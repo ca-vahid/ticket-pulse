@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { buildHistoryItems, groupByActor, parseFsFeedLine, countMachine, friendlyDays, workflowRunSummary } from './ticketHistory';
+import { buildHistoryItems, groupByActor, parseFsFeedLine, countMachine, friendlyDays, workflowRunSummary, aiAssignmentConfidence, isPreviewRun } from './ticketHistory';
 
 const T0 = Date.parse('2026-09-14T11:37:50Z');
 const iso = (ms) => new Date(T0 + ms).toISOString();
@@ -390,5 +390,56 @@ describe('macro_applied (lane D macros, QA 11-05)', () => {
     ]);
     const [clean] = buildHistoryItems({ activities: [{ id: 82, activityType: 'macro_applied', performedBy: 'Alex Rivera', performedAt: '2026-11-05T18:00:00.000Z', details: { actorKind: 'human', macroName: 'Close as duplicate', steps: [{ type: 'status', summary: 'Set status to Closed', ok: true }] } }] });
     expect(clean).toMatchObject({ reason: '1 step', machine: false });
+  });
+});
+describe('QA 11-05b #3 — AI confidence in the details, preview runs hidden', () => {
+  const T = Date.parse('2026-10-22T16:12:00Z');
+  const at = (min) => new Date(T + min * 60e3).toISOString();
+  const aiEpisode = { id: 41, technician: { name: 'Jordan Lee' }, startMethod: 'workflow_assigned', startAssignedByName: 'Ticket Pulse AI', startedAt: at(0) };
+  const recommendation = {
+    confidence: 'medium',
+    recommendations: [
+      { rank: 1, score: 0.74, techId: 3, techName: 'Casey Park' },
+      { rank: 2, score: 0.82, techId: 7, techName: 'Jordan Lee' },
+      { rank: 3, score: 0.6, techId: 9, techName: 'Sam Ortiz' },
+    ],
+  };
+  const aiRun = { id: 3301, status: 'completed', decision: 'auto_assigned', triggerSource: 'webhook', assignedTechId: 7, recommendation, createdAt: at(-1), decidedAt: at(-0.2) };
+
+  test('(a) the AI assignment line carries "Confidence 82 % · 3 people considered" in its details only', () => {
+    const items = buildHistoryItems({ assignmentEpisodes: [aiEpisode], pipelineRuns: [aiRun] });
+    expect(items).toHaveLength(1);
+    const [line] = items;
+    expect(line.extra).toEqual(['Confidence 82 % · 3 people considered', expect.stringMatching(/^AI run #3301 · via webhook/)]);
+    // Never on the line itself.
+    for (const field of ['verb', 'reason', 'to', 'detail']) expect(String(line[field] ?? '')).not.toMatch(/Confidence|%/);
+  });
+
+  test('(a) the assigned person\'s score is used; rank 1 when they are not in the list', () => {
+    expect(aiAssignmentConfidence(aiRun)).toBe('Confidence 82 % · 3 people considered');
+    expect(aiAssignmentConfidence({ ...aiRun, assignedTechId: 99 })).toBe('Confidence 74 % · 3 people considered');
+    expect(aiAssignmentConfidence({ ...aiRun, assignedTechId: null })).toBe('Confidence 74 % · 3 people considered');
+  });
+
+  test('(a) omitted when the run carries no recommendation or score', () => {
+    expect(aiAssignmentConfidence({ id: 1 })).toBeNull();
+    expect(aiAssignmentConfidence({ id: 1, recommendation: { confidence: 'high' } })).toBeNull();
+    expect(aiAssignmentConfidence({ id: 1, recommendation: { recommendations: [{ rank: 1, techId: 3 }] } })).toBe('1 person considered');
+    const items = buildHistoryItems({ assignmentEpisodes: [aiEpisode], pipelineRuns: [{ ...aiRun, recommendation: null }] });
+    expect(items[0].extra).toEqual([expect.stringMatching(/^AI run #3301/)]);
+  });
+
+  test('(c) a workflow preview run never shows, even with machine activity on; Shadow and skipped still do', () => {
+    const base = { workflowId: 3, workflowName: 'Ticket arrived', eventType: 'ticket.created', status: 'completed', durationMs: 90, actions: [], steps: [] };
+    const items = buildHistoryItems({ workflowRuns: [
+      { ...base, id: 950, executionMode: 'preview', shadow: true, startedAt: at(30), outcome: 'nothing', actions: [{ type: 'email', to: 1, cc: 0, sent: false }] },
+      { ...base, id: 951, executionMode: 'mock', shadow: true, startedAt: at(20), outcome: 'nothing', actions: [{ type: 'email', to: 1, cc: 0, sent: false }] },
+      { ...base, id: 952, executionMode: 'live', shadow: false, startedAt: at(10), outcome: 'stopped', stopReason: 'Noise ticket skipped' },
+    ] });
+    expect(items.map((i) => i.key)).toEqual(['wf-951', 'wf-952']);
+    expect(items.some((i) => /preview/i.test(i.verb))).toBe(false);
+    expect(countMachine(items)).toBe(2);
+    expect(isPreviewRun({ executionMode: 'preview' })).toBe(true);
+    expect(isPreviewRun({ executionMode: 'mock' })).toBe(false);
   });
 });

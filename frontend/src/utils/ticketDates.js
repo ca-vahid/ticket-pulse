@@ -25,6 +25,20 @@ export function formatPacificWhen(value, now = new Date()) {
   return `${p.weekday} ${p.day} ${p.month}${p.year !== thisYear ? ` ${p.year}` : ''}, ${p.hour}:${p.minute} ${p.dayPeriod}`;
 }
 
+/** The day alone: "Tue 20 Oct" (Pacific); "Tue 20 Oct 2025" in another year. */
+export function formatPacificDay(value, now = new Date()) {
+  const d = toDate(value);
+  if (!d) return '—';
+  const p = parts(d, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  const thisYear = parts(now, { year: 'numeric' }).year;
+  return `${p.weekday} ${p.day} ${p.month}${p.year !== thisYear ? ` ${p.year}` : ''}`;
+}
+
+/** Board cards (QA 11-05b #2): "2 h ago" within the last day, else "Tue 20 Oct". */
+export function dayOrAgo(value, now = Date.now()) {
+  return isRecent(value, now) ? agoWords(value, now) : formatPacificDay(value, new Date(now));
+}
+
 /** Tooltip form, always with the year and the zone: "Tue 20 Oct 2026, 9:14 AM PDT". */
 export function formatPacificFull(value) {
   const d = toDate(value);

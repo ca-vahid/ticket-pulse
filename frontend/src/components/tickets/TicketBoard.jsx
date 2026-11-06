@@ -9,6 +9,7 @@ import { PersonAvatar, SlaChip, StatusPill, TypePill, PRIORITY_STRIP_COLORS, PRI
 import { baseStatusOf, statusToneFromDefs } from './statusDefs';
 import ErrorBoundary from '../ErrorBoundary';
 import { useDelayedFlag } from '../../hooks/useDelayedFlag';
+import { dayOrAgo, formatPacificFull } from '../../utils/ticketDates';
 
 /**
  * Board view for the tickets queue (QA 07-27 #3): Open / Pending / Closed
@@ -190,9 +191,23 @@ function BoardCard({ ticket, statusDefs, canDrag, dragging, linkState, onClick, 
         >
           {ticket.subject || '(no subject)'}
         </Link>
-        {/* Requester line (QA 08-07 #6) — quiet, between subject and assignee */}
-        {ticket.requester?.name && (
-          <p className="mt-0.5 truncate text-[11px] text-muted-foreground/75">{ticket.requester.name}</p>
+        {/* Requester line (QA 08-07 #6) — quiet, between subject and assignee.
+            QA 11-05b #2: the opened date rides on its right ("Opened Tue 20
+            Oct", or "Opened 2 h ago" within a day), Pacific time. */}
+        {(ticket.requester?.name || ticket.createdAt) && (
+          <p className="mt-0.5 flex items-baseline gap-1.5 text-[11px] text-muted-foreground/75" data-testid="board-card-meta">
+            {ticket.requester?.name && <span className="min-w-0 truncate">{ticket.requester.name}</span>}
+            {ticket.createdAt && (
+              <time
+                dateTime={ticket.createdAt}
+                title={`Opened ${formatPacificFull(ticket.createdAt)}`}
+                className="ml-auto shrink-0 whitespace-nowrap tabular-nums"
+                data-testid="board-card-opened"
+              >
+                Opened {dayOrAgo(ticket.createdAt)}
+              </time>
+            )}
+          </p>
         )}
         <div className="mt-2 flex items-center gap-1.5">
           {ticket.assignedTech ? (

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ChevronRight, MoreHorizontal, Plus, Search, X } from 'lucide-react';
+import { AlertTriangle, ChevronRight, FilePen, History, MoreHorizontal, Plus, Search, X } from 'lucide-react';
 import { WorkflowRowMenu, relativeTime, rowMenuItems, runFailed, workflowState } from './WorkflowIndex';
 import { WORKFLOW_STAGES, groupWorkflowsByStage, listWatchSignals, runsInAddition, stageForTrigger } from '../../utils/workflowStages';
 import { motionReduced } from '../../utils/motionPreference';
+import { formatPacificFull, formatPacificWhen } from '../../utils/ticketDates';
 
 /**
  * Mail Workflows, the list page.
@@ -36,6 +37,11 @@ import { motionReduced } from '../../utils/motionPreference';
  * Columns: name (+ description), mode (dot + word, never a pill), routing
  * (Default / Routed / Variant / Sub-workflow, + after-hours), version and last
  * run. The enable switch stays on the workflow's own page (QA 09-22 #11).
+ *
+ * QA 11-05b #1 (5 Nov 2026): a row says when it carries a saved draft nobody
+ * published ("Unpublished changes · saved … by …" / "Never published"), and
+ * when this browser holds an unsaved copy ("Unsaved on this computer · …",
+ * Open / Discard). The Drafts tab shows only those rows.
  */
 
 const FILTERS = [
@@ -44,7 +50,29 @@ const FILTERS = [
   { key: 'observe', label: 'Shadow' },
   { key: 'failing', label: 'Failing' },
   { key: 'off', label: 'Off' },
+  // QA 11-05b #1b: saved drafts nobody published, plus this browser's unsaved copies.
+  { key: 'drafts', label: 'Drafts' },
 ];
+
+/**
+ * QA 11-05b #1a: "Unpublished changes · saved Thu 5 Nov, 3:12 PM by Alex
+ * Rivera" / "Never published · saved …". The server says whether there is a
+ * draft (`hasUnpublishedChanges`); null when there is nothing to say.
+ */
+export function draftMarkerText(workflow, now = new Date()) {
+  if (!workflow?.hasUnpublishedChanges || workflow.archivedAt) return null;
+  const lead = workflow.draftState === 'never_published' ? 'Never published' : 'Unpublished changes';
+  const who = workflow.draftSavedByName || workflow.draftSavedBy || null;
+  const when = workflow.draftSavedAt ? formatPacificWhen(workflow.draftSavedAt, now) : null;
+  if (!when && !who) return lead;
+  return `${lead} · saved${when ? ` ${when}` : ''}${who ? ` by ${who}` : ''}`;
+}
+
+/** "Unsaved on this computer · Thu 5 Nov, 3:12 PM". */
+export function localDraftText(localDraft, now = new Date()) {
+  if (!localDraft) return null;
+  return `Unsaved on this computer${localDraft.savedAt ? ` · ${formatPacificWhen(localDraft.savedAt, now)}` : ''}`;
+}
 
 /** A trigger with two defaults names its blocks (QA 10-20 #5). */
 const FAMILY_LABELS = { standard: 'Business hours', after_hours: 'After hours and holidays' };
@@ -72,8 +100,9 @@ export function workflowKind(workflow, { isAfterHours = () => false } = {}) {
   return isAfterHours(workflow) ? `${kind} · after-hours` : kind;
 }
 
-function matchesFilter(workflow, filter) {
+function matchesFilter(workflow, filter, isDraft = () => false) {
   if (filter === 'all') return true;
+  if (filter === 'drafts') return isDraft(workflow);
   const key = workflowState(workflow).key;
   if (filter === 'off') return key === 'off' || key === 'draft';
   return key === filter;
@@ -83,7 +112,7 @@ function matchesFilter(workflow, filter) {
 // a row whose menu would be empty shows no "⋯". The menu itself is
 // WorkflowRowMenu, portalled so the card's overflow-hidden can't clip it
 // (QA 10-27 #3).
-function ListRow({ workflow, name, href, onOpen, onRowAction, isAfterHours, variant = false, lastVariant = false, familyStart = false, last = false }) {
+function ListRow({ workflow, name, href, onOpen, onRowAction, isAfterHours, variant = false, lastVariant = false, familyStart = false, last = false, localDraft = null, onOpenLocalDraft = null, onDiscardLocalDraft = null }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuButtonRef = useRef(null);
   const closeMenu = useCallback(() => setMenuOpen(false), []);
@@ -97,6 +126,8 @@ function ListRow({ workflow, name, href, onOpen, onRowAction, isAfterHours, vari
   const runText = lastRun ? `${failed ? 'Failed' : 'Ran'} ${relativeTime(lastRun.startedAt)}` : 'No runs yet';
   const signals = listWatchSignals(workflow);
   const menuItems = onRowAction ? rowMenuItems(workflow) : [];
+  const draftText = draftMarkerText(workflow);
+  const localText = localDraft ? localDraftText(localDraft) : null;
 
   // A plain left click stays in the app; modified and middle clicks fall
   // through to the browser so the link opens in a new tab or window.
@@ -113,6 +144,8 @@ function ListRow({ workflow, name, href, onOpen, onRowAction, isAfterHours, vari
       data-state={state.key}
       data-variant={variant ? 'true' : undefined}
       data-family-start={familyStart ? 'true' : undefined}
+      data-draft={draftText ? workflow.draftState : undefined}
+      data-local-draft={localText ? 'true' : undefined}
     >
       {/* The elbow: a variant hangs off its default. */}
       {variant && (
@@ -121,59 +154,113 @@ function ListRow({ workflow, name, href, onOpen, onRowAction, isAfterHours, vari
           {!lastVariant && <span aria-hidden="true" className="pointer-events-none absolute left-6 top-5 w-2.5 border-t border-border" />}
         </>
       )}
-      <a
-        href={href}
-        onClick={handleClick}
-        className={cx(
-          'tp-focus-ring grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-0.5 py-2.5 pr-4 text-left transition-colors hover:bg-muted/60 focus-visible:ring-inset focus-visible:ring-offset-0',
-          'md:grid-cols-[minmax(0,1fr)_5.5rem_9.5rem_9rem_1rem]',
-          variant ? 'pl-11' : 'pl-4',
-          last && 'rounded-b-xl',
-        )}
-      >
-        <span className="min-w-0">
-          <span className={cx('block truncate text-sm font-semibold', muted ? 'text-muted-foreground' : 'text-foreground')}>{name}</span>
-          {workflow.description && <span className="block truncate text-xs text-muted-foreground">{workflow.description}</span>}
-          <span className="block truncate text-xs text-muted-foreground/75 md:hidden">{kind} · {versionText} · {runText}</span>
-          {/* QA 10-05 #5: workflow watch — say when a workflow quietly stopped doing its job. */}
-          {signals.slice(0, 2).map((signal) => (
-            <span key={`${signal.code}-${signal.nodeId || ''}`} data-testid="workflow-watch-signal" className="mt-0.5 flex items-start gap-1 text-xs text-amber-800 dark:text-amber-200">
-              <AlertTriangle className="mt-0.5 h-3 w-3 flex-shrink-0" aria-hidden="true" />
-              <span className="min-w-0">{signal.message}</span>
-            </span>
-          ))}
-        </span>
-        <span className="flex items-center gap-1.5 self-start pt-0.5 text-xs text-foreground/85 md:self-center md:pt-0">
-          <span className={cx('h-2 w-2 flex-shrink-0 rounded-full', state.dot)} aria-hidden="true" />
-          {state.label}
-        </span>
-        <span className="hidden truncate text-xs text-muted-foreground md:block">{kind}</span>
-        <span className="hidden truncate text-xs text-muted-foreground md:block">
-          <span className="tabular-nums">{versionText}</span>
-          <span aria-hidden="true"> · </span>
-          <span className={failed ? 'text-red-700 dark:text-red-300' : undefined}>{runText}</span>
-        </span>
-        <ChevronRight className="hidden h-4 w-4 text-muted-foreground/60 md:block" aria-hidden="true" />
-      </a>
-      {menuItems.length > 0 && (
-        <button
-          ref={menuButtonRef}
-          type="button"
-          onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          aria-label={`More actions for ${name}`}
-          className={cx('tp-focus-ring absolute right-9 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground/75 hover:bg-muted hover:text-foreground', menuOpen ? 'opacity-100' : 'opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100')}
+      <div className="relative">
+        <a
+          href={href}
+          onClick={handleClick}
+          className={cx(
+            'tp-focus-ring grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-0.5 py-2.5 pr-4 text-left transition-colors hover:bg-muted/60 focus-visible:ring-inset focus-visible:ring-offset-0',
+            'md:grid-cols-[minmax(0,1fr)_5.5rem_9.5rem_9rem_1rem]',
+            variant ? 'pl-11' : 'pl-4',
+            last && !localText && 'rounded-b-xl',
+          )}
         >
-          <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
-        </button>
-      )}
+          <span className="min-w-0">
+            <span className={cx('block truncate text-sm font-semibold', muted ? 'text-muted-foreground' : 'text-foreground')}>{name}</span>
+            {workflow.description && <span className="block truncate text-xs text-muted-foreground">{workflow.description}</span>}
+            <span className="block truncate text-xs text-muted-foreground/75 md:hidden">{kind} · {versionText} · {runText}</span>
+            {/* QA 10-05 #5: workflow watch — say when a workflow quietly stopped doing its job. */}
+            {signals.slice(0, 2).map((signal) => (
+              <span key={`${signal.code}-${signal.nodeId || ''}`} data-testid="workflow-watch-signal" className="mt-0.5 flex items-start gap-1 text-xs text-amber-800 dark:text-amber-200">
+                <AlertTriangle className="mt-0.5 h-3 w-3 flex-shrink-0" aria-hidden="true" />
+                <span className="min-w-0">{signal.message}</span>
+              </span>
+            ))}
+            {draftText && (
+              <span
+                data-testid="workflow-draft-marker"
+                title={workflow.draftSavedAt ? formatPacificFull(workflow.draftSavedAt) : undefined}
+                className="mt-0.5 flex items-start gap-1 text-xs text-blue-700 dark:text-blue-300"
+              >
+                <FilePen className="mt-0.5 h-3 w-3 flex-shrink-0" aria-hidden="true" />
+                <span className="min-w-0">{draftText}</span>
+              </span>
+            )}
+          </span>
+          <span className="flex items-center gap-1.5 self-start pt-0.5 text-xs text-foreground/85 md:self-center md:pt-0">
+            <span className={cx('h-2 w-2 flex-shrink-0 rounded-full', state.dot)} aria-hidden="true" />
+            {state.label}
+          </span>
+          <span className="hidden truncate text-xs text-muted-foreground md:block">{kind}</span>
+          <span className="hidden truncate text-xs text-muted-foreground md:block">
+            <span className="tabular-nums">{versionText}</span>
+            <span aria-hidden="true"> · </span>
+            <span className={failed ? 'text-red-700 dark:text-red-300' : undefined}>{runText}</span>
+          </span>
+          <ChevronRight className="hidden h-4 w-4 text-muted-foreground/60 md:block" aria-hidden="true" />
+        </a>
+        {menuItems.length > 0 && (
+          <button
+            ref={menuButtonRef}
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            aria-label={`More actions for ${name}`}
+            className={cx('tp-focus-ring absolute right-9 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground/75 hover:bg-muted hover:text-foreground', menuOpen ? 'opacity-100' : 'opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100')}
+          >
+            <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+          </button>
+        )}
+      </div>
       {menuOpen && menuItems.length > 0 && <WorkflowRowMenu anchorRef={menuButtonRef} workflow={workflow} name={name} items={menuItems} onRowAction={onRowAction} onClose={closeMenu} />}
+      {/* QA 11-05b #1c: this browser's unsaved copy — outside the link, so its
+          buttons are real buttons. */}
+      {localText && (
+        <div
+          data-testid="workflow-local-draft"
+          className={cx(
+            '-mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 pb-2.5 pr-4 text-xs text-amber-800 dark:text-amber-200',
+            variant ? 'pl-11' : 'pl-4',
+          )}
+        >
+          <History className="h-3 w-3 flex-shrink-0" aria-hidden="true" />
+          <span title={localDraft?.savedAt ? formatPacificFull(localDraft.savedAt) : undefined}>{localText}</span>
+          {onOpenLocalDraft && (
+            <>
+              <span className="text-amber-700/60 dark:text-amber-200/50" aria-hidden="true">·</span>
+              <button
+                type="button"
+                onClick={() => onOpenLocalDraft(workflow.id)}
+                aria-label={`Open the unsaved copy of ${name}`}
+                className="tp-focus-ring rounded font-semibold text-primary hover:underline"
+                data-testid="workflow-local-draft-open"
+              >
+                Open
+              </button>
+            </>
+          )}
+          {onDiscardLocalDraft && (
+            <>
+              <span className="text-amber-700/60 dark:text-amber-200/50" aria-hidden="true">·</span>
+              <button
+                type="button"
+                onClick={() => onDiscardLocalDraft(workflow.id)}
+                aria-label={`Discard the unsaved copy of ${name}`}
+                className="tp-focus-ring rounded font-semibold text-foreground/85 hover:underline"
+                data-testid="workflow-local-draft-discard"
+              >
+                Discard
+              </button>
+            </>
+          )}
+        </div>
+      )}
     </li>
   );
 }
 
-function TriggerCard({ group, cardRef, getVisuals, getDisplayName, getHref, onOpen, onRowAction, onAdd, isAfterHours }) {
+function TriggerCard({ group, cardRef, getVisuals, getDisplayName, getHref, onOpen, onRowAction, onAdd, isAfterHours, localDraftsById = null, onOpenLocalDraft = null, onDiscardLocalDraft = null }) {
   const { triggerType, label, workflows } = group;
   const visuals = getVisuals(triggerType) || {};
   const GroupIcon = visuals.icon;
@@ -233,6 +320,9 @@ function TriggerCard({ group, cardRef, getVisuals, getDisplayName, getHref, onOp
             lastVariant={lastNested.has(workflow.id)}
             familyStart={familyStarts.has(workflow.id)}
             last={index === workflows.length - 1}
+            localDraft={localDraftsById?.get(String(workflow.id)) || null}
+            onOpenLocalDraft={onOpenLocalDraft}
+            onDiscardLocalDraft={onDiscardLocalDraft}
           />,
         ].filter(Boolean))}
       </ul>
@@ -312,9 +402,13 @@ export default function WorkflowListPage({
   stats = null,
   actions = null,
   footer = null,
+  localDrafts = [],
+  onOpenLocalDraft = null,
+  onDiscardLocalDraft = null,
+  initialFilter = 'all',
 }) {
   const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState('all');
+  const [filter, setFilter] = useState(initialFilter);
   // Archived is the parent's state when it manages it (it keeps the selection
   // in step); otherwise the page keeps it.
   const [localArchived, setLocalArchived] = useState(false);
@@ -324,15 +418,26 @@ export default function WorkflowListPage({
   const active = useMemo(() => workflows.filter((w) => !w.archivedAt), [workflows]);
   const archived = useMemo(() => workflows.filter((w) => w.archivedAt), [workflows]);
   const archivedTotal = archived.length || archivedCount || 0;
-  const counts = useMemo(() => Object.fromEntries(FILTERS.map((f) => [f.key, active.filter((w) => matchesFilter(w, f.key)).length])), [active]);
+  const localDraftsById = useMemo(
+    () => new Map((localDrafts || []).map((draft) => [String(draft.workflowId), draft])),
+    [localDrafts],
+  );
+  const isDraft = useCallback(
+    (w) => Boolean(draftMarkerText(w)) || localDraftsById.has(String(w.id)),
+    [localDraftsById],
+  );
+  const counts = useMemo(
+    () => Object.fromEntries(FILTERS.map((f) => [f.key, active.filter((w) => matchesFilter(w, f.key, isDraft)).length])),
+    [active, isDraft],
+  );
   const enabledCount = useMemo(() => active.filter((w) => w.isEnabled).length, [active]);
 
   const q = query.trim().toLowerCase();
   const shown = useMemo(() => (archivedOn ? archived : active).filter((w) => (
-    (archivedOn || matchesFilter(w, filter))
+    (archivedOn || matchesFilter(w, filter, isDraft))
     && (!q || [getDisplayName(w), w.name, w.description, eventLabels[w.triggerType], stageForTrigger(w.triggerType).label]
       .filter(Boolean).join(' ').toLowerCase().includes(q))
-  )), [active, archived, archivedOn, filter, q, getDisplayName, eventLabels]);
+  )), [active, archived, archivedOn, filter, q, getDisplayName, eventLabels, isDraft]);
   const stages = useMemo(
     () => groupWorkflowsByStage(shown, eventLabels, { familyOf: (w) => (isAfterHours(w) ? 'after_hours' : 'standard') }),
     [shown, eventLabels, isAfterHours],
@@ -458,7 +563,9 @@ export default function WorkflowListPage({
         <div ref={scrollRef} onScroll={updateActive} className="settings-scrollbar min-h-0 flex-1 overflow-y-auto bg-muted/70 px-3 pb-10 sm:px-5" data-testid="workflow-list-scroll">
           {stages.length === 0 && (
             <p className="px-4 py-12 text-center text-sm text-muted-foreground">
-              {q || filter !== 'all' || archivedOn ? 'No workflows match.' : 'No workflows yet. Start with New workflow or a template.'}
+              {filter === 'drafts' && !archivedOn && !q
+                ? 'No unpublished drafts. Everything saved is published.'
+                : q || filter !== 'all' || archivedOn ? 'No workflows match.' : 'No workflows yet. Start with New workflow or a template.'}
             </p>
           )}
           {stages.map(({ stage, triggers }, stageIndex) => (
@@ -482,6 +589,9 @@ export default function WorkflowListPage({
                     onRowAction={onRowAction}
                     onAdd={onAdd}
                     isAfterHours={isAfterHours}
+                    localDraftsById={localDraftsById}
+                    onOpenLocalDraft={onOpenLocalDraft}
+                    onDiscardLocalDraft={onDiscardLocalDraft}
                   />
                 ))}
               </div>
