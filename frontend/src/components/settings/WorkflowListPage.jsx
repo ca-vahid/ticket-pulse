@@ -180,9 +180,9 @@ function ListRow({ workflow, name, href, onOpen, onRowAction, isAfterHours, vari
               <span
                 data-testid="workflow-draft-marker"
                 title={workflow.draftSavedAt ? formatPacificFull(workflow.draftSavedAt) : undefined}
-                className="mt-0.5 flex items-start gap-1 text-xs text-blue-700 dark:text-blue-300"
+                className="mt-0.5 flex items-start gap-1 text-xs text-muted-foreground"
               >
-                <FilePen className="mt-0.5 h-3 w-3 flex-shrink-0" aria-hidden="true" />
+                <FilePen className="mt-0.5 h-3 w-3 flex-shrink-0 text-blue-600 dark:text-blue-300" aria-hidden="true" />
                 <span className="min-w-0">{draftText}</span>
               </span>
             )}

@@ -222,8 +222,11 @@ function BoardCard({ ticket, statusDefs, canDrag, dragging, linkState, onClick, 
             {baseStatusOf(statusDefs, ticket.status) === 'Open' && ticket.dueBy && (
               <SlaChip value={ticket.dueBy} calendarAware={slaCalendarAware} className="!px-1.5 !text-[10px]" />
             )}
-            <span className="text-[10px] font-semibold uppercase text-muted-foreground/75" title={`Priority: ${PRIORITY_LABELS[ticket.priority] || ticket.priority}`}>
-              {PRIORITY_LABELS[ticket.priority]?.slice(0, 3) || `P${ticket.priority}`}
+            {/* QA 11-05b review: the whole word ("HIGH", "URGENT"), never a
+                3-letter cut that reads as clipped; it keeps its width and the
+                assignee name gives way. */}
+            <span className="shrink-0 whitespace-nowrap text-[10px] font-semibold uppercase text-muted-foreground/75" title={`Priority: ${PRIORITY_LABELS[ticket.priority] || ticket.priority}`} data-testid="board-card-priority">
+              {PRIORITY_LABELS[ticket.priority] || `P${ticket.priority}`}
             </span>
           </span>
         </div>
