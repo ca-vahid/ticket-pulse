@@ -2,7 +2,7 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, test } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import TicketHistoryTimeline, { dayHeading, fullTime } from './TicketHistoryTimeline';
+import TicketHistoryTimeline, { HistoryRow, dayHeading, fullTime } from './TicketHistoryTimeline';
 import { buildHistoryItems, countMachine } from '../../utils/ticketHistory';
 
 // QA 11-05 #9 — the Activity tab: the right actor, one line per event,
@@ -85,6 +85,53 @@ describe('Activity tab, one line per event (QA 11-05 #9)', () => {
     expect(details).toHaveTextContent(fullTime(data.workflowRuns[0].startedAt));
     fireEvent.click(button);
     expect(within(row).queryByTestId('history-details')).not.toBeInTheDocument();
+  });
+
+  test('below sm the change sits on its own wrapping line under the name; from sm up it shares the line (UI Design 11-05)', () => {
+    const section = renderTab();
+    const row = within(section).getAllByTestId('history-row').find((r) => /Competency mismatch/.test(r.textContent));
+    const change = within(row).getByTestId('history-change');
+    // Phone: line 2, wrapping, never truncated; desktop: line 1.
+    expect(change.className).toMatch(/\brow-start-2\b/);
+    expect(change.className).toMatch(/\bflex-wrap\b/);
+    expect(change.className).toMatch(/\bwhitespace-normal\b/);
+    expect(change.className).toMatch(/\bsm:row-start-1\b/);
+    for (const el of change.querySelectorAll('*')) expect(el.className?.baseVal ?? el.className).not.toMatch(/(^|\s)truncate(\s|$)/);
+    // The actor's name is visible text on the phone too (not only a tooltip).
+    expect(within(row).getByText('Jordan Lee', { selector: 'span.truncate' })).not.toHaveClass('sr-only');
+  });
+
+  test('the peek (compact) is always two lines and never truncates a value', () => {
+    const items = buildHistoryItems(data).filter((i) => !i.machine);
+    render(<div>{items.map((i) => <HistoryRow key={i.key} item={i} compact />)}</div>);
+    const rows = screen.getAllByTestId('history-row');
+    expect(rows.every((r) => r.getAttribute('data-layout') === 'two-line')).toBe(true);
+    const change = within(rows.find((r) => /Sam Ortiz/.test(r.textContent))).getByTestId('history-change');
+    expect(change.className).not.toMatch(/sm:/);
+    expect(change.innerHTML).not.toMatch(/sm:truncate|(\s|")truncate(\s|")/);
+  });
+
+  test('every arrow is the ArrowRight icon, also inside a workflow summary; workflow rows use the run icon, not the workflow glyph twice', () => {
+    const items = buildHistoryItems({ workflowRuns: [{ ...data.workflowRuns[0], id: 40, actions: [{ type: 'update', fields: ['status'], status: { from: 'Pending', to: 'Open' } }] }] });
+    render(<TicketHistoryTimeline items={items} hideMachine onToggleMachine={() => {}} hiddenMachineCount={0} />);
+    const row = screen.getByTestId('history-row');
+    const change = within(row).getByTestId('history-change');
+    expect(change.textContent).toMatch(/set status Pending\s*Open/);
+    expect(change.textContent).not.toContain('→');
+    expect(within(change).getAllByLabelText('to').length).toBeGreaterThanOrEqual(1);
+    expect(within(row).getByText('Workflow run')).toHaveClass('sr-only');
+    expect(row.querySelectorAll('svg.lucide-workflow')).toHaveLength(1);
+    expect(row.querySelectorAll('svg.lucide-play')).toHaveLength(1);
+  });
+
+  test('a macro reads as the person\'s one line with the wand icon', () => {
+    const items = buildHistoryItems({ activities: [{ id: 81, activityType: 'macro_applied', performedBy: 'Alex Rivera', performedAt: iso(30e3), details: { actorKind: 'human', macroName: 'Laptop handover', steps: [{ type: 'note', summary: 'Added a note', ok: true }] } }] });
+    render(<TicketHistoryTimeline items={items} hideMachine onToggleMachine={() => {}} hiddenMachineCount={0} />);
+    const row = screen.getByTestId('history-row');
+    expect(row).toHaveTextContent(/Alex Rivera.*applied macro “Laptop handover”.*1 step/);
+    expect(within(row).getByText('Macro')).toHaveClass('sr-only');
+    fireEvent.click(within(row).getByRole('button'));
+    expect(within(row).getByTestId('history-details')).toHaveTextContent('Added a note');
   });
 
   test('day headings name the day ("Today", "Tue 3 Nov")', () => {

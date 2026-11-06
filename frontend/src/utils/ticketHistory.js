@@ -298,6 +298,24 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
     } else if (t === 'requester_teams_chat') {
       // QA 10-15 #5: the requester opened a Teams chat with the agent from the urgency page.
       item = baseItem({ event: 'reply', verb: 'opened a Teams chat from the urgency page', detail: d.agentName ? `With ${d.agentName}` : null, importance: 2, machine: false });
+    } else if (t === 'macro_applied') {
+      // QA 11-05 (lane D macros): one line for the whole macro, its steps in the details.
+      const steps = Array.isArray(d.steps) ? d.steps : [];
+      const failed = steps.filter((s) => s && s.ok === false).length;
+      const ran = steps.filter((s) => s && s.ok !== false && !s.skipped).length;
+      item = baseItem({
+        event: 'macro',
+        verb: `applied macro “${d.macroName || 'a macro'}”`,
+        reason: failed ? `${plural(failed, 'step')} failed` : steps.length ? `${plural(ran, 'step')}` : null,
+        detail: steps.length ? null : d.note || null,
+        importance: 2,
+        machine: false,
+      });
+      item.extra = steps.map((s) => [
+        s.summary || humanize(s.type),
+        s.skipped ? `skipped${s.reason ? `: ${s.reason}` : ''}` : null,
+        s.ok === false ? `failed${s.error ? `: ${s.error}` : ''}` : null,
+      ].filter(Boolean).join(' · '));
     } else if (t === 'mirror_conflict') {
       item = baseItem({ event: 'system', verb: 'mirror conflict', detail: d.note || (Array.isArray(d.drift) ? d.drift.join(', ') : null) });
     } else if (t === 'created') {
