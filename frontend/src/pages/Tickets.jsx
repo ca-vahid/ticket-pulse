@@ -2190,7 +2190,7 @@ export default function Tickets() {
                         <span className={`block text-lg sm:text-2xl font-bold leading-none tabular-nums ${seg.num}`}>
                           {count == null ? '–' : count.toLocaleString()}
                         </span>
-                        <span className="block whitespace-nowrap text-[11px] font-medium text-muted-foreground sm:truncate mt-0.5 sm:mt-1" title={cardWindowNote(seg) ? `${seg.label}: finished tickets from the last ${windowChoice(stats?.createdWithin)?.label}, plus all open work` : undefined}>{seg.label}{cardWindowNote(seg)}</span>
+                        <span className="block whitespace-nowrap text-[11px] font-medium text-muted-foreground sm:truncate mt-0.5 sm:mt-1" title={cardWindowNote(seg) ? `${seg.label}: finished tickets from the last ${windowChoice(stats?.createdWithin)?.label}, plus all open work` : seg.hint}>{seg.label}{cardWindowNote(seg)}</span>
                       </span>
                     </button>
                     {mineTile}
