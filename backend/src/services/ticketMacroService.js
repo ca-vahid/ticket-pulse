@@ -4,6 +4,7 @@ import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { fillGreetingPlaceholders } from './replyGreetingService.js';
 import { refPositionFor, replyMailSubject } from './mailSubjectService.js';
+import { reasonLabel, requiresResolutionReason, validateResolution } from './resolutionReasonService.js';
 
 /**
  * Macros — agent quick-action bundles (QA 11-05 #2: their own Settings tab and
@@ -141,6 +142,7 @@ class TicketMacroService {
       select: {
         id: true, workspaceId: true, origin: true, status: true, subject: true, priority: true,
         nativeNumber: true, freshserviceTicketId: true, assignedTechId: true, ccEmails: true,
+        resolutionReason: true, internalCategory: { select: { name: true } },
         requester: { select: { name: true, email: true, unattended: true } },
         assignedTech: { select: { id: true, name: true } },
         tagLinks: { select: { tagId: true } },
@@ -221,6 +223,9 @@ class TicketMacroService {
     const isClosedBase = (name) => ['Resolved', 'Closed'].includes(baseStatus.get(name) || name);
     // { status, already } while the ticket is (or will be, at this point of the macro) closed.
     let closedAt = isClosedBase(ticket.status) ? { status: ticket.status, already: true } : null;
+    // Security tickets need a resolution reason to close (resolutionReasonService);
+    // track the top-level category as the macro's own category steps change it.
+    let categoryName = ticket.internalCategory?.name || null;
 
     const planned = steps.map((s, index) => {
       const base = { index, type: s.type, run: true, reason: null };
@@ -229,17 +234,29 @@ class TicketMacroService {
       case 'status': {
         const target = statusTargets.get(s.status) || s.status;
         const swapped = target !== s.status;
-        closedAt = isClosedBase(target) ? { status: target, already: false } : null;
+        const closing = isClosedBase(target);
+        closedAt = closing ? { status: target, already: false } : null;
+        const reasonLabelText = s.resolutionReason ? reasonLabel(s.resolutionReason) : null;
+        const summary = `Set status to ${target}${reasonLabelText ? ` · ${reasonLabelText}` : ''}`;
+        // 6 Nov 2026 (first real use): "Set status Closed" after "Set category
+        // Security" failed — a Security ticket needs a resolution reason. Without
+        // one on the step, say so up front instead of failing on Apply.
+        if (closing && isNative && !s.resolutionReason && !ticket.resolutionReason
+          && requiresResolutionReason({ internalCategoryName: categoryName })) {
+          return { ...base, summary, run: false, reason: 'Security tickets need a resolution reason to close — add one to this step in Settings → Macros' };
+        }
         return {
           ...base,
-          summary: `Set status to ${target}`,
+          summary,
           ...(swapped ? { notice: `${s.status} is retired in this workspace, so the ticket is set to ${target}` } : {}),
           field: { status: target },
+          ...(closing && s.resolutionReason ? { resolution: { resolutionReason: s.resolutionReason, resolutionNote: s.resolutionNote || null } } : {}),
         };
       }
       case 'priority':
         return { ...base, summary: `Set priority to ${PRIORITY_LABELS[Number(s.priority)] || s.priority}`, field: { priority: Number(s.priority) } };
       case 'category': {
+        if (nameOf(cats, s.categoryId)) categoryName = nameOf(cats, s.categoryId);
         const label = [nameOf(cats, s.categoryId), nameOf(cats, s.subcategoryId)].filter(Boolean).join(' / ') || `category ${s.categoryId}`;
         return {
           ...base,
@@ -396,7 +413,7 @@ class TicketMacroService {
         // A reply placed after a close still goes out: the reply path neither
         // refuses nor reopens a closed ticket (the preview says so).
         await run(p, () => (plan.isNative
-          ? ticketService.changeStatus(ticketId, workspaceId, String(p.field.status), actor)
+          ? ticketService.changeStatus(ticketId, workspaceId, String(p.field.status), actor, ...(p.resolution ? [p.resolution] : []))
           : ticketService.updateFsTicket(ticketId, workspaceId, { status: String(p.field.status) }, actor, { allowAssignableOnly: true })).then(() => null));
         break;
       case 'assign':
@@ -490,7 +507,17 @@ class TicketMacroService {
       const live = await import('./autoCloseResolvedService.js')
         .then(({ default: svc }) => svc.closedInsteadOfResolved(workspaceId, normalized))
         .catch(() => normalized);
-      return { ...out, status: live || normalized };
+      // Optional resolution reason (needed to close a Security ticket), checked
+      // with the same rules as the close dialog.
+      const resolution = nonEmpty(step.resolutionReason)
+        ? validateResolution({ resolutionReason: step.resolutionReason, resolutionNote: step.resolutionNote || null })
+        : null;
+      return {
+        ...out,
+        status: live || normalized,
+        ...(resolution?.resolutionReason ? { resolutionReason: resolution.resolutionReason } : {}),
+        ...(resolution?.resolutionNote ? { resolutionNote: resolution.resolutionNote } : {}),
+      };
     }
     case 'priority': {
       const p = Number(step.priority);

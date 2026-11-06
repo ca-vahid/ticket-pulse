@@ -1,3 +1,4 @@
+import { reasonLabel } from './resolutionReasons';
 /**
  * Macros as an ordered action list (QA 11-05 #2). Mirrors
  * backend/src/services/ticketMacroService.js: the same step types, the same
@@ -107,6 +108,8 @@ export function stepsForSave(steps) {
     if (s.type === 'category' && !nonEmpty(s.subcategoryId)) delete out.subcategoryId;
     if (s.type === 'assign' && s.to === 'applier') delete out.technicianId;
     if (s.type === 'reply' && !String(s.subject || '').trim()) delete out.subject;
+    if (s.type === 'status' && !nonEmpty(s.resolutionReason)) { delete out.resolutionReason; delete out.resolutionNote; }
+    if (s.type === 'status' && !String(s.resolutionNote || '').trim()) delete out.resolutionNote;
     return out;
   });
 }
@@ -125,7 +128,7 @@ export function describeStep(step, lookups = {}) {
   switch (step.type) {
   case 'reply': return 'Reply to the requester';
   case 'note': return 'Add an internal note';
-  case 'status': return step.status ? `Set status to ${step.status}` : 'Set status';
+  case 'status': return step.status ? `Set status to ${step.status}${step.resolutionReason ? ` · ${reasonLabel(step.resolutionReason)}` : ''}` : 'Set status';
   case 'priority': return `Set priority to ${PRIORITY_LABELS[Number(step.priority)] || step.priority}`;
   case 'category': {
     const label = [catName(step.categoryId), catName(step.subcategoryId)].filter(Boolean).join(' / ');
