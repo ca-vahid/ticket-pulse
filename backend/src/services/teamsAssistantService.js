@@ -25,7 +25,7 @@ import prisma from './prisma.js';
 import bot from '../integrations/teamsBotClient.js';
 import { assistantCard, assistantUnsureCard, assistantHelpCard, approvalCard } from './teamsCards.js';
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
-import { classifyMessage, keywordIntents, requestSignals, isStartOver } from './teamsAssistantRouting.js';
+import { classifyMessage, keywordIntents, requestSignals, isStartOver, isRankingAsk } from './teamsAssistantRouting.js';
 import teamsAssistantSettings, { ASSISTANT_OPERATION } from './teamsAssistantSettings.js';
 import {
   ASSISTANT_TOOLS, SUBMIT_ANSWER_TOOL, TOOL_NAMES, executeAssistantTool, modelView, idsOf, fmtDay, pacificDayKey,
@@ -42,6 +42,7 @@ export const RATE = Object.freeze({ perMinute: 8, perHour: 60, perDay: 200 });
 export const MEMORY = Object.freeze({ turns: 3, windowMs: 15 * 60 * 1000 });
 export const HELP_EXAMPLES = Object.freeze(['Show me the approvals waiting for me', 'My overdue tickets', "Who's out today?"]);
 export const NO_AI_NOTE = 'Answered without AI just now.';
+export const NO_RANKING_LEAD = 'I do not rank or compare people. The Dashboard and Analytics show how work is spread across the team.';
 
 const lc = (s) => String(s || '').trim().toLowerCase();
 const baseUrl = () => resolvePublicBaseUrl({ warn: (m) => logger.warn(m) });
@@ -255,7 +256,7 @@ export function sectionFor(result, { multiWs = false, focusIds = [], base = '' }
           id: r.id,
           title: r.subject || r.ref || 'Ticket',
           line: [r.ref, r.priority, r.status].filter(Boolean).join(' · ') + wsTag(r),
-          right: r.due ? `${r.overdue ? '🔥 ' : ''}${r.due}` : '',
+          right: r.due ? `${r.overdue ? 'Overdue since ' : 'Due '}${r.due}` : '',
           rightColor: r.overdue ? 'Attention' : 'Default',
           url: r.url,
         })),
@@ -573,7 +574,17 @@ class TeamsAssistantService {
   }
 
   /** The keyword answer as a card. */
+  _rankingCard(turnId = null) {
+    const base = baseUrl();
+    return assistantCard({
+      title: 'I can\'t do that from Teams', icon: '🙅', word: 'Ask', style: 'emphasis', lead: NO_RANKING_LEAD,
+      links: [{ title: 'Open Analytics', url: `${base}/analytics` }, { title: 'Open the Dashboard', url: `${base}/dashboard` }], turnId,
+    });
+  }
+
   _keywordCard(text, results, access, { note = null, turnId = null } = {}) {
+    // Team-safe rule: never a ranking, whatever the keywords picked.
+    if (isRankingAsk(text)) return { card: this._rankingCard(turnId), summary: `I can't do that from Teams — ${NO_RANKING_LEAD}`, kind: 'refused', shownIds: [], delivered: 'keyword' };
     if (!results.length) {
       if (requestSignals(text)) return { card: this._requestCard(text, note), summary: 'This looks like a request for IT — offered to make a ticket.', kind: 'suggest_autofill', shownIds: [], delivered: 'keyword' };
       return { card: this._helpCard(note), summary: 'What I can help with (examples).', kind: 'help', shownIds: [], delivered: 'help' };
@@ -697,10 +708,9 @@ class TeamsAssistantService {
     if (checked.kind === 'help') return { card: this._helpCard(), summary: 'What I can help with (examples).', shownIds: [] };
     if (checked.kind === 'suggest_autofill') return { card: this._requestCard(text), summary: 'This looks like a request for IT — offered to make a ticket.', shownIds: [] };
     if (checked.kind === 'refused') {
-      const ranking = /\b(most|least|best|worst|rank\w*|leaderboard|top|fastest|slowest)\b/i.test(text);
-      const lead = checked.lead || (ranking
-        ? 'I do not rank or compare people. The Dashboard and Analytics show how work is spread across the team.'
-        : 'I can only read your own tickets, approvals and time away; I cannot change tickets.');
+      const ranking = isRankingAsk(text) || /\b(most|least|best|worst|rank\w*|leaderboard|top|fastest|slowest)\b/i.test(text);
+      // A ranking always gets the fixed team-safe line, never the model's words.
+      const lead = ranking ? NO_RANKING_LEAD : (checked.lead || 'I can only read your own tickets, approvals and time away; I cannot change tickets.');
       const otherQueue = !ranking && /\b(tickets|queue|workload|plate)\b/i.test(text) && !/\b(reassign|assign|close|change|edit|move|delete|merge)\b/i.test(text);
       const links = ranking ? [{ title: 'Open Analytics', url: `${base}/analytics` }]
         : otherQueue ? [{ title: 'Open the Dashboard', url: `${base}/dashboard` }]

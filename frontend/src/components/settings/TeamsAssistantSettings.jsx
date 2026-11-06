@@ -187,7 +187,7 @@ export default function TeamsAssistantSettings() {
         <SwitchCue>Early access</SwitchCue>
       </div>
       <p className="mb-3 text-xs text-muted-foreground">
-        People ask the bot in plain words — &ldquo;what approvals are waiting for me?&rdquo;, &ldquo;my overdue tickets&rdquo;, &ldquo;who&apos;s out today?&rdquo; — and get a card built from their own tickets, approvals and time away. The AI only reads; approving stays on the approval card with its confirm step. Each person can switch it off for themselves under Mail &amp; alerts.
+        People ask the bot in plain words — &ldquo;what approvals are waiting for me?&rdquo;, &ldquo;my overdue tickets&rdquo;, &ldquo;who&apos;s out today?&rdquo; — and get a card built from their own tickets, approvals and time away. The AI only reads; approving stays on the approval card with its confirm step. Each person can switch it off for themselves under Mail &amp; alerts. Super admins can review the questions people ask (Latest questions, below); each person sees their own under Mail &amp; alerts.
       </p>
       {error && <div role="alert" className="mb-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-500/30 dark:bg-red-500/15 dark:text-red-200">{error}</div>}
 
@@ -256,14 +256,13 @@ export default function TeamsAssistantSettings() {
             <p className="mt-1 max-w-2xl text-xs text-muted-foreground">At the limit the AI stops until the 1st and people get the keyword answers. The super admins get one e-mail when it is reached.</p>
           </div>
 
-          <div className="max-w-2xl rounded-lg border border-border bg-card px-3">
+          <div className="max-w-2xl divide-y divide-border border-t border-border">
             <SwitchRow
               label="Keep ticket subjects away from the AI"
               description="For workspaces where subjects name people (HR, onboarding). The AI sees ids and statuses only; the card still shows the subject to the person asking."
               checked={s.sensitive === true}
               disabled={busy}
               onCheckedChange={(v) => save({ sensitive: v }, v ? 'Subjects stay away from the AI' : 'Subjects may go to the AI')}
-              className="py-2.5"
             />
           </div>
 

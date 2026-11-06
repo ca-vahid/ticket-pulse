@@ -453,6 +453,30 @@ describe('the rest of the flow', () => {
     expect(state.turns).toHaveLength(1);
   });
 
+  test('team-safe: "who closed the most tickets" is never a ranking, with or without the AI', async () => {
+    // Keyword path (Off / Shadow / capped): the fixed line, no list.
+    await svc.handleMessage(message('who closed the most tickets this week', { id: 'rank-1' }), ALEX, { route: 'assistant' });
+    let card = cardText(sentCards().at(-1));
+    expect(card).toContain('I do not rank or compare people');
+    expect(card).toContain('/analytics');
+    expect(state.turns.at(-1).answerKind).toBe('refused');
+    // Live: even if the model writes its own words (or a list), the fixed line wins.
+    setMode(1, 'on');
+    gateway.runToolTurn.mockResolvedValueOnce(toolTurn([{ name: 'submit_answer', input: { lead: 'Riley closed the most.', refuse: true } }]));
+    await svc.handleMessage(message('who closed the most tickets this week', { id: 'rank-2' }), ALEX, { route: 'assistant' });
+    card = cardText(sentCards().at(-1));
+    expect(card).toContain('I do not rank or compare people');
+    expect(card).not.toContain('Riley closed the most');
+  });
+
+  test('overdue dates are plain words in the attention colour, no emoji', async () => {
+    await svc.handleMessage(message('my tickets please', { id: 'od-1' }), ALEX, { route: 'assistant' });
+    const card = cardText(sentCards().at(-1));
+    expect(card).toMatch(/"text":"Overdue since [A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2}, \d{1,2}:\d{2} [AP]M","wrap":false,"size":"Small","spacing":"None","color":"Attention"/);
+    expect(card).not.toContain('🔥');
+    expect(card).toContain('#246762');
+  });
+
   test('the 180-day prune removes only old rows', async () => {
     state.turns.push({ id: 1, email: ALEX, question: 'old', createdAt: new Date(Date.now() - 181 * 86400_000) });
     state.turns.push({ id: 2, email: ALEX, question: 'new', createdAt: new Date() });
