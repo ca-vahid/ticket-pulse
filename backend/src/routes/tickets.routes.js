@@ -1807,6 +1807,15 @@ router.get('/:id', asyncHandler(async (req, res) => {
         logger.debug?.(`Urgent clock not attached to ticket ${ticketId}: ${error.message}`);
       }
     }
+    // QA 11-05 #9: Ticket Pulse workflow runs on this ticket, for the Activity
+    // tab (a run that only e-mailed, or stopped, left no other trace). Here in
+    // the internal route, never in getTicket, so the public v1 shape cannot
+    // pick it up. A failure only hides the rows.
+    if (ticket) {
+      ticket.workflowRuns = await import('../services/ticketWorkflowRunsService.js')
+        .then(({ listTicketWorkflowRuns }) => listTicketWorkflowRuns(ticketId))
+        .catch(() => []);
+    }
     res.json({ success: true, data: ticket });
   } catch (err) {
     if (!(err instanceof NotFoundError)) throw err;
