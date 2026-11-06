@@ -155,25 +155,32 @@ describe('TicketDetail History tab — actor kinds, machine filter, collapsing (
     expect(within(section).getAllByText('Dominic Bautista')).toHaveLength(1);
     // An FS status line with no audit twin is surfaced, named.
     expect(within(section).getAllByText('Kirsten Fanning').length).toBeGreaterThanOrEqual(1);
-    // Kind chips.
-    const chips = within(section).getAllByTestId('actor-kind-chip').map((c) => c.getAttribute('data-kind'));
-    expect(chips).toEqual(expect.arrayContaining(['human', 'api', 'freshservice_sync']));
-    expect(chips).not.toContain('reconcile');
+    // Each row carries its actor kind (QA 11-05 #9: as data, no "Human" pill).
+    const kinds = within(section).getAllByTestId('history-row').map((r) => r.getAttribute('data-kind'));
+    expect(kinds).toEqual(expect.arrayContaining(['human', 'api', 'freshservice_sync']));
+    expect(kinds).not.toContain('reconcile');
+    expect(within(section).queryByTestId('actor-kind-chip')).not.toBeInTheDocument();
+    expect(within(section).queryByText('Human')).not.toBeInTheDocument();
     // The collapsed Spam flap is hidden.
     expect(within(section).queryByText(/Open → Spam/)).not.toBeInTheDocument();
   });
 
-  test('unticking reveals the machine burst; expanding it shows the ×3 flap with a time span, and the choice is remembered', async () => {
+  test('unticking shows every machine action as its own line; expanding one shows the ×3 flap with a time span, and the choice is remembered', async () => {
     renderHistory();
     const section = await historySection();
 
     fireEvent.click(within(section).getByRole('checkbox', { name: /hide machine activity/i }));
 
     expect(within(section).queryByTestId('machine-hidden-count')).not.toBeInTheDocument();
-    // Machine chatter folds into collapsed "N automation events" lines (14 Sep overhaul).
-    for (const b of within(section).queryAllByTestId('history-burst')) fireEvent.click(within(b).getByRole('button', { expanded: false }));
+    // No "N automation events" bursts any more (QA 11-05 #9): one line per action.
+    expect(within(section).queryByTestId('history-burst')).not.toBeInTheDocument();
+    const machineRows = within(section).getAllByTestId('history-row').filter((r) => r.getAttribute('data-machine') === 'true');
+    expect(machineRows).toHaveLength(2); // the ×3 reconcile flap (one line, ×3) + the FreshService system line
+    const flap = machineRows.find((r) => r.getAttribute('data-kind') === 'reconcile');
+    expect(flap).toHaveTextContent('×3');
+    fireEvent.click(within(flap).getByRole('button', { expanded: false }));
     // Three identical reconcile rows folded into one with a span.
-    expect(within(section).getByTestId('collapsed-span')).toHaveTextContent(/×3, \d{1,2}:\d{2}.*–.*\d{1,2}:\d{2}/);
+    expect(within(flap).getByTestId('collapsed-span')).toHaveTextContent(/×3, \d{1,2}:\d{2}.*–.*\d{1,2}:\d{2}/);
     expect(within(section).getAllByText(/Spam/).length).toBeGreaterThanOrEqual(1);
     expect(within(section).getByText(/Ticket Workflow executed Update department/)).toBeInTheDocument();
     expect(localStorage.getItem('tp.ticketHistory.hideMachine')).toBe('false');
@@ -184,6 +191,26 @@ describe('TicketDetail History tab — actor kinds, machine filter, collapsing (
     renderHistory();
     const section = await historySection();
     expect(within(section).getByRole('checkbox', { name: /hide machine activity/i })).not.toBeChecked();
-    expect(within(section).getAllByTestId('actor-kind-chip').map((c) => c.getAttribute('data-kind'))).toContain('reconcile');
+    expect(within(section).getAllByTestId('history-row').map((r) => r.getAttribute('data-kind'))).toContain('reconcile');
+  });
+
+  test('each row is a keyboard-focusable button that expands and collapses its details (QA 11-05 #9)', async () => {
+    renderHistory();
+    const section = await historySection();
+    const row = within(section).getAllByTestId('history-row').find((r) => r.getAttribute('data-kind') === 'freshservice_sync' && /Dominic Bautista/.test(r.textContent));
+    const button = within(row).getByRole('button');
+    expect(button.tagName).toBe('BUTTON');
+    expect(button).toHaveAttribute('type', 'button');
+    button.focus();
+    expect(document.activeElement).toBe(button);
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(button);
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+    const details = within(row).getByTestId('history-details');
+    expect(button).toHaveAttribute('aria-controls', details.id);
+    expect(within(details).getByTestId('actor-kind')).toHaveTextContent(/FreshService/);
+    fireEvent.click(button);
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    expect(within(row).queryByTestId('history-details')).not.toBeInTheDocument();
   });
 });

@@ -15,8 +15,11 @@ describe('Auto-help history label', () => {
     expect(label.className).not.toMatch(/rounded-full|border|bg-/);
   });
 
-  test('other kinds keep their chip', () => {
+  test('other kinds are plain coloured words too — no pills (QA 11-05 #9)', () => {
     render(<ActorKindChip kind="workflow" />);
-    expect(screen.getByTestId('actor-kind-chip').className).toMatch(/rounded-full/);
+    const label = screen.getByTestId('actor-kind-chip');
+    expect(label).toHaveTextContent('Workflow');
+    expect(label.className).not.toMatch(/rounded-full|border|bg-/);
+    expect(label.className).toMatch(/text-amber-700/);
   });
 });

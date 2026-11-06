@@ -1511,9 +1511,10 @@ export default function TicketDetail() {
     activities: ticket?.activities || [],
     assignmentEpisodes: ticket?.assignmentEpisodes || [],
     pipelineRuns: ticket?.pipelineRuns || [],
+    workflowRuns: ticket?.workflowRuns || [],
     thread: ticket?.thread || [],
     techNameById,
-  }), [ticket?.activities, ticket?.assignmentEpisodes, ticket?.pipelineRuns, ticket?.thread, techNameById]);
+  }), [ticket?.activities, ticket?.assignmentEpisodes, ticket?.pipelineRuns, ticket?.workflowRuns, ticket?.thread, techNameById]);
   const techPhotoByName = useMemo(() => {
     const map = new Map();
     for (const t of meta?.technicians || []) if (t.name && t.photoUrl) map.set(String(t.name).trim().toLowerCase(), t.photoUrl);

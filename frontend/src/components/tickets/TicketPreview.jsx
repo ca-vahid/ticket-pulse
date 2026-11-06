@@ -27,7 +27,9 @@ import { FRESHSERVICE_DOMAIN } from '../tech-detail/constants';
 import { useWorkspaceRole } from '../nav/navDestinations';
 import { looksLikeRealHtml } from '../../utils/htmlContent';
 import { agoWords, formatPacificFull, formatPacificWhen } from '../../utils/ticketDates';
-import { ActorKindChip, activityActorKind, isMachineActivity, readHideMachinePreference } from './activityKind';
+import { readHideMachinePreference } from './activityKind';
+import { HistoryRow } from './TicketHistoryTimeline';
+import { buildHistoryItems, countMachine } from '../../utils/ticketHistory';
 
 // Known-tag detector (QA 08-06 #5): plain text carrying angle-bracket tokens
 // like <Processed> renders via the plain-text branch with the tokens intact.
@@ -238,15 +240,21 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
 
   // Peek parity with the History tab (TU-2): same per-viewer "hide machine
   // activity" preference, same kind chip; 15 most recent VISIBLE rows.
+  // QA 11-05 #9: the same one-line rows as the Activity tab (right actor,
+  // workflow runs), built by the same model.
   const hideMachine = useMemo(() => readHideMachinePreference(), []);
-  const machineHiddenCount = useMemo(
-    () => (hideMachine ? (ticket?.activities || []).filter((a) => isMachineActivity(a)).length : 0),
-    [ticket?.activities, hideMachine],
-  );
-  const activity = useMemo(
-    () => (ticket?.activities || []).filter((a) => !hideMachine || !isMachineActivity(a)).slice(0, 15),
-    [ticket?.activities, hideMachine],
-  );
+  const peekTechs = meta?.technicians;
+  const peekHistory = useMemo(() => buildHistoryItems({
+    activities: ticket?.activities || [],
+    assignmentEpisodes: ticket?.assignmentEpisodes || [],
+    pipelineRuns: ticket?.pipelineRuns || [],
+    workflowRuns: ticket?.workflowRuns || [],
+    thread: ticket?.thread || [],
+    techNameById: new Map((peekTechs || []).map((t) => [t.id, t.name])),
+  }), [ticket?.activities, ticket?.assignmentEpisodes, ticket?.pipelineRuns, ticket?.workflowRuns, ticket?.thread, peekTechs]);
+  const peekPhotoForName = useCallback((name) => (peekTechs || []).find((t) => t.photoUrl && String(t.name || '').trim().toLowerCase() === String(name || '').trim().toLowerCase())?.photoUrl || null, [peekTechs]);
+  const machineHiddenCount = useMemo(() => (hideMachine ? countMachine(peekHistory) : 0), [peekHistory, hideMachine]);
+  const activity = useMemo(() => (hideMachine ? peekHistory.filter((i) => !i.machine) : peekHistory).slice(0, 15), [peekHistory, hideMachine]);
 
   // ---- AI assignment: pending suggestion + live modal ----
   const [aiOpen, setAiOpen] = useState(false);
@@ -816,19 +824,17 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                   {machineHiddenCount} machine {machineHiddenCount === 1 ? 'event' : 'events'} hidden
                 </p>
               )}
-              <ul className="space-y-1.5">
-                {activity.map((a) => (
-                  <li key={a.id} className="flex items-start gap-2 text-xs text-muted-foreground">
-                    <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 mt-1.5 flex-shrink-0" aria-hidden="true" />
-                    <span className="min-w-0">
-                      <span className="font-medium text-muted-foreground capitalize">{String(a.activityType || '').replace(/_/g, ' ')}</span>
-                      {a.performedBy ? ` · ${a.performedBy}` : ''}
-                      <span className="text-muted-foreground/75"> · {timeAgo(a.performedAt)}</span>
-                      <ActorKindChip kind={activityActorKind(a)} className="ml-1.5 align-middle" />
-                    </span>
-                  </li>
+              <div className="-mx-1.5">
+                {activity.map((item) => (
+                  <HistoryRow
+                    key={item.key}
+                    item={item}
+                    compact
+                    statusTone={(status) => statusToneFromDefs(statusDefs, status)}
+                    photoForName={peekPhotoForName}
+                  />
                 ))}
-              </ul>
+              </div>
             </>
           )
         ) : null}
