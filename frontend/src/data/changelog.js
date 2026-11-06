@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.51-preview';
+export const APP_VERSION = '4.3.52-preview';
 
 export const changelog = [
+  {
+    version: '4.3.52-preview',
+    date: 'November 5, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>API contacts lookup</strong> works again. <code>GET /contacts</code> and <code>GET /contacts/{id}</code> answered with an error on every call, and so did the new requester-e-mail filter on ticket lists and search. They filtered people by workspace, but people are shared by every workspace.' },
+    ],
+  },
   {
     version: '4.3.51-preview',
     date: 'November 5, 2026',

@@ -139,7 +139,8 @@ describe('C3 / C4 — GET /contacts', () => {
   test('location filters on the Entra office, case-insensitively; e-mail is an exact lookup', async () => {
     const res = await request(app()).get('/api/v1/contacts?location=calgary&email=DRichard@bgc.ca&limit=1000').expect(200);
     const args = prismaMock.requester.findMany.mock.calls[0][0];
-    expect(args.where).toMatchObject({ workspaceId: 8, entraOfficeLocation: { contains: 'calgary', mode: 'insensitive' }, email: { equals: 'drichard@bgc.ca', mode: 'insensitive' } });
+    expect(args.where).not.toHaveProperty('workspaceId');
+    expect(args.where).toMatchObject({ entraOfficeLocation: { contains: 'calgary', mode: 'insensitive' }, email: { equals: 'drichard@bgc.ca', mode: 'insensitive' } });
     expect(args.take).toBe(500); // capped
     expect(res.body.data[0]).toMatchObject({ email: 'drichard@bgc.ca', location: 'Calgary', department: 'Geo', jobTitle: 'Site Lead' });
   });
@@ -147,7 +148,8 @@ describe('C3 / C4 — GET /contacts', () => {
   test('no filters → the old behaviour (100 rows, name order)', async () => {
     await request(app()).get('/api/v1/contacts').expect(200);
     const args = prismaMock.requester.findMany.mock.calls[0][0];
-    expect(args.where).toEqual({ workspaceId: 8 });
+    // Requesters are shared by every workspace: no workspace filter (Prisma refuses one).
+    expect(args.where).toEqual({});
     expect(args.take).toBe(100);
   });
 });

@@ -110,7 +110,7 @@ describe('GET /search/tickets?in= with filters, cursor, snippet and url', () => 
     prismaMock.requester.findMany.mockResolvedValue([{ id: 55 }]);
     prismaMock.technician.findMany.mockResolvedValue([{ id: 9 }]);
     await request(app()).get('/api/v1/search/tickets?q=PIM&in=subject&requesterEmail=PAM@bgc.ca&assigneeEmail=agent@bgc.ca').expect(200);
-    expect(prismaMock.requester.findMany.mock.calls[0][0].where).toMatchObject({ workspaceId: 8, OR: [{ email: { equals: 'pam@bgc.ca', mode: 'insensitive' } }] });
+    expect(prismaMock.requester.findMany.mock.calls[0][0].where).toEqual({ OR: [{ email: { equals: 'pam@bgc.ca', mode: 'insensitive' } }] });
     expect(ticketServiceMock.buildListWhere.mock.calls[0][1]).toMatchObject({ requesterId: '55', assignedTechId: '9' });
 
     jest.clearAllMocks();
@@ -200,5 +200,16 @@ describe('searchSnippet', () => {
     expect(s).toContain('PIM activation');
     expect(searchSnippet('', 'x')).toBeNull();
     expect(searchSnippet('  a   b  ', 'zz')).toBe('a b');
+  });
+});
+
+describe('requester queries', () => {
+  test('never filter requesters by workspace (the model has no such column; Prisma refuses the query)', async () => {
+    const src = (await import('node:fs')).readFileSync(new URL('../src/routes/apiV1.routes.js', import.meta.url), 'utf8');
+    const calls = src.match(/prisma\.requester\.find(?:Many|First)\(\{[^\n]*/g) || [];
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) expect(call).not.toMatch(/workspaceId/);
+    const contactsWhere = src.slice(src.indexOf("router.get('/contacts', S"), src.indexOf("router.get('/contacts/:id'"));
+    expect(contactsWhere).not.toMatch(/workspaceId/);
   });
 });

@@ -94,7 +94,8 @@ async function scopedListQuery(req, query) {
   const requesterEmails = emailList(q.requesterEmail);
   delete q.requesterEmail;
   if (requesterEmails.length) {
-    const rows = await prisma.requester.findMany({ where: { workspaceId: req.workspaceId, OR: requesterEmails.map((e) => ({ email: { equals: e, mode: 'insensitive' } })) }, select: { id: true } });
+    // Requesters are shared by every workspace (no workspace column).
+    const rows = await prisma.requester.findMany({ where: { OR: requesterEmails.map((e) => ({ email: { equals: e, mode: 'insensitive' } })) }, select: { id: true } });
     if (!rows.length) return { q, empty: true };
     q.requesterId = rows.map((r) => r.id).join(',');
   }
@@ -1353,8 +1354,9 @@ router.get('/contacts', S('contacts:read'), asyncHandler(async (req, res) => {
   const location = String(req.query.location || '').trim();
   const email = String(req.query.email || '').trim().toLowerCase();
   const limit = Math.max(1, Math.min(Number(req.query.limit) || 100, 500));
+  // Requesters are shared by every workspace: the model has no workspace
+  // column, and filtering on one made Prisma refuse the query (a 500).
   const where = {
-    workspaceId: req.workspaceId,
     ...(q ? { OR: [{ name: { contains: q, mode: 'insensitive' } }, { email: { contains: q, mode: 'insensitive' } }] } : {}),
     ...(location ? { entraOfficeLocation: { contains: location, mode: 'insensitive' } } : {}),
     ...(email ? { email: { equals: email, mode: 'insensitive' } } : {}),
@@ -1364,7 +1366,7 @@ router.get('/contacts', S('contacts:read'), asyncHandler(async (req, res) => {
 }));
 
 router.get('/contacts/:id', S('contacts:read'), asyncHandler(async (req, res) => {
-  const r = await prisma.requester.findFirst({ where: { id: Number(req.params.id), workspaceId: req.workspaceId } });
+  const r = await prisma.requester.findFirst({ where: { id: Number(req.params.id) } });
   if (!r) throw problems.notFound('Contact not found');
   res.json({ success: true, data: contactShape(r) });
 }));
