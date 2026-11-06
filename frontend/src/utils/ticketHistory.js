@@ -113,6 +113,36 @@ export function workflowRunSummary(run) {
   return [...new Set(bits)].join(', ');
 }
 
+/** A Mail Workflows editor test run ("Preview"), by its execution mode. */
+export function isPreviewRun(run) {
+  return String(run?.executionMode || '').toLowerCase() === 'preview';
+}
+
+/**
+ * QA 11-05b #3a: "Confidence 82 % · 3 people considered" from the pipeline
+ * run's own recommendation — the score of the person it assigned (rank 1 when
+ * that person is not in the list) and how many people it ranked. Null when
+ * the run carries neither.
+ */
+export function aiAssignmentConfidence(run) {
+  const recs = Array.isArray(run?.recommendation?.recommendations)
+    ? run.recommendation.recommendations.filter((r) => r && typeof r === 'object')
+    : [];
+  const assigned = run?.assignedTechId != null
+    ? recs.find((r) => r.techId != null && Number(r.techId) === Number(run.assignedTechId))
+    : null;
+  const pick = assigned || recs.find((r) => Number(r.rank) === 1) || recs[0] || null;
+  const raw = Number(pick?.score);
+  const pct = pick && pick.score !== null && pick.score !== '' && Number.isFinite(raw) && raw >= 0
+    ? Math.round(raw <= 1 ? raw * 100 : Math.min(raw, 100))
+    : null;
+  const bits = [
+    pct !== null ? `Confidence ${pct} %` : null,
+    recs.length ? `${plural(recs.length, 'person', 'people')} considered` : null,
+  ].filter(Boolean);
+  return bits.length ? bits.join(' · ') : null;
+}
+
 const fmtDuration = (ms) => {
   const n = Number(ms);
   if (!Number.isFinite(n) || n < 0) return null;
@@ -404,10 +434,14 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
   // acted (or failed) is part of the story; Shadow, preview and skipped runs
   // are machine activity.
   for (const r of workflowRuns) {
+    // QA 11-05b #3c: the editor's test runs are not the ticket's story — they
+    // stay in the workflow editor's own run history, never on this tab
+    // (not even with machine activity shown). Shadow and skipped runs stay.
+    if (isPreviewRun(r)) continue;
     const shadow = Boolean(r.shadow);
     const outcome = r.outcome || 'nothing';
     const verb = shadow
-      ? (r.executionMode === 'preview' ? 'Preview — nothing sent' : 'Shadow — nothing sent')
+      ? 'Shadow — nothing sent'
       : { failed: 'failed', stopped: 'skipped', waiting: 'is waiting', running: 'is running', nothing: 'ran' }[outcome] || 'ran';
     const summary = workflowRunSummary(r);
     const reason = outcome === 'failed' ? (r.error ? String(r.error).split('\n')[0] : null)
@@ -520,7 +554,14 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
     const run = items.find((r) => r.pipelineRun && !drop.has(r) && near(r, ep));
     if (run) {
       drop.add(run);
-      ep.extra = [...(ep.extra || []), `AI run #${run.pipelineRun.id}${run.detail ? ` · ${run.detail}` : ''}`];
+      // QA 11-05b #3a: the AI's confidence lives here, in the details only —
+      // never on the line itself. Omitted when the run carries none.
+      const confidence = aiAssignmentConfidence(run.pipelineRun);
+      ep.extra = [
+        ...(ep.extra || []),
+        ...(confidence ? [confidence] : []),
+        `AI run #${run.pipelineRun.id}${run.detail ? ` · ${run.detail}` : ''}`,
+      ];
     }
   }
   // A workflow run and what it did: its workflow_updated_ticket row, and an

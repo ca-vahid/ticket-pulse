@@ -8,7 +8,7 @@
 export const MACRO_ACTIONS = [
   { type: 'reply', label: 'Reply to the requester', hint: 'Goes out through the normal reply path: signature, threading and the FreshService copy work as usual.' },
   { type: 'note', label: 'Add an internal note', hint: 'Only agents see it.' },
-  { type: 'status', label: 'Set status', hint: 'Always runs last, after everything else.' },
+  { type: 'status', label: 'Set status', hint: 'Runs where it sits in the list. A reply placed after a close is still sent.' },
   { type: 'priority', label: 'Set priority' },
   { type: 'category', label: 'Set category' },
   { type: 'group', label: 'Set group', tpOnly: true },

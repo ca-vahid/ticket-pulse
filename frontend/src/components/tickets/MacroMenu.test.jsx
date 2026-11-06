@@ -36,7 +36,9 @@ describe('MacroMenu', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: /Spam \/ phishing/ }));
 
     expect(await screen.findByRole('dialog', { name: /Apply “Spam \/ phishing” to #230002/ })).toBeInTheDocument();
-    expect(screen.getByText('2 of 4 actions will run, in this order. A status change runs last.')).toBeInTheDocument();
+    // QA 11-05b #4: the exact order, no "status runs last" rule.
+    expect(screen.getByText('2 of 4 actions will run, in exactly this order.')).toBeInTheDocument();
+    expect(screen.queryByText(/runs last/)).not.toBeInTheDocument();
     expect(screen.getByText(/Skipped: The requester is an unattended mailbox/)).toBeInTheDocument();
     expect(screen.getByText(/Skipped: FreshService owns this field/)).toBeInTheDocument();
     expect(screen.getByText('Reported by Alex')).toBeInTheDocument();
@@ -46,6 +48,24 @@ describe('MacroMenu', () => {
     await waitFor(() => expect(ticketsAPI.applyMacro).toHaveBeenCalledWith(501, 9));
     await waitFor(() => expect(onApplied).toHaveBeenCalledWith(expect.objectContaining({ ok: true })));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  test('steps show in the macro order, a close before the reply, with the after-close notice', async () => {
+    ticketsAPI.previewMacro.mockResolvedValueOnce({ success: true, data: {
+      macro: { id: 9, name: 'Spam / phishing' },
+      ticket: { id: 502, ref: 'TP-1201', origin: 'ticketpulse' },
+      steps: [
+        { index: 0, type: 'status', run: true, summary: 'Set status to Closed' },
+        { index: 1, type: 'reply', run: true, summary: 'Reply to the requester', html: '<p>Thanks, Sam</p>', notice: 'This reply runs after the ticket is set to Closed: it is still sent, and the ticket stays Closed.' },
+      ],
+    } });
+    render(<MacroMenu ticketId={502} />);
+    fireEvent.click(screen.getByRole('button', { name: /Macros/ }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Spam \/ phishing/ }));
+    const list = await screen.findByTestId('macro-preview-steps');
+    const items = [...list.querySelectorAll('li')].map((li) => li.getAttribute('data-testid'));
+    expect(items).toEqual(['macro-preview-status', 'macro-preview-reply']);
+    expect(screen.getByText(/This reply runs after the ticket is set to Closed: it is still sent/)).toBeInTheDocument();
   });
 
   test('Cancel closes the preview without applying', async () => {

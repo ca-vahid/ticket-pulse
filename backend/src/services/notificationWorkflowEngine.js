@@ -2261,6 +2261,34 @@ function requesterFacingDelivery(eventContext, toRecipients, ccRecipients = [], 
   return Boolean(requesterEmail && recipientSet(toRecipients, ccRecipients, bccRecipients).has(requesterEmail));
 }
 
+export const DELIVERED_REPLY_SKIP_REASON = 'The agent replied from Outlook, which already delivered this reply to the requester — it is not sent again';
+
+const plainForCompare = (s) => String(s || '')
+  .replace(/<[^>]+>/g, ' ')
+  .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+  .replace(/&quot;/gi, '"').replace(/&#0?39;|&apos;/gi, "'")
+  .replace(/\s+/g, ' ')
+  .trim()
+  .toLowerCase();
+
+/**
+ * QA 11-05b #3: does this e-mail step send the requester the agent reply that
+ * Outlook already delivered? True only when the event says so
+ * (`event.extra.alreadyDelivered`, set by the mailbox ingest for an agent's
+ * own Outlook reply), the requester is a recipient, and the rendered body
+ * carries the reply's text (its first 120 characters). Anything else — a
+ * check-in nudge, a note to the team — still sends.
+ */
+export function repeatsDeliveredReply(eventContext, email = {}, toRecipients = [], ccRecipients = [], bccRecipients = []) {
+  const x = eventContext?.event?.extra || {};
+  if (x.alreadyDelivered !== true) return false;
+  if (!requesterFacingDelivery(eventContext, toRecipients, ccRecipients, bccRecipients)) return false;
+  const reply = plainForCompare(x.bodyText);
+  if (reply.length < 12) return false;
+  const probe = reply.slice(0, 120);
+  return plainForCompare(email?.text).includes(probe) || plainForCompare(email?.html).includes(probe);
+}
+
 function buildDeliveryDedupeKey({ workflow, run, node, eventContext, output, toRecipients, ccRecipients, bccRecipients }) {
   const baseRunKey = `${run.dedupeKey}:email:${node.id}`;
   if (!requesterFacingDelivery(eventContext, toRecipients, ccRecipients, bccRecipients)) {
@@ -3265,6 +3293,12 @@ async function executeNode({
         skipped: true,
         reason: 'No email body generated',
       };
+    }
+
+    // QA 11-05b #3: an agent's Outlook reply already reached the requester —
+    // a step that would mail them that same reply text again is skipped.
+    if (repeatsDeliveredReply(eventContext, baseEmail, toRecipients, ccRecipients, bccRecipients)) {
+      return { skipped: true, alreadyDelivered: true, reason: DELIVERED_REPLY_SKIP_REASON };
     }
 
     // Auto-send safety gates for LLM-authored content: below-threshold

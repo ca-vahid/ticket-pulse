@@ -85,11 +85,13 @@ import { Switch, SwitchCue, SwitchRow } from '../ui/switch';
 import {
   DraftRestoreLine,
   LeaveWithoutSavingDialog,
+  UnpublishedChangesLine,
   WORKFLOW_DRAFT_AUTOSAVE_MS,
   clearStoredWorkflowDraft,
   draftRestoreOffer,
   hashFingerprint,
   historyStateWithoutGuard,
+  listStoredWorkflowDrafts,
   onLeaveGuardEntry,
   readStoredWorkflowDraft,
   useLeaveGuard,
@@ -7361,6 +7363,10 @@ export default function NotificationWorkflowsPanel({
   const [leaveSaving, setLeaveSaving] = useState(false);
   const [leaveError, setLeaveError] = useState(null);
   const [restoreOffer, setRestoreOffer] = useState(null);
+  // QA 11-05b #1c: this browser's local drafts for the list, and the one an
+  // "Open" on the list asked to restore once its workflow has loaded.
+  const [localDraftRecords, setLocalDraftRecords] = useState([]);
+  const [pendingLocalRestoreId, setPendingLocalRestoreId] = useState(null);
   const [variableCatalog, setVariableCatalog] = useState([]);
   const [variableSearch, setVariableSearch] = useState('');
   const [activeInsertTarget, setActiveInsertTarget] = useState(null);
@@ -8100,6 +8106,12 @@ export default function NotificationWorkflowsPanel({
   // published version — a saved, unpublished draft is not at risk).
   const savedFingerprint = useMemo(() => definitionFingerprint(selected?.draftDefinition), [selected?.draftDefinition]);
   const editorDirty = Boolean(selected?.id && draft && !selectedLoading && draftFingerprint !== savedFingerprint);
+  // QA 11-05b #1d: the SAVED draft is not what is live (or was never
+  // published by anyone — a seeded default nobody touched has no lastChangedBy).
+  const selectedHasUnpublishedDraft = Boolean(
+    selected?.id && !selected.archivedAt && !selectedLoading
+    && (selectedIsPublished ? savedFingerprint !== publishedFingerprint : Boolean(selected.lastChangedBy)),
+  );
   const draftStorageKey = workflowDraftStorageKey(workspaceId, selected?.id);
   const autosaveRef = useRef({ timer: null, payload: null });
   autosaveRef.current.payload = editorDirty && draftStorageKey && !restoreOffer
@@ -8155,9 +8167,9 @@ export default function NotificationWorkflowsPanel({
     clearStoredWorkflowDraft(draftStorageKey);
   }
 
-  function restoreLocalDraft() {
-    if (!restoreOffer) return;
-    const restored = normalizeEditorDefinition(restoreOffer.definition);
+  function restoreLocalDraft(offer = restoreOffer) {
+    if (!offer) return;
+    const restored = normalizeEditorDefinition(offer.definition);
     updateDraft((next) => {
       for (const key of Object.keys(next)) delete next[key];
       Object.assign(next, restored);
@@ -8171,6 +8183,61 @@ export default function NotificationWorkflowsPanel({
     forgetLocalDraft();
     setRestoreOffer(null);
   }
+
+  // ---- QA 11-05b #1c: local drafts on the list ----------------------------
+  const refreshLocalDrafts = useCallback(() => {
+    setLocalDraftRecords(listStoredWorkflowDrafts(workspaceId));
+  }, [workspaceId]);
+  useEffect(() => {
+    if (workflowView === 'list') refreshLocalDrafts();
+  }, [workflowView, workflows, refreshLocalDrafts]);
+  useEffect(() => {
+    // Another tab saved or cleared a draft.
+    const onStorage = (event) => {
+      if (!event?.key || String(event.key).startsWith('tp:wf-draft:')) refreshLocalDrafts();
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [refreshLocalDrafts]);
+  // Only copies that still differ from what is saved, for workflows on the list.
+  const localDrafts = useMemo(() => {
+    const byId = new Map((workflows || []).map((workflow) => [String(workflow.id), workflow]));
+    return localDraftRecords.filter((record) => {
+      const workflow = byId.get(String(record.workflowId));
+      return workflow && !workflow.archivedAt
+        && definitionFingerprint(record.definition) !== definitionFingerprint(workflow.draftDefinition);
+    });
+  }, [localDraftRecords, workflows]);
+
+  /** List → Open: open the workflow and restore its local copy into the editor. */
+  function openLocalDraft(id) {
+    setPendingLocalRestoreId(String(id));
+    openWorkflow(id);
+  }
+
+  function discardLocalDraftFromList(id) {
+    clearStoredWorkflowDraft(workflowDraftStorageKey(workspaceId, id));
+    if (String(selected?.id) === String(id)) {
+      const state = autosaveRef.current;
+      if (state.timer) { window.clearTimeout(state.timer); state.timer = null; }
+      state.payload = null;
+      setRestoreOffer(null);
+    }
+    refreshLocalDrafts();
+  }
+
+  // Once the asked-for workflow is loaded, restore straight from storage (the
+  // restore offer state may not have landed yet in the same commit).
+  useEffect(() => {
+    if (!pendingLocalRestoreId || selectedLoading) return;
+    if (String(selected?.id) !== pendingLocalRestoreId) return;
+    setPendingLocalRestoreId(null);
+    const record = readStoredWorkflowDraft(draftStorageKey);
+    const offer = draftRestoreOffer({ record, savedFingerprint, fingerprintOf: definitionFingerprint });
+    if (offer) restoreLocalDraft(offer);
+    else setMessage({ type: 'success', text: 'That unsaved copy is already the saved version.' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingLocalRestoreId, selected?.id, selectedLoading]);
 
   const { leave: leaveEditor, consumeGuardEntry } = useLeaveGuard({
     active: editorDirty,
@@ -11736,7 +11803,17 @@ export default function NotificationWorkflowsPanel({
               </div>
             )}
             {workflowTabActive && !workflowListView && restoreOffer && (
-              <DraftRestoreLine offer={restoreOffer} onRestore={restoreLocalDraft} onDiscard={discardLocalDraft} />
+              <DraftRestoreLine offer={restoreOffer} onRestore={() => restoreLocalDraft()} onDiscard={discardLocalDraft} />
+            )}
+            {workflowTabActive && !workflowListView && selectedHasUnpublishedDraft && (
+              <UnpublishedChangesLine
+                neverPublished={!selectedIsPublished}
+                savedAt={selected?.draftSavedAt || null}
+                savedBy={selected?.draftSavedByName || selected?.draftSavedBy || null}
+                onPublish={editorDirty ? null : publishWorkflow}
+                publishDisabledReason={hasBlockingGraphErrors ? draftValidationIssues[0] : null}
+                publishing={saving}
+              />
             )}
           </div>
         </div>
@@ -11852,6 +11929,9 @@ export default function NotificationWorkflowsPanel({
               showArchived={showArchivedWorkflows}
               archivedCount={archivedWorkflowCount}
               onShowArchivedChange={updateShowArchivedWorkflows}
+              localDrafts={localDrafts}
+              onOpenLocalDraft={openLocalDraft}
+              onDiscardLocalDraft={discardLocalDraftFromList}
               actions={<WorkflowTemplatesMenu saving={saving} onInstalled={loadWorkflows} setMessage={setMessage} />}
               footer={<WorkflowHealthMenu health={health} warnings={healthWarnings} variant="card" />}
             />

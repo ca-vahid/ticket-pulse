@@ -25,7 +25,8 @@
  */
 import { useCallback, useContext, useEffect, useRef } from 'react';
 import { UNSAFE_NavigationContext } from 'react-router-dom';
-import { AlertCircle, History, X } from 'lucide-react';
+import { AlertCircle, FilePen, History, X } from 'lucide-react';
+import { formatPacificFull, formatPacificWhen } from '../../utils/ticketDates';
 
 export const WORKFLOW_DRAFT_AUTOSAVE_MS = 3000;
 const DRAFT_KEY_PREFIX = 'tp:wf-draft:v1';
@@ -78,6 +79,31 @@ export function writeStoredWorkflowDraft(key, record) {
 export function clearStoredWorkflowDraft(key) {
   if (!key) return;
   try { window.localStorage.removeItem(key); } catch { /* nothing to clear */ }
+}
+
+/**
+ * QA 11-05b #1c: every local draft this browser holds for one workspace,
+ * newest first — `{ key, workflowId, savedAt, definition }`. Blocked or
+ * broken storage gives an empty list.
+ */
+export function listStoredWorkflowDrafts(workspaceId) {
+  const prefix = `${DRAFT_KEY_PREFIX}:ws${workspaceId ?? 'current'}:wf`;
+  const out = [];
+  try {
+    const storage = window.localStorage;
+    for (let index = 0; index < storage.length; index += 1) {
+      const key = storage.key(index);
+      if (!key || !key.startsWith(prefix)) continue;
+      const workflowId = key.slice(prefix.length);
+      if (!/^\d+$/.test(workflowId)) continue;
+      const record = readStoredWorkflowDraft(key);
+      if (!record) continue;
+      out.push({ key, workflowId, savedAt: record.savedAt || null, definition: record.definition });
+    }
+  } catch {
+    return [];
+  }
+  return out.sort((a, b) => String(b.savedAt || '').localeCompare(String(a.savedAt || '')));
 }
 
 /**
@@ -378,6 +404,53 @@ export function LeaveWithoutSavingDialog({
           </button>
         </div>
       </section>
+    </div>
+  );
+}
+
+/**
+ * QA 11-05b #1d: the quiet line on a workflow whose SAVED draft is not
+ * published — "This workflow has unpublished changes (saved Thu 5 Nov,
+ * 3:12 PM by Alex Rivera). · Publish". There is no diff view for workflows,
+ * so there is no "Compare". `onPublish` null hides the action (e.g. while the
+ * editor has unsaved edits, the main Save & publish button covers it).
+ */
+export function UnpublishedChangesLine({
+  neverPublished = false,
+  savedAt = null,
+  savedBy = null,
+  onPublish = null,
+  publishDisabledReason = null,
+  publishing = false,
+  now = new Date(),
+}) {
+  const when = savedAt ? formatPacificWhen(savedAt, now) : null;
+  const saved = when || savedBy ? ` (saved${when ? ` ${when}` : ''}${savedBy ? ` by ${savedBy}` : ''})` : '';
+  return (
+    <div
+      role="status"
+      className="flex flex-wrap items-center gap-x-2 gap-y-0.5 py-0.5 text-xs text-muted-foreground"
+      data-testid="workflow-unpublished-line"
+    >
+      <FilePen className="h-3.5 w-3.5 shrink-0 text-blue-600 dark:text-blue-300" aria-hidden="true" />
+      <span title={savedAt ? formatPacificFull(savedAt) : undefined}>
+        {neverPublished ? 'This workflow has never been published' : 'This workflow has unpublished changes'}{saved}.
+      </span>
+      {onPublish && (
+        <>
+          <span className="text-muted-foreground/50" aria-hidden="true">·</span>
+          <button
+            type="button"
+            onClick={onPublish}
+            disabled={publishing || Boolean(publishDisabledReason)}
+            title={publishDisabledReason || 'Publish the saved draft as a new version'}
+            className="tp-focus-ring rounded font-semibold text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:no-underline"
+            data-testid="workflow-unpublished-publish"
+          >
+            {publishing ? 'Publishing…' : 'Publish'}
+          </button>
+        </>
+      )}
     </div>
   );
 }

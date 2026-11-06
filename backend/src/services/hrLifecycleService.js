@@ -88,12 +88,16 @@ const DEFAULT_TEMPLATES = Object.freeze({
 const NH_CHILD_KEY = 'workstation';
 const DEFAULT_PARENT_HINT = 'Vahid Haeri';
 
-// QA 11-05 #6: the parent of an offboarding is due a week after the last day
-// (after the fact: a week after the notice). Lives in the templates JSON.
-export const DEFAULT_PARENT_DUE_DAYS = 7;
+// QA 11-05b #1 (product decision): the parent (master) of an offboarding is due THREE
+// BUSINESS days after the last day (after the fact: after the notice), on the
+// workspace business calendar. Stored in the templates JSON as
+// `__parent.dueBusinessDays`. 4.3.48 stored `__parent.dueOffsetDays` in
+// calendar days (default 7); that number is never read as business days — a
+// row that only has it reads the new default until it is saved again.
+export const DEFAULT_PARENT_DUE_DAYS = 3;
 export const DEFAULT_AFTER_FACT_BUSINESS_DAYS = 5;
-const MAX_PARENT_DUE_DAYS = 60;
-const PARENT_KEY = '__parent'; // { dueOffsetDays } — its presence also marks settings saved under the 11-05 due rules
+const MAX_PARENT_DUE_DAYS = 30;
+const PARENT_KEY = '__parent'; // { dueBusinessDays } — its presence also marks settings saved under the 11-05 due rules
 const NOTICE_CATEGORY_KEY = '__noticeCategories';
 
 // QA 11-05 #5: the category every family ticket gets, as the team already
@@ -119,7 +123,7 @@ const CATEGORY_HINTS = Object.freeze({
 });
 export const NOTICE_CATEGORY_GROUPS = Object.freeze(['departure', 'new_hire', 'transfer', 'leave']);
 export const NOTICE_CATEGORY_LABELS = Object.freeze({
-  departure: 'Departure notices', new_hire: 'New-hire notices', transfer: 'Transfer notices', leave: 'Leave notices',
+  departure: 'Departure notices and offboarding master tickets', new_hire: 'New-hire notices and onboarding master tickets', transfer: 'Transfer notices', leave: 'Leave notices',
 });
 const NOTICE_CATEGORY_HINTS = Object.freeze({
   departure: [OO, 'Offboarding'],
@@ -287,8 +291,9 @@ const dateOnly = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null);
  * QA 11-05 #6 — the local date a family ticket is due (17:00 that day).
  *
  * Offboarding:
- *   parent                 last day + parentDueOffsetDays (7); after the fact
- *                          the last day is past, so the notice date + 7
+ *   parent                 parentDueOffsetDays (3) BUSINESS days after the
+ *                          last day; after the fact the last day is past, so
+ *                          3 business days after the notice (QA 11-05b #1)
  *   child, standard        last day + its offset (calendar days), as before
  *   child, after the fact  its offset in BUSINESS days after the notice
  *                          (workspace calendar: Settings → Business Hours &
@@ -308,7 +313,7 @@ export function familyDueDate({
     return role === 'parent' ? base : addDays(base, offsetDays || 0);
   }
   let due = null;
-  if (role === 'parent') due = base ? addDays(base, parentDueOffsetDays ?? DEFAULT_PARENT_DUE_DAYS) : null;
+  if (role === 'parent') due = base ? businessCalendarService.addBusinessDays(base, parentDueOffsetDays ?? DEFAULT_PARENT_DUE_DAYS, calendar) : null;
   else if (afterTheFact && noticeDate) due = businessCalendarService.addBusinessDays(noticeDate, offsetDays || 0, calendar);
   else due = base ? addDays(base, offsetDays || 0) : null;
   if (due && floor && due <= floor) due = businessCalendarService.nextBusinessDate(floor, calendar);
@@ -506,7 +511,7 @@ class HrLifecycleService {
     }
     const storedNotices = stored[NOTICE_CATEGORY_KEY] && typeof stored[NOTICE_CATEGORY_KEY] === 'object' ? stored[NOTICE_CATEGORY_KEY] : {};
     const noticeCategories = Object.fromEntries(NOTICE_CATEGORY_GROUPS.map((g) => [g, hasOwn(storedNotices, g) ? catPair(storedNotices[g]) : catPair(defaults.noticeCategories?.[g])]));
-    const parentDue = Number(stored[PARENT_KEY]?.dueOffsetDays);
+    const parentDue = Number(stored[PARENT_KEY]?.dueBusinessDays);
     const parentDueOffsetDays = Number.isInteger(parentDue) && parentDue >= 0 && parentDue <= MAX_PARENT_DUE_DAYS ? parentDue : defaults.parentDueOffsetDays;
     const side = (v, d) => ({
       assigneeTechId: v?.assigneeTechId ? Number(v.assigneeTechId) : (v ? null : d.assigneeTechId),
@@ -596,7 +601,7 @@ class HrLifecycleService {
     }));
     if (input.parentDueOffsetDays !== undefined) {
       const n = Number(input.parentDueOffsetDays);
-      if (!Number.isInteger(n) || n < 0 || n > MAX_PARENT_DUE_DAYS) throw new ValidationError(`Parent due: a whole number of days from 0 to ${MAX_PARENT_DUE_DAYS} after the last day`);
+      if (!Number.isInteger(n) || n < 0 || n > MAX_PARENT_DUE_DAYS) throw new ValidationError(`Parent due: a whole number of business days from 0 to ${MAX_PARENT_DUE_DAYS} after the last day`);
       next.parentDueOffsetDays = n;
     }
     if (input.noticeCategories !== undefined) {
@@ -786,7 +791,7 @@ class HrLifecycleService {
         ...next.templates,
         [ROUTING_KEY]: next.officeRouting,
         [WAKE_KEY]: next.wake,
-        [PARENT_KEY]: { dueOffsetDays: next.parentDueOffsetDays ?? DEFAULT_PARENT_DUE_DAYS },
+        [PARENT_KEY]: { dueBusinessDays: next.parentDueOffsetDays ?? DEFAULT_PARENT_DUE_DAYS },
         [NOTICE_CATEGORY_KEY]: Object.fromEntries(NOTICE_CATEGORY_GROUPS.map((g) => [g, catPair(next.noticeCategories?.[g])])),
       },
       leave: next.leave,
@@ -886,6 +891,48 @@ class HrLifecycleService {
   }
 
   /**
+   * QA 11-05b #2 (product decision): the master ticket of a family — the HR notice that
+   * holds the children — is filed under its FAMILY: Onboarding & Offboarding >
+   * Offboarding for an offboarding, > Onboarding for an onboarding (the
+   * "Departure notices" / "New-hire notices" rows of Settings → Notice
+   * categories). It follows the family kind, never the notice's own type
+   * reading, so a parent can never land under another group's category.
+   */
+  _familyCategory(settings, familyKind) {
+    return this._noticeCategory(settings, familyKind === 'onboarding' ? 'new_hire' : 'departure');
+  }
+
+  /**
+   * Did a PERSON set this ticket's category? Their edit leaves a history row
+   * (fields_updated / fs_write_back) that changes the category, by a human
+   * (actorKind 'human', or an older row whose actor is not Ticket Pulse / the
+   * AI / FreshService). Reads only. On a failed read: true, so nothing a
+   * person may have chosen is overwritten.
+   */
+  async _categorySetByPerson(ticketId) {
+    try {
+      const rows = await prisma.ticketActivity.findMany({
+        where: { ticketId: Number(ticketId), activityType: { in: ['fields_updated', 'fs_write_back'] } },
+        select: { performedBy: true, details: true },
+        orderBy: { id: 'desc' },
+        take: 200,
+      });
+      return (rows || []).some((r) => {
+        const d = r.details && typeof r.details === 'object' ? r.details : {};
+        const ch = d.changes && typeof d.changes === 'object' ? d.changes : {};
+        // TP-born edits record internalCategoryId / internalSubcategoryId; the FS-born write-back records `category`.
+        if (!['internalCategoryId', 'internalSubcategoryId', 'category'].some((k) => hasOwn(ch, k))) return false;
+        if (d.actorKind && d.actorKind !== 'human') return false;
+        // "Ticket Pulse (Onboarding)" (role automation) is stamped 'human' by actorKindOf: the name decides.
+        return !/^(ticket pulse|freshservice|ai\b|system|notification workflow|ticket workflow)/i.test(String(r.performedBy || '').trim());
+      });
+    } catch (err) {
+      logger.debug?.(`HR lifecycle: category history not read for ticket ${ticketId}: ${err.message}`);
+      return true;
+    }
+  }
+
+  /**
    * QA 11-05 #5: give an uncategorized family ticket its template category,
    * as a system change in its history (no workflow event). Never overwrites
    * a category somebody — or the AI — already set. The AI run that may
@@ -897,22 +944,35 @@ class HrLifecycleService {
    * write-back, like the notice's owner and due date.
    * backfill: no event at all; FS-born tickets get the Ticket Pulse category
    * on our row only (no FreshService write), with the same history row.
+   * `replace` (QA 11-05b #2, a family's master ticket only): a category the
+   * AI or the sync set is replaced by the family's; one a PERSON set
+   * (_categorySetByPerson) is still never touched.
    * Returns true when it wrote. Never throws.
    */
-  async _applyCategory(t, pair, out, { recheck = true, backfill = false } = {}) {
+  async _applyCategory(t, pair, out, { recheck = true, backfill = false, replace = false } = {}) {
     const { categoryId, subcategoryId } = catPair(pair);
     if (!t || !categoryId) return false;
     try {
       const row = recheck
-        ? await soft(() => prisma.ticket.findFirst({ where: { id: t.id, workspaceId: t.workspaceId }, select: { internalCategoryId: true } }))
-        : { internalCategoryId: t.internalCategoryId ?? null };
-      if (row?.internalCategoryId) return false;
+        ? await soft(() => prisma.ticket.findFirst({ where: { id: t.id, workspaceId: t.workspaceId }, select: { internalCategoryId: true, internalSubcategoryId: true } }))
+        : { internalCategoryId: t.internalCategoryId ?? null, internalSubcategoryId: t.internalSubcategoryId ?? null };
+      let from = null;
+      if (row?.internalCategoryId) {
+        if (!replace) return false;
+        const same = Number(row.internalCategoryId) === categoryId && (Number(row.internalSubcategoryId) || null) === (subcategoryId || null);
+        if (same) {
+          await this._markTemplateCategory(t.id);
+          return false;
+        }
+        if (await this._categorySetByPerson(t.id)) return false;
+        from = { categoryId: Number(row.internalCategoryId), subcategoryId: Number(row.internalSubcategoryId) || null };
+      }
       const svc = await this._ticketService();
       const input = { internalCategoryId: categoryId, internalSubcategoryId: subcategoryId };
       if (this._isNative(t)) {
         await svc.updateTicketFields(t.id, t.workspaceId, input, HR_LIFECYCLE_ACTOR, { emitEvent: false });
       } else if (backfill) {
-        await this._writeCategoryLocally(t, input);
+        await this._writeCategoryLocally(t, input, from);
       } else {
         await svc.updateFsTicket(t.id, t.workspaceId, input, HR_LIFECYCLE_ACTOR, { notifyLifecycle: false, auditDetails: { reason: TEMPLATE_CATEGORY_NOTE } });
       }
@@ -923,7 +983,7 @@ class HrLifecycleService {
           .then(({ emitTicketEvent }) => emitTicketEvent?.('ticket.categorized', t.id, {
             source: 'hr_lifecycle',
             dedupeStamp: `categorized:${t.id}:${categoryId}:${subcategoryId || 0}`,
-            extra: { first: true, fromCategoryId: null, toCategoryId: categoryId, toSubcategoryId: subcategoryId || null, fit: TEMPLATE_CATEGORY_FIT, by: 'automation' },
+            extra: { first: !from, fromCategoryId: from?.categoryId ?? null, toCategoryId: categoryId, toSubcategoryId: subcategoryId || null, fit: TEMPLATE_CATEGORY_FIT, by: 'automation' },
           }))
           .catch(() => {});
       }
@@ -935,7 +995,7 @@ class HrLifecycleService {
   }
 
   /** FS-born, backfill only: the Ticket Pulse category on our row and a history row; FreshService is not written. */
-  async _writeCategoryLocally(t, { internalCategoryId, internalSubcategoryId }) {
+  async _writeCategoryLocally(t, { internalCategoryId, internalSubcategoryId }, from = null) {
     const names = await soft(() => prisma.competencyCategory.findMany({
       where: { id: { in: [internalCategoryId, internalSubcategoryId].filter(Boolean) } }, select: { id: true, name: true },
     }), []) || [];
@@ -956,8 +1016,8 @@ class HrLifecycleService {
       details: {
         source: 'hr_lifecycle_backfill', actorKind: 'system', reason: TEMPLATE_CATEGORY_NOTE,
         changes: {
-          internalCategoryId: { from: null, to: internalCategoryId },
-          ...(internalSubcategoryId ? { internalSubcategoryId: { from: null, to: internalSubcategoryId } } : {}),
+          internalCategoryId: { from: from?.categoryId ?? null, to: internalCategoryId },
+          ...(internalSubcategoryId || from?.subcategoryId ? { internalSubcategoryId: { from: from?.subcategoryId ?? null, to: internalSubcategoryId || null } } : {}),
         },
       },
     }).catch(() => {});
@@ -1713,7 +1773,13 @@ class HrLifecycleService {
     try {
       // QA 11-05 #5: every HR notice (a family's parent, a re-send, a change,
       // leave, transfer) gets its kind's category when it has none.
-      if (c?.type && NOTICE_TYPE_GROUP[c.type] && plan.decision !== 'ignored') {
+      // QA 11-05b #2: a family's master ticket (create, after the fact, and
+      // Organise now) gets its FAMILY's category, whatever the notice's own
+      // type reads as; one the AI set is replaced, one a person set is kept.
+      const isFamilyParent = plan.decision === 'create_family' || plan.decision === 'create_family_after_the_fact';
+      if (isFamilyParent) {
+        await this._applyCategory(ticket, this._familyCategory(settings, plan.familyKind), out, { replace: true });
+      } else if (c?.type && NOTICE_TYPE_GROUP[c.type] && plan.decision !== 'ignored') {
         await this._applyCategory(ticket, this._noticeCategory(settings, c.type), out);
       }
       switch (plan.decision) {

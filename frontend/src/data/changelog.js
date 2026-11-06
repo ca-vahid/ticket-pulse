@@ -1,6 +1,19 @@
-export const APP_VERSION = '4.3.48-preview';
+export const APP_VERSION = '4.3.49-preview';
 
 export const changelog = [
+  {
+    version: '4.3.49-preview',
+    date: 'November 5, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Offboarding: the main ticket is due 3 business days after the last day</strong> &mdash; instead of a week of calendar days, so it never lands on a weekend or holiday. When HR tells IT after the person has already left, it is 3 business days after the notice. The laptop, phone and iPad tickets keep 5 business days from the notice. Comings &amp; Goings &rarr; Settings has the number.' },
+      { type: 'improved', html: '<strong>The main onboarding or offboarding ticket gets its category</strong> &mdash; the ticket that holds the laptop, phone and account tickets is now <em>Onboarding &amp; Offboarding &rsaquo; Onboarding</em> or <em>&rsaquo; Offboarding</em>, set from the family it belongs to. A category a person chose is never changed.' },
+      { type: 'improved', html: '<strong>An Outlook reply counts as &ldquo;Agent replied to requester&rdquo;</strong> &mdash; when an agent answers from Outlook, workflows on that trigger now run, a parked ticket wakes up, and the ticket&rsquo;s owner gets the usual Teams update, just as for a reply written in Ticket Pulse. The reply is never sent twice: a workflow step that would e-mail the requester the same reply again is skipped, and the agent is not told about their own reply.' },
+      { type: 'improved', html: '<strong>Macros run in the order you set</strong> &mdash; a status change no longer jumps to the end. If a reply comes after a Close step, the preview says so: the reply is still sent, and the ticket stays closed.' },
+      { type: 'new', html: '<strong>See your workflow drafts</strong> &mdash; Settings &rarr; Mail Workflows marks each workflow with changes that are not live yet (<em>Unpublished changes &middot; saved Thu 5 Nov, 3:12 PM by &hellip;</em>, or <em>Never published</em>), and a new <em>Drafts</em> tab shows only those. Changes kept only in your browser show as <em>Unsaved on this computer</em>, with Open and Discard. Opening a workflow with unpublished changes says so at the top, with a Publish button.' },
+      { type: 'improved', html: '<strong>Board cards show when a ticket was opened</strong> &mdash; a small <em>Opened Tue 20 Oct</em> (or <em>2 h ago</em>) on the requester line.' },
+      { type: 'improved', html: '<strong>Activity: the AI&rsquo;s confidence, and no test runs</strong> &mdash; open the AI&rsquo;s assignment line to see how sure it was (<em>Confidence 82 % &middot; 3 people considered</em>). Workflow test runs from the editor no longer appear in a ticket&rsquo;s Activity; they stay in the editor&rsquo;s own run list.' },
+    ],
+  },
   {
     version: '4.3.48-preview',
     date: 'November 5, 2026',
