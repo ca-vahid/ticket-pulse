@@ -171,7 +171,15 @@ class AvailabilityService {
    * kept as assignable-only (isActive false) are not part of the team. The
    * viewer must belong to that workspace (admin, member, or active agent);
    * otherwise, or with no workspace, the workspaces they are an active agent
-   * in. The viewer is always included. Returns a Set of e-mails.
+   * in. Returns a Set of e-mails.
+   *
+   * QA 11-05 #4: the viewer is no longer added on top. A disabled member
+   * (agent row isActive false) — super admin or not — showed up in their own
+   * team's Overview, wallchart, calendar, balances and history, and counted in
+   * "of N people". Only the workspace's enabled agents are the team; a
+   * disabled person's own bookings stay (My time) but leave the team views.
+   * Opening and managing the page is unchanged (access is checked above and
+   * in _adminWorkspaceIds, not by being on the roster).
    */
   async rosterFor(user, workspaceId = null) {
     const email = lc(user?.email);
@@ -201,9 +209,7 @@ class AvailabilityService {
       : [];
     // Service accounts are agents in FreshService but not people who take time
     // off (the "Ticket Pulse" automation agent, admin twins of real people).
-    const roster = new Set(techs.filter((t) => !SERVICE_ACCOUNT_RE.test(String(t.name || ''))).map((t) => lc(t.email)).filter(Boolean));
-    if (email) roster.add(email);
-    return roster;
+    return new Set(techs.filter((t) => !SERVICE_ACCOUNT_RE.test(String(t.name || ''))).map((t) => lc(t.email)).filter(Boolean));
   }
 
   async assertAdmin(user) {

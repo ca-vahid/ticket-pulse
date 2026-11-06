@@ -82,6 +82,20 @@ import WorkflowPreviewPage, {
 import { useTheme } from '../../contexts/ThemeContext';
 import { compactTemplateHtml, formatTemplateHtml } from '../../utils/templateHtmlFormat';
 import { groupWorkflowsByStage } from '../../utils/workflowStages';
+import {
+  DraftRestoreLine,
+  LeaveWithoutSavingDialog,
+  WORKFLOW_DRAFT_AUTOSAVE_MS,
+  clearStoredWorkflowDraft,
+  draftRestoreOffer,
+  hashFingerprint,
+  historyStateWithoutGuard,
+  onLeaveGuardEntry,
+  readStoredWorkflowDraft,
+  useLeaveGuard,
+  workflowDraftStorageKey,
+  writeStoredWorkflowDraft,
+} from './workflowEditorGuard';
 
 // Inspector width (px) and the minimap choice are remembered per browser.
 const WORKFLOW_INSPECTOR_WIDTH_KEY = 'ticket-pulse-notification-workflow-inspector-w';
@@ -7264,8 +7278,10 @@ function writeWorkflowParam(id, { push = false } = {}) {
     if (id) url.searchParams.set('wf', String(id));
     else url.searchParams.delete('wf');
     const next = `${url.pathname}${url.search}${url.hash}`;
-    if (push) window.history.pushState(window.history.state, '', next);
-    else window.history.replaceState(window.history.state, '', next);
+    // Never carry the leave-guard marker (QA 11-05 #3) onto another address.
+    const state = historyStateWithoutGuard();
+    if (push) window.history.pushState(state, '', next);
+    else window.history.replaceState(state, '', next);
   } catch { /* the address is a convenience */ }
 }
 
@@ -7290,6 +7306,7 @@ export default function NotificationWorkflowsPanel({
   hideTabBar = false,
   rootClassName = null,
   onHealthChange = null,
+  workspaceId = null,
 } = {}) {
   const { resolvedTheme } = useTheme();
   // R2 inspector: docked width (drag the divider); the shown state lags the
@@ -7380,6 +7397,13 @@ export default function NotificationWorkflowsPanel({
   const [loading, setLoading] = useState(true);
   const [selectedLoading, setSelectedLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  // QA 11-05 #3: leave guard + local draft. `leavePrompt` holds the exit that
+  // is waiting on "Leave without saving?"; `restoreOffer` is a newer local
+  // draft found on open.
+  const [leavePrompt, setLeavePrompt] = useState(null);
+  const [leaveSaving, setLeaveSaving] = useState(false);
+  const [leaveError, setLeaveError] = useState(null);
+  const [restoreOffer, setRestoreOffer] = useState(null);
   const [variableCatalog, setVariableCatalog] = useState([]);
   const [variableSearch, setVariableSearch] = useState('');
   const [activeInsertTarget, setActiveInsertTarget] = useState(null);
@@ -7837,7 +7861,9 @@ export default function NotificationWorkflowsPanel({
   }
 
   function backToWorkflowList() {
-    writeWorkflowParam(null, { push: true });
+    // From the leave guard's same-address entry, replace it instead of
+    // stacking the list on top of it (QA 11-05 #3).
+    writeWorkflowParam(null, { push: !onLeaveGuardEntry() });
     setWorkflowView('list');
     setSelectedNodeId(null);
   }
@@ -7997,10 +8023,17 @@ export default function NotificationWorkflowsPanel({
       writeWorkflowParam(selected.id, { push: false });
     }
   }, [workflowView, selected?.id]);
+  const selectedIdRef = useRef(null);
+  selectedIdRef.current = selected?.id ?? null;
+  const workflowViewRef = useRef(workflowView);
+  workflowViewRef.current = workflowView;
   useEffect(() => {
     const onPop = () => {
       const id = readWorkflowParam();
       if (!id) { setWorkflowView('list'); setSelectedNodeId(null); return; }
+      // Same workflow already open (the leave guard's same-address entry,
+      // QA 11-05 #3): reloading it would throw the working copy away.
+      if (workflowViewRef.current === 'editor' && String(id) === String(selectedIdRef.current)) return;
       setWorkflowView('editor');
       loadWorkflow(id);
     };
@@ -8104,6 +8137,151 @@ export default function NotificationWorkflowsPanel({
     [draft, selected?.triggerType],
   );
   const hasBlockingGraphErrors = draftValidationIssues.length > 0;
+
+  // ---- QA 11-05 #3: unsaved-changes guard + local draft ------------------
+  // Dirty = the working copy differs from the last SAVED draft (not from the
+  // published version — a saved, unpublished draft is not at risk).
+  const savedFingerprint = useMemo(() => definitionFingerprint(selected?.draftDefinition), [selected?.draftDefinition]);
+  const editorDirty = Boolean(selected?.id && draft && !selectedLoading && draftFingerprint !== savedFingerprint);
+  const draftStorageKey = workflowDraftStorageKey(workspaceId, selected?.id);
+  const autosaveRef = useRef({ timer: null, payload: null });
+  autosaveRef.current.payload = editorDirty && draftStorageKey && !restoreOffer
+    ? {
+      key: draftStorageKey,
+      record: {
+        workflowId: selected.id,
+        definition: draft,
+        savedAt: null,
+        baseHash: hashFingerprint(savedFingerprint),
+        basePublishedVersion: Number(selected.publishedVersion || 0),
+      },
+    }
+    : null;
+  const flushDraftAutosave = useCallback(() => {
+    const state = autosaveRef.current;
+    if (state.timer) { window.clearTimeout(state.timer); state.timer = null; }
+    if (!state.payload) return;
+    writeStoredWorkflowDraft(state.payload.key, { ...state.payload.record, savedAt: new Date().toISOString() });
+  }, []);
+  // Every few seconds while dirty (a throttle, so steady typing still saves).
+  // Paused while an older draft is on offer, so it is not overwritten unseen.
+  useEffect(() => {
+    if (!autosaveRef.current.payload || autosaveRef.current.timer) return;
+    autosaveRef.current.timer = window.setTimeout(() => {
+      autosaveRef.current.timer = null;
+      flushDraftAutosave();
+    }, WORKFLOW_DRAFT_AUTOSAVE_MS);
+  }, [draft, editorDirty, draftStorageKey, restoreOffer, flushDraftAutosave]);
+  useEffect(() => {
+    const onHide = () => flushDraftAutosave();
+    window.addEventListener('pagehide', onHide);
+    return () => {
+      window.removeEventListener('pagehide', onHide);
+      flushDraftAutosave();
+    };
+  }, [flushDraftAutosave]);
+  // On open (and whenever the saved version changes): a local draft that
+  // differs from what is saved is offered back — never restored on its own.
+  useEffect(() => {
+    if (!draftStorageKey) { setRestoreOffer(null); return; }
+    const record = readStoredWorkflowDraft(draftStorageKey);
+    const offer = draftRestoreOffer({ record, savedFingerprint, fingerprintOf: definitionFingerprint });
+    if (!offer && record && !editorDirty) clearStoredWorkflowDraft(draftStorageKey);
+    setRestoreOffer(offer && !editorDirty ? offer : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftStorageKey, savedFingerprint]);
+
+  function forgetLocalDraft() {
+    const state = autosaveRef.current;
+    if (state.timer) { window.clearTimeout(state.timer); state.timer = null; }
+    state.payload = null;
+    clearStoredWorkflowDraft(draftStorageKey);
+  }
+
+  function restoreLocalDraft() {
+    if (!restoreOffer) return;
+    const restored = normalizeEditorDefinition(restoreOffer.definition);
+    updateDraft((next) => {
+      for (const key of Object.keys(next)) delete next[key];
+      Object.assign(next, restored);
+    });
+    setSelectedNodeId(null);
+    setRestoreOffer(null);
+    setMessage({ type: 'success', text: 'Restored your unsaved changes. Save & publish when ready.' });
+  }
+
+  function discardLocalDraft() {
+    forgetLocalDraft();
+    setRestoreOffer(null);
+  }
+
+  const { leave: leaveEditor, consumeGuardEntry } = useLeaveGuard({
+    active: editorDirty,
+    // The panel's own tabs (/workflows/<tab>) keep the working copy in memory.
+    isInside: (pathname) => /^\/workflows(\/|$)/.test(pathname || ''),
+    onBlocked: ({ kind, proceed }) => {
+      flushDraftAutosave();
+      setLeaveError(null);
+      setLeavePrompt({ kind, proceed });
+    },
+  });
+
+  /** In-panel exits ("All workflows", Refresh): ask first when dirty. */
+  function guardedEditorExit(proceed, { staysOnPage = false } = {}) {
+    if (!editorDirty) { proceed(); return; }
+    flushDraftAutosave();
+    setLeaveError(null);
+    setLeavePrompt({ kind: 'inside', proceed, staysOnPage });
+  }
+
+  function revertToSavedDraft() {
+    if (!selected) return;
+    setDraft(normalizeEditorDefinition(selected.draftDefinition));
+    undoStackRef.current = [];
+    setUndoDepth(0);
+    setEdgeInsert(null);
+    richEditorDirtyRef.current = false;
+  }
+
+  function finishLeave(prompt) {
+    setLeavePrompt(null);
+    setLeaveError(null);
+    if (prompt.kind !== 'inside') { leaveEditor(prompt.proceed); return; }
+    if (prompt.staysOnPage) consumeGuardEntry();
+    prompt.proceed();
+  }
+
+  function discardAndLeave() {
+    const prompt = leavePrompt;
+    if (!prompt) return;
+    forgetLocalDraft();
+    revertToSavedDraft();
+    finishLeave(prompt);
+  }
+
+  async function saveDraftAndLeave() {
+    const prompt = leavePrompt;
+    if (!prompt || !selected) return;
+    setLeaveSaving(true);
+    setLeaveError(null);
+    try {
+      const response = await notificationWorkflowAPI.saveDraft(selected.id, {
+        name: selected.name,
+        description: selected.description,
+        definition: draft,
+      });
+      richEditorDirtyRef.current = false;
+      forgetLocalDraft();
+      applyWorkflowUpdate(response.data);
+      finishLeave(prompt);
+    } catch (error) {
+      const details = Array.isArray(error?.details) ? error.details : [];
+      setLeaveError(details[0] || error?.message || 'Save failed');
+    } finally {
+      setLeaveSaving(false);
+    }
+  }
+  // ------------------------------------------------------------------------
   const mockAuditOpen = activeGlobalTab === 'mock-audit';
   const workflowTabActive = activeGlobalTab === 'workflows';
   // Keyboard: Esc with nothing else open deselects the step, which closes the
@@ -8398,6 +8576,9 @@ export default function NotificationWorkflowsPanel({
         definition,
       });
       applyWorkflowUpdate(response.data);
+      // The rename saved the whole working copy as the draft.
+      forgetLocalDraft();
+      consumeGuardEntry();
       setMessage({ type: 'success', text: 'Workflow renamed' });
       return true;
     } catch (error) {
@@ -8617,6 +8798,9 @@ export default function NotificationWorkflowsPanel({
         enabled: shouldStayEnabled,
       });
       applyWorkflowUpdate(response.data.workflow);
+      // Saved: the local copy and the Back guard have done their job.
+      forgetLocalDraft();
+      consumeGuardEntry();
       setMessage({
         type: 'success',
         text: shouldStayEnabled
@@ -11358,6 +11542,21 @@ export default function NotificationWorkflowsPanel({
     else if (action === 'delete') setDeleteConfirm({ workflow });
   };
 
+  // QA 11-05 #3 — rendered on the editor and on the preview page alike, so an
+  // exit held from either always has its question on screen.
+  const leaveDialog = (
+    <LeaveWithoutSavingDialog
+      open={Boolean(leavePrompt)}
+      workflowName={selected ? workflowDisplayName(selected) : ''}
+      saving={leaveSaving}
+      error={leaveError}
+      saveBlockedReason={hasBlockingGraphErrors ? draftValidationIssues[0] : null}
+      onKeepEditing={() => { setLeavePrompt(null); setLeaveError(null); }}
+      onSaveAndLeave={saveDraftAndLeave}
+      onDiscard={discardAndLeave}
+    />
+  );
+
   if (loading) {
     return (
       <div className="flex min-h-[420px] items-center justify-center text-sm text-muted-foreground">
@@ -11383,6 +11582,7 @@ export default function NotificationWorkflowsPanel({
     return (
       <div className={rootClassName || 'tp-glass-strong m-3 flex h-[calc(100dvh-8.5rem)] min-h-0 max-h-[calc(100dvh-8.5rem)] flex-col overflow-hidden rounded-2xl border border-card/70 dark:border-white/10 sm:m-4'}>
         <NotificationToast message={message} onDismiss={dismissMessage} />
+        {leaveDialog}
         <WorkflowPreviewPage
           workflowName={workflowDisplayName(selected)}
           onBack={closePreviewPage}
@@ -11422,6 +11622,7 @@ export default function NotificationWorkflowsPanel({
   return (
     <div className={rootClassName || 'tp-glass-strong m-3 flex h-[calc(100dvh-8.5rem)] min-h-0 max-h-[calc(100dvh-8.5rem)] flex-col overflow-hidden rounded-2xl border border-card/70 dark:border-white/10 sm:m-4'}>
       <NotificationToast message={message} onDismiss={dismissMessage} />
+      {leaveDialog}
       {showPanelHeader && (
         <div className="shrink-0 border-b border-border px-5 py-2.5">
           {!hideTabBar && (
@@ -11458,7 +11659,7 @@ export default function NotificationWorkflowsPanel({
               <div className="flex min-h-[36px] flex-wrap items-center gap-2" data-testid="workflow-action-row">
                 <button
                   type="button"
-                  onClick={backToWorkflowList}
+                  onClick={() => guardedEditorExit(backToWorkflowList)}
                   className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-sm font-medium text-foreground/85 hover:bg-muted/50"
                   data-testid="workflow-back-to-list"
                 >
@@ -11490,7 +11691,7 @@ export default function NotificationWorkflowsPanel({
                           ...(canAddVariant(selected) ? [{ key: 'variant', label: 'New variant…', Icon: Plus, disabled: saving, onClick: () => { setVariantSource(null); setVariantDialogOpen(true); }, title: 'Create a variant of the selected workflow — start blank or copy its steps; you pick the name' }] : []),
                           { key: 'archive', label: selected?.archivedAt ? 'Restore' : 'Archive', Icon: selected?.archivedAt ? RefreshCw : XCircle, disabled: saving || !selected || (selected?.isDefaultVariant && !selected?.archivedAt), onClick: () => setArchiveConfirm({ workflow: selected, archived: !selected?.archivedAt }), title: selected?.isDefaultVariant && !selected?.archivedAt ? 'Default variants can be disabled but not archived.' : selected?.archivedAt ? 'Restore this variant.' : 'Archive this custom variant.' },
                           ...(selected?.archivedAt && !selected?.isDefaultVariant ? [{ key: 'delete', label: 'Delete permanently', Icon: Trash2, danger: true, disabled: saving || !selected, onClick: () => setDeleteConfirm({ workflow: selected }), title: 'Permanently delete this archived variant and its workflow audit history.' }] : []),
-                          { key: 'refresh', label: 'Refresh', Icon: RefreshCw, onClick: () => loadWorkflows(selected?.id) },
+                          { key: 'refresh', label: 'Refresh', Icon: RefreshCw, onClick: () => guardedEditorExit(() => loadWorkflows(selected?.id), { staysOnPage: true }) },
                         ].map((item) => (
                           <button
                             key={item.key}
@@ -11613,6 +11814,9 @@ export default function NotificationWorkflowsPanel({
                   {hasPublishableChanges ? 'Save & publish' : 'Saved'}
                 </button>
               </div>
+            )}
+            {workflowTabActive && !workflowListView && restoreOffer && (
+              <DraftRestoreLine offer={restoreOffer} onRestore={restoreLocalDraft} onDiscard={discardLocalDraft} />
             )}
           </div>
         </div>
