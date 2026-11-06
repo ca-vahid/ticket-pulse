@@ -24,6 +24,7 @@ import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { isOnCallNow } from './urgentResponse/onCallNow.js';
 import { findNoteImages, noteImagePath, noteTextForPreview, noteTextWithoutMarkers, tokenFromDecisionUrl } from './approvalNoteImages.js';
 import { closeReasonLabel } from '../utils/approvalCloseReasons.js';
+import { myOpenTickets, openTicketScopes } from './myOpenTickets.js';
 
 /** What an agent can choose from. mode: 'teams' | 'digest' | 'off'. */
 export const EVENTS = [
@@ -821,7 +822,16 @@ class TeamsNotificationService {
     // QA 10-01 #3: a screenshot or a pasted chat (not a command) → Autofill.
     // It answers with its own card and fills it in the background.
     const intake = await import('./teamsIntakeService.js');
-    if (intake.wantsAutofill(activity)) {
+    // Teams assistant (plans/TEAMS_BOT_COMMANDS_PLAN.md): a question to the bot
+    // is answered, not offered as a ticket. 'legacy' (assistant switched off by
+    // the person, or not a personal chat) keeps the bot exactly as it was.
+    const { default: assistant } = await import('./teamsAssistantService.js');
+    const route = await assistant.route(activity, email).catch(() => 'legacy');
+    if (route === 'assistant' || route === 'unsure') {
+      assistant.handleMessage(activity, email, { route }).catch((err) => logger.warn(`Teams assistant failed: ${err.message}`));
+      return;
+    }
+    if (route === 'autofill' || (route === 'legacy' && intake.wantsAutofill(activity))) {
       intake.default.handleMessage(activity, email).catch((err) => logger.warn(`Teams Autofill failed: ${err.message}`));
       return;
     }
@@ -853,6 +863,11 @@ class TeamsNotificationService {
       if (verb.startsWith('autofill.')) {
         const { default: teamsIntakeService } = await import('./teamsIntakeService.js');
         return cardRes(await teamsIntakeService.handleAction(verb, data, email, activity));
+      }
+      if (verb.startsWith('assist.')) {
+        const { default: assistant } = await import('./teamsAssistantService.js');
+        const out = await assistant.handleAction(verb, data, email, activity);
+        return out.card ? cardRes(out.card) : toast(out.toast);
       }
 
       const tech = await prisma.technician.findFirst({ where: { workspaceId, email: { equals: email, mode: 'insensitive' } }, select: { id: true, name: true, email: true } });
@@ -946,29 +961,13 @@ class TeamsNotificationService {
   async _digestCardFor(email, { workspaceId = null, since = null } = {}) {
     const techs = await prisma.technician.findMany({ where: { email: { equals: lc(email), mode: 'insensitive' }, ...(workspaceId ? { workspaceId } : {}) }, select: { id: true, name: true, workspaceId: true, timezone: true } });
     if (!techs.length) return null;
-    // 7 Oct 2026 (Vahid's digest read "200 open, 200 overdue"): "open" was
-    // "no resolved or closed date", which also matched 178 Closed and 70
-    // Deleted tickets that never got those dates, and the three numbers were
-    // counted from a list capped at 200 rows. Open now means an Open- or
-    // Pending-base status in the ticket's own workspace (the same rule as the
-    // Tickets page), and the numbers are real counts.
-    const where = { OR: await this._openTicketScopes(techs), isNoise: false };
+    // Open = an Open- or Pending-base status, noise left out, real counts (7 Oct
+    // 2026); the rule lives in myOpenTickets.js, shared with the Teams assistant.
     const now = new Date();
     const tz = techs[0].timezone || 'America/Vancouver';
     const today = localDay(tz, now);
-    const [open, openCount, overdueCount, nearDue] = await Promise.all([
-      prisma.ticket.findMany({
-        where,
-        select: { id: true, subject: true, dueBy: true, priority: true, freshserviceTicketId: true, nativeNumber: true, origin: true },
-        orderBy: [{ dueBy: { sort: 'asc', nulls: 'last' } }, { id: 'desc' }],
-        take: DIGEST_ROWS,
-      }),
-      prisma.ticket.count({ where }),
-      prisma.ticket.count({ where: { ...where, dueBy: { lt: now } } }),
-      // "Due today" is a local calendar day: read the due times around now and test each in the agent's time zone.
-      prisma.ticket.findMany({ where: { ...where, dueBy: { gte: new Date(now.getTime() - 36 * 3600 * 1000), lte: new Date(now.getTime() + 36 * 3600 * 1000) } }, select: { dueBy: true }, take: 1000 }),
-    ]);
-    const dueTodayCount = nearDue.filter((t) => t.dueBy && localDay(tz, t.dueBy) === today).length;
+    const { rows: open, counts: mine } = await myOpenTickets(techs, { take: DIGEST_ROWS, now, tz });
+    const [openCount, overdueCount, dueTodayCount] = [mine.open, mine.overdue, mine.dueToday];
     const rows = open.map((t) => ({
       ref: ticketDisplayRef(t), subject: t.subject, url: this._ticketUrl(t.id), priority: t.priority,
       overdue: Boolean(t.dueBy && t.dueBy < now), dueLabel: t.dueBy ? fmtDue(t.dueBy, tz) : '',
@@ -994,22 +993,7 @@ class TeamsNotificationService {
    * that cannot be read falls back to Open / Pending.
    */
   async _openTicketScopes(techs) {
-    const byWs = new Map();
-    for (const t of techs) {
-      if (!byWs.has(t.workspaceId)) byWs.set(t.workspaceId, []);
-      byWs.get(t.workspaceId).push(t.id);
-    }
-    const scopes = [];
-    for (const [workspaceId, ids] of byWs) {
-      let names = ['Open', 'Pending'];
-      try {
-        const { default: statusService } = await import('./statusService.js');
-        const found = await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']);
-        if (Array.isArray(found) && found.length) names = found;
-      } catch { /* keep the fallback */ }
-      scopes.push({ workspaceId, assignedTechId: { in: ids }, status: { in: names } });
-    }
-    return scopes;
+    return openTicketScopes(techs);
   }
 
   // ------------------------------------------------------------ agent API

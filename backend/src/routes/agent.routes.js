@@ -5,6 +5,7 @@ import summitWorkshopService from '../services/summitWorkshopService.js';
 import notificationPreferenceService from '../services/notificationPreferenceService.js';
 import agentAlertService from '../services/agentAlertService.js';
 import teamsNotificationService from '../services/teamsNotificationService.js';
+import teamsAssistantSettings, { RETENTION_DAYS } from '../services/teamsAssistantSettings.js';
 import userSignatureService from '../services/userSignatureService.js';
 import webPushService from '../services/webPushService.js';
 
@@ -136,6 +137,19 @@ router.post('/teams/test', asyncHandler(async (req, res) => {
 }));
 router.delete('/teams/mutes/:ticketId', asyncHandler(async (req, res) => {
   res.json({ success: true, data: await teamsNotificationService.unmute(me(req), wsOf(req), req.params.ticketId) });
+}));
+// "Ask Ticket Pulse in Teams (advanced)": my own switch and my own questions (last 180 days).
+const myAssistant = async (email) => ({
+  enabled: await teamsAssistantSettings.personEnabled(email),
+  turns: await teamsAssistantSettings.myTurns(email, { take: 50 }),
+  retentionDays: RETENTION_DAYS,
+});
+router.get('/teams/assistant', asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await myAssistant(me(req)) });
+}));
+router.put('/teams/assistant', asyncHandler(async (req, res) => {
+  await teamsAssistantSettings.setPersonEnabled(me(req), req.body?.enabled === true);
+  res.json({ success: true, data: await myAssistant(me(req)) });
 }));
 
 // My email signature (Mega 08-15 Phase D). Session-email keyed and mounted

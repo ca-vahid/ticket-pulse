@@ -27,6 +27,8 @@ const AI_OPERATION_OPTIONS = [
   // Knowledge -> Settings -> Confluence: nightly sync + hierarchy check, and the one-time import (higher effort).
   { value: 'knowledge_confluence', label: 'Confluence Sync' },
   { value: 'knowledge_confluence_import', label: 'Confluence Import' },
+  // Settings -> Teams -> Ask Ticket Pulse: plain-words questions to the Teams bot (5 Nov 2026).
+  { value: 'teams_assistant', label: 'Teams Assistant' },
 ];
 
 // QA 11-05 #1: a setting that turns on/off is the shared switch, not a checkbox.
