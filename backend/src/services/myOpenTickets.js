@@ -3,7 +3,7 @@
  * Tickets page: the Teams daily digest, the "my tickets" bot command and the
  * Teams assistant's my_tickets tool (plans/TEAMS_BOT_COMMANDS_PLAN.md).
  *
- * 7 Oct 2026 (Vahid's digest read "200 open, 200 overdue"): "open" was "no
+ * 7 Oct 2026 (the owner's digest read "200 open, 200 overdue"): "open" was "no
  * resolved or closed date", which also matched Closed and Deleted tickets that
  * never got those dates, and the numbers were counted from a list capped at
  * 200 rows. Open means an Open- or Pending-base status in the ticket's own

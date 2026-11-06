@@ -6,7 +6,7 @@ import { formatPacificWhen, formatPacificFull } from '../../utils/ticketDates';
 
 /**
  * "Ask Ticket Pulse in Teams (advanced)" (plans/TEAMS_BOT_COMMANDS_PLAN.md,
- * Vahid 5 Nov 2026): the person's own switch, on by default, and their own
+ * product decision 5 Nov 2026): the person's own switch, on by default, and their own
  * questions to the bot from the last 180 days — question, what they were
  * shown, when. Nobody else's questions ever appear here.
  *

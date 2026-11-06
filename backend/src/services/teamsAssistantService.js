@@ -1,6 +1,6 @@
 /**
  * Teams assistant: ask Ticket Pulse in plain words (plans/TEAMS_BOT_COMMANDS_PLAN.md,
- * P0-P2, Vahid's decisions 5 Nov 2026).
+ * P0-P2, product decisions 5 Nov 2026).
  *
  * message -> dedupe -> who is this (access) -> route (teamsAssistantRouting)
  *   pictures / long pasted text / a clear request -> Autofill (unchanged)

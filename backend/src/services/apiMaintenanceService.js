@@ -30,7 +30,7 @@ async function sweep() {
   } catch (err) {
     logger.debug(`API maintenance sweep failed (non-fatal): ${err.message}`);
   }
-  // Teams assistant audit log: 180 days (Vahid, 5 Nov 2026). Once a day, on
+  // Teams assistant audit log: 180 days (product decision, 5 Nov 2026). Once a day, on
   // its own so a missing table (migration not applied yet) never stops the rest.
   if (now - lastAssistantPruneAt >= ASSISTANT_PRUNE_EVERY_MS) {
     lastAssistantPruneAt = now;

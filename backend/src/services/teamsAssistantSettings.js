@@ -1,6 +1,6 @@
 /**
  * Teams assistant settings, the per-person switch, the monthly cap and the
- * audit log reads (plans/TEAMS_BOT_COMMANDS_PLAN.md; Vahid's decisions 5 Nov 2026).
+ * audit log reads (plans/TEAMS_BOT_COMMANDS_PLAN.md; product decisions 5 Nov 2026).
  *
  *  - Per workspace (Settings -> Teams): mode off | shadow | pilot | on, the
  *    pilot people, the monthly AI cap (USD 25 by default, adjustable) and the

@@ -8,7 +8,7 @@ import { formatPacificWhen, formatPacificFull } from '../../utils/ticketDates';
  * Settings → Teams → Ask Ticket Pulse in Teams (plans/TEAMS_BOT_COMMANDS_PLAN.md).
  * A pick-list for the mode, a people picker for the pilot, the monthly AI
  * limit and the sensitive switch — settings in the UI, never typed JSON
- * (Vahid). Super admins also see the latest questions (the Shadow log).
+ * (product decision). Super admins also see the latest questions (the Shadow log).
  * Renders nothing when the API is not there (older server, panel tests).
  */
 const MODES = [

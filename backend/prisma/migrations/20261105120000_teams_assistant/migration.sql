@@ -60,7 +60,7 @@ CREATE INDEX IF NOT EXISTS "teams_assistant_turns_conversation_id_created_at_idx
 CREATE INDEX IF NOT EXISTS "teams_assistant_turns_workspace_id_created_at_idx" ON "teams_assistant_turns"("workspace_id", "created_at");
 CREATE INDEX IF NOT EXISTS "teams_assistant_turns_created_at_idx" ON "teams_assistant_turns"("created_at");
 
--- Defaults (Vahid, 5 Nov 2026): every workspace Off except IT (workspace 1)
+-- Defaults (product decision, 5 Nov 2026): every workspace Off except IT (workspace 1)
 -- in Shadow, with the time-away approval managers on its pilot list. Ids only
 -- here (the repository is public): technicians 20 and 59 are the approvers of
 -- the active availability approval group, read from production on 5 Nov.

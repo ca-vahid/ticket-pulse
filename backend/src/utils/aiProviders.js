@@ -41,7 +41,7 @@ export const AI_OPERATIONS = [
   // Teams assistant (plans/TEAMS_BOT_COMMANDS_PLAN.md, 5 Nov 2026): people ask
   // the bot in plain words; a cheap model picks one of six read-only tools and
   // the server builds the answer card. Haiku 5.5 with GPT-6 Luna as the
-  // fallback (Vahid, 5 Nov). Its own cost line and monthly cap per workspace.
+  // fallback (product decision, 5 Nov). Its own cost line and monthly cap per workspace.
   'teams_assistant',
 ];
 
