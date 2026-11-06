@@ -59,7 +59,8 @@ test('service accounts (the Ticket Pulse agent, domain-admin twins) are not on t
     : techs(args)));
   const roster = await svc.rosterFor({ email: 'vhaeri@bgc.ca', role: 'agent' }, 5);
   techFindMany.mockImplementation(techs);
-  expect([...roster].sort()).toEqual(['a@bgc.ca', 'vhaeri@bgc.ca']);
+  // QA 11-05 #4: the viewer is not added on top of the workspace's agents.
+  expect([...roster].sort()).toEqual(['a@bgc.ca']);
 });
 
 test('a workspace the viewer does not belong to falls back to their own workspaces', async () => {
@@ -67,10 +68,50 @@ test('a workspace the viewer does not belong to falls back to their own workspac
   expect([...roster]).toEqual(['alexa@bgc.ca']);
 });
 
-test('a member (no agent row) of the workspace sees its agents, and themselves', async () => {
+test('a member (no agent row) of the workspace sees its agents, not themselves (QA 11-05 #4)', async () => {
   prismaMock.workspaceAccess.findFirst.mockResolvedValue({ id: 4 });
   const roster = await svc.rosterFor({ email: 'manager@bgc.ca', role: 'user' }, 2);
-  expect([...roster].sort()).toEqual(['alexa@bgc.ca', 'manager@bgc.ca']);
+  expect([...roster].sort()).toEqual(['alexa@bgc.ca']);
+});
+
+// QA 11-05 #4: disabled members (their agent row is isActive false) showed up
+// in their own workspace's team views because the viewer was always added.
+describe('disabled members stay out of the team views (QA 11-05 #4)', () => {
+  const SUPER_DISABLED_HERE = { email: 'rivera@example.com', role: 'admin' }; // super admin, disabled agent in ws 2
+
+  test('a super admin who is a disabled agent here is not on the roster, and the count is the enabled agents', async () => {
+    const roster = await svc.rosterFor(SUPER_DISABLED_HERE, 2);
+    expect([...roster]).toEqual(['alexa@bgc.ca']);
+    expect(roster.has('rivera@example.com')).toBe(false);
+    // Only enabled agents are asked for.
+    expect(techFindMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ workspaceId: { in: [2] }, isActive: true }) }));
+  });
+
+  test('the calendar (Overview, wallchart, month view) asks only for the enabled agents', async () => {
+    await svc.calendar(SUPER_DISABLED_HERE, { from: '2026-11-02', to: '2026-11-08', workspaceId: 2 });
+    const where = prismaMock.avPerson.findMany.mock.calls[0][0].where;
+    expect(where.email.in).toEqual(['alexa@bgc.ca']);
+    // Their own bookings are not fetched for the team view.
+    const requestWhere = prismaMock.avRequest.findMany.mock.calls[0]?.[0]?.where;
+    if (requestWhere) expect(requestWhere.email.in).not.toContain('rivera@example.com');
+  });
+
+  test('the team-views roster (avatars, Book for, groups) leaves them out', async () => {
+    await svc.roster(SUPER_DISABLED_HERE, 2);
+    const where = prismaMock.avPerson.findMany.mock.calls[0][0].where;
+    expect(where.email.in).toEqual(['alexa@bgc.ca']);
+  });
+
+  test('request history for the workspace leaves them out', async () => {
+    await svc.requestHistory(SUPER_DISABLED_HERE, { workspaceId: 2 });
+    const where = prismaMock.avRequest.findMany.mock.calls[0][0].where;
+    expect(where.email.in).toEqual(['alexa@bgc.ca']);
+  });
+
+  test('a disabled viewer of a workspace with nobody enabled sees an empty team, not themselves', async () => {
+    const roster = await svc.rosterFor({ email: 'ortiz@example.com', role: 'admin' }, 9);
+    expect(roster.size).toBe(0);
+  });
 });
 
 test('an app admin may look at any workspace', async () => {

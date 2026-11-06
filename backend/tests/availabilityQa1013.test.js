@@ -56,7 +56,7 @@ describe('#7 view as a role in another workspace', () => {
   test('the roster is the viewed workspace, never the viewer\'s own team', async () => {
     prismaMock.technician.findMany.mockImplementation(async ({ where }) => (where.workspaceId?.in ? [{ email: 'pa1@bgc.ca', name: 'Pa One' }] : [{ workspaceId: 1 }]));
     const roster = await svc.rosterFor(asReviewerInPA, 5);
-    expect([...roster].sort()).toEqual(['boss@bgc.ca', 'pa1@bgc.ca']);
+    expect([...roster].sort()).toEqual(['pa1@bgc.ca']); // QA 11-05 #4: no viewer self-add
     expect(prismaMock.technician.findMany).toHaveBeenCalledTimes(1);
     expect(prismaMock.technician.findMany.mock.calls[0][0].where.workspaceId).toEqual({ in: [5] });
   });
