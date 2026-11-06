@@ -2712,9 +2712,14 @@ export default function TicketDetail() {
                           lastLocalMutationRef.current = Date.now();
                           fetchTicket({ silent: true });
                           const failed = (result?.steps || []).filter((s) => !s.ok);
-                          showToast(failed.length ? 'amber' : 'emerald', failed.length
+                          // 6 Nov 2026: a skipped step (e.g. a close a Security ticket can't take
+                          // without a reason) is said too, so nobody reads "applied" as "closed".
+                          const skipped = (result?.steps || []).filter((s) => s.ok && s.skipped);
+                          showToast(failed.length || skipped.length ? 'amber' : 'emerald', failed.length
                             ? `Macro applied with ${failed.length} failed step${failed.length === 1 ? '' : 's'}`
-                            : `Macro "${result?.macro?.name || ''}" applied`);
+                            : skipped.length
+                              ? `Macro applied; skipped: ${skipped.map((s) => s.summary || s.type).join(', ')}${skipped.length === 1 && skipped[0].reason ? ` (${skipped[0].reason})` : ''}`
+                              : `Macro "${result?.macro?.name || ''}" applied`);
                         }}
                       />
                     )}

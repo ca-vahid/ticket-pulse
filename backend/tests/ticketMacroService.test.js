@@ -241,8 +241,18 @@ describe('apply on a Ticket Pulse-born ticket', () => {
     const status = preview.steps.find((s) => s.type === 'status');
     expect(status.run).toBe(false);
     expect(status.reason).toMatch(/resolution reason/i);
-    await svc.apply(501, 1, 9, ACTOR);
+    // The ticket was NOT Security before the macro: the check follows the macro's own category step.
+    const result = await svc.apply(501, 1, 9, ACTOR);
     expect(ticketServiceMock.changeStatus).not.toHaveBeenCalled();
+    // The result says the close was skipped and why, so nobody thinks it closed.
+    expect(result.steps.find((s) => s.type === 'status')).toEqual(expect.objectContaining({ skipped: true, reason: expect.stringMatching(/resolution reason/i) }));
+  });
+
+  test('a reason on the step is used when the ticket is already Security', async () => {
+    prismaMock.ticketMacro.findFirst.mockResolvedValue({ id: 15, name: 'Close phish', isActive: true, actions: { steps: [{ type: 'status', status: 'Closed', resolutionReason: 'benign_expected' }] } });
+    prismaMock.ticket.findFirst.mockResolvedValue(tpTicket({ internalCategory: { name: 'Security' } }));
+    await svc.apply(501, 1, 15, ACTOR);
+    expect(ticketServiceMock.changeStatus).toHaveBeenCalledWith(501, 1, 'Closed', ACTOR, { resolutionReason: 'benign_expected', resolutionNote: null });
   });
 
   test('a ticket already in Security closes when the step carries a reason; another category needs none', async () => {
