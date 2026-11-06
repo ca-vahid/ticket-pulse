@@ -110,7 +110,7 @@ const CATEGORY_HINTS = Object.freeze({
     disable_account: [OO, 'Account Decommissioning'],
     decommission_account: [OO, 'Account Decommissioning'],
   },
-  // Decision for Vahid (11-05): User Creation follows the team's habit (New
+  // Product decision (11-05): User Creation follows the team's habit (New
   // Hire Workstation); Onboarding is the alternative.
   onboarding: {
     laptop: [OO, 'New Hire Workstation'],

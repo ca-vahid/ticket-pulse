@@ -1213,7 +1213,7 @@ describe('QA 11-05 #5: every family ticket gets its category', () => {
     expect(cat('offboarding_after_fact', 'ipad')).toEqual([132, 135]);
     expect(cat('offboarding_standard', 'disable_account')).toEqual([132, 134]);
     expect(cat('offboarding_standard', 'decommission_account')).toEqual([132, 134]);
-    expect(cat('onboarding', 'laptop')).toEqual([132, 133]); // User Creation: the team's habit (decision for Vahid)
+    expect(cat('onboarding', 'laptop')).toEqual([132, 133]); // User Creation: the team's habit (product decision)
     expect(cat('onboarding', 'workstation')).toEqual([132, 133]);
     expect(s.noticeCategories).toEqual({
       departure: { categoryId: 132, subcategoryId: 2 },

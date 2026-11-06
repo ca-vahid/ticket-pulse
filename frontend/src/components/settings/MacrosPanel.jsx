@@ -359,7 +359,7 @@ export function MacroForm({ initial, lookups, onSave, onCancel, busy = false, er
     onSave({ name: name.trim(), description: description.trim(), actions: { steps: stepsForSave(steps) } });
   };
   return (
-    // Two levels at most (Vahid): the form has no box of its own; the action
+    // Two levels at most (house style): the form has no box of its own; the action
     // list is plain rows split by rules.
     <form onSubmit={submit} className="space-y-3 py-1" data-testid="macro-form" aria-label={initial?.id ? `Edit ${initial.name}` : 'New macro'}>
       <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
