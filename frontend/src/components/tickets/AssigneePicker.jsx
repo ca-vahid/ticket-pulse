@@ -1,11 +1,11 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Loader2, Search, Sparkles, UserRound, X } from 'lucide-react';
 import { AgentFirstName, PersonAvatar, UnassignedBadge } from './ticketUi';
 import { OverridePromptToast, useOverridePrompt } from './OverridePrompt';
 import HandBackReasonDialog from './HandBackReasonDialog';
 import AwayAssignConfirm from './AwayAssignConfirm';
-import { awayTag } from '../../utils/away';
+import { awayTag, dayLabel } from '../../utils/away';
 import { assignmentAPI, ticketsAPI } from '../../services/api';
 import { useCurrentIdentity } from '../../utils/currentIdentity';
 import { asksChangeReason, isSignedInAs, splitTeams } from '../../utils/handBack';
@@ -94,7 +94,9 @@ export default function AssigneePicker({
       if (rootRef.current?.contains(e.target) || panelRef.current?.contains(e.target)) return;
       setOpen(false);
     };
-    const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); } };
+    // Escape closes and hands focus back to the trigger (the typed text goes
+    // with the panel: it is cleared on close).
+    const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); triggerRef.current?.focus(); } };
     const onMove = () => placePanel();
     document.addEventListener('mousedown', onDoc);
     document.addEventListener('keydown', onKey, true);
@@ -131,6 +133,31 @@ export default function AssigneePicker({
     return list;
   }, [technicians, query, ticketOrigin]);
   const { team: teamList, others: otherTeams } = useMemo(() => splitTeams(filtered), [filtered]);
+  const people = useMemo(() => [...teamList, ...otherTeams], [teamList, otherTeams]);
+
+  // Keyboard (QA 11-05 #10, ARIA 1.2 combobox): focus stays in the search box
+  // and aria-activedescendant points at the active row — Unassigned, the
+  // people, then Let AI assign. Typing makes the first match active, so
+  // "soh" + Enter assigns; with no text the current assignee starts active.
+  const baseId = useId();
+  const listId = `${baseId}-list`;
+  const optionId = (key) => `${baseId}-opt-${key}`;
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const optionKeys = ['unassigned', ...people.map((t) => `t${t.id}`), ...(showAi ? ['ai'] : [])];
+  const activeKey = optionKeys[activeIndex] || null;
+  useEffect(() => {
+    if (!open) { setActiveIndex(-1); return; }
+    if (query.trim()) { setActiveIndex(people.length ? 1 : -1); return; }
+    const at = value == null ? -1 : people.findIndex((t) => t.id === value);
+    setActiveIndex(at >= 0 ? at + 1 : 0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, query]);
+  useEffect(() => {
+    if (!activeKey) return;
+    const el = typeof document !== 'undefined' ? document.getElementById(optionId(activeKey)) : null;
+    el?.scrollIntoView?.({ block: 'nearest' });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeKey]);
 
   const write = (techId, extra) => {
     if (assignFn) return extra ? assignFn(techId, extra) : assignFn(techId);
@@ -267,6 +294,33 @@ export default function AssigneePicker({
     setBusy(false);
   };
 
+  // Enter runs the same path as a click, so the away confirm, the hand-back
+  // reason and the override prompt still appear.
+  const runOption = (key) => {
+    if (!key) return;
+    if (key === 'unassigned') { pickUnassigned(); return; }
+    if (key === 'ai') { if (!busy && aiState !== 'queued') aiAssign(); return; }
+    const t = people.find((p) => `t${p.id}` === key);
+    if (t) assign(t.id);
+  };
+  const onSearchKeyDown = (e) => {
+    const n = optionKeys.length;
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActiveIndex((i) => (i < 0 ? 0 : (i + 1) % n)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActiveIndex((i) => (i <= 0 ? n - 1 : i - 1)); }
+    else if (e.key === 'Home') { e.preventDefault(); setActiveIndex(0); }
+    else if (e.key === 'End') { e.preventDefault(); setActiveIndex(n - 1); }
+    else if (e.key === 'Enter') { e.preventDefault(); runOption(activeKey); }
+    else if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); setOpen(false); triggerRef.current?.focus(); }
+  };
+  // The option's accessible name carries the away state: "Alex Rivera, away, back Mon 16 Nov".
+  const optionLabel = (t) => [
+    t.name,
+    t.away ? (t.away.backOn ? `away, back ${dayLabel(t.away.backOn)}` : 'away') : null,
+    t.origin === 'local' ? 'local agent' : null,
+  ].filter(Boolean).join(', ');
+  // Active row: the hover tint plus a thin primary accent on the left.
+  const activeRowClass = 'bg-blue-50 dark:bg-blue-500/15 shadow-[inset_2px_0_0_hsl(var(--primary))]';
+
   const sm = size === 'sm';
   // Unassigned + a pending AI pick = a "proposed" slot the coordinator must
   // decide on. Rendered as a dashed capsule so it never reads as a committed
@@ -366,8 +420,7 @@ export default function AssigneePicker({
       {open && panelPos && createPortal(
         <div
           ref={panelRef}
-          role="listbox"
-          aria-label="Choose assignee"
+          data-testid="assignee-panel"
           className="fixed z-[60] w-64 tp-card rounded-xl shadow-soft p-1.5 animate-scaleIn"
           style={panelPos}
           onClick={(e) => e.stopPropagation()}
@@ -460,76 +513,100 @@ export default function AssigneePicker({
             <input
               ref={inputRef}
               type="search"
+              role="combobox"
+              aria-expanded="true"
+              aria-controls={listId}
+              aria-autocomplete="list"
+              aria-activedescendant={activeKey ? optionId(activeKey) : undefined}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={onSearchKeyDown}
               placeholder="Find member…"
               aria-label="Filter technicians"
+              autoComplete="off"
               className="tp-focus-ring w-full pl-8 pr-2 py-1.5 text-xs bg-muted/50 border border-border rounded-lg placeholder:text-muted-foreground/75"
             />
           </div>
 
-          <div className="max-h-64 overflow-y-auto settings-scrollbar">
-            <button
-              role="option"
-              aria-selected={value === null}
-              onClick={pickUnassigned}
-              className="tp-focus-ring w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted/50 text-left"
-            >
-              <span className="h-6 w-6 rounded-full border-[1.5px] border-dashed border-input text-muted-foreground/75 inline-flex items-center justify-center flex-shrink-0">
-                <UserRound className="w-3 h-3" aria-hidden="true" />
-              </span>
-              <span className="text-sm text-muted-foreground italic">Unassigned</span>
-              {value === null && <Check className="w-3.5 h-3.5 text-blue-600 dark:text-blue-300 ml-auto" aria-hidden="true" />}
-            </button>
-            {[...teamList, ...otherTeams].map((t, i) => (
-              <Fragment key={t.id}>
-                {otherTeams.length > 0 && i === teamList.length && (
-                  <span role="presentation" className="block px-2 pt-2 pb-0.5 text-[10px] font-medium text-muted-foreground">Other teams</span>
-                )}
-                <button
-                  role="option"
-                  aria-selected={t.id === value}
-                  onClick={() => assign(t.id)}
-                  className={`tp-focus-ring w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left hover:bg-blue-50 dark:hover:bg-blue-500/15 ${t.id === value ? 'bg-blue-50/70 dark:bg-blue-500/10' : ''}`}
-                >
-                  <PersonAvatar name={t.name} photoUrl={t.photoUrl} size="h-6 w-6" textSize="text-[9px]" />
-                  <span className="text-sm text-foreground/85 truncate">{t.name}</span>
-                  {t.away && (
-                    <span className="ml-auto whitespace-nowrap text-[10px] font-medium text-amber-700 dark:text-amber-300 flex-shrink-0" title="Off at the next working moment">{awayTag(t.away)}</span>
-                  )}
-                  {t.origin === 'local' && (
-                    <span className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-300 flex-shrink-0">Local</span>
-                  )}
-                  {t.id === value && <Check className="w-3.5 h-3.5 text-blue-600 dark:text-blue-300 ml-auto flex-shrink-0" aria-hidden="true" />}
-                </button>
-              </Fragment>
-            ))}
-            {filtered.length === 0 && <p className="px-2 py-2 text-xs text-muted-foreground/75">No member matches “{query}”.</p>}
-          </div>
-
-          {showAi && (
-            <div className="border-t border-border/60 mt-1 pt-1">
+          <div id={listId} role="listbox" aria-label="Choose assignee">
+            <div className="max-h-64 overflow-y-auto settings-scrollbar">
               <button
-                onClick={aiAssign}
-                disabled={busy || aiState === 'queued'}
-                className="tp-focus-ring w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left hover:bg-indigo-50 dark:hover:bg-indigo-500/15 disabled:opacity-70"
+                id={optionId('unassigned')}
+                role="option"
+                tabIndex={-1}
+                aria-selected={activeKey === 'unassigned'}
+                onClick={pickUnassigned}
+                onMouseMove={() => { if (activeKey !== 'unassigned') setActiveIndex(0); }}
+                className={`tp-focus-ring w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted/50 text-left ${activeKey === 'unassigned' ? activeRowClass : ''}`}
               >
-                <span className="h-6 w-6 rounded-full bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 inline-flex items-center justify-center flex-shrink-0">
-                  <Sparkles className="w-3 h-3" aria-hidden="true" />
+                <span className="h-6 w-6 rounded-full border-[1.5px] border-dashed border-input text-muted-foreground/75 inline-flex items-center justify-center flex-shrink-0">
+                  <UserRound className="w-3 h-3" aria-hidden="true" />
                 </span>
-                {aiState === 'queued' ? (
-                  <span className="text-sm font-medium text-indigo-700 dark:text-indigo-200">Queued — recommendation lands in Review</span>
-                ) : (
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium text-indigo-700 dark:text-indigo-200">Let AI assign</span>
-                    <span className="block text-[10px] text-muted-foreground/75 truncate">
-                      {onAiAssign ? 'Watch the pipeline live & approve inline' : 'Runs the assignment pipeline for this ticket'}
-                    </span>
-                  </span>
-                )}
+                <span className="text-sm text-muted-foreground italic">Unassigned</span>
+                {value === null && <Check className="w-3.5 h-3.5 text-blue-600 dark:text-blue-300 ml-auto" aria-hidden="true" />}
               </button>
+              {people.map((t, i) => (
+                <Fragment key={t.id}>
+                  {otherTeams.length > 0 && i === teamList.length && (
+                    <span role="presentation" className="block px-2 pt-2 pb-0.5 text-[10px] font-medium text-muted-foreground">Other teams</span>
+                  )}
+                  <button
+                    id={optionId(`t${t.id}`)}
+                    role="option"
+                    tabIndex={-1}
+                    aria-selected={activeKey === `t${t.id}`}
+                    aria-label={optionLabel(t)}
+                    onClick={() => assign(t.id)}
+                    onMouseMove={() => { if (activeKey !== `t${t.id}`) setActiveIndex(i + 1); }}
+                    className={`tp-focus-ring w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left hover:bg-blue-50 dark:hover:bg-blue-500/15 ${
+                      activeKey === `t${t.id}` ? activeRowClass : (t.id === value ? 'bg-blue-50/70 dark:bg-blue-500/10' : '')
+                    }`}
+                  >
+                    <PersonAvatar name={t.name} photoUrl={t.photoUrl} size="h-6 w-6" textSize="text-[9px]" />
+                    <span className="text-sm text-foreground/85 truncate">{t.name}</span>
+                    {t.away && (
+                      <span className="ml-auto whitespace-nowrap text-[10px] font-medium text-amber-700 dark:text-amber-300 flex-shrink-0" title="Off at the next working moment">{awayTag(t.away)}</span>
+                    )}
+                    {t.origin === 'local' && (
+                      <span className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-300 flex-shrink-0">Local</span>
+                    )}
+                    {t.id === value && <Check className="w-3.5 h-3.5 text-blue-600 dark:text-blue-300 ml-auto flex-shrink-0" aria-hidden="true" />}
+                  </button>
+                </Fragment>
+              ))}
+              {filtered.length === 0 && <p role="presentation" className="px-2 py-2 text-xs text-muted-foreground/75">No member matches “{query}”.</p>}
             </div>
-          )}
+
+            {showAi && (
+              <div className="border-t border-border/60 mt-1 pt-1">
+                <button
+                  id={optionId('ai')}
+                  role="option"
+                  tabIndex={-1}
+                  aria-selected={activeKey === 'ai'}
+                  aria-disabled={busy || aiState === 'queued' ? 'true' : undefined}
+                  onClick={aiAssign}
+                  onMouseMove={() => { if (activeKey !== 'ai') setActiveIndex(optionKeys.length - 1); }}
+                  disabled={busy || aiState === 'queued'}
+                  className={`tp-focus-ring w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left hover:bg-indigo-50 dark:hover:bg-indigo-500/15 disabled:opacity-70 ${activeKey === 'ai' ? 'bg-indigo-50 dark:bg-indigo-500/15 shadow-[inset_2px_0_0_hsl(var(--primary))]' : ''}`}
+                >
+                  <span className="h-6 w-6 rounded-full bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 inline-flex items-center justify-center flex-shrink-0">
+                    <Sparkles className="w-3 h-3" aria-hidden="true" />
+                  </span>
+                  {aiState === 'queued' ? (
+                    <span className="text-sm font-medium text-indigo-700 dark:text-indigo-200">Queued — recommendation lands in Review</span>
+                  ) : (
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-indigo-700 dark:text-indigo-200">Let AI assign</span>
+                      <span className="block text-[10px] text-muted-foreground/75 truncate">
+                        {onAiAssign ? 'Watch the pipeline live & approve inline' : 'Runs the assignment pipeline for this ticket'}
+                      </span>
+                    </span>
+                  )}
+                </button>
+              </div>
+            )}
+          </div>
         </div>,
         document.body,
       )}

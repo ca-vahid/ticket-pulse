@@ -26,6 +26,7 @@ import { baseStatusOf, fsBornStatusNames, isTerminalStatus, statusDefsFromMeta, 
 import { FRESHSERVICE_DOMAIN } from '../tech-detail/constants';
 import { useWorkspaceRole } from '../nav/navDestinations';
 import { looksLikeRealHtml } from '../../utils/htmlContent';
+import { agoWords, formatPacificFull, formatPacificWhen } from '../../utils/ticketDates';
 import { ActorKindChip, activityActorKind, isMachineActivity, readHideMachinePreference } from './activityKind';
 
 // Known-tag detector (QA 08-06 #5): plain text carrying angle-bracket tokens
@@ -637,9 +638,10 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
               <dl className="rounded-lg border border-border/60 divide-y divide-border/60 text-xs">
                 <div className="flex items-center gap-2 px-2.5 py-1.5">
                   <dt className="flex items-center gap-1.5 text-muted-foreground/75 w-24 flex-shrink-0"><CalendarDays className="w-3 h-3" aria-hidden="true" />Created</dt>
-                  <dd className="text-muted-foreground truncate" title={new Date(ticket.createdAt).toLocaleString()}>
-                    {formatDayTime(ticket.createdAt)}
-                    <span className="text-muted-foreground/75"> · {timeAgo(ticket.createdAt)}</span>
+                  <dd className="text-muted-foreground truncate" title={formatPacificFull(ticket.createdAt)}>
+                    {/* QA 11-05 #7: Pacific weekday date, then its age once (it read "Oct 20, 9:14 AM · Oct 20"). */}
+                    <span className="font-medium text-foreground">{formatPacificWhen(ticket.createdAt)}</span>
+                    <span className="text-muted-foreground/75"> · {agoWords(ticket.createdAt)}</span>
                   </dd>
                 </div>
                 {ticket.frDueBy && !['Deleted', 'Spam'].includes(ticket.status) && (

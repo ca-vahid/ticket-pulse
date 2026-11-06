@@ -1,9 +1,13 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useEffect, useId, useImperativeHandle, useRef, useState } from 'react';
 import { Building2, Loader2, Search, X } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
 import { initials } from './ticketUi';
 
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Active option: the hover tint plus a thin left accent (keyboard and mouse agree).
+const ACTIVE_ROW = 'bg-blue-50 dark:bg-blue-500/15 shadow-[inset_2px_0_0_hsl(var(--primary))]';
+const ACTIVE_ROW_VIOLET = 'bg-violet-50 dark:bg-violet-500/15 shadow-[inset_2px_0_0_hsl(var(--primary))]';
 
 const DEFAULT_FIELD_CLASS = 'tp-focus-ring w-full text-sm bg-card border border-input rounded-lg px-3 py-2.5 text-foreground placeholder:text-muted-foreground/75';
 
@@ -122,6 +126,46 @@ const RequesterTypeahead = forwardRef(function RequesterTypeahead({
 
   const typedEmailOk = allowNewEmail && EMAIL_RE.test(query.trim());
   const hasHits = Boolean(results && (results.requesters.length > 0 || results.directory.length > 0));
+  const listOpen = Boolean(open && results && (hasHits || typedEmailOk));
+
+  // Keyboard (QA 11-05 #10, same combobox pattern as the assignee picker):
+  // focus stays in the field, the first hit is active, ↑/↓/Home/End move,
+  // Enter picks, Escape closes the list.
+  const baseId = useId();
+  const listId = `${baseId}-list`;
+  const optionId = (key) => `${baseId}-opt-${key}`;
+  const options = listOpen ? [
+    ...results.requesters.map((p) => ({ key: `r-${p.id}`, pick: () => pick(p) })),
+    ...results.directory.map((p) => ({ key: `d-${p.email}`, pick: () => pick(p, true) })),
+    ...(typedEmailOk ? [{ key: 'new', pick: () => pick({ name: query.trim().split('@')[0], email: query.trim().toLowerCase() }, false) }] : []),
+  ] : [];
+  const [activeIndex, setActiveIndex] = useState(0);
+  useEffect(() => { setActiveIndex(0); }, [results, typedEmailOk, open]);
+  const activeKey = options[activeIndex]?.key || null;
+  useEffect(() => {
+    if (!activeKey) return;
+    document.getElementById(optionId(activeKey))?.scrollIntoView?.({ block: 'nearest' });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeKey]);
+  const onKeyDown = (e) => {
+    if (!listOpen) {
+      if (e.key === 'ArrowDown' && results) { e.preventDefault(); setOpen(true); }
+      return;
+    }
+    const n = options.length;
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActiveIndex((i) => (i + 1) % n); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActiveIndex((i) => (i <= 0 ? n - 1 : i - 1)); }
+    else if (e.key === 'Home') { e.preventDefault(); setActiveIndex(0); }
+    else if (e.key === 'End') { e.preventDefault(); setActiveIndex(n - 1); }
+    else if (e.key === 'Enter') { if (options[activeIndex]) { e.preventDefault(); options[activeIndex].pick(); } }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setOpen(false); }
+  };
+  const rowState = (key) => ({
+    id: optionId(key),
+    tabIndex: -1,
+    'aria-selected': activeKey === key,
+    onMouseMove: () => { const i = options.findIndex((o) => o.key === key); if (i >= 0 && i !== activeIndex) setActiveIndex(i); },
+  });
 
   return (
     <div ref={rootRef} className="relative" data-testid="requester-typeahead">
@@ -168,8 +212,11 @@ const RequesterTypeahead = forwardRef(function RequesterTypeahead({
               autoComplete="off"
               role="combobox"
               aria-label={ariaLabel}
-              aria-expanded={open}
+              aria-expanded={listOpen}
               aria-autocomplete="list"
+              aria-controls={listOpen ? listId : undefined}
+              aria-activedescendant={activeKey ? optionId(activeKey) : undefined}
+              onKeyDown={onKeyDown}
               className={`${fieldClass} pl-9`}
             />
             {loading && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground/50 absolute right-3 top-1/2 -translate-y-1/2" aria-hidden="true" />}
@@ -179,8 +226,8 @@ const RequesterTypeahead = forwardRef(function RequesterTypeahead({
               {newEmailNote || <>New requester — “{query.trim()}” will be created with the ticket.</>}
             </p>
           )}
-          {open && results && (hasHits || typedEmailOk) && (
-            <div className="absolute left-0 right-0 top-full mt-1 z-30 tp-card rounded-xl shadow-soft py-1 max-h-80 overflow-y-auto settings-scrollbar animate-popIn" role="listbox">
+          {listOpen && (
+            <div className="absolute left-0 right-0 top-full mt-1 z-30 tp-card rounded-xl shadow-soft py-1 max-h-80 overflow-y-auto settings-scrollbar animate-popIn" role="listbox" id={listId} aria-label="Matching people">
               {results.requesters.length > 0 && (
                 <p className="px-3 pt-1.5 pb-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground/75">Requesters</p>
               )}
@@ -189,9 +236,9 @@ const RequesterTypeahead = forwardRef(function RequesterTypeahead({
                   key={`r-${p.id}`}
                   type="button"
                   role="option"
-                  aria-selected="false"
+                  {...rowState(`r-${p.id}`)}
                   onClick={() => pick(p)}
-                  className="tp-focus-ring w-full text-left px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-500/15 flex items-center gap-2.5"
+                  className={`tp-focus-ring w-full text-left px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-500/15 flex items-center gap-2.5 ${activeKey === `r-${p.id}` ? ACTIVE_ROW : ''}`}
                 >
                   <span className="h-7 w-7 rounded-full bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border border-blue-100 dark:border-blue-500/20 inline-flex items-center justify-center text-[10px] font-semibold flex-shrink-0">{initials(p.name)}</span>
                   <span className="min-w-0">
@@ -210,9 +257,9 @@ const RequesterTypeahead = forwardRef(function RequesterTypeahead({
                   key={`d-${p.email}`}
                   type="button"
                   role="option"
-                  aria-selected="false"
+                  {...rowState(`d-${p.email}`)}
                   onClick={() => pick(p, true)}
-                  className="tp-focus-ring w-full text-left px-3 py-2 hover:bg-violet-50 dark:hover:bg-violet-500/15 flex items-center gap-2.5"
+                  className={`tp-focus-ring w-full text-left px-3 py-2 hover:bg-violet-50 dark:hover:bg-violet-500/15 flex items-center gap-2.5 ${activeKey === `d-${p.email}` ? ACTIVE_ROW_VIOLET : ''}`}
                 >
                   <span className="h-7 w-7 rounded-full bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200 border border-violet-100 dark:border-violet-500/20 inline-flex items-center justify-center text-[10px] font-semibold flex-shrink-0">{initials(p.name)}</span>
                   <span className="min-w-0">
@@ -225,9 +272,9 @@ const RequesterTypeahead = forwardRef(function RequesterTypeahead({
                 <button
                   type="button"
                   role="option"
-                  aria-selected="false"
+                  {...rowState('new')}
                   onClick={() => pick({ name: query.trim().split('@')[0], email: query.trim().toLowerCase() }, false)}
-                  className="tp-focus-ring w-full text-left px-3 py-2 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 text-sm text-emerald-700 dark:text-emerald-200 border-t border-border/60 mt-1"
+                  className={`tp-focus-ring w-full text-left px-3 py-2 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 text-sm text-emerald-700 dark:text-emerald-200 border-t border-border/60 mt-1 ${activeKey === 'new' ? 'bg-emerald-50 dark:bg-emerald-500/15' : ''}`}
                 >
                   Use “{query.trim()}” as a new requester
                 </button>
