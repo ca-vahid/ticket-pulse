@@ -115,6 +115,16 @@ export function keywordIntents(text) {
   return [];
 }
 
+/**
+ * Team-safe rule: "who closed the most tickets", "rank the team", "leaderboard".
+ * Answered with "I do not rank or compare people", never with a list.
+ */
+export function isRankingAsk(text) {
+  const t = lc(text);
+  return /\b(leaderboard|league table|rank(ing|ings)?|top performers?|worst performers?)\b/.test(t)
+    || (/\b(who|which (agent|tech|person|one))\b/.test(t) && /\b(most|least|fewest|fastest|slowest|best|worst|top|highest|lowest)\b/.test(t));
+}
+
 /** "Start over" clears the short conversation memory. */
 export function isStartOver(text) {
   return /^(start over|start again|reset|new question|forget (it|that)|never ?mind)[.!]*$/i.test(String(text || '').trim());

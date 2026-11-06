@@ -8,7 +8,8 @@ import { formatPacificWhen, formatPacificFull } from '../../utils/ticketDates';
  * "Ask Ticket Pulse in Teams (advanced)" (plans/TEAMS_BOT_COMMANDS_PLAN.md,
  * product decision 5 Nov 2026): the person's own switch, on by default, and their own
  * questions to the bot from the last 180 days — question, what they were
- * shown, when. Nobody else's questions ever appear here.
+ * shown, when. Only their own questions appear here; super admins can also
+ * review them in Settings → Teams (Latest questions).
  *
  * Renders nothing when the API is not there (older server, tests that mock
  * only the Teams panel).
@@ -61,7 +62,7 @@ export default function TeamsAssistantPersonal() {
         <SwitchRow
           label="Ask Ticket Pulse in Teams (advanced)"
           description={data.enabled
-            ? 'Ask the bot things like "what approvals are waiting for me?", "my overdue tickets" or "who\'s out today?" and it answers from your own tickets, approvals and time away. Turn it off and the bot works as it did before: longer messages are offered as new tickets.'
+            ? 'Ask the bot things like "what approvals are waiting for me?", "my overdue tickets" or "who\'s out today?" and it answers from your own tickets, approvals and time away. Super admins can review the questions people ask. Turn it off and the bot works as it did before: longer messages are offered as new tickets.'
             : 'Off: the bot works as it did before. Longer messages are offered as new tickets, and "my tickets" lists your open tickets.'}
           checked={data.enabled === true}
           onCheckedChange={toggle}
@@ -76,7 +77,7 @@ export default function TeamsAssistantPersonal() {
         <section aria-labelledby="my-teams-questions" className="mt-2">
           <div className="flex items-baseline justify-between gap-2">
             <h4 id="my-teams-questions" className="text-xs font-semibold text-muted-foreground">My Teams questions</h4>
-            <span className="text-[11px] text-muted-foreground/75">Only you see these · kept {data.retentionDays || 180} days</span>
+            <span className="text-[11px] text-muted-foreground/75">You and super admins can see these · kept {data.retentionDays || 180} days</span>
           </div>
           {turns.length === 0 ? (
             <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">

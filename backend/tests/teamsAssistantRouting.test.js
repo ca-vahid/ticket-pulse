@@ -3,7 +3,7 @@
  * to the bot is answered, a request for IT still goes to Autofill, and when it
  * cannot tell, the bot asks. Plus the keyword router the fallback cards use.
  */
-import { classifyMessage, keywordIntents, ticketRefsIn, isStartOver } from '../src/services/teamsAssistantRouting.js';
+import { classifyMessage, keywordIntents, ticketRefsIn, isStartOver, isRankingAsk } from '../src/services/teamsAssistantRouting.js';
 import { isBotCommand } from '../src/services/teamsIntakeService.js';
 
 const route = (text, opts = {}) => classifyMessage(text, { isCommand: isBotCommand, ...opts }).route;
@@ -102,6 +102,14 @@ describe('keyword router (the fallback cards)', () => {
     expect(ticketRefsIn('TP-1 and #231164')).toEqual(['TP-1', '#231164']);
     expect(ticketRefsIn('where is 246762 at')).toEqual(['246762']);
     expect(ticketRefsIn('at 123 main')).toEqual([]);
+  });
+
+  test('ranking asks are recognised (team-safe rule)', () => {
+    expect(isRankingAsk('who closed the most tickets this week')).toBe(true);
+    expect(isRankingAsk('show me the leaderboard')).toBe(true);
+    expect(isRankingAsk('which agent is the slowest')).toBe(true);
+    expect(isRankingAsk("who's out today")).toBe(false);
+    expect(isRankingAsk('my overdue stuff')).toBe(false);
   });
 
   test('"start over" clears the memory', () => {
