@@ -1402,8 +1402,9 @@ class MailboxIngestService {
     try {
       const { default: lifecycle } = await import('./ticketLifecycleNotificationService.js');
       const bodyText = String(entry?.bodyText || entry?.content || '').slice(0, 20000);
+      // No `source`: the in-app reply's default, so webhook subscribers (Simorgh,
+      // ContinuIT) get a payload identical to an in-app reply apart from extra.
       await lifecycle.emitTicketEvent('ticket.public_reply_added', ticket.id, {
-        source: 'email_inbound',
         dedupeStamp: `reply:${entry.id}`,
         extra: {
           entryId: entry.id,

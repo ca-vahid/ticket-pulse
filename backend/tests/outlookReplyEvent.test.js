@@ -84,8 +84,9 @@ describe('an agent reply from Outlook fires "Agent replied to requester"', () =>
     expect(events().map((c) => c[0])).toEqual(['ticket.public_reply_added']); // (e) no reply_received
     const [, ticketId, opts] = replyAdded()[0];
     expect(ticketId).toBe(70001);
+    // No source: the in-app default, so webhook subscribers get the in-app payload (only extra differs).
+    expect(opts.source).toBeUndefined();
     expect(opts).toMatchObject({
-      source: 'email_inbound',
       dedupeStamp: `reply:${entry.id}`,
       extra: expect.objectContaining({
         entryId: entry.id,
