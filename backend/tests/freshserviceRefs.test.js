@@ -9,6 +9,10 @@ describe('FreshService ticket numbers in mail', () => {
     ['Re: Mailbox permission for someone [#246332]', [246332]],
     ['Ticket #224183 has been updated', [224183]],
     ['Fw: [INC-243414] same as [#SR-246489] and [INC-243414] again', [243414, 246489]],
+    // Accounting's FreshService (aptickets@, 6 Nov 2026).
+    ['Re: [CASE-251037] Invoice 4471 from a vendor', [251037]],
+    ['RE: [#CASE-250924] payment run question', [250924]],
+    ['Fw: re #CASE-250659 remittance', [250659]],
   ])('%s', (subject, expected) => {
     expect(freshserviceTicketNumbers(subject)).toEqual(expected);
   });
@@ -16,6 +20,7 @@ describe('FreshService ticket numbers in mail', () => {
   test('ordinary numbers are not ticket numbers', () => {
     expect(freshserviceTicketNumbers('Invoice 2026-10-0457 for PO 88213, room #12')).toEqual([]);
     expect(freshserviceTicketNumbers('TP-1806 laptop')).toEqual([]);
+    expect(freshserviceTicketNumbers('Case study for UPCASE-12345 and CASE 77812 review')).toEqual([]);
     expect(freshserviceTicketNumbers(null)).toEqual([]);
   });
 });

@@ -4,11 +4,14 @@
  * The it@ inbox carries three shapes: `[INC-243414]`, `[#SR-246489]` and `[#246332]`
  * (FreshService notification subjects are `[{{ticket.id}}] {{ticket.subject}}`), plus the older
  * "Ticket #12345". The same number appears with both prefixes, so the number alone names the ticket.
+ * 6 Nov 2026: Accounting's FreshService numbers its tickets `[CASE-251037]` (all 99 CASE numbers
+ * in a week of aptickets@ mail were Accounting FreshService tickets); without CASE a requester's
+ * reply would have opened a new ticket once that mailbox moves to Ticket Pulse.
  * Returns distinct numbers in the order they appear.
  */
 const PATTERNS = [
-  /\[#?(?:INC|SR|CHN|PRB|REL)-(\d{4,})\]/gi,
-  /(?<![\w-])#(?:INC|SR)-(\d{4,})\b/gi,
+  /\[#?(?:INC|SR|CHN|PRB|REL|CASE)-(\d{4,})\]/gi,
+  /(?<![\w-])#(?:INC|SR|CASE)-(\d{4,})\b/gi,
   /\[#(\d{4,})\]/g,
   /\bTicket\s*#(\d{4,})\b/gi,
 ];
