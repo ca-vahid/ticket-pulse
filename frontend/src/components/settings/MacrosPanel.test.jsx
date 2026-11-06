@@ -86,6 +86,30 @@ describe('Settings → Macros', () => {
     expect(payload.actions.steps[2]).toEqual(expect.objectContaining({ status: 'Closed' }));
   });
 
+  test('status picker offers only the live statuses; the reply subject defaults to the workspace subject', async () => {
+    // A workspace that retired Resolved: /tickets/meta leaves it out, and the picker invents nothing.
+    settingsAPI.getMacros.mockResolvedValue({ data: { data: [
+      { id: 4, name: 'Ack', isActive: true, actions: { steps: [{ type: 'reply', subject: '[{{ticket.ref}}] {{ticket.subject}}', html: '<p>Hi</p>' }, { type: 'status', status: 'Resolved' }] } },
+    ] } });
+    render(<MacrosPanel />);
+    await screen.findByText('Ack');
+    // Switch sits on the right of the row, before edit/delete.
+    const row = screen.getByRole('button', { name: 'Edit Ack' }).parentElement;
+    expect(within(row).getByRole('switch', { name: /Turn off Ack/ })).toBeInTheDocument();
+    await waitFor(() => expect(ticketsAPI.meta).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Ack' }));
+    const form = screen.getByTestId('macro-form');
+    const status = within(form).getByLabelText('Status');
+    await within(status).findByText('Resolved (no longer offered here)');
+    const live = [...status.options].filter((o) => !o.disabled).map((o) => o.textContent);
+    expect(live).toEqual(['Pick a status…', 'Open', 'Closed']);
+    // The stored Resolved is shown as no longer offered, not as a live choice.
+    expect(within(status).getByText('Resolved (no longer offered here)')).toBeDisabled();
+    // The early hardcoded subject reads as empty = the workspace's usual reply subject.
+    expect(within(form).getByLabelText('Reply subject')).toHaveValue('');
+    expect(within(form).getByText(/Leave empty to use the workspace's usual reply subject \(keeps the thread together\)/)).toBeInTheDocument();
+  });
+
   test('editing an old-shape macro opens it as steps and saves the new shape', async () => {
     render(<MacrosPanel />);
     await screen.findByText('Resolve as no-fault');

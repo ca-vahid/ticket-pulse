@@ -96,7 +96,12 @@ export function MacroPreviewDialog({ ticketId, macro, onClose, onApplied }) {
                       </p>
                     )}
                     {s.dueAt && <p className="text-xs text-muted-foreground">Due {new Date(s.dueAt).toLocaleString('en-CA', { timeZone: 'America/Vancouver', weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</p>}
-                    {s.run && s.subject && <p className="mt-1 text-xs text-muted-foreground">Subject: <span className="text-foreground/85">{s.subject}</span></p>}
+                    {s.run && s.subject && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Subject: <span className="text-foreground/85">{s.subject}</span>
+                        {s.subjectIsDefault && <span> (the workspace&apos;s usual reply subject)</span>}
+                      </p>
+                    )}
                     {s.run && s.html && (
                       // The message as the thread will show it (same renderer).
                       <div className="mt-1.5 max-h-48 overflow-y-auto settings-scrollbar rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm [&_img]:max-w-full">

@@ -157,8 +157,9 @@ function SubjectInput({ value, onChange }) {
         ref={inputRef}
         value={value || ''}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="Leave empty for the usual “Re: [TP-n] subject”"
+        placeholder="The workspace's usual reply subject"
         aria-label="Reply subject"
+        aria-describedby="macro-subject-hint"
         className={`${field} min-w-0 flex-1`}
       />
       <VariableMenu onPick={insert} label="Variable" testId="macro-subject-variables" />
@@ -172,8 +173,11 @@ function StepConfig({ step, onPatch, lookups }) {
   case 'reply':
     return (
       <div className="space-y-2">
-        <label className="block text-xs font-medium text-muted-foreground">Subject <span className="font-normal">(Ticket Pulse tickets; FreshService composes its own)</span></label>
+        <label className="block text-xs font-medium text-muted-foreground">Subject <span className="font-normal">(optional)</span></label>
         <SubjectInput value={step.subject} onChange={(subject) => onPatch({ subject })} />
+        <p id="macro-subject-hint" className="text-[11px] text-muted-foreground">
+          Leave empty to use the workspace&apos;s usual reply subject (keeps the thread together). A subject you type still gets the ticket number. FreshService tickets use FreshService&apos;s own subject.
+        </p>
         <label className="block text-xs font-medium text-muted-foreground">Message</label>
         <MacroBodyEditor value={step.html} onChange={(html) => onPatch({ html })} ariaLabel="Reply to the requester" placeholder="Hi {{requester.firstName}}, …" testId="macro-reply-body" />
       </div>
@@ -184,7 +188,11 @@ function StepConfig({ step, onPatch, lookups }) {
     return (
       <select value={step.status || ''} onChange={(e) => onPatch({ status: e.target.value })} aria-label="Status" className={field}>
         <option value="">Pick a status…</option>
+        {/* Only the workspace's live statuses (Resolved drops out where it is retired). */}
         {statuses.map((s) => <option key={s.name} value={s.name}>{s.name}</option>)}
+        {step.status && statuses.length > 0 && !statuses.some((s) => s.name === step.status) && (
+          <option value={step.status} disabled>{step.status} (no longer offered here)</option>
+        )}
       </select>
     );
   case 'priority':
@@ -351,7 +359,9 @@ export function MacroForm({ initial, lookups, onSave, onCancel, busy = false, er
     onSave({ name: name.trim(), description: description.trim(), actions: { steps: stepsForSave(steps) } });
   };
   return (
-    <form onSubmit={submit} className="space-y-3 rounded-xl border border-border bg-muted/30 p-3" data-testid="macro-form" aria-label={initial?.id ? `Edit ${initial.name}` : 'New macro'}>
+    // Two levels at most (Vahid): the form has no box of its own; the action
+    // list is plain rows split by rules.
+    <form onSubmit={submit} className="space-y-3 py-1" data-testid="macro-form" aria-label={initial?.id ? `Edit ${initial.name}` : 'New macro'}>
       <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
         <label className="block">
           <span className="text-xs font-medium text-muted-foreground">Name</span>
@@ -368,12 +378,12 @@ export function MacroForm({ initial, lookups, onSave, onCancel, busy = false, er
           <h4 className="text-sm font-semibold text-foreground">Actions</h4>
           <p className="text-[11px] text-muted-foreground">Run top to bottom; a status change always runs last.</p>
         </div>
-        <ol className="mt-1.5 divide-y divide-border/60 rounded-lg border border-border bg-card" data-testid="macro-steps">
-          {steps.length === 0 && <li className="px-3 py-3 text-xs text-muted-foreground">No actions yet. Add the first one below.</li>}
+        <ol className="mt-1.5 divide-y divide-border/60 border-y border-border/60" data-testid="macro-steps">
+          {steps.length === 0 && <li className="py-3 text-xs text-muted-foreground">No actions yet. Add the first one below.</li>}
           {steps.map((step, i) => {
             const meta = MACRO_ACTION_BY_TYPE[step.type] || { label: step.type };
             return (
-              <li key={step.id} className="px-3 py-2.5" data-testid={`macro-step-${step.type}`}>
+              <li key={step.id} className="py-3" data-testid={`macro-step-${step.type}`}>
                 <div className="flex items-center gap-2">
                   <span className="w-5 shrink-0 text-xs font-semibold tabular-nums text-muted-foreground">{i + 1}.</span>
                   <span className="text-sm font-medium text-foreground">{meta.label}</span>
@@ -488,13 +498,7 @@ export default function MacrosPanel() {
               {editing && editing !== 'new' && editing.id === macro.id ? (
                 <MacroForm initial={macro} lookups={lookups} onSave={save} onCancel={() => setEditing(null)} busy={busy} error={formError} />
               ) : (
-                <div className="flex flex-wrap items-start gap-3">
-                  <Switch
-                    checked={macro.isActive === true}
-                    aria-label={`${macro.isActive ? 'Turn off' : 'Turn on'} ${macro.name}`}
-                    onCheckedChange={() => toggle(macro)}
-                    className="mt-0.5"
-                  />
+                <div className="flex items-start gap-3">
                   <div className="min-w-0 flex-1">
                     <p className={`text-sm font-semibold ${macro.isActive ? 'text-foreground' : 'text-muted-foreground'}`}>{macro.name}</p>
                     {macro.description && <p className="text-[11.5px] text-muted-foreground">{macro.description}</p>}
@@ -502,7 +506,14 @@ export default function MacrosPanel() {
                       {editableSteps(macro.actions).map((s) => describeStep(s, lookups)).join(' · ') || 'No actions'}
                     </p>
                   </div>
-                  <div className="flex items-center gap-1">
+                  {/* Switch on the right, before edit/delete, like every Settings row. */}
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Switch
+                      checked={macro.isActive === true}
+                      aria-label={`${macro.isActive ? 'Turn off' : 'Turn on'} ${macro.name}`}
+                      onCheckedChange={() => toggle(macro)}
+                      className="mr-1.5"
+                    />
                     <button onClick={() => { setEditing(macro); setFormError(null); }} aria-label={`Edit ${macro.name}`} className="tp-focus-ring rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"><Pencil className="h-3.5 w-3.5" aria-hidden="true" /></button>
                     <button onClick={() => remove(macro)} aria-label={`Delete ${macro.name}`} className="tp-focus-ring rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/15 dark:hover:text-red-300"><Trash2 className="h-3.5 w-3.5" aria-hidden="true" /></button>
                   </div>
