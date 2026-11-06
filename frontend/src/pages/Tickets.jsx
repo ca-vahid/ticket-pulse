@@ -24,6 +24,7 @@ import MobileAssignSheet from '../components/tickets/MobileAssignSheet';
 import { OverridePromptToast, useOverridePrompt } from '../components/tickets/OverridePrompt';
 import { queueSearchToKeep, readQueueScroll, recallQueueScroll, recallQueueView, rememberQueueScroll, rememberQueueView } from '../utils/queueMemory';
 import { initialPull, stepPull, touchPull } from '../utils/pullToReveal';
+import { rememberTicketList } from '../utils/lastTicketList';
 import AiAssignModal from '../components/tickets/AiAssignModal';
 import BulkActionBar from '../components/tickets/BulkActionBar';
 import BulkDeleteDialog from '../components/tickets/BulkDeleteDialog';
@@ -481,6 +482,7 @@ export default function Tickets() {
       }
     }
     rememberQueueView(workspaceId, location.search);
+    rememberTicketList(workspaceId, `${location.pathname}${location.search}`); // this tab's list, for the ticket page's Close/Back (QA 11-05 #4)
   }, [workspaceId, location.pathname, location.search]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
