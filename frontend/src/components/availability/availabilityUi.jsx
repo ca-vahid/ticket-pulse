@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Activity } from 'lucide-react';
+import { Switch } from '../ui/switch';
 
 /**
  * Shared pieces for Availability (native Vacation Tracker replacement).
@@ -175,15 +176,23 @@ export function Field({ label, hint = null, children, className = '' }) {
   );
 }
 
+/**
+ * An on/off setting: the app's one switch (components/ui/switch, QA 11-05)
+ * with its words beside it. The words are a real <label>, so clicking them
+ * toggles too.
+ */
 export function Toggle({ checked, onChange, label, hint = null, disabled = false }) {
+  const auto = useId();
+  const id = `av-sw-${auto.replace(/:/g, '')}`;
+  const hintId = hint ? `${id}-hint` : undefined;
   return (
-    <label className={`flex items-start gap-2 text-sm text-foreground ${disabled ? 'opacity-50' : ''}`}>
-      <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[hsl(var(--primary))]" checked={Boolean(checked)} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
-      <span>
-        {label}
-        {hint && <span className="block text-xs text-muted-foreground">{hint}</span>}
+    <div className={`flex items-start gap-2.5 text-sm text-foreground ${disabled ? 'opacity-60' : ''}`}>
+      <Switch id={id} checked={Boolean(checked)} disabled={disabled} onCheckedChange={(v) => onChange(v === true)} aria-describedby={hintId} className="mt-px" />
+      <span className="min-w-0">
+        <label htmlFor={id} className={disabled ? 'cursor-not-allowed' : 'cursor-pointer'}>{label}</label>
+        {hint && <span id={hintId} className="block text-xs text-muted-foreground">{hint}</span>}
       </span>
-    </label>
+    </div>
   );
 }
 

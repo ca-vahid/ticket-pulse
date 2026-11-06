@@ -40,6 +40,7 @@ import {
   Pencil,
   Play,
   Plus,
+  Radio,
   RefreshCw,
   Repeat,
   Rows3,
@@ -47,8 +48,6 @@ import {
   Search,
   Send,
   StickyNote,
-  ToggleLeft,
-  ToggleRight,
   Trash2,
   Type,
   RotateCcw,
@@ -82,6 +81,7 @@ import WorkflowPreviewPage, {
 import { useTheme } from '../../contexts/ThemeContext';
 import { compactTemplateHtml, formatTemplateHtml } from '../../utils/templateHtmlFormat';
 import { groupWorkflowsByStage } from '../../utils/workflowStages';
+import { Switch, SwitchCue, SwitchRow } from '../ui/switch';
 import {
   DraftRestoreLine,
   LeaveWithoutSavingDialog,
@@ -4571,21 +4571,16 @@ function SendEmailBrandingControls({ nodeData = {}, blocks = EMPTY_EMAIL_BLOCKS,
 
       <div className="space-y-3">
         <div className="rounded-md border border-emerald-100 dark:border-emerald-500/20 bg-card p-3">
-          <button
-            type="button"
-            aria-pressed={includeHeader}
-            onClick={() => onChange({
+          <SwitchRow
+            className="py-0"
+            label="Include header"
+            description="Optional content above the generated email body."
+            checked={includeHeader}
+            onCheckedChange={() => onChange({
               includeHeader: !includeHeader,
               headerBlockId: includeHeader ? null : (nodeData.headerBlockId || null),
             })}
-            className="flex w-full items-start gap-2 text-left"
-          >
-            {includeHeader ? <ToggleRight className="mt-0.5 h-5 w-5 text-emerald-600 dark:text-emerald-300" /> : <ToggleLeft className="mt-0.5 h-5 w-5 text-muted-foreground/75" />}
-            <span>
-              <span className="block text-sm font-semibold text-foreground">Include header</span>
-              <span className="block text-xs leading-5 text-muted-foreground">Optional content above the generated email body.</span>
-            </span>
-          </button>
+          />
           {renderSelect({
             type: 'Header',
             enabled: includeHeader,
@@ -4605,21 +4600,16 @@ function SendEmailBrandingControls({ nodeData = {}, blocks = EMPTY_EMAIL_BLOCKS,
         </div>
 
         <div className="rounded-md border border-emerald-100 dark:border-emerald-500/20 bg-card p-3">
-          <button
-            type="button"
-            aria-pressed={includeFooter}
-            onClick={() => onChange({
+          <SwitchRow
+            className="py-0"
+            label="Include footer/sign-off"
+            description="On by default so existing workflows keep their workspace footer."
+            checked={includeFooter}
+            onCheckedChange={() => onChange({
               includeFooter: !includeFooter,
               footerBlockId: includeFooter ? null : (nodeData.footerBlockId || null),
             })}
-            className="flex w-full items-start gap-2 text-left"
-          >
-            {includeFooter ? <ToggleRight className="mt-0.5 h-5 w-5 text-emerald-600 dark:text-emerald-300" /> : <ToggleLeft className="mt-0.5 h-5 w-5 text-muted-foreground/75" />}
-            <span>
-              <span className="block text-sm font-semibold text-foreground">Include footer/sign-off</span>
-              <span className="block text-xs leading-5 text-muted-foreground">On by default so existing workflows keep their workspace footer.</span>
-            </span>
-          </button>
+          />
           {renderSelect({
             type: 'Footer',
             enabled: includeFooter,
@@ -5398,65 +5388,38 @@ function AfterHoursRoutingPanel({
         </button>
       </div>
 
-      <div className="rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-3 py-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2 text-sm font-semibold text-amber-950 dark:text-amber-200">
-              {workflowEnabled ? <ToggleRight className="h-5 w-5 text-emerald-700 dark:text-emerald-200" /> : <ToggleLeft className="h-5 w-5 text-muted-foreground" />}
-              Live after-hours routing
-            </div>
-            <p className="mt-1 text-xs leading-5 text-amber-900 dark:text-amber-200">
-              {workflowEnabled
-                ? 'On because this workflow is enabled. Ticket arrivals can use this workflow when the window matches.'
-                : workflowPublished
-                  ? 'Off because this workflow is disabled. The window preview is still shown for configuration.'
-                  : 'Publish this workflow before it can be enabled for live after-hours routing.'}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onToggleWorkflow}
-            disabled={saving || !workflowPublished}
-            className={cls(
-              'inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-semibold disabled:opacity-50',
-              workflowEnabled ? 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 hover:bg-red-100 dark:hover:bg-red-500/20' : 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-100 dark:hover:bg-emerald-500/20',
-            )}
-          >
-            {workflowEnabled ? <ToggleLeft className="h-4 w-4" /> : <ToggleRight className="h-4 w-4" />}
-            {workflowEnabled ? 'Disable workflow' : workflowPublished ? 'Enable workflow' : 'Publish first'}
-          </button>
-        </div>
-      </div>
+      {/* QA 11-05 (one app switch): the state is said in words next to the
+          label ("Live" / "Off" / "Publish first"), not by a green/red colour. */}
+      <SwitchRow
+        className="rounded-md border border-border bg-card px-3 py-3"
+        testId="after-hours-live-switch"
+        label="Live after-hours routing"
+        cue={<SwitchCue icon={workflowEnabled ? Radio : null}>{workflowEnabled ? 'Live' : workflowPublished ? 'Off' : 'Publish first'}</SwitchCue>}
+        description={workflowEnabled
+          ? 'On because this workflow is enabled. Ticket arrivals can use this workflow when the window matches.'
+          : workflowPublished
+            ? 'Off because this workflow is disabled. The window preview is still shown for configuration.'
+            : 'Publish this workflow before it can be enabled for live after-hours routing.'}
+        checked={workflowEnabled}
+        onCheckedChange={() => onToggleWorkflow()}
+        disabled={saving || !workflowPublished}
+      />
 
       <div className="grid gap-3 md:grid-cols-2">
-        <button
-          type="button"
-          onClick={() => setAfterHoursDraft((current) => ({ ...current, holidaysEnabled: !current.holidaysEnabled }))}
-          className={cls(
-            'rounded-md border px-3 py-3 text-left transition',
-            afterHoursDraft.holidaysEnabled ? 'border-violet-300 dark:border-violet-500/40 bg-violet-50 dark:bg-violet-500/15 text-violet-950 dark:text-violet-200' : 'border-border bg-card text-foreground/85 hover:bg-muted/50',
-          )}
-        >
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            {afterHoursDraft.holidaysEnabled ? <ToggleRight className="h-5 w-5 text-violet-700 dark:text-violet-200" /> : <ToggleLeft className="h-5 w-5 text-muted-foreground/75" />}
-            Include holidays
-          </div>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">Use the workspace holiday calendar as an off-hours route.</p>
-        </button>
-        <button
-          type="button"
-          onClick={() => setAfterHoursDraft((current) => ({ ...current, suppressStandardTicketCreated: !current.suppressStandardTicketCreated }))}
-          className={cls(
-            'rounded-md border px-3 py-3 text-left transition',
-            afterHoursDraft.suppressStandardTicketCreated ? 'border-blue-300 dark:border-blue-500/40 bg-blue-50 dark:bg-blue-500/15 text-blue-950 dark:text-blue-200' : 'border-border bg-card text-foreground/85 hover:bg-muted/50',
-          )}
-        >
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            {afterHoursDraft.suppressStandardTicketCreated ? <ToggleRight className="h-5 w-5 text-blue-700 dark:text-blue-200" /> : <ToggleLeft className="h-5 w-5 text-muted-foreground/75" />}
-            Replace normal received email
-          </div>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">On: only this workflow runs. Off: this and the normal Ticket arrived workflow both run.</p>
-        </button>
+        <SwitchRow
+          className="rounded-md border border-border bg-card px-3 py-3"
+          label="Include holidays"
+          description="Use the workspace holiday calendar as an off-hours route."
+          checked={afterHoursDraft.holidaysEnabled}
+          onCheckedChange={() => setAfterHoursDraft((current) => ({ ...current, holidaysEnabled: !current.holidaysEnabled }))}
+        />
+        <SwitchRow
+          className="rounded-md border border-border bg-card px-3 py-3"
+          label="Replace normal received email"
+          description="On: only this workflow runs. Off: this and the normal Ticket arrived workflow both run."
+          checked={afterHoursDraft.suppressStandardTicketCreated}
+          onCheckedChange={() => setAfterHoursDraft((current) => ({ ...current, suppressStandardTicketCreated: !current.suppressStandardTicketCreated }))}
+        />
       </div>
 
       <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
@@ -6141,24 +6104,22 @@ export function LlmContextToolsPanel({
                 {sourceRows.map((row) => (
                   <div
                     key={row.key}
-                    className={cls(
-                      'relative rounded-md border transition',
-                      mode === 'off' ? 'opacity-50' : '',
-                      row.enabled && mode !== 'off' ? 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-950 dark:text-emerald-200' : 'border-border bg-muted/50 text-muted-foreground',
-                    )}
+                    className={cls('relative rounded-md border border-border bg-card px-3 py-2 pr-10', mode === 'off' ? 'opacity-60' : '')}
                   >
-                    <button
-                      type="button"
-                      onClick={() => onSettingChange('context', { [row.key]: !row.enabled })}
-                      disabled={mode === 'off'}
-                      className="w-full px-3 py-2 pr-10 text-left disabled:cursor-not-allowed"
-                    >
-                      <span className="flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide">
-                        {row.label}
-                        {row.enabled && mode !== 'off' ? <ToggleRight className="h-4 w-4" /> : <ToggleLeft className="h-4 w-4" />}
+                    <div className="flex items-start gap-2.5">
+                      <Switch
+                        id={`llm-source-${row.key}`}
+                        checked={row.enabled && mode !== 'off'}
+                        disabled={mode === 'off'}
+                        onCheckedChange={() => onSettingChange('context', { [row.key]: !row.enabled })}
+                        aria-describedby={`llm-source-${row.key}-hint`}
+                        className="mt-px"
+                      />
+                      <span className="min-w-0">
+                        <label htmlFor={`llm-source-${row.key}`} className={cls('block text-xs font-semibold uppercase tracking-wide text-foreground/85', mode === 'off' ? 'cursor-not-allowed' : 'cursor-pointer')}>{row.label}</label>
+                        <span id={`llm-source-${row.key}-hint`} className="mt-1 block text-xs leading-4 text-muted-foreground">{row.description}</span>
                       </span>
-                      <span className="mt-1 block text-xs leading-4 text-muted-foreground">{row.description}</span>
-                    </button>
+                    </div>
                     <LlmHelpButton topic={row.helpTopic} onOpenHelp={onOpenHelp} className="absolute right-2 top-2 h-6 w-6 shadow-none" />
                   </div>
                 ))}
@@ -6222,34 +6183,30 @@ export function LlmContextToolsPanel({
                 <div>Unsupported outage claims, private/internal note mentions, tool names, provider/model names, and audit wording are blocked from requester-facing fields. Similar-report wording is allowed only after threshold evidence.</div>
               </div>
 
-              <div className="flex flex-wrap gap-2">
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => onChange({ redactionEnabled: !draft.redactionEnabled })}
-                    className={cls(
-                      'inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-semibold',
-                      draft.redactionEnabled ? 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200' : 'border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200',
-                    )}
-                  >
-                    {draft.redactionEnabled ? <ToggleRight className="h-3.5 w-3.5" /> : <ToggleLeft className="h-3.5 w-3.5" />}
-                    Redaction {draft.redactionEnabled ? 'on' : 'off'}
-                  </button>
-                  <LlmHelpButton topic="redaction" onOpenHelp={onOpenHelp} className="h-8 w-8 shadow-none" />
+              {/* QA 11-05: the old green/red and amber buttons carried the
+                  meaning in colour; the words now say it next to the switch. */}
+              <div className="grid gap-2 md:grid-cols-2">
+                <div className="flex items-start gap-1">
+                  <SwitchRow
+                    className="min-w-0 flex-1 rounded-md border border-border bg-card px-3 py-2"
+                    label="Redaction"
+                    cue={<SwitchCue icon={draft.redactionEnabled ? null : AlertCircle}>{draft.redactionEnabled ? 'On' : 'Off: secrets reach the model'}</SwitchCue>}
+                    description="Removes passwords, API keys and tokens before evidence is sent to the model."
+                    checked={draft.redactionEnabled === true}
+                    onCheckedChange={() => onChange({ redactionEnabled: !draft.redactionEnabled })}
+                  />
+                  <LlmHelpButton topic="redaction" onOpenHelp={onOpenHelp} className="mt-1 h-8 w-8 shadow-none" />
                 </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => onChange({ includePrivateNotes: !draft.includePrivateNotes })}
-                    className={cls(
-                      'inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-semibold',
-                      draft.includePrivateNotes ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200' : 'border-border bg-muted/50 text-muted-foreground',
-                    )}
-                  >
-                    {draft.includePrivateNotes ? <ToggleRight className="h-3.5 w-3.5" /> : <ToggleLeft className="h-3.5 w-3.5" />}
-                    Private notes {draft.includePrivateNotes ? 'internal evidence' : 'excluded'}
-                  </button>
-                  <LlmHelpButton topic="privateNotes" onOpenHelp={onOpenHelp} className="h-8 w-8 shadow-none" />
+                <div className="flex items-start gap-1">
+                  <SwitchRow
+                    className="min-w-0 flex-1 rounded-md border border-border bg-card px-3 py-2"
+                    label="Private notes"
+                    cue={<SwitchCue>{draft.includePrivateNotes ? 'Used as internal evidence' : 'Excluded'}</SwitchCue>}
+                    description="When on, internal notes may inform the model. Requester e-mail never quotes or mentions them."
+                    checked={draft.includePrivateNotes === true}
+                    onCheckedChange={() => onChange({ includePrivateNotes: !draft.includePrivateNotes })}
+                  />
+                  <LlmHelpButton topic="privateNotes" onOpenHelp={onOpenHelp} className="mt-1 h-8 w-8 shadow-none" />
                 </div>
               </div>
             </div>
@@ -11345,65 +11302,28 @@ export default function NotificationWorkflowsPanel({
             value={selectedNode.data?.recordInConversation}
             onChange={(checked) => updateNodeData({ recordInConversation: checked })}
           />
+          {/* QA 11-05 (one app switch): the per-link colours carried no
+              meaning, and the "Selected / Off" pill repeated the switch. */}
           {linkOptions.map((option) => {
             const enabled = selectedNode.data?.[option.key] === true;
-            const enabledClass = option.color === 'red'
-              ? 'border-red-300 dark:border-red-500/40 bg-red-50 dark:bg-red-500/15 text-red-950 dark:text-red-200'
-              : option.color === 'amber'
-                ? 'border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 text-amber-950 dark:text-amber-200'
-                : option.color === 'teal'
-                  ? 'border-teal-300 dark:border-teal-500/40 bg-teal-50 dark:bg-teal-500/15 text-teal-950 dark:text-teal-200'
-                  : 'border-blue-300 dark:border-blue-500/40 bg-blue-50 dark:bg-blue-500/15 text-blue-950 dark:text-blue-200';
-            const iconClass = option.color === 'red'
-              ? 'text-red-600 dark:text-red-300'
-              : option.color === 'amber'
-                ? 'text-amber-600 dark:text-amber-300'
-                : option.color === 'teal'
-                  ? 'text-teal-600 dark:text-teal-300'
-                  : 'text-blue-600 dark:text-blue-300';
-            const previewClass = option.color === 'red'
-              ? 'border-red-200 dark:border-red-500/30 text-red-900 dark:text-red-200'
-              : option.color === 'amber'
-                ? 'border-amber-200 dark:border-amber-500/30 text-amber-900 dark:text-amber-200'
-                : option.color === 'teal'
-                  ? 'border-teal-200 dark:border-teal-500/30 text-teal-900 dark:text-teal-200'
-                  : 'border-blue-200 dark:border-blue-500/30 text-blue-900 dark:text-blue-200';
             return (
-              <button
+              <SwitchRow
                 key={option.key}
-                type="button"
-                onClick={() => updateNodeData({ [option.key]: !enabled })}
-                className={cls(
-                  'flex w-full items-start gap-3 rounded-lg border px-3 py-3 text-left transition',
-                  enabled ? enabledClass : 'border-border bg-card text-foreground/85 hover:bg-muted/50',
-                )}
+                testId={`send-email-link-${option.key}`}
+                className="rounded-lg border border-border bg-card px-3 py-3"
+                label={option.title}
+                description={option.description}
+                checked={enabled}
+                onCheckedChange={() => updateNodeData({ [option.key]: !enabled })}
               >
-                {enabled ? (
-                  <ToggleRight className={cls('mt-0.5 h-5 w-5 shrink-0', iconClass)} />
-                ) : (
-                  <ToggleLeft className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground/75" />
-                )}
-                <span className="min-w-0">
-                  <span className="flex flex-wrap items-center gap-2 text-sm font-semibold">
-                    {option.title}
-                    <span className={cls(
-                      'rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-                      enabled ? 'bg-card/80 text-current ring-1 ring-current/20' : 'bg-muted text-muted-foreground',
-                    )}
-                    >
-                      {enabled ? 'Selected' : 'Off'}
-                    </span>
+                <span className="mt-1 block text-xs font-semibold leading-5 text-foreground/85">{option.liveRule}</span>
+                <span className="block text-xs leading-5 text-muted-foreground">Preview/test can force selected blocks so admins can inspect the full email.</span>
+                {enabled && (
+                  <span className="mt-2 block rounded-md border border-border bg-muted/50 px-3 py-2 text-xs leading-5 text-foreground/85">
+                    {option.activePreview}
                   </span>
-                  <span className="mt-1 block text-xs leading-5 text-muted-foreground">{option.description}</span>
-                  <span className="mt-1 block text-xs font-semibold leading-5 text-foreground/85">{option.liveRule}</span>
-                  <span className="block text-xs leading-5 text-muted-foreground">Preview/test can force selected blocks so admins can inspect the full email.</span>
-                  {enabled && (
-                    <span className={cls('mt-2 block rounded-md border bg-card/70 px-3 py-2 text-xs leading-5', previewClass)}>
-                      {option.activePreview}
-                    </span>
-                  )}
-                </span>
-              </button>
+                )}
+              </SwitchRow>
             );
           })}
           <SendEmailBrandingControls
