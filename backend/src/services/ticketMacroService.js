@@ -25,7 +25,7 @@ import { refPositionFor, replyMailSubject } from './mailSubjectService.js';
  *    `updateFsTicket` seam; Ticket Pulse tags; notes; replies). Group, type and
  *    custom fields are FreshService's — those steps are skipped and the
  *    preview says so.
- * Steps run in EXACTLY the order the admin set (QA 11-05b #4, Vahid: the old
+ * Steps run in EXACTLY the order the admin set (QA 11-05b #4, product decision: the old
  * "status always runs last" rule is gone). Field steps next to each other
  * share one write; when several steps assign, only the last one runs. A
  * reply placed after a close is still sent and leaves the ticket closed (the
@@ -366,7 +366,7 @@ class TicketMacroService {
     // that one runs (no hand-off notifications to the people in between).
     const lastAssign = runnable.filter((x) => x.type === 'assign').pop() || null;
 
-    // QA 11-05b #4 (Vahid): every step runs in EXACTLY the order the admin set,
+    // QA 11-05b #4 (product decision): every step runs in EXACTLY the order the admin set,
     // a status change included (no more "status always runs last"). Field
     // steps that sit next to each other share one write — one fields_updated
     // event (TP) / one FS-first PUT (FS) — which never changes the order.

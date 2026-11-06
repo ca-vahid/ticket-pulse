@@ -88,7 +88,7 @@ const DEFAULT_TEMPLATES = Object.freeze({
 const NH_CHILD_KEY = 'workstation';
 const DEFAULT_PARENT_HINT = 'Vahid Haeri';
 
-// QA 11-05b #1 (Vahid): the parent (master) of an offboarding is due THREE
+// QA 11-05b #1 (product decision): the parent (master) of an offboarding is due THREE
 // BUSINESS days after the last day (after the fact: after the notice), on the
 // workspace business calendar. Stored in the templates JSON as
 // `__parent.dueBusinessDays`. 4.3.48 stored `__parent.dueOffsetDays` in
@@ -891,7 +891,7 @@ class HrLifecycleService {
   }
 
   /**
-   * QA 11-05b #2 (Vahid): the master ticket of a family — the HR notice that
+   * QA 11-05b #2 (product decision): the master ticket of a family — the HR notice that
    * holds the children — is filed under its FAMILY: Onboarding & Offboarding >
    * Offboarding for an offboarding, > Onboarding for an onboarding (the
    * "Departure notices" / "New-hire notices" rows of Settings → Notice

@@ -1317,7 +1317,7 @@ class MailboxIngestService {
         } catch { /* non-fatal */ }
       }
     } else {
-      // QA 11-05b #3 (Vahid): an agent's Outlook reply is "Agent replied to
+      // QA 11-05b #3 (product decision): an agent's Outlook reply is "Agent replied to
       // requester", like an in-app reply — once per entry, marked as already
       // delivered by Outlook so nothing sends the reply itself again.
       await this._emitAgentOutlookReply(ticket, entry, agent, via);

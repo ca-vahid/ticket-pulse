@@ -1,7 +1,7 @@
 import { jest, describe, expect, test, beforeEach } from '@jest/globals';
 
 /**
- * QA 11-05b #3 (Vahid) — an agent's reply from Outlook fires "Agent replied to
+ * QA 11-05b #3 (product decision) — an agent's reply from Outlook fires "Agent replied to
  * requester" (`ticket.public_reply_added`), the event the in-app reply fires
  * (ticketService._addThreadEntry), with guards:
  *  (a) once per thread entry: the dedupe stamp is `reply:<entryId>`;
