@@ -122,6 +122,21 @@ describe('rules before a card is sent', () => {
     await svc._onTicketEvent(ctx('ticket.note_added', { byEmail: 'adrian@x.io', bodyText: 'mine' }));
     expect(svc.pending.size).toBe(0);
   });
+  // QA 11-05b #3 (d): an agent's own Outlook reply — the mailbox ingest puts the
+  // agent on the event (byEmail + actorTechnicianId), so they are never pinged
+  // about it, even when they wrote from another address of theirs.
+  test('never about your own Outlook reply (by e-mail, or by technician id from an alias)', async () => {
+    await svc._onTicketEvent(ctx('ticket.public_reply_added', { byEmail: 'adrian@x.io', actorTechnicianId: 7, via: 'outlook', alreadyDelivered: true, bodyText: 'On my way' }));
+    await svc._onTicketEvent(ctx('ticket.public_reply_added', { byEmail: 'a.lo@alias.x.io', actorTechnicianId: 7, via: 'outlook', alreadyDelivered: true, bodyText: 'On my way' }));
+    expect(svc.pending.size).toBe(0);
+    expect(eventActor(ctx('ticket.public_reply_added', { byEmail: 'A.Lo@Alias.x.io', actorTechnicianId: 7 }))).toEqual({ email: 'a.lo@alias.x.io', technicianId: 7 });
+    // A teammate's Outlook reply on Adrian's ticket is still a teammate update.
+    await svc._onTicketEvent(ctx('ticket.public_reply_added', { byEmail: 'sam@x.io', actorTechnicianId: 9, author: 'Sam', via: 'outlook', alreadyDelivered: true, bodyText: 'Sorted' }));
+    expect(svc.pending.size).toBe(1);
+    for (const v of svc.pending.values()) clearTimeout(v.timer);
+    svc.pending.clear();
+  });
+
   test("someone else's note on my ticket is queued once, then sent as one card", async () => {
     await svc._onTicketEvent(ctx('ticket.note_added', { byEmail: 'sam@x.io', author: 'Sam', bodyText: 'Checked the VPN logs' }));
     await svc._onTicketEvent(ctx('ticket.public_reply_added', { byEmail: 'sam@x.io', author: 'Sam', bodyText: 'Second' }));

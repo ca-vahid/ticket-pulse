@@ -68,7 +68,7 @@ export function MacroPreviewDialog({ ticketId, macro, onClose, onApplied }) {
               <Wand2 className="h-4 w-4 text-primary" aria-hidden="true" /> Apply “{macro.name}”{preview?.ticket?.ref ? ` to ${preview.ticket.ref}` : ''}?
             </h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              {preview ? `${runCount} of ${steps.length} action${steps.length === 1 ? '' : 's'} will run, in this order. A status change runs last.` : 'Checking what it will do on this ticket…'}
+              {preview ? `${runCount} of ${steps.length} action${steps.length === 1 ? '' : 's'} will run, in exactly this order.` :'Checking what it will do on this ticket…'}
             </p>
           </div>
           <button type="button" onClick={onClose} disabled={applying} aria-label="Close dialog" className="tp-focus-ring rounded-md p-1 text-muted-foreground hover:bg-muted disabled:opacity-50">

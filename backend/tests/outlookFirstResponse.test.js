@@ -87,8 +87,9 @@ describe('an agent reply from Outlook is the first response', () => {
     }]);
     // The agent takes the reply, as for an in-app reply.
     expect(replyOwnerMock.claimForAgentReply).toHaveBeenCalledWith(70001, expect.objectContaining({ entryId: 9001 }));
-    // Still never re-sent, still no "requester replied".
-    expect(lifecycleMock.emitTicketEvent).not.toHaveBeenCalled();
+    // Still never re-sent, still no "requester replied"; since 4.3.49 (QA
+    // 11-05b #3) it is "Agent replied to requester", once.
+    expect(lifecycleMock.emitTicketEvent.mock.calls.map((c) => c[0])).toEqual(['ticket.public_reply_added']);
   });
 
   test('a second reply never moves it: already answered → no write; a race is caught by the conditional update', async () => {

@@ -29,7 +29,7 @@ const CATEGORIES = [
 const SETTINGS = {
   mode: 'live',
   parentAssigneeTechId: null,
-  parentDueOffsetDays: 7,
+  parentDueOffsetDays: 3,
   noticeCategories: {
     departure: { categoryId: 132, subcategoryId: 2 },
     new_hire: { categoryId: 132, subcategoryId: 10 },
@@ -70,7 +70,13 @@ describe('categories and due dates in Comings & Goings settings (QA 11-05)', () 
     fireEvent.click(within(listbox).getByRole('option', { name: 'Hardware Return / Collection' }));
     expect(phone).toHaveTextContent('Hardware Return / Collection · Onboarding & Offboarding');
 
-    fireEvent.change(screen.getByRole('spinbutton', { name: 'Offboarding parent: days after the last day' }), { target: { value: '10' } });
+    // QA 11-05b #1: business days, default 3, relabelled.
+    expect(screen.getByText('Main offboarding ticket due')).toBeInTheDocument();
+    expect(screen.getByText('business days after the last day')).toBeInTheDocument();
+    const due = screen.getByRole('spinbutton', { name: 'Main offboarding ticket due: business days after the last day' });
+    expect(due).toHaveValue(3);
+    expect(due).toHaveAttribute('max', '30');
+    fireEvent.change(due, { target: { value: '10' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(updateSettings).toHaveBeenCalled());
     const body = updateSettings.mock.calls[0][0];
@@ -93,8 +99,9 @@ describe('categories and due dates in Comings & Goings settings (QA 11-05)', () 
 
   test('change history reads in words', () => {
     const catById = new Map(CATEGORIES.map((c) => [c.id, c]));
-    expect(changeFieldLabel('parentDueOffsetDays')).toBe('Offboarding parent — due, days after the last day');
-    expect(changeValueLabel('parentDueOffsetDays', 7)).toBe('7 days');
+    expect(changeFieldLabel('parentDueOffsetDays')).toBe('Main offboarding ticket — due, business days after the last day');
+    expect(changeValueLabel('parentDueOffsetDays', 3)).toBe('3 business days');
+    expect(changeValueLabel('parentDueOffsetDays', 1)).toBe('1 business day');
     expect(changeFieldLabel('noticeCategories.leave')).toBe('Leave notices — category');
     expect(changeValueLabel('noticeCategories.leave', { categoryId: 144, subcategoryId: 148 }, { catById })).toBe('Service Desk & Routing › Non-actionable Notifications');
     expect(changeFieldLabel('templates.offboarding_after_fact[laptop].category', { templateLabels: DATA.templateLabels, templates: SETTINGS.templates })).toBe('Offboarding — after the fact — Laptop: category');

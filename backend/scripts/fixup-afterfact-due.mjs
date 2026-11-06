@@ -3,7 +3,8 @@
  * QA 11-05 #6 — fix-up: open AFTER-THE-FACT offboarding families made under
  * the old due rule (everything due "the notice day, 5 PM": TP-11340 and its
  * children were overdue four hours after they arrived) get the new dates:
- *   parent   the notice date + Settings' parent due offset (7 days)
+ *   parent   Settings' parent due offset in BUSINESS days after the notice
+ *            (3 by default; QA 11-05b #1 — 4.3.48 used 7 calendar days)
  *   children their after-the-fact offset in BUSINESS days after the notice
  *            (5 by default; the workspace business calendar)
  *
@@ -70,8 +71,14 @@ export async function planAfterFactFixup(db, hr, { workspaceId = 1, familyId = n
       const key = x.member?.templateKey || null;
       const row = { familyId: f.id, ticketId: t.id, ref: refOf(t), role: x.role, key, from: iso(t.dueBy) };
       if (['Resolved', 'Closed', 'Deleted', 'Spam'].includes(t.status)) { rows.push({ ...row, action: 'skip', why: `status ${t.status}` }); continue; }
-      // What the OLD rule set: the parent on the base date, a child on base + its stored offset (calendar days).
-      const oldDue = base ? dueInstant(x.role === 'parent' ? base : addDays(base, x.member?.dueOffsetDays || 0), tz) : null;
+      // What an OLD rule set — either one counts as "still the template's":
+      //  - before 4.3.48: the parent on the base date, a child on base + its stored offset (calendar days);
+      //  - 4.3.48: the parent on base + 7 calendar days (a child's 4.3.48 date is the new one already).
+      const olds = base ? [
+        dueInstant(x.role === 'parent' ? base : addDays(base, x.member?.dueOffsetDays || 0), tz),
+        ...(x.role === 'parent' ? [dueInstant(addDays(base, 7), tz)] : []),
+      ] : [];
+      const oldDue = olds[0] || null;
       const offset = x.role === 'child' ? Number(items.get(key)?.dueOffsetDays ?? 5) : 0;
       const newDate = familyDueDate({
         kind: 'offboarding', afterTheFact: true, role: x.role, offsetDays: offset, date, noticeDate: notice,
@@ -79,10 +86,11 @@ export async function planAfterFactFixup(db, hr, { workspaceId = 1, familyId = n
       });
       const to = newDate ? dueInstant(newDate, tz) : null;
       const byPerson = dueChanges.some((a) => a.ticketId === t.id && !String(a.performedBy || '').startsWith('Ticket Pulse'));
-      const stillTemplate = oldDue && t.dueBy && Math.abs(new Date(t.dueBy).getTime() - new Date(oldDue).getTime()) < SAME_MS;
+      const near = (a, b) => Boolean(a && b) && Math.abs(new Date(a).getTime() - new Date(b).getTime()) < SAME_MS;
+      const stillTemplate = Boolean(t.dueBy) && olds.some((o) => near(t.dueBy, o));
       if (byPerson) { rows.push({ ...row, to, action: 'skip', why: 'a person changed the due date' }); continue; }
-      if (!stillTemplate) { rows.push({ ...row, to, action: 'skip', why: `due is not the old template's (${iso(oldDue)})` }); continue; }
-      if (to && Math.abs(new Date(to).getTime() - new Date(t.dueBy).getTime()) < SAME_MS) { rows.push({ ...row, to, action: 'skip', why: 'already right' }); continue; }
+      if (to && near(to, t.dueBy)) { rows.push({ ...row, to, action: 'skip', why: 'already right' }); continue; }
+      if (!stillTemplate) { rows.push({ ...row, to, action: 'skip', why: `due is not an old template's (${olds.map(iso).join(' or ') || iso(oldDue)})` }); continue; }
       rows.push({ ...row, to, action: 'move', origin: t.origin, memberId: x.member?.id ?? null, memberOffsetFrom: x.member?.dueOffsetDays ?? null, memberOffsetTo: x.role === 'child' ? offset : null });
     }
   }

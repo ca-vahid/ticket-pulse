@@ -25,8 +25,11 @@ import { refPositionFor, replyMailSubject } from './mailSubjectService.js';
  *    `updateFsTicket` seam; Ticket Pulse tags; notes; replies). Group, type and
  *    custom fields are FreshService's — those steps are skipped and the
  *    preview says so.
- * Field changes run first, then the assignee, tags, note and reply; a status
- * change always runs LAST so a resolve/close never races the other writes.
+ * Steps run in EXACTLY the order the admin set (QA 11-05b #4, Vahid: the old
+ * "status always runs last" rule is gone). Field steps next to each other
+ * share one write; when several steps assign, only the last one runs. A
+ * reply placed after a close is still sent and leaves the ticket closed (the
+ * reply path neither refuses nor reopens) — the preview says so.
  */
 
 export const MACRO_STEP_TYPES = ['status', 'priority', 'category', 'group', 'assign', 'type', 'tags', 'due', 'custom_field', 'note', 'reply'];
@@ -206,6 +209,19 @@ class TicketMacroService {
         .catch(() => s.status));
     }
 
+    // QA 11-05b #4: steps run in the admin's exact order, so a reply can come
+    // after a close. Base status of the ticket now and of each status target.
+    const baseStatus = new Map();
+    const { default: statusService } = await import('./statusService.js').catch(() => ({ default: null }));
+    for (const name of [ticket.status, ...statusTargets.values()].filter(nonEmpty)) {
+      if (baseStatus.has(name)) continue;
+      const b = await Promise.resolve().then(() => statusService?.resolveBaseStatus?.(workspaceId, name)).catch(() => null);
+      baseStatus.set(name, b || name);
+    }
+    const isClosedBase = (name) => ['Resolved', 'Closed'].includes(baseStatus.get(name) || name);
+    // { status, already } while the ticket is (or will be, at this point of the macro) closed.
+    let closedAt = isClosedBase(ticket.status) ? { status: ticket.status, already: true } : null;
+
     const planned = steps.map((s, index) => {
       const base = { index, type: s.type, run: true, reason: null };
       const fsSkip = (summary) => ({ ...base, summary, run: false, reason: FS_OWNS });
@@ -213,6 +229,7 @@ class TicketMacroService {
       case 'status': {
         const target = statusTargets.get(s.status) || s.status;
         const swapped = target !== s.status;
+        closedAt = isClosedBase(target) ? { status: target, already: false } : null;
         return {
           ...base,
           summary: `Set status to ${target}`,
@@ -280,18 +297,28 @@ class TicketMacroService {
           subject: isNative ? replyMailSubject(ticket.subject, ticketDisplayRef(ticket), refPosition, typed) : null,
           subjectIsDefault: isNative && !typed,
         };
-        if (!isNative && typed) out.notice = 'FreshService composes the subject on FreshService tickets — the subject line is not used';
+        const notices = [];
+        if (!isNative && typed) notices.push('FreshService composes the subject on FreshService tickets — the subject line is not used');
         if (unattended && !fsReplyViaTp) {
           // FreshService itself would e-mail the unattended mailbox: send nothing.
-          return { ...out, run: false, reason: UNATTENDED_REPLY_REASON };
+          return { ...out, ...(notices.length ? { notice: notices.join(' ') } : {}), run: false, reason: UNATTENDED_REPLY_REASON };
         }
         if (unattended && ccCount === 0) {
           // Same path as an agent reply: kept on the ticket, the guard in
           // ticketService._emailRequesterReply sends nothing.
-          out.notice = `${UNATTENDED_REPLY_REASON}. It is saved on the ticket and nothing is sent.`;
+          notices.push(`${UNATTENDED_REPLY_REASON}. It is saved on the ticket and nothing is sent.`);
         } else if (unattended) {
-          out.notice = `${UNATTENDED_REPLY_REASON}; it goes to the ${ccCount} Cc'd ${ccCount === 1 ? 'person' : 'people'} only, as an agent reply would.`;
+          notices.push(`${UNATTENDED_REPLY_REASON}; it goes to the ${ccCount} Cc'd ${ccCount === 1 ? 'person' : 'people'} only, as an agent reply would.`);
         }
+        // A reply after a close (QA 11-05b #4): the reply path neither refuses
+        // nor reopens a closed ticket — it is sent, the status stays.
+        if (closedAt) {
+          const sent = !(unattended && ccCount === 0); // the unattended guard keeps it on the ticket either way
+          notices.push(closedAt.already
+            ? `This ticket is ${closedAt.status}: ${sent ? 'the reply is still sent, and ' : ''}the ticket stays ${closedAt.status}.`
+            : `This reply runs after the ticket is set to ${closedAt.status}: ${sent ? 'it is still sent, and ' : ''}the ticket stays ${closedAt.status}.`);
+        }
+        if (notices.length) out.notice = notices.join(' ');
         return out;
       }
       default:
@@ -335,61 +362,75 @@ class TicketMacroService {
 
     for (const p of plan.steps.filter((x) => !x.run)) record(p, { ok: true, skipped: true, reason: p.reason });
     const runnable = plan.steps.filter((x) => x.run);
-    const fieldSteps = runnable.filter((x) => x.field && x.type !== 'status');
-    const statusSteps = runnable.filter((x) => x.type === 'status');
-    const assignSteps = runnable.filter((x) => x.type === 'assign');
+    // Several assign steps: the last one is who ends up owning it, so only
+    // that one runs (no hand-off notifications to the people in between).
+    const lastAssign = runnable.filter((x) => x.type === 'assign').pop() || null;
 
-    // 1) Fields — one write, one fields_updated event (TP) / one FS-first PUT (FS).
-    if (fieldSteps.length) {
-      const patch = Object.assign({}, ...fieldSteps.map((x) => x.field));
-      if (patch.customFields) patch.customFields = Object.assign({}, ...fieldSteps.filter((x) => x.field.customFields).map((x) => x.field.customFields));
+    // QA 11-05b #4 (Vahid): every step runs in EXACTLY the order the admin set,
+    // a status change included (no more "status always runs last"). Field
+    // steps that sit next to each other share one write — one fields_updated
+    // event (TP) / one FS-first PUT (FS) — which never changes the order.
+    const writeFields = async (batch) => {
+      const patch = Object.assign({}, ...batch.map((x) => x.field));
+      if (patch.customFields) patch.customFields = Object.assign({}, ...batch.filter((x) => x.field.customFields).map((x) => x.field.customFields));
       try {
         if (plan.isNative) await ticketService.updateTicketFields(ticketId, workspaceId, patch, actor);
         else await ticketService.updateFsTicket(ticketId, workspaceId, patch, actor, { allowAssignableOnly: true });
-        fieldSteps.forEach((x) => record(x, { ok: true }));
+        batch.forEach((x) => record(x, { ok: true }));
       } catch (error) {
-        fieldSteps.forEach((x) => record(x, { ok: false, error: error.message }));
+        batch.forEach((x) => record(x, { ok: false, error: error.message }));
       }
-    }
-    // 2) Assignee — the last assign step wins.
-    if (assignSteps.length) {
-      const last = assignSteps[assignSteps.length - 1];
-      assignSteps.slice(0, -1).forEach((x) => record(x, { ok: true, skipped: true, reason: 'A later assign step in this macro wins' }));
-      await run(last, () => (plan.isNative
-        ? ticketService.assignTicket(ticketId, workspaceId, last.technicianId, actor, { allowAssignableOnly: true })
-        : ticketService.updateFsTicket(ticketId, workspaceId, { assignedTechId: last.technicianId }, actor, { allowAssignableOnly: true })).then(() => null));
-    }
-    // 3) Tags — added to what the ticket already carries (never removes).
-    for (const p of runnable.filter((x) => x.type === 'tags')) {
-      await run(p, async () => {
-        const current = (ticket.tagLinks || []).map((l) => Number(l.tagId));
-        const next = [...new Set([...current, ...p.tagIds])];
-        ticket.tagLinks = next.map((tagId) => ({ tagId }));
-        await ticketService.setTags(ticketId, workspaceId, next, actor);
-        return null;
-      });
-    }
-    // 4) Note and reply, in the macro's order, through the normal thread paths.
-    for (const p of runnable.filter((x) => x.type === 'note' || x.type === 'reply')) {
-      if (p.type === 'note') {
+    };
+    let batch = [];
+    const flush = async () => {
+      if (!batch.length) return;
+      const pending = batch;
+      batch = [];
+      await writeFields(pending);
+    };
+    for (const p of runnable) {
+      if (p.field && p.type !== 'status') { batch.push(p); continue; }
+      await flush();
+      switch (p.type) {
+      case 'status':
+        // A reply placed after a close still goes out: the reply path neither
+        // refuses nor reopens a closed ticket (the preview says so).
+        await run(p, () => (plan.isNative
+          ? ticketService.changeStatus(ticketId, workspaceId, String(p.field.status), actor)
+          : ticketService.updateFsTicket(ticketId, workspaceId, { status: String(p.field.status) }, actor, { allowAssignableOnly: true })).then(() => null));
+        break;
+      case 'assign':
+        if (p !== lastAssign) { record(p, { ok: true, skipped: true, reason: 'A later assign step in this macro wins' }); break; }
+        await run(p, () => (plan.isNative
+          ? ticketService.assignTicket(ticketId, workspaceId, p.technicianId, actor, { allowAssignableOnly: true })
+          : ticketService.updateFsTicket(ticketId, workspaceId, { assignedTechId: p.technicianId }, actor, { allowAssignableOnly: true })).then(() => null));
+        break;
+      case 'tags':
+        // Added to what the ticket already carries (never removes).
+        await run(p, async () => {
+          const current = (ticket.tagLinks || []).map((l) => Number(l.tagId));
+          const next = [...new Set([...current, ...p.tagIds])];
+          ticket.tagLinks = next.map((tagId) => ({ tagId }));
+          await ticketService.setTags(ticketId, workspaceId, next, actor);
+          return null;
+        });
+        break;
+      case 'note':
         await run(p, () => ticketService.addPrivateNote(ticketId, workspaceId, { bodyHtml: p.html }, actor).then(() => null));
-      } else {
+        break;
+      case 'reply':
         await run(p, async () => {
           const res = await ticketService.addReply(ticketId, workspaceId, { bodyHtml: p.html, ...(p.subjectOverride ? { subject: p.subjectOverride } : {}) }, actor);
           const email = res?.email || null;
           if (email && email.sent === false && email.skipped === 'unattended_requester') return 'Saved on the ticket — not e-mailed (unattended requester)';
           return null;
         });
+        break;
+      default:
+        record(p, { ok: true, skipped: true, reason: 'This action is not supported' });
       }
     }
-    // 5) Status LAST so a resolve/close doesn't race the other writes.
-    if (statusSteps.length) {
-      const last = statusSteps[statusSteps.length - 1];
-      statusSteps.slice(0, -1).forEach((x) => record(x, { ok: true, skipped: true, reason: 'A later status step in this macro wins' }));
-      await run(last, () => (plan.isNative
-        ? ticketService.changeStatus(ticketId, workspaceId, String(last.field.status), actor)
-        : ticketService.updateFsTicket(ticketId, workspaceId, { status: String(last.field.status) }, actor, { allowAssignableOnly: true })).then(() => null));
-    }
+    await flush();
 
     results.sort((a, b) => a.index - b.index);
     const failed = results.filter((s) => !s.ok);
