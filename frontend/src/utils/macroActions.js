@@ -41,11 +41,21 @@ const nonEmpty = (v) => v !== undefined && v !== null && v !== '';
 let seq = 0;
 export const newStepId = () => `s${Date.now().toString(36)}${(seq += 1).toString(36)}`;
 
+// The early editor default ignored the workspace's ticket-number position
+// (4.3.45): read it as "no subject typed" = the workspace's reply subject.
+const OLD_DEFAULT_SUBJECT_RE = /^\s*\[\s*\{\{\s*ticket\.ref\s*\}\}\s*\]\s*\{\{\s*ticket\.subject\s*\}\}\s*$/;
+const tidyStep = (s) => {
+  if (s.type !== 'reply' || typeof s.subject !== 'string' || !OLD_DEFAULT_SUBJECT_RE.test(s.subject)) return s;
+  const rest = { ...s };
+  delete rest.subject;
+  return rest;
+};
+
 /** The ordered steps behind any stored shape (array, v2 object, or the old keys). */
 export function macroSteps(actions) {
-  if (Array.isArray(actions)) return actions.filter(isObj);
+  if (Array.isArray(actions)) return actions.filter(isObj).map(tidyStep);
   if (!isObj(actions)) return [];
-  if (Array.isArray(actions.steps)) return actions.steps.filter(isObj);
+  if (Array.isArray(actions.steps)) return actions.steps.filter(isObj).map(tidyStep);
   const steps = [];
   if (nonEmpty(actions.assignToTechnicianId)) steps.push({ type: 'assign', to: 'technician', technicianId: Number(actions.assignToTechnicianId) });
   if (nonEmpty(actions.setPriority)) steps.push({ type: 'priority', priority: Number(actions.setPriority) });

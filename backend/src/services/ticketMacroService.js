@@ -3,6 +3,7 @@ import logger from '../utils/logger.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { fillGreetingPlaceholders } from './replyGreetingService.js';
+import { refPositionFor, replyMailSubject } from './mailSubjectService.js';
 
 /**
  * Macros — agent quick-action bundles (QA 11-05 #2: their own Settings tab and
@@ -42,11 +43,25 @@ export const UNATTENDED_REPLY_REASON = 'The requester is an unattended mailbox (
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
 const nonEmpty = (v) => v !== undefined && v !== null && v !== '';
 
+// An early editor build offered this as the reply subject. It ignores the
+// workspace's ticket-number position (mailSubjectService, 4.3.45) and would
+// split threads where the number goes after the subject, so it reads as
+// "no subject typed" = the workspace's usual reply subject.
+const OLD_DEFAULT_SUBJECT_RE = /^\s*\[\s*\{\{\s*ticket\.ref\s*\}\}\s*\]\s*\{\{\s*ticket\.subject\s*\}\}\s*$/;
+const tidyStep = (s) => {
+  if (s.type === 'reply' && typeof s.subject === 'string' && OLD_DEFAULT_SUBJECT_RE.test(s.subject)) {
+    const rest = { ...s };
+    delete rest.subject;
+    return rest;
+  }
+  return s;
+};
+
 /** The ordered step list behind any stored shape (array, v2 object, or the legacy keys). */
 export function macroSteps(actions) {
-  if (Array.isArray(actions)) return actions.filter(isObj);
+  if (Array.isArray(actions)) return actions.filter(isObj).map(tidyStep);
   if (!isObj(actions)) return [];
-  if (Array.isArray(actions.steps)) return actions.steps.filter(isObj);
+  if (Array.isArray(actions.steps)) return actions.steps.filter(isObj).map(tidyStep);
   const steps = [];
   if (nonEmpty(actions.assignToTechnicianId)) steps.push({ type: 'assign', to: 'technician', technicianId: Number(actions.assignToTechnicianId) });
   if (nonEmpty(actions.setPriority)) steps.push({ type: 'priority', priority: Number(actions.setPriority) });
@@ -177,13 +192,34 @@ class TicketMacroService {
     const render = (template, html) => fillGreetingPlaceholders(template, vars, { escape: html });
     const ccCount = Array.isArray(ticket.ccEmails) ? ticket.ccEmails.length : 0;
     const unattended = ticket.requester?.unattended === true;
+    // Where this workspace puts the ticket number in mail subjects (4.3.45).
+    const refPosition = isNative && steps.some((s) => s.type === 'reply')
+      ? await refPositionFor(workspaceId).catch(() => 'after')
+      : 'after';
+    // Where Resolved is retired (QA 10-30 #2) a "Set status Resolved" lands as
+    // Closed — the same swap the workflow engine and changeStatus make.
+    const statusTargets = new Map();
+    for (const s of steps.filter((x) => x.type === 'status' && nonEmpty(x.status))) {
+      if (statusTargets.has(s.status)) continue;
+      statusTargets.set(s.status, await import('./autoCloseResolvedService.js')
+        .then(({ default: svc }) => svc.closedInsteadOfResolved(workspaceId, s.status))
+        .catch(() => s.status));
+    }
 
     const planned = steps.map((s, index) => {
       const base = { index, type: s.type, run: true, reason: null };
       const fsSkip = (summary) => ({ ...base, summary, run: false, reason: FS_OWNS });
       switch (s.type) {
-      case 'status':
-        return { ...base, summary: `Set status to ${s.status}`, field: { status: s.status } };
+      case 'status': {
+        const target = statusTargets.get(s.status) || s.status;
+        const swapped = target !== s.status;
+        return {
+          ...base,
+          summary: `Set status to ${target}`,
+          ...(swapped ? { notice: `${s.status} is retired in this workspace, so the ticket is set to ${target}` } : {}),
+          field: { status: target },
+        };
+      }
       case 'priority':
         return { ...base, summary: `Set priority to ${PRIORITY_LABELS[Number(s.priority)] || s.priority}`, field: { priority: Number(s.priority) } };
       case 'category': {
@@ -232,9 +268,19 @@ class TicketMacroService {
       }
       case 'reply': {
         const html = s.html ? render(s.html, true) : textToHtml(render(s.text, false));
-        const subject = s.subject ? render(s.subject, false).trim().slice(0, MAX_SUBJECT_CHARS) : null;
-        const out = { ...base, summary: 'Reply to the requester', html, subject: isNative ? subject : null };
-        if (!isNative && subject) out.notice = 'FreshService composes the subject on FreshService tickets — the subject line is not used';
+        // Empty = the workspace's usual reply subject (number placed per the
+        // workspace setting). A typed subject overrides it, and still gets the
+        // ticket number the same way (replyMailSubject), so threads hold.
+        const typed = s.subject ? render(s.subject, false).trim().slice(0, MAX_SUBJECT_CHARS) || null : null;
+        const out = {
+          ...base,
+          summary: 'Reply to the requester',
+          html,
+          subjectOverride: isNative ? typed : null,
+          subject: isNative ? replyMailSubject(ticket.subject, ticketDisplayRef(ticket), refPosition, typed) : null,
+          subjectIsDefault: isNative && !typed,
+        };
+        if (!isNative && typed) out.notice = 'FreshService composes the subject on FreshService tickets — the subject line is not used';
         if (unattended && !fsReplyViaTp) {
           // FreshService itself would e-mail the unattended mailbox: send nothing.
           return { ...out, run: false, reason: UNATTENDED_REPLY_REASON };
@@ -329,7 +375,7 @@ class TicketMacroService {
         await run(p, () => ticketService.addPrivateNote(ticketId, workspaceId, { bodyHtml: p.html }, actor).then(() => null));
       } else {
         await run(p, async () => {
-          const res = await ticketService.addReply(ticketId, workspaceId, { bodyHtml: p.html, ...(p.subject ? { subject: p.subject } : {}) }, actor);
+          const res = await ticketService.addReply(ticketId, workspaceId, { bodyHtml: p.html, ...(p.subjectOverride ? { subject: p.subjectOverride } : {}) }, actor);
           const email = res?.email || null;
           if (email && email.sent === false && email.skipped === 'unattended_requester') return 'Saved on the ticket — not e-mailed (unattended requester)';
           return null;
@@ -399,7 +445,11 @@ class TicketMacroService {
         const valid = (await statusService.listStatuses(workspaceId)).map((s) => s.name).join(', ');
         throw new ValidationError(`Macro status must be one of this workspace's statuses: ${valid}`);
       }
-      return { ...out, status: normalized };
+      // Resolved retired here (QA 10-30 #2): the macro stores what will really happen.
+      const live = await import('./autoCloseResolvedService.js')
+        .then(({ default: svc }) => svc.closedInsteadOfResolved(workspaceId, normalized))
+        .catch(() => normalized);
+      return { ...out, status: live || normalized };
     }
     case 'priority': {
       const p = Number(step.priority);

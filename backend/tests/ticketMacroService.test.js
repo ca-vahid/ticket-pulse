@@ -33,7 +33,10 @@ const laneMock = { isFsBornRepliesViaTicketPulseEnabled: jest.fn() };
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
 jest.unstable_mockModule('../src/services/ticketService.js', () => ({ default: ticketServiceMock }));
 jest.unstable_mockModule('../src/services/fsBornReplyLaneService.js', () => laneMock);
-jest.unstable_mockModule('../src/services/settingsRepository.js', () => ({ default: { get: jest.fn(), set: jest.fn() } }));
+const settingsGet = jest.fn();
+jest.unstable_mockModule('../src/services/settingsRepository.js', () => ({ default: { get: settingsGet, set: jest.fn() } }));
+const closedInsteadOfResolved = jest.fn(async (_ws, status) => status);
+jest.unstable_mockModule('../src/services/autoCloseResolvedService.js', () => ({ default: { closedInsteadOfResolved } }));
 jest.unstable_mockModule('../src/services/statusService.js', () => ({
   default: {
     normalizeStatusName: jest.fn(async (_ws, name) => (['open', 'pending', 'resolved', 'closed'].includes(String(name).toLowerCase())
@@ -49,6 +52,7 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
 }));
 
 const { default: svc, macroSteps, UNATTENDED_REPLY_REASON } = await import('../src/services/ticketMacroService.js');
+const { clearMailSubjectCache } = await import('../src/services/mailSubjectService.js');
 
 const ACTOR = { email: 'sam@example.com', name: 'Sam Ortiz', technicianId: 42 };
 const tpTicket = (over = {}) => ({
@@ -91,6 +95,63 @@ beforeEach(() => {
   prismaMock.workspace.findUnique.mockResolvedValue({ name: 'IT' });
   laneMock.isFsBornRepliesViaTicketPulseEnabled.mockResolvedValue(false);
   for (const fn of Object.values(ticketServiceMock)) fn.mockResolvedValue({});
+  settingsGet.mockResolvedValue(null);
+  closedInsteadOfResolved.mockImplementation(async (_ws, status) => status);
+  clearMailSubjectCache();
+});
+
+describe('reply subject follows the workspace ticket-number position (4.3.45)', () => {
+  const replyOnly = (subject) => ({ id: 12, name: 'Ack', isActive: true, actions: { version: 2, steps: [{ type: 'reply', ...(subject !== undefined ? { subject } : {}), html: '<p>Hi</p>' }] } });
+
+  test.each([
+    ['after', 'Re: Laptop <slow> [TP-11340]'],
+    ['before', 'Re: [TP-11340] Laptop <slow>'],
+  ])('empty subject = the workspace reply subject (%s): nothing overridden, preview shows it', async (position, expected) => {
+    settingsGet.mockImplementation(async (key) => (key === 'mail_subject_ws1' ? JSON.stringify({ refPosition: position }) : null));
+    prismaMock.ticketMacro.findFirst.mockResolvedValue(replyOnly(undefined));
+    const preview = await svc.preview(501, 1, 12, ACTOR);
+    expect(preview.steps[0]).toEqual(expect.objectContaining({ subject: expected, subjectIsDefault: true }));
+    await svc.apply(501, 1, 12, ACTOR);
+    // No override sent: addReply's effectiveReplySubject builds the same default.
+    expect(ticketServiceMock.addReply.mock.calls[0][2]).not.toHaveProperty('subject');
+  });
+
+  test.each([
+    ['after', 'Laptop update [TP-11340]'],
+    ['before', '[TP-11340] Laptop update'],
+  ])('a typed subject overrides it and gets the number where the workspace puts it (%s)', async (position, expected) => {
+    settingsGet.mockImplementation(async (key) => (key === 'mail_subject_ws1' ? JSON.stringify({ refPosition: position }) : null));
+    prismaMock.ticketMacro.findFirst.mockResolvedValue(replyOnly('Laptop update'));
+    const preview = await svc.preview(501, 1, 12, ACTOR);
+    expect(preview.steps[0]).toEqual(expect.objectContaining({ subject: expected, subjectIsDefault: false }));
+    await svc.apply(501, 1, 12, ACTOR);
+    expect(ticketServiceMock.addReply.mock.calls[0][2].subject).toBe('Laptop update');
+  });
+
+  test('a stored "[{{ticket.ref}}] {{ticket.subject}}" (the early editor default) reads as empty', () => {
+    const [step] = macroSteps({ steps: [{ type: 'reply', subject: '[{{ ticket.ref }}] {{ticket.subject}}', html: '<p>x</p>' }] });
+    expect(step).not.toHaveProperty('subject');
+  });
+});
+
+describe('Resolved retired in the workspace (QA 10-30 #2)', () => {
+  beforeEach(() => {
+    closedInsteadOfResolved.mockImplementation(async (_ws, status) => (status === 'Resolved' ? 'Closed' : status));
+  });
+
+  test('"Set status Resolved" lands as Closed, and the preview says so', async () => {
+    prismaMock.ticketMacro.findFirst.mockResolvedValue({ id: 13, name: 'Done', isActive: true, actions: { setStatus: 'Resolved' } });
+    const preview = await svc.preview(501, 1, 13, ACTOR);
+    expect(preview.steps[0]).toEqual(expect.objectContaining({ summary: 'Set status to Closed', notice: expect.stringMatching(/Resolved is retired/) }));
+    await svc.apply(501, 1, 13, ACTOR);
+    expect(ticketServiceMock.changeStatus).toHaveBeenCalledWith(501, 1, 'Closed', ACTOR);
+  });
+
+  test('saving a Resolved step in a retired workspace stores Closed', async () => {
+    prismaMock.ticketMacro.create.mockImplementation(({ data }) => Promise.resolve({ id: 14, ...data }));
+    const m = await svc.create(1, { name: 'Done', actions: { steps: [{ type: 'status', status: 'resolved' }] } }, ACTOR);
+    expect(m.actions.steps[0].status).toBe('Closed');
+  });
 });
 
 describe('stored shape', () => {
