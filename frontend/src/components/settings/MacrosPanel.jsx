@@ -5,6 +5,7 @@ import {
 import { settingsAPI, ticketsAPI } from '../../services/api';
 import RichTextEditor from '../tickets/RichTextEditor';
 import { Switch, SwitchCue } from '../ui/switch';
+import { RESOLUTION_REASONS } from '../../utils/resolutionReasons';
 import {
   MACRO_ACTIONS, MACRO_ACTION_BY_TYPE, MACRO_VARIABLES, PRIORITY_LABELS,
   blankStep, describeStep, editableSteps, stepsForSave,
@@ -184,17 +185,52 @@ function StepConfig({ step, onPatch, lookups }) {
     );
   case 'note':
     return <MacroBodyEditor value={step.html} onChange={(html) => onPatch({ html })} ariaLabel="Internal note" placeholder="What the agent should know…" testId="macro-note-body" />;
-  case 'status':
+  case 'status': {
+    const base = statuses.find((s) => s.name === step.status)?.baseStatus || step.status;
+    const closing = ['Resolved', 'Closed'].includes(base);
     return (
-      <select value={step.status || ''} onChange={(e) => onPatch({ status: e.target.value })} aria-label="Status" className={field}>
-        <option value="">Pick a status…</option>
-        {/* Only the workspace's live statuses (Resolved drops out where it is retired). */}
-        {statuses.map((s) => <option key={s.name} value={s.name}>{s.name}</option>)}
-        {step.status && statuses.length > 0 && !statuses.some((s) => s.name === step.status) && (
-          <option value={step.status} disabled>{step.status} (no longer offered here)</option>
+      <div className="space-y-2">
+        <select value={step.status || ''} onChange={(e) => onPatch({ status: e.target.value })} aria-label="Status" className={field}>
+          <option value="">Pick a status…</option>
+          {/* Only the workspace's live statuses (Resolved drops out where it is retired). */}
+          {statuses.map((s) => <option key={s.name} value={s.name}>{s.name}</option>)}
+          {step.status && statuses.length > 0 && !statuses.some((s) => s.name === step.status) && (
+            <option value={step.status} disabled>{step.status} (no longer offered here)</option>
+          )}
+        </select>
+        {/* 6 Nov 2026: closing a Security ticket needs a resolution reason; without
+            one here the step is skipped on those tickets (the preview says so). */}
+        {closing && (
+          <div className="flex flex-wrap items-start gap-2">
+            <select
+              value={step.resolutionReason || ''}
+              onChange={(e) => onPatch({ resolutionReason: e.target.value, ...(e.target.value === 'other' ? {} : { resolutionNote: '' }) })}
+              aria-label="Resolution reason"
+              aria-describedby={`macro-reason-hint-${step.id || 'x'}`}
+              className={field}
+            >
+              <option value="">No resolution reason</option>
+              {RESOLUTION_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+            </select>
+            {step.resolutionReason === 'other' && (
+              <input
+                value={step.resolutionNote || ''}
+                onChange={(e) => onPatch({ resolutionNote: e.target.value })}
+                maxLength={4000}
+                required
+                aria-label="Resolution note"
+                placeholder="Say what"
+                className={`${field} min-w-[12rem] flex-1`}
+              />
+            )}
+            <p id={`macro-reason-hint-${step.id || 'x'}`} className="basis-full text-[11px] text-muted-foreground">
+              Security tickets need a reason to close. Without one, this step is skipped on them.
+            </p>
+          </div>
         )}
-      </select>
+      </div>
     );
+  }
   case 'priority':
     return (
       <select value={String(step.priority || '')} onChange={(e) => onPatch({ priority: Number(e.target.value) })} aria-label="Priority" className={field}>

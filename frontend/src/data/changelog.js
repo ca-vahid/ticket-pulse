@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.53-preview';
+export const APP_VERSION = '4.3.54-preview';
 
 export const changelog = [
+  {
+    version: '4.3.54-preview',
+    date: 'November 6, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Macros can close Security tickets</strong> &mdash; a macro that files a ticket under Security and then closes it (the phishing-report kind) failed at its last step, because closing a Security ticket needs a resolution reason. A <em>Set status</em> step that closes a ticket now has a <em>Resolution reason</em> picker (False positive, Benign / expected and the rest), and the macro passes it on. Without one, the preview says up front that the close will be skipped on Security tickets, instead of the step failing.' },
+    ],
+  },
   {
     version: '4.3.53-preview',
     date: 'November 5, 2026',

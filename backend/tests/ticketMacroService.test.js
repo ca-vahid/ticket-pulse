@@ -78,10 +78,11 @@ const FULL_MACRO = {
       { type: 'custom_field', key: 'asset_tag', label: 'Asset tag', value: 'A-1' },
       { type: 'assign', to: 'applier' },
       { type: 'tags', tagIds: [7] },
-      { type: 'status', status: 'Closed' },
+      { type: 'status', status: 'Closed', resolutionReason: 'false_positive' },
     ],
   },
 };
+const RESOLUTION = { resolutionReason: 'false_positive', resolutionNote: null };
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -206,7 +207,7 @@ describe('apply on a Ticket Pulse-born ticket', () => {
     expect(ticketServiceMock.setTags).toHaveBeenCalledWith(501, 1, [3, 7], ACTOR);
     expect(ticketServiceMock.addPrivateNote).toHaveBeenCalledTimes(1);
     expect(ticketServiceMock.addReply).toHaveBeenCalledTimes(1);
-    expect(ticketServiceMock.changeStatus).toHaveBeenCalledWith(501, 1, 'Closed', ACTOR);
+    expect(ticketServiceMock.changeStatus).toHaveBeenCalledWith(501, 1, 'Closed', ACTOR, RESOLUTION);
     // QA 11-05b #4: exactly the macro's order — reply, note, the fields, assign, tags, status (last because it is last in the list).
     const order = (fn) => fn.mock.invocationCallOrder[0];
     const seq = ['addReply', 'addPrivateNote', 'updateTicketFields', 'assignTicket', 'setTags', 'changeStatus'].map((k) => order(ticketServiceMock[k]));
@@ -228,6 +229,42 @@ describe('apply on a Ticket Pulse-born ticket', () => {
     const [, , note] = ticketServiceMock.addPrivateNote.mock.calls[0];
     expect(note.bodyHtml).toContain('<p>Sam applied this for IT</p>');
     expect(note.bodyHtml).toContain('data:image/png;base64,');
+  });
+
+  // 6 Nov 2026, first real use: "Set category Security" then "Set status Closed"
+  // with no reason failed on Apply (a Security ticket needs a resolution reason).
+  test('closing into Security without a resolution reason is skipped up front, with the reason in the preview', async () => {
+    const noReason = JSON.parse(JSON.stringify(FULL_MACRO));
+    delete noReason.actions.steps.at(-1).resolutionReason;
+    prismaMock.ticketMacro.findFirst.mockResolvedValue(noReason);
+    const preview = await svc.preview(501, 1, 9, ACTOR);
+    const status = preview.steps.find((s) => s.type === 'status');
+    expect(status.run).toBe(false);
+    expect(status.reason).toMatch(/resolution reason/i);
+    // The ticket was NOT Security before the macro: the check follows the macro's own category step.
+    const result = await svc.apply(501, 1, 9, ACTOR);
+    expect(ticketServiceMock.changeStatus).not.toHaveBeenCalled();
+    // The result says the close was skipped and why, so nobody thinks it closed.
+    expect(result.steps.find((s) => s.type === 'status')).toEqual(expect.objectContaining({ skipped: true, reason: expect.stringMatching(/resolution reason/i) }));
+  });
+
+  test('a reason on the step is used when the ticket is already Security', async () => {
+    prismaMock.ticketMacro.findFirst.mockResolvedValue({ id: 15, name: 'Close phish', isActive: true, actions: { steps: [{ type: 'status', status: 'Closed', resolutionReason: 'benign_expected' }] } });
+    prismaMock.ticket.findFirst.mockResolvedValue(tpTicket({ internalCategory: { name: 'Security' } }));
+    await svc.apply(501, 1, 15, ACTOR);
+    expect(ticketServiceMock.changeStatus).toHaveBeenCalledWith(501, 1, 'Closed', ACTOR, { resolutionReason: 'benign_expected', resolutionNote: null });
+  });
+
+  test('a ticket already in Security closes when the step carries a reason; another category needs none', async () => {
+    prismaMock.ticketMacro.findFirst.mockResolvedValue({ id: 14, name: 'Close', isActive: true, actions: { steps: [{ type: 'status', status: 'Closed' }] } });
+    prismaMock.ticket.findFirst.mockResolvedValue(tpTicket({ internalCategory: { name: 'Hardware' } }));
+    await svc.apply(501, 1, 14, ACTOR);
+    expect(ticketServiceMock.changeStatus).toHaveBeenCalledWith(501, 1, 'Closed', ACTOR);
+  });
+
+  test('saving a status step validates its resolution reason', async () => {
+    await expect(svc.create(1, { name: 'x', actions: { steps: [{ type: 'status', status: 'Closed', resolutionReason: 'nope' }] } })).rejects.toThrow(/Unknown resolution reason/);
+    await expect(svc.create(1, { name: 'x', actions: { steps: [{ type: 'status', status: 'Closed', resolutionReason: 'other' }] } })).rejects.toThrow(/needs a note/);
   });
 
   test('a failing step is reported and the rest still run', async () => {
@@ -324,7 +361,8 @@ describe('QA 11-05b #4: macros run in exactly the order the admin set', () => {
       { type: 'status', status: 'Pending' },
       { type: 'note', html: '<p>Waiting on the vendor</p>' },
       { type: 'category', categoryId: 10, subcategoryId: 11 },
-      { type: 'status', status: 'Closed' },
+      // Category 10 is Security in these mocks: closing it needs a reason.
+      { type: 'status', status: 'Closed', resolutionReason: 'no_action_required' },
     ]));
     const result = await svc.apply(501, 1, 21, ACTOR);
     expect(ticketServiceMock.updateTicketFields.mock.calls.map((c) => c[2])).toEqual([{ priority: 3 }, { internalCategoryId: 10, internalSubcategoryId: 11 }]);
