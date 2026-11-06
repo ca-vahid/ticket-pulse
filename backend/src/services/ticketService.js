@@ -1525,6 +1525,15 @@ class TicketService {
       const ids = asList(query.internalSubcategoryId).map(Number).filter(Number.isFinite);
       if (ids.length) where.internalSubcategoryId = { in: ids };
     }
+    // An API client's read limit (Simorgh IT read-search): never from the
+    // query string, only set by apiV1 from the credential. Spelled with
+    // explicit nulls, because NOT IN drops uncategorised tickets in SQL.
+    if (Array.isArray(query.excludeCategoryIds) && query.excludeCategoryIds.length) {
+      const ids = query.excludeCategoryIds.map(Number).filter(Number.isInteger);
+      where.AND = [...(where.AND || []),
+        { OR: [{ internalCategoryId: null }, { internalCategoryId: { notIn: ids } }] },
+        { OR: [{ internalSubcategoryId: null }, { internalSubcategoryId: { notIn: ids } }] }];
+    }
     if (query.groupId) {
       const ids = asList(query.groupId).filter((s) => /^\d+$/.test(s)).map(BigInt);
       if (ids.length) where.groupId = { in: ids };

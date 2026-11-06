@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 const prismaMock = {
   ticket: { findUnique: jest.fn(), update: jest.fn().mockResolvedValue({}) },
   noiseRule: { findMany: jest.fn() },
+  competencyCategory: { count: jest.fn() },
 };
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
 jest.unstable_mockModule('../src/utils/logger.js', () => ({
@@ -21,7 +22,7 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
 }));
 
 const { default: noiseRuleService } = await import('../src/services/noiseRuleService.js');
-const { validateAllowlist, validateDefaultSource } = await import('../src/services/oauthClientService.js');
+const { validateAllowlist, validateDefaultSource, validateReadExcludeCategoryIds } = await import('../src/services/oauthClientService.js');
 const { trustedReviewNeeded } = await import('../src/services/ticketService.js');
 
 const src = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
@@ -167,5 +168,19 @@ describe('IP allowlist — the forwarded address may carry a port (go-live smoke
     // The exact failure: an allowlisted App Service address refused because of its port.
     expect(ipAllowed(clientIp({ ip: '130.107.159.116:1282' }), ['130.107.159.116', '20.48.204.14'])).toBe(true);
     expect(ipAllowed(clientIp({ ip: '130.107.159.117:1282' }), ['130.107.159.116'])).toBe(false);
+  });
+});
+
+describe('read limits (Simorgh IT read-search, 6 Nov 2026)', () => {
+  test('excluded categories are de-duplicated ids of the client workspace', async () => {
+    prismaMock.competencyCategory.count.mockResolvedValue(2);
+    await expect(validateReadExcludeCategoryIds([10, '133', 10, 'x', -1], 1)).resolves.toEqual([10, 133]);
+    expect(prismaMock.competencyCategory.count).toHaveBeenCalledWith({ where: { workspaceId: 1, id: { in: [10, 133] } } });
+    await expect(validateReadExcludeCategoryIds([], 1)).resolves.toEqual([]);
+  });
+
+  test('a category from another workspace is refused', async () => {
+    prismaMock.competencyCategory.count.mockResolvedValue(1);
+    await expect(validateReadExcludeCategoryIds([10, 9999], 1)).rejects.toThrow(/belong to this workspace/);
   });
 });

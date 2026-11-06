@@ -44,6 +44,20 @@ export function validateAllowlist(input) {
   return clean;
 }
 
+/**
+ * Categories this client may never read (Simorgh IT read-search, 6 Nov 2026):
+ * parent or subcategory ids of the client's own workspace, at most 100.
+ */
+export async function validateReadExcludeCategoryIds(input, workspaceId) {
+  const list = Array.isArray(input) ? input : String(input || '').split(/[\s,]+/);
+  const ids = [...new Set(list.map((v) => Number(v)).filter((n) => Number.isInteger(n) && n > 0))];
+  if (ids.length > 100) throw new ValidationError('At most 100 excluded categories');
+  if (!ids.length) return [];
+  const found = await prisma.competencyCategory.count({ where: { workspaceId, id: { in: ids } } });
+  if (found !== ids.length) throw new ValidationError('Every excluded category must belong to this workspace');
+  return ids;
+}
+
 /** Optional default arrival channel for tickets this client creates (Simorgh B8). */
 export function validateDefaultSource(input) {
   if (input === null || input === undefined || input === '') return null;
@@ -80,6 +94,8 @@ function shape(client, secret = null) {
     scopes: client.scopes, isEnabled: client.isEnabled, revokedAt: client.revokedAt || null,
     trustedIntake: client.trustedIntake === true,
     structureOwnTicketsOnly: client.structureOwnTicketsOnly === true,
+    readExcludeCategoryIds: Array.isArray(client.readExcludeCategoryIds) ? client.readExcludeCategoryIds : [],
+    readPrivateNotes: client.readPrivateNotes !== false,
     fsStatusWrite: client.fsStatusWrite === true,
     ipAllowlist: Array.isArray(client.ipAllowlist) ? client.ipAllowlist : [],
     defaultSource: client.defaultSource ?? null,
@@ -123,18 +139,21 @@ class OAuthClientService {
 
   async create(workspaceId, {
     name, scopes, expiresInDays = null, trustedIntake = false, structureOwnTicketsOnly = false, fsStatusWrite = false, ipAllowlist = [], defaultSource = null,
+    readExcludeCategoryIds = [], readPrivateNotes = true,
   }, actor) {
     const trimmed = String(name || '').trim();
     if (trimmed.length < 3) throw new ValidationError('Client name must be at least 3 characters');
     const cleanScopes = validateScopes(scopes);
     const cleanAllowlist = validateAllowlist(ipAllowlist);
     const cleanSource = validateDefaultSource(defaultSource);
+    const cleanExclude = await validateReadExcludeCategoryIds(readExcludeCategoryIds, workspaceId);
     if (!cleanScopes.length) throw new ValidationError('Grant at least one scope');
     const { clientId, secret, secretHash, secretPrefix } = generateClient();
     const client = await prisma.oAuthClient.create({
       data: {
         workspaceId, name: trimmed, clientId, clientSecretHash: secretHash, secretPrefix,
         trustedIntake: trustedIntake === true, structureOwnTicketsOnly: structureOwnTicketsOnly === true, fsStatusWrite: fsStatusWrite === true, ipAllowlist: cleanAllowlist, defaultSource: cleanSource,
+        readExcludeCategoryIds: cleanExclude, readPrivateNotes: readPrivateNotes !== false,
         scopes: cleanScopes,
         expiresAt: expiresInDays ? new Date(Date.now() + Number(expiresInDays) * 86400000) : null,
         createdBy: actor?.email || null,
@@ -155,6 +174,8 @@ class OAuthClientService {
     if (patch.fsStatusWrite !== undefined) data.fsStatusWrite = patch.fsStatusWrite === true;
     if (patch.ipAllowlist !== undefined) data.ipAllowlist = validateAllowlist(patch.ipAllowlist);
     if (patch.defaultSource !== undefined) data.defaultSource = validateDefaultSource(patch.defaultSource);
+    if (patch.readExcludeCategoryIds !== undefined) data.readExcludeCategoryIds = await validateReadExcludeCategoryIds(patch.readExcludeCategoryIds, workspaceId);
+    if (patch.readPrivateNotes !== undefined) data.readPrivateNotes = patch.readPrivateNotes !== false;
     const updated = await prisma.oAuthClient.update({ where: { id: client.id }, data });
     return shape(updated);
   }

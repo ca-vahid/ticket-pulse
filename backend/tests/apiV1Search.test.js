@@ -15,7 +15,7 @@ import request from 'supertest';
  *  Go-live round (19 Sep, 3.9.54): B4 assignedTechEmail, C1 origin + groups[],
  *  C3 jobTitle, B6 categories description/isActive, C2 ids= batch read.
  */
-const ticketServiceMock = { getTicket: jest.fn(), createTicket: jest.fn(), updateTicketFields: jest.fn(), changeStatus: jest.fn(), assignTicket: jest.fn(), listTickets: jest.fn(), setTags: jest.fn() };
+const ticketServiceMock = { getTicket: jest.fn(), createTicket: jest.fn(), updateTicketFields: jest.fn(), changeStatus: jest.fn(), assignTicket: jest.fn(), listTickets: jest.fn(), setTags: jest.fn(), buildListWhere: jest.fn().mockResolvedValue({ workspaceId: 8 }) };
 const technicianRepositoryMock = { getAll: jest.fn() };
 const prismaMock = { requester: { findMany: jest.fn() }, technician: { findFirst: jest.fn() }, groupMember: { findMany: jest.fn().mockResolvedValue([]) }, competencyCategory: { findMany: jest.fn().mockResolvedValue([]) }, workspace: { findUnique: jest.fn().mockResolvedValue({ externalRefCustomFieldKey: null, apiResubmissionMatchEnabled: false, apiResubmissionMatchWindowDays: 30 }) } };
 let apiKey;
@@ -23,7 +23,7 @@ let apiKey;
 prismaMock.$queryRawUnsafe = jest.fn();
 prismaMock.ticketTag = { findFirst: jest.fn(), create: jest.fn() };
 prismaMock.ticketTagLink = { findMany: jest.fn() };
-prismaMock.ticket = { findFirst: jest.fn(), findUnique: jest.fn() };
+prismaMock.ticket = { findFirst: jest.fn(), findUnique: jest.fn(), findMany: jest.fn() };
 const similarMock = { search: jest.fn() };
 const fsStatusMock = { isFreshServiceBorn: jest.fn(), changeFsBornStatus: jest.fn() };
 const alertMock = { record: jest.fn() };
@@ -108,7 +108,8 @@ describe('POST /search/similar/batch', () => {
 
 describe('GET /search/tickets?in=', () => {
   test('ranks through the full-text query, keeps that order, and shapes tickets', async () => {
-    prismaMock.$queryRawUnsafe.mockResolvedValue([{ id: 3 }, { id: 1 }]);
+    prismaMock.$queryRawUnsafe.mockResolvedValue([{ id: 3, bucket: 3 }, { id: 1, bucket: 2 }]);
+    prismaMock.ticket.findMany.mockImplementation(async ({ select }) => (select.descriptionText ? [] : [{ id: 3 }, { id: 1 }]));
     ticketServiceMock.listTickets.mockResolvedValue({ items: [{ id: 1, subject: 'b', status: 'Open' }, { id: 3, subject: 'a', status: 'Open' }] });
     const res = await request(app()).get('/api/v1/search/tickets?query=lenovo%20calgary&in=subject,description').expect(200);
     expect(res.body.data.items.map((t) => t.id)).toEqual([3, 1]);

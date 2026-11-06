@@ -19,6 +19,7 @@ import { looksLikeRealHtml } from '../utils/htmlContent.js';
 import { resolveCategoryNames } from '../services/categoryNameResolver.js';
 import ticketResubmissionService, { normalizeExternalRef } from '../services/ticketResubmissionService.js';
 import { buildOpenApiSpec, renderDocsPage } from './apiV1.openapi.js';
+import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 
 /**
  * Public integration API (/api/v1) — key-authenticated, workspace-scoped,
@@ -59,8 +60,75 @@ async function tid(req) {
     const { resolveTicketRefOrThrow } = await import('../services/ticketRefResolver.js');
     id = (await resolveTicketRefOrThrow(raw, req.workspaceId)).id;
   }
+  // A ticket in a category this credential may not read answers exactly like
+  // a missing one, on every per-ticket route (reads and writes).
+  const { exclude } = readScope(req);
+  if (exclude.length) {
+    const row = await prisma.ticket.findFirst({ where: { id, workspaceId: req.workspaceId }, select: { internalCategoryId: true, internalSubcategoryId: true } });
+    if (row && (exclude.includes(row.internalCategoryId) || exclude.includes(row.internalSubcategoryId))) {
+      throw problems.notFound(`Ticket ${raw} not found in this workspace`);
+    }
+  }
   req._resolvedTicketId = id;
   return id;
+}
+
+// Read limits on the credential (Simorgh IT read-search, 6 Nov 2026): the
+// categories whose tickets it never sees, and whether private notes are in.
+// API keys carry neither, so they read as before.
+function readScope(req) {
+  const raw = Array.isArray(req.apiKey?.readExcludeCategoryIds) ? req.apiKey.readExcludeCategoryIds : [];
+  return { exclude: raw.map(Number).filter((n) => Number.isInteger(n) && n > 0), privateNotes: req.apiKey?.readPrivateNotes !== false };
+}
+
+const emailList = (v) => String(v || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean).slice(0, 20);
+
+// A list query with the credential's exclusion applied (whatever the caller
+// sent) and requesterEmail / assigneeEmail turned into ids. `empty` = an
+// e-mail filter matched nobody, so the answer is no tickets.
+async function scopedListQuery(req, query) {
+  const q = { ...query };
+  delete q.excludeCategoryIds;
+  const { exclude } = readScope(req);
+  if (exclude.length) q.excludeCategoryIds = exclude;
+  const requesterEmails = emailList(q.requesterEmail);
+  delete q.requesterEmail;
+  if (requesterEmails.length) {
+    const rows = await prisma.requester.findMany({ where: { workspaceId: req.workspaceId, OR: requesterEmails.map((e) => ({ email: { equals: e, mode: 'insensitive' } })) }, select: { id: true } });
+    if (!rows.length) return { q, empty: true };
+    q.requesterId = rows.map((r) => r.id).join(',');
+  }
+  const agentEmails = emailList(q.assigneeEmail || q.assignedTechEmail);
+  delete q.assigneeEmail;
+  delete q.assignedTechEmail;
+  if (agentEmails.length) {
+    const rows = await prisma.technician.findMany({ where: { workspaceId: req.workspaceId, OR: agentEmails.map((e) => ({ email: { equals: e, mode: 'insensitive' } })) }, select: { id: true } });
+    if (!rows.length) return { q, empty: true };
+    q.assignedTechId = rows.map((r) => r.id).join(',');
+  }
+  return { q, empty: false };
+}
+
+// Similar-search hits in an excluded category are dropped after ranking.
+async function dropExcludedHits(req, results) {
+  const { exclude } = readScope(req);
+  if (!exclude.length || !results || typeof results !== 'object') return results;
+  const lists = Array.isArray(results) ? [results] : Object.values(results);
+  const ids = [...new Set(lists.filter(Array.isArray).flat().map((h) => Number(h?.id)).filter(Number.isInteger))];
+  if (!ids.length) return results;
+  const hidden = new Set((await prisma.ticket.findMany({
+    where: { workspaceId: req.workspaceId, id: { in: ids }, OR: [{ internalCategoryId: { in: exclude } }, { internalSubcategoryId: { in: exclude } }] },
+    select: { id: true },
+  })).map((r) => r.id));
+  if (!hidden.size) return results;
+  const keep = (list) => (Array.isArray(list) ? list.filter((h) => !hidden.has(Number(h?.id))) : list);
+  if (Array.isArray(results)) return keep(results);
+  return Object.fromEntries(Object.entries(results).map(([k, v]) => [k, keep(v)]));
+}
+
+function ticketUrl(id) {
+  const base = resolvePublicBaseUrl();
+  return base ? `${base}/tickets/${id}` : null;
 }
 
 /**
@@ -88,6 +156,8 @@ function ticketShape(t) {
   return {
     id: t.id,
     ref: t.displayRef,
+    // Link for people (Simorgh IT read-search); null when no public app URL is set.
+    url: ticketUrl(t.id),
     // Caller's stable per-record key (Phase PA) — the resubmission upsert key.
     externalRef: t.externalRef || null,
     // The same request in other systems. TP-born tickets are mirrored into
@@ -275,7 +345,12 @@ router.get('/tickets', S('tickets:read'), asyncHandler(async (req, res) => {
   // ContinuIT C2: `ids=1,2,3` (ticket ids or TP-refs, ≤ 200) for a batch
   // read; the service turns it into an id filter.
   if (q.ids !== undefined) q.ids = String(Array.isArray(q.ids) ? q.ids.join(',') : q.ids).split(',').map((s) => s.trim().replace(/^TP-/i, '')).filter((s) => /^\d+$/.test(s)).slice(0, 200).map(Number);
-  const result = await ticketService.listTickets(req.workspaceId, q);
+  const scoped = await scopedListQuery(req, q);
+  if (scoped.empty) {
+    res.json({ success: true, data: { items: [], pagination: q.useCursor ? { next_cursor: null, limit: Number(q.pageSize) || 25, total: 0 } : { page: Number(q.page) || 1, page_size: Number(q.pageSize) || 25, total: 0 } } });
+    return;
+  }
+  const result = await ticketService.listTickets(req.workspaceId, scoped.q);
   const pagination = result.nextCursor !== undefined
     ? { next_cursor: result.nextCursor, limit: result.pageSize, total: result.total }
     : { page: result.page, page_size: result.pageSize, total: result.total };
@@ -880,7 +955,9 @@ router.delete('/tickets/:id/links/:linkId', S('tickets:write'), asyncHandler(asy
 
 router.get('/tickets/:id/conversations', S('conversations:read'), asyncHandler(async (req, res) => {
   const ticket = await ticketService.getTicket((await tid(req)), req.workspaceId, API_READ);
-  res.json({ success: true, data: (ticket.thread || []).filter((e) => e.bodyText || e.content).map(threadEntryShape) });
+  // A credential with private notes switched off gets the public thread only.
+  const { privateNotes } = readScope(req);
+  res.json({ success: true, data: (ticket.thread || []).filter((e) => (e.bodyText || e.content) && (privateNotes || e.isPrivate !== true)).map(threadEntryShape) });
 }));
 
 router.post('/tickets/:id/replies', S(['tickets:write', 'conversations:write']), withIdempotency, asyncHandler(async (req, res) => {
@@ -1403,13 +1480,13 @@ const pickSimilarOptions = (body) => Object.fromEntries(SIMILAR_OPTION_KEYS.filt
 router.post('/search/similar', S('search:read'), asyncHandler(async (req, res) => {
   const body = req.body || {};
   const { results, meta } = await runSimilar(req, [{ key: 'text', text: body.text }], pickSimilarOptions(body));
-  res.json({ success: true, data: results.text, meta });
+  res.json({ success: true, data: (await dropExcludedHits(req, results)).text, meta });
 }));
 
 router.post('/search/similar/batch', S('search:read'), asyncHandler(async (req, res) => {
   const body = req.body || {};
   const { results, meta } = await runSimilar(req, body.items, pickSimilarOptions(body));
-  res.json({ success: true, data: results, meta });
+  res.json({ success: true, data: await dropExcludedHits(req, results), meta });
 }));
 
 // Keyword search over more than the subject (ContinuIT request 3):
@@ -1418,7 +1495,7 @@ router.post('/search/similar/batch', S('search:read'), asyncHandler(async (req, 
 // indexed expressions. Conversation text needs conversations:read.
 const SEARCH_IN = ['subject', 'description', 'conversations'];
 
-async function searchTicketsIn(req, q, fields, limit) {
+async function searchTicketsIn(req, q, fields, limit, { privateNotes = true } = {}) {
   const params = [req.workspaceId, q];
   const parts = [];
   if (fields.includes('subject')) {
@@ -1433,7 +1510,7 @@ async function searchTicketsIn(req, q, fields, limit) {
   }
   if (fields.includes('conversations')) {
     parts.push(`SELECT e.ticket_id AS id, 1 AS bucket, max(ts_rank_cd(to_tsvector('english', coalesce(e.body_text, '')), websearch_to_tsquery('english', $2), 32)) AS r
-      FROM ticket_thread_entries e WHERE e.workspace_id = $1
+      FROM ticket_thread_entries e WHERE e.workspace_id = $1${privateNotes ? '' : ' AND e.is_private IS NOT TRUE'}
         AND to_tsvector('english', coalesce(e.body_text, '')) @@ websearch_to_tsquery('english', $2)
       GROUP BY e.ticket_id`);
   }
@@ -1443,7 +1520,35 @@ async function searchTicketsIn(req, q, fields, limit) {
     GROUP BY h.id, t.updated_at
     ORDER BY bucket DESC, r DESC, t.updated_at DESC
     LIMIT ${limit}`, ...params);
-  return rows.map((r) => Number(r.id));
+  return rows.map((r) => ({ id: Number(r.id), bucket: Number(r.bucket) }));
+}
+
+// Full-text hits are ranked once into a pool, then filtered and paged over it
+// (Simorgh IT read-search). The cursor is an offset into that ranking.
+const SEARCH_POOL = 500;
+const SEARCH_MATCHED_IN = { 3: 'subject', 2: 'description', 1: 'conversations' };
+const SEARCH_CONTROL_KEYS = ['in', 'q', 'query', 'limit', 'cursor', 'page', 'pageSize', 'useCursor', 'ids'];
+const encodeSearchCursor = (offset) => Buffer.from(`o:${offset}`, 'utf8').toString('base64url');
+function decodeSearchCursor(raw) {
+  if (!raw) return 0;
+  const m = /^o:(\d+)$/.exec(Buffer.from(String(raw), 'base64url').toString('utf8'));
+  if (!m) throw problems.badRequest('cursor is not one this search returned');
+  return Number(m[1]);
+}
+
+// About `size` characters of the description around the first query word.
+export function searchSnippet(text, q, size = 300) {
+  const body = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!body) return null;
+  if (body.length <= size) return body;
+  const lower = body.toLowerCase();
+  let at = -1;
+  for (const term of String(q || '').toLowerCase().split(/\s+/).map((t) => t.replace(/^[-"]+|"+$/g, '')).filter((t) => t.length >= 2)) {
+    const i = lower.indexOf(term);
+    if (i >= 0 && (at < 0 || i < at)) at = i;
+  }
+  const start = at < 0 ? 0 : Math.max(0, Math.min(at - Math.floor(size / 3), body.length - size));
+  return `${start > 0 ? '…' : ''}${body.slice(start, start + size).trim()}${start + size < body.length ? '…' : ''}`;
 }
 
 router.get('/search/tickets', S('search:read'), asyncHandler(async (req, res) => {
@@ -1458,14 +1563,53 @@ router.get('/search/tickets', S('search:read'), asyncHandler(async (req, res) =>
     const q = String(req.query.query || req.query.q || '').trim();
     if (q.length < 2) throw problems.badRequest('query must be at least 2 characters');
     const limit = Math.max(1, Math.min(Number(req.query.limit) || 25, 50));
-    const ids = await searchTicketsIn(req, q.slice(0, 200), fields, limit);
-    const result = ids.length ? await ticketService.listTickets(req.workspaceId, { ids, pageSize: limit }) : { items: [] };
+    const offset = decodeSearchCursor(req.query.cursor);
+    const filters = { ...req.query };
+    for (const k of SEARCH_CONTROL_KEYS) delete filters[k];
+    const scoped = await scopedListQuery(req, filters);
+    const hits = scoped.empty ? [] : await searchTicketsIn(req, q.slice(0, 200), fields, SEARCH_POOL, readScope(req));
+    // Every list filter (type, status, dates, requester, agent, …) and the
+    // credential's category exclusion apply to the ranked pool.
+    let ranked = hits;
+    if (hits.length) {
+      const where = await ticketService.buildListWhere(req.workspaceId, scoped.q);
+      const allowed = new Set((await prisma.ticket.findMany({ where: { AND: [where, { id: { in: hits.map((h) => h.id) } }] }, select: { id: true } })).map((r) => r.id));
+      ranked = hits.filter((h) => allowed.has(h.id));
+    }
+    const page = ranked.slice(offset, offset + limit);
+    const ids = page.map((h) => h.id);
+    const [result, descriptions] = ids.length
+      ? await Promise.all([
+        ticketService.listTickets(req.workspaceId, { ids, pageSize: limit }),
+        prisma.ticket.findMany({ where: { id: { in: ids } }, select: { id: true, descriptionText: true } }),
+      ])
+      : [{ items: [] }, []];
     const order = new Map(ids.map((id, i) => [id, i]));
+    const bucket = new Map(page.map((h) => [h.id, h.bucket]));
+    const text = new Map(descriptions.map((d) => [d.id, d.descriptionText]));
     const items = [...(result.items || [])].sort((a, b) => order.get(a.id) - order.get(b.id));
-    res.json({ success: true, data: { items: items.map(ticketShape), pagination: { limit, count: items.length } } });
+    const nextOffset = offset + limit;
+    res.json({
+      success: true,
+      data: {
+        items: items.map((t) => ({ ...ticketShape(t), matchedIn: SEARCH_MATCHED_IN[bucket.get(t.id)] || null, snippet: searchSnippet(text.get(t.id), q) })),
+        pagination: {
+          limit,
+          count: items.length,
+          next_cursor: nextOffset < ranked.length ? encodeSearchCursor(nextOffset) : null,
+          // true = more than SEARCH_POOL tickets matched; narrow the query or the dates.
+          truncated: hits.length >= SEARCH_POOL,
+        },
+      },
+    });
     return;
   }
-  const result = await ticketService.listTickets(req.workspaceId, { ...req.query, q: req.query.query || req.query.q });
+  const scoped = await scopedListQuery(req, { ...req.query, q: req.query.query || req.query.q });
+  if (scoped.empty) {
+    res.json({ success: true, data: { items: [], pagination: { page: 1, page_size: Number(req.query.pageSize) || 25, total: 0 } } });
+    return;
+  }
+  const result = await ticketService.listTickets(req.workspaceId, scoped.q);
   const pagination = result.nextCursor !== undefined
     ? { next_cursor: result.nextCursor, limit: result.pageSize }
     : { page: result.page, page_size: result.pageSize, total: result.total };
