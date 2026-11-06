@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Activity, Download, RefreshCw } from 'lucide-react';
 import { teamsAdminAPI } from '../../services/api';
 import TeamsEventGrid from '../agent/TeamsEventGrid';
+import TeamsAssistantSettings from './TeamsAssistantSettings';
 
 /**
  * Settings → Teams (plans/TEAMS_NOTIFICATIONS_PLAN.md): is the bot healthy,
@@ -197,6 +198,8 @@ export default function TeamsSettingsPanel() {
               onChange={(key, mode) => save({ defaults: { ...defaults, events: { ...defaults.events, [key]: mode } } }, 'Defaults saved')}
             />
           </section>
+
+          <TeamsAssistantSettings />
 
           <section>
             <h3 className="mb-1 text-sm font-semibold text-foreground">Team channel feed</h3>

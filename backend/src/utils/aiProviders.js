@@ -38,6 +38,11 @@ export const AI_OPERATIONS = [
   // articles go straight into the library. Their own cost lines.
   'knowledge_confluence',
   'knowledge_confluence_import',
+  // Teams assistant (plans/TEAMS_BOT_COMMANDS_PLAN.md, 5 Nov 2026): people ask
+  // the bot in plain words; a cheap model picks one of six read-only tools and
+  // the server builds the answer card. Haiku 5.5 with GPT-6 Luna as the
+  // fallback (product decision, 5 Nov). Its own cost line and monthly cap per workspace.
+  'teams_assistant',
 ];
 
 // Sonnet 5.5 (released 28 Sep 2026: same $2/$10 price as Sonnet 5, >30%
@@ -289,7 +294,8 @@ export function anthropicRequestRules(model) {
 
 export function defaultModelForProvider(provider, operation = null) {
   const normalizedProvider = normalizeProvider(provider);
-  if (normalizedProvider === AI_PROVIDER_OPENAI) return DEFAULT_OPENAI_MODEL;
+  if (normalizedProvider === AI_PROVIDER_OPENAI) return operation === 'teams_assistant' ? OPENAI_ECONOMY_MODEL : DEFAULT_OPENAI_MODEL;
+  if (operation === 'teams_assistant') return HAIKU_5_5_MODEL;
   if (operation === 'ticket_reclassification' || operation === 'calendar_leave' || operation === 'requester_sentiment' || operation === 'ticket_grouping' || operation === 'requester_reply_check') {
     return DEFAULT_RECLASSIFICATION_MODEL;
   }

@@ -30,7 +30,22 @@ async function sweep() {
   } catch (err) {
     logger.debug(`API maintenance sweep failed (non-fatal): ${err.message}`);
   }
+  // Teams assistant audit log: 180 days (product decision, 5 Nov 2026). Once a day, on
+  // its own so a missing table (migration not applied yet) never stops the rest.
+  if (now - lastAssistantPruneAt >= ASSISTANT_PRUNE_EVERY_MS) {
+    lastAssistantPruneAt = now;
+    try {
+      const { default: teamsAssistantSettings } = await import('./teamsAssistantSettings.js');
+      const removed = await teamsAssistantSettings.prune(now);
+      if (removed) logger.info(`Teams assistant: ${removed} audit row(s) older than 180 days removed`);
+    } catch (err) {
+      logger.debug(`Teams assistant prune failed (non-fatal): ${err.message}`);
+    }
+  }
 }
+
+const ASSISTANT_PRUNE_EVERY_MS = 24 * 60 * 60 * 1000;
+let lastAssistantPruneAt = 0;
 
 let timer = null;
 function start() {

@@ -4564,6 +4564,71 @@ model TeamsAutofillDraft {
   @@map("teams_autofill_drafts")
 }
 
+/// Teams assistant (plans/TEAMS_BOT_COMMANDS_PLAN.md, 5 Nov 2026): people ask
+/// the bot in plain words. Per workspace: off | shadow | pilot | on, the pilot
+/// people (lower-cased e-mails), the monthly AI cap and the sensitive switch
+/// (subjects never go to the model). No row = defaults (IT shadow, others off).
+model TeamsAssistantSetting {
+  workspaceId     Int      @id @map("workspace_id")
+  mode            String   @default("off") @db.VarChar(10)
+  pilotEmails     String[] @default([]) @map("pilot_emails")
+  monthlyCapUsd   Decimal  @default(25) @map("monthly_cap_usd") @db.Decimal(8, 2)
+  sensitive       Boolean  @default(false)
+  // "YYYY-MM" the cap e-mail was last sent for (once a month).
+  capAlertedMonth String?  @map("cap_alerted_month") @db.VarChar(7)
+  updatedBy       String?  @map("updated_by") @db.VarChar(255)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("teams_assistant_settings")
+}
+
+/// The per-person switch "Ask Ticket Pulse in Teams (advanced)". No row = on.
+model TeamsAssistantPerson {
+  email     String   @id @db.VarChar(255) // lower-cased
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("teams_assistant_people")
+}
+
+/// One row per message the assistant handled (audit, memory, "My Teams
+/// questions"). Kept 180 days. Tool calls are names, inputs, counts and
+/// timings only; tool output is never stored.
+model TeamsAssistantTurn {
+  id             Int      @id @default(autoincrement())
+  email          String   @db.VarChar(255)
+  workspaceId    Int?     @map("workspace_id") // the workspace the AI cost is booked to
+  conversationId String?  @map("conversation_id") @db.VarChar(255)
+  activityId     String?  @map("activity_id") @db.VarChar(255)
+  mode           String   @db.VarChar(10) // off | shadow | live
+  route          String   @db.VarChar(20) // assistant | unsure | autofill
+  question       String   @db.VarChar(500)
+  toolCalls      Json?    @map("tool_calls")
+  answerKind     String?  @map("answer_kind") @db.VarChar(20) // list | confirm | clarify | help | suggest_autofill | refused
+  shownIds       Json?    @map("shown_ids")
+  lead           String?  @db.VarChar(300) // the AI's lead line (live, or what it would have said in Shadow)
+  replySummary   String?  @map("reply_summary") @db.VarChar(300) // what the person was actually shown
+  delivered      String?  @db.VarChar(20) // ai | keyword | help | unsure | limited | none
+  provider       String?  @db.VarChar(30)
+  model          String?  @db.VarChar(100)
+  inputTokens    Int?     @map("input_tokens")
+  outputTokens   Int?     @map("output_tokens")
+  costUsd        Decimal? @map("cost_usd") @db.Decimal(10, 6)
+  latencyMs      Int?     @map("latency_ms")
+  outcome        String   @db.VarChar(20) // answered | fallback | rate_limited | timeout | error | capped
+  error          String?  @db.VarChar(200)
+  feedback       String?  @db.VarChar(20) // useful | not_right
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([email, createdAt])
+  @@index([conversationId, createdAt])
+  @@index([workspaceId, createdAt])
+  @@index([createdAt])
+  @@map("teams_assistant_turns")
+}
+
 // ---------------------------------------------------------------------------
 // HR lifecycle: Onboarding / Offboarding (plans/HR_LIFECYCLE_PLAN.md, QA 10-01 #8).
 // Ships disabled: mode off | observe | live per workspace, default off. No

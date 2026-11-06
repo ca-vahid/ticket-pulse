@@ -2031,6 +2031,10 @@ export const teamsAdminAPI = {
   disconnect: (technicianIds) => api.post('/teams-notifications/disconnect', { technicianIds }),
   // Static copy of backend/teams-app/ticket-pulse-teams.zip (manifest + icons only).
   packageUrl: () => '/downloads/ticket-pulse-teams.zip',
+  // Ask Ticket Pulse in Teams: mode, pilot people, monthly AI limit; the Shadow log (super admins).
+  getAssistant: () => api.get('/teams-notifications/assistant'),
+  saveAssistant: (data) => api.put('/teams-notifications/assistant', data),
+  assistantTurns: (params = {}) => api.get('/teams-notifications/assistant/turns', { params }),
 };
 
 export const agentAPI = {
@@ -2063,6 +2067,9 @@ export const agentAPI = {
   connectTeams: (data = {}) => api.post('/agent/teams/connect', data),
   sendTeamsTest: (data = {}) => api.post('/agent/teams/test', data),
   unmuteTeamsTicket: (ticketId, params = {}) => api.delete(`/agent/teams/mutes/${ticketId}`, { params }),
+  // "Ask Ticket Pulse in Teams (advanced)": my switch + my own questions.
+  getTeamsAssistant: () => api.get('/agent/teams/assistant'),
+  saveTeamsAssistant: (data) => api.put('/agent/teams/assistant', data),
   getSummitWorkshop: () => api.get('/agent/summit-2026/workshop'),
   voteSummitCategory: (data) => api.post('/agent/summit-2026/votes', data),
   getSummitWorkshopEventSource: () => new EventSource(`${API_BASE_URL}/agent/summit-2026/workshop/events${_authToken ? `?token=${encodeURIComponent(_authToken)}` : ''}`, { withCredentials: true }),

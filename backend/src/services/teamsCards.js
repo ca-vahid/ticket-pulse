@@ -505,3 +505,90 @@ export function autofillCard(m = {}, stage = 'ready') {
   actions.push({ type: 'Action.Execute', title: 'Discard', verb: 'autofill.discard', data, associatedInputs: 'none', mode: 'secondary' });
   return wrapCard(body, actions);
 }
+
+// ---------------------------------------------------------------- Teams assistant (5 Nov 2026)
+
+/**
+ * The answer card of the Teams assistant (plans/TEAMS_BOT_COMMANDS_PLAN.md).
+ * Built by the server from tool rows, never from model text: the only free
+ * text is `lead` (already checked: its numbers appear in the tool results).
+ * a: {
+ *   title, subline, icon, word, style,
+ *   lead,                      one sentence under the banner
+ *   sections: [{ heading, empty, rows: [{ title, line, right, rightColor, url }], more, moreUrl, moreLabel }],
+ *   note,                      small print ("Answered without AI just now")
+ *   links: [{ title, url }],   page links at the foot
+ *   buttons: [Action.Execute], e.g. "Make a ticket from this"
+ *   turnId,                    adds the Useful / Not right feedback buttons
+ * }
+ */
+export const ASSISTANT_ROWS_SHOWN = 8;
+
+export function assistantCard(a = {}) {
+  const body = [banner({ style: a.style || 'accent', title: a.title || 'Ticket Pulse', subline: a.subline || null, icon: a.icon || '💬', word: a.word || 'Ask' })];
+  if (a.lead) body.push(text(a.lead, { spacing: 'Medium' }));
+  for (const [si, s] of (a.sections || []).entries()) {
+    const items = [];
+    if (s.heading) items.push(label(String(s.heading).toUpperCase()));
+    const rows = (s.rows || []).slice(0, ASSISTANT_ROWS_SHOWN);
+    if (!rows.length && s.empty) items.push(text(s.empty, { size: 'Small', isSubtle: true, spacing: 'Small' }));
+    for (const r of rows) {
+      items.push({
+        type: 'ColumnSet',
+        spacing: 'Small',
+        ...(r.url ? { selectAction: { type: 'Action.OpenUrl', url: r.url, title: 'Open' } } : {}),
+        columns: [
+          {
+            type: 'Column',
+            width: 'stretch',
+            items: [
+              text(`**${mdSafe(clip(r.title, 90))}**`, { spacing: 'None' }),
+              ...(r.line ? [text(mdSafe(clip(r.line, 140)), { size: 'Small', isSubtle: true, spacing: 'None' })] : []),
+            ],
+          },
+          ...(r.right ? [{ type: 'Column', width: 'auto', verticalContentAlignment: 'Center', items: [text(r.right, { size: 'Small', spacing: 'None', wrap: false, color: r.rightColor || 'Default' })] }] : []),
+        ],
+      });
+    }
+    const hidden = Math.max(0, (Number(s.more) || 0) + Math.max(0, (s.rows || []).length - ASSISTANT_ROWS_SHOWN));
+    if (hidden > 0) {
+      items.push(text(s.moreUrl ? `…and ${hidden} more — [${s.moreLabel || 'see them all'}](${s.moreUrl})` : `…and ${hidden} more`, { size: 'Small', isSubtle: true, spacing: 'Small' }));
+    }
+    if (items.length) body.push({ type: 'Container', id: `s${si}`, spacing: 'Medium', separator: si > 0, items });
+  }
+  if (a.note) body.push(text(`ℹ️ ${a.note}`, { size: 'Small', isSubtle: true, spacing: 'Medium' }));
+  const actions = [
+    ...(a.buttons || []),
+    ...(a.links || []).filter((l) => l?.url).slice(0, 3).map((l) => ({ type: 'Action.OpenUrl', title: l.title, url: l.url })),
+  ];
+  if (a.turnId) {
+    actions.push({ type: 'Action.Execute', title: '👍 Useful', verb: 'assist.feedback', data: { turnId: a.turnId, value: 'useful' }, mode: 'secondary' });
+    actions.push({ type: 'Action.Execute', title: '👎 Not right', verb: 'assist.feedback', data: { turnId: a.turnId, value: 'not_right' }, mode: 'secondary' });
+  }
+  return wrapCard(body, actions);
+}
+
+/** "Is this a request for IT, or a question for me?" — two buttons that carry the text. */
+export function assistantUnsureCard(q) {
+  const data = { q: String(q || '').slice(0, 600) };
+  return wrapCard([
+    banner({ title: 'Is this a request for IT, or a question for me?', subline: clip(q, 120), icon: '🤔', word: 'Ask' }),
+    text('A request becomes a new ticket (you check it before it is created). A question gets an answer from your tickets, approvals and time away.', { size: 'Small', isSubtle: true, spacing: 'Medium' }),
+  ], [
+    { type: 'Action.Execute', title: '🎫 A request for IT', verb: 'assist.route', data: { ...data, choice: 'request' } },
+    { type: 'Action.Execute', title: '💬 A question for you', verb: 'assist.route', data: { ...data, choice: 'question' } },
+  ]);
+}
+
+/** What the assistant can do, with three example questions as buttons. */
+export function assistantHelpCard({ examples = [], links = [], note = null } = {}) {
+  return wrapCard([
+    banner({ title: 'Ask me about your work', subline: 'Your tickets, approvals and time away, in plain words', icon: '💬', word: 'Ask' }),
+    text('- **Approvals** — "show me the approvals waiting for me"\n- **Time away** — "any vacation requests I need to approve?", "how many vacation days do I have left?"\n- **Tickets** — "my overdue tickets", "status of TP-1042"\n- **Who is out** — "who\'s out today?"', { spacing: 'Medium' }),
+    text('I only read: approve or decline from the approval card, and change tickets in Ticket Pulse. Paste a screenshot or a long chat and I fill in a new ticket for you.', { size: 'Small', isSubtle: true, spacing: 'Small' }),
+    ...(note ? [text(`ℹ️ ${note}`, { size: 'Small', isSubtle: true, spacing: 'Small' })] : []),
+  ], [
+    ...examples.slice(0, 3).map((q) => ({ type: 'Action.Execute', title: q, verb: 'assist.ask', data: { q } })),
+    ...links.filter((l) => l?.url).slice(0, 2).map((l) => ({ type: 'Action.OpenUrl', title: l.title, url: l.url })),
+  ]);
+}
