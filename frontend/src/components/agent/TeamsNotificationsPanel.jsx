@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Activity, BellOff, Send } from 'lucide-react';
 import { agentAPI } from '../../services/api';
 import TeamsEventGrid from './TeamsEventGrid';
+import TeamsAssistantPersonal from './TeamsAssistantPersonal';
 
 /**
  * My Teams notifications (plans/TEAMS_NOTIFICATIONS_PLAN.md): connection,
@@ -181,6 +182,8 @@ export default function TeamsNotificationsPanel({ workspaceId }) {
               </span>
             </label>
           </div>
+
+          <TeamsAssistantPersonal />
 
           {data.mutes?.length > 0 && (
             <div className="mt-5">

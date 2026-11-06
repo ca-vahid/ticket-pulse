@@ -78,6 +78,7 @@ const LABEL_KIND = Object.freeze({
   'auto-help-overnight-summary': 'report',
   'agent alert': 'alert',
   'sync-health-alert': 'alert',
+  'teams-assistant-cap': 'alert',
   'urgent response notice': 'alert',
   'park wake': 'notice',
   'ready to close': 'notice',
