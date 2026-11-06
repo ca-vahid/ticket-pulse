@@ -209,6 +209,59 @@ class BusinessCalendarService {
   async nextBusinessInstant(from, { workspaceId, calendar = undefined } = {}) {
     return this.addBusinessMinutes(from, 0, { workspaceId, calendar });
   }
+
+  /** loadCalendar that never throws (null = no calendar: Monday to Friday, no holidays). */
+  async loadCalendarSafe(workspaceId) {
+    return Promise.resolve().then(() => this.loadCalendar(workspaceId)).catch((err) => {
+      logger.debug?.(`businessCalendarService: calendar not loaded for ws ${workspaceId}: ${err.message}`);
+      return null;
+    });
+  }
+
+  /**
+   * Is the local calendar date `dateStr` (yyyy-MM-dd) a working day? With a
+   * calendar: an enabled business-hour day that is not a holiday. Without one
+   * (no rows, or not loaded): Monday to Friday.
+   */
+  isWorkingDate(dateStr, calendar = null) {
+    const dow = dayOfWeekOf(dateStr);
+    if (!calendar) return dow >= 1 && dow <= 5;
+    return calendar.byDay.has(dow) && !calendar.isHolidayDate(dateStr);
+  }
+
+  /**
+   * Business-DAY walk on local calendar dates (QA 11-05 #6, offboarding after
+   * the fact: "5 business days after the notice"). Returns the date `days`
+   * working days after `dateStr`; the start day itself never counts, so a
+   * Friday + 1 is Monday. `days` <= 0 returns `dateStr` when it is a working
+   * day, else the next one. Pure and synchronous: pass the calendar from
+   * loadCalendar / loadCalendarSafe. Capped at MAX_WALK_DAYS like the other
+   * walks (a calendar with no working day at all returns the plain date sum).
+   */
+  addBusinessDays(dateStr, days, calendar = null) {
+    const want = Math.max(0, Math.trunc(Number(days) || 0));
+    let cur = String(dateStr).slice(0, 10);
+    if (want === 0) return this.isWorkingDate(cur, calendar) ? cur : this.nextBusinessDate(cur, calendar);
+    let counted = 0;
+    for (let i = 0; i < MAX_WALK_DAYS; i++) {
+      cur = nextDateStr(cur);
+      if (this.isWorkingDate(cur, calendar)) counted += 1;
+      if (counted >= want) return cur;
+    }
+    const d = new Date(`${String(dateStr).slice(0, 10)}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + want);
+    return d.toISOString().slice(0, 10);
+  }
+
+  /** The first working date strictly after `dateStr`. */
+  nextBusinessDate(dateStr, calendar = null) {
+    let cur = String(dateStr).slice(0, 10);
+    for (let i = 0; i < MAX_WALK_DAYS; i++) {
+      cur = nextDateStr(cur);
+      if (this.isWorkingDate(cur, calendar)) return cur;
+    }
+    return nextDateStr(String(dateStr).slice(0, 10));
+  }
 }
 
 const businessCalendarService = new BusinessCalendarService();

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { buildHistoryItems, foldBursts, groupByActor, parseFsFeedLine, countMachine, friendlyDays } from './ticketHistory';
+import { buildHistoryItems, groupByActor, parseFsFeedLine, countMachine, friendlyDays, workflowRunSummary } from './ticketHistory';
 
 const T0 = Date.parse('2026-09-14T11:37:50Z');
 const iso = (ms) => new Date(T0 + ms).toISOString();
@@ -87,16 +87,17 @@ describe('buildHistoryItems — one story, deduplicated, machine chatter folded'
     expect(human.find((i) => i.event === 'note' && i.count === 2)).toBeTruthy();
   });
 
-  test('machine rows fold into bursts and are counted for the header', () => {
-    const bursts = items.filter((i) => i.event === 'burst');
-    expect(bursts.length).toBeGreaterThanOrEqual(1);
-    // A lone machine row between people stays a plain row, not a one-item burst.
-    expect(items.some((i) => i.machine && i.event !== 'burst')).toBe(true);
-    expect(bursts.every((b) => b.items.every((i) => i.machine))).toBe(true);
+  test('machine rows stay one line each (no bursts, QA 11-05 #9) and are counted for the header', () => {
+    expect(items.some((i) => i.event === 'burst' || Array.isArray(i.items))).toBe(false);
     expect(countMachine(items)).toBe(items.filter((i) => i.machine).reduce((n, i) => n + (i.count || 1), 0));
     // Ticket Pulse's own write-back echoes are machine, the workflow lines are machine.
-    const echo = bursts.flatMap((b) => b.items).find((i) => i.event === 'category');
-    expect(echo).toMatchObject({ actor: 'Ticket Pulse', machine: true });
+    expect(items.find((i) => i.event === 'category')).toMatchObject({ actor: 'Ticket Pulse', actorType: 'ticketpulse', machine: true });
+    // FreshService's "executed … workflow" lines read as a FreshService workflow, by name.
+    const fsWf = items.filter((i) => i.actorType === 'fs_workflow');
+    expect(fsWf.length).toBeGreaterThanOrEqual(4);
+    expect(fsWf.every((i) => i.machine && i.event === 'wfrun')).toBe(true);
+    expect(items.find((i) => i.key === 'fs-917')).toMatchObject({ workflowName: 'Ticket Closed (06-13)', verb: 'ran', reason: 'on: Ticket is closed' });
+    expect(items.find((i) => i.key === 'fs-902')).toMatchObject({ workflowName: 'Ticket Received (June 19, 2026)', verb: 'called a webhook', reason: 'webhook "Trigger webhook" · Success' });
   });
 
   test('a reopen is its own event', () => {
@@ -105,38 +106,24 @@ describe('buildHistoryItems — one story, deduplicated, machine chatter folded'
   });
 });
 
-describe('foldBursts', () => {
-  test('a single machine row stays a row; two or more within five minutes become a burst', () => {
-    const mk = (k, at, machine) => ({ key: k, at, machine, count: 1, from_at: at, to_at: at, actor: 'x', event: 'system' });
-    const single = foldBursts([mk('a', 1000, true), mk('b', 0, false)]);
-    expect(single.map((i) => i.event)).toEqual(['system', 'system']);
-    const two = foldBursts([mk('a', 60e3, true), mk('b', 0, true)]);
-    expect(two).toHaveLength(1);
-    expect(two[0]).toMatchObject({ event: 'burst', count: 2 });
-    const far = foldBursts([mk('a', 20 * 60e3, true), mk('b', 0, true)]);
-    expect(far).toHaveLength(2);
-  });
-});
-
-describe('groupByActor — one run per person, machine rows absorbed only mid-run', () => {
+describe('groupByActor — one run per actor, every row its own line (QA 11-05 #9)', () => {
   const items = buildHistoryItems({ activities, assignmentEpisodes: episodes, thread, techNameById: new Map([[7, 'Anton Kuzmychev']]) });
-  const runs = groupByActor(items);
 
-  test('consecutive actions by the same person become one run with the name once', () => {
-    const anton = runs.filter((r) => r.actor === 'Anton Kuzmychev' && !r.machine);
+  test('with machine activity hidden, consecutive actions by the same person become one run with the name once', () => {
+    const runs = groupByActor(items.filter((i) => !i.machine));
+    const anton = runs.filter((r) => r.actor === 'Anton Kuzmychev');
     expect(anton).toHaveLength(1);
-    expect(anton[0].items.filter((i) => !i.machine).length).toBeGreaterThanOrEqual(5);
+    expect(anton[0].items.length).toBeGreaterThanOrEqual(5);
     // Names never repeat back-to-back on the rail.
-    for (let i = 1; i < runs.length; i += 1) expect(runs[i].machine || runs[i - 1].machine || runs[i].actor !== runs[i - 1].actor).toBe(true);
+    for (let i = 1; i < runs.length; i += 1) expect(runs[i].actor !== runs[i - 1].actor).toBe(true);
   });
 
-  test('a machine row between two people stands on its own; one inside a run is absorbed', () => {
-    const mk = (k, at, actor, machine) => ({ key: k, at, actor, machine, count: 1, from_at: at, to_at: at, event: machine ? 'system' : 'note', kind: machine ? 'system' : 'human' });
-    const inside = groupByActor([mk('a', 30, 'Ann', false), mk('m', 20, 'Ticket Workflow', true), mk('b', 10, 'Ann', false)]);
-    expect(inside).toHaveLength(1);
-    expect(inside[0].items.map((i) => i.key)).toEqual(['a', 'm', 'b']);
-    const between = groupByActor([mk('a', 30, 'Ann', false), mk('m', 20, 'Ticket Workflow', true), mk('b', 10, 'Bob', false)]);
-    expect(between.map((r) => `${r.actor}|${r.machine}`)).toEqual(['Ann|false', 'Ticket Workflow|true', 'Bob|false']);
+  test('a machine row is never absorbed into a person\'s run; it splits the run and stands as its own line', () => {
+    const mk = (k, at, actor, machine) => ({ key: k, at, actor, machine, actorType: machine ? 'fs_workflow' : 'person', count: 1, from_at: at, to_at: at, event: machine ? 'system' : 'note', kind: machine ? 'system' : 'human' });
+    const inside = groupByActor([mk('a', 30, 'Ann', false), mk('m', 20, 'FreshService workflow', true), mk('b', 10, 'Ann', false)]);
+    expect(inside.map((r) => r.items.map((i) => i.key))).toEqual([['a'], ['m'], ['b']]);
+    const machines = groupByActor([mk('m1', 30, 'FreshService workflow', true), mk('m2', 20, 'FreshService workflow', true), mk('b', 10, 'Bob', false)]);
+    expect(machines.map((r) => `${r.actor}|${r.items.length}`)).toEqual(['FreshService workflow|2', 'Bob|1']);
   });
 });
 
@@ -195,7 +182,9 @@ describe('a reassignment made in Ticket Pulse reads as one line (2 Oct 2026, #24
       ],
     });
     const flat = items.flatMap((i) => (i.items ? i.items : [i]));
-    const reassign = flat.filter((i) => i.event === 'assignment');
+    // The episode's own start is the AI's assignment of Gaby (QA 11-05 #9) — a different moment.
+    expect(flat.find((i) => i.key === 'ep-9')).toMatchObject({ actor: 'Ticket Pulse AI', actorType: 'ai', verb: 'assigned', to: 'Gaby Tonnova' });
+    const reassign = flat.filter((i) => i.event === 'assignment' && !i.episode);
     expect(reassign).toHaveLength(1);
     expect(reassign[0]).toMatchObject({ verb: 'reassigned', from: 'Gaby Tonnova', to: 'Marcus Blackstock', actor: 'Gaby Tonnova', machine: false });
     expect(flat.some((i) => i.verb?.startsWith('ownership ended'))).toBe(false);
@@ -269,5 +258,137 @@ describe('a grouping close names both tickets (QA 10-20 #2, #248018 into TP-1029
     const flat = items.flatMap((i) => (i.items ? i.items : [i]));
     expect(flat[0]).toMatchObject({ event: 'merge', verb: 'combined in a duplicate', to: '#248018', machine: false });
     expect(flat[0].detail).toBe('"Re: URGENT HELP NEEDED" · The same request.');
+  });
+});
+
+describe('QA 11-05 #9 — the right actor, workflow runs, one line per action', () => {
+  const T = Date.parse('2026-10-22T16:12:00Z');
+  const at = (min) => new Date(T + min * 60e3).toISOString();
+  const aiEpisode = { id: 41, technician: { name: 'Jordan Lee' }, startMethod: 'workflow_assigned', startAssignedByName: 'Ticket Pulse AI', startedAt: at(0) };
+
+  test('a workflow-assigned episode is the AI\'s action, not the assignee\'s, and "by …" is never printed', () => {
+    const [it] = buildHistoryItems({ assignmentEpisodes: [aiEpisode] });
+    expect(it).toMatchObject({ event: 'assignment', actor: 'Ticket Pulse AI', actorType: 'ai', verb: 'assigned', to: 'Jordan Lee', reason: 'auto-assign', machine: false });
+    expect(it.detail).toBeNull();
+    expect(JSON.stringify(it)).not.toMatch(/by Ticket Pulse AI/);
+    expect(it.actorBy).toBeUndefined();
+  });
+
+  test('a self-pick stays the technician\'s own; a FreshService assigner is named and placed', () => {
+    const items = buildHistoryItems({ assignmentEpisodes: [
+      { id: 1, technician: { name: 'Sam Ortiz' }, startMethod: 'self_picked', startedAt: at(0) },
+      { id: 2, technician: { name: 'Alex Rivera' }, startMethod: 'coordinator_assigned', startAssignedByName: 'Riley Chen (in FreshService)', startedAt: at(60) },
+    ] });
+    expect(items.find((i) => i.key === 'ep-1')).toMatchObject({ actor: 'Sam Ortiz', event: 'ownership', verb: 'picked this up' });
+    expect(items.find((i) => i.key === 'ep-2')).toMatchObject({ actor: 'Riley Chen', actorType: 'person', to: 'Alex Rivera', reason: 'in FreshService', source: 'freshservice' });
+  });
+
+  test('"ownership ended" is the ender\'s action; a hand-back folds into the unassign row with its reason', () => {
+    const items = buildHistoryItems({
+      activities: [{ id: 5, activityType: 'assigned', performedBy: 'Jordan Lee', performedAt: at(30), actorKind: 'human', details: { fromTechId: 9, toTechId: null, handBack: { label: 'Access / permission limited' }, actorKind: 'human' } }],
+      assignmentEpisodes: [{ ...aiEpisode, endedAt: at(30), endMethod: 'rejected', endActorName: 'Jordan Lee' }],
+      techNameById: new Map([[9, 'Jordan Lee']]),
+    });
+    expect(items.find((i) => i.key === 'ep-end-41')).toBeUndefined();
+    expect(items.find((i) => i.key === 'a-5')).toMatchObject({ actor: 'Jordan Lee', verb: 'unassigned', from: 'Jordan Lee', reason: 'Access / permission limited' });
+    const ended = buildHistoryItems({ assignmentEpisodes: [{ ...aiEpisode, endedAt: at(90), endMethod: 'reassigned', endActorName: 'Casey Park' }] });
+    expect(ended.find((i) => i.key === 'ep-end-41')).toMatchObject({ actor: 'Casey Park', from: 'Jordan Lee', reason: 'reassigned' });
+  });
+
+  test('the AI\'s own pipeline-run row folds into its assignment line', () => {
+    const items = buildHistoryItems({
+      assignmentEpisodes: [aiEpisode],
+      pipelineRuns: [{ id: 3301, status: 'completed', decision: 'auto_assigned', triggerSource: 'webhook', createdAt: at(-1), decidedAt: at(-0.2) }],
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0].extra).toEqual([expect.stringMatching(/^AI run #3301 · via webhook/)]);
+  });
+
+  const liveRun = {
+    id: 900, workflowId: 3, workflowName: 'Reopen on requester reply', eventType: 'ticket.reply_received', status: 'completed', executionMode: 'live', shadow: false,
+    startedAt: at(120), durationMs: 104, outcome: 'acted', stopReason: null,
+    actions: [{ type: 'update', fields: ['status'], status: { from: 'Pending Response', to: 'Open' }, assignedTo: null }],
+    steps: [{ nodeId: 'trigger', nodeType: 'trigger', status: 'completed' }, { nodeId: 'reopen', nodeType: 'update_ticket', status: 'completed' }],
+  };
+
+  test('a workflow run with no audit row still shows a line, people-visible when live', () => {
+    const [it] = buildHistoryItems({ workflowRuns: [{ ...liveRun, id: 901, actions: [{ type: 'email', to: 1, cc: 0, sent: true }] }] });
+    expect(it).toMatchObject({ event: 'wfrun', actor: 'Workflow', actorType: 'workflow', workflowName: 'Reopen on requester reply', verb: 'ran', reason: 'e-mailed 1 person', machine: false, duration: '0.1 s' });
+  });
+
+  test('a run and its own workflow_updated_ticket row fold into one line', () => {
+    const items = buildHistoryItems({
+      workflowRuns: [liveRun],
+      activities: [{ id: 77, activityType: 'workflow_updated_ticket', performedBy: 'Notification workflow', performedAt: at(120.01), details: { note: 'Reopened automatically — the requester replied.', changes: { status: { from: 'Pending Response', to: 'Open' } }, actorKind: 'workflow', eventType: 'ticket.reply_received' } }],
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ key: 'wf-900', reason: 'set status Pending Response → Open' });
+    expect(items[0].extra).toEqual(['changed status Pending Response → Open · Reopened automatically — the requester replied.']);
+  });
+
+  test('a Shadow run is labelled and counts as machine activity; a skipped run says why', () => {
+    const items = buildHistoryItems({ workflowRuns: [
+      { ...liveRun, id: 902, executionMode: 'mock', shadow: true, actions: [{ type: 'email', to: 1, cc: 0, sent: false, reason: 'Shadow - email not sent' }] },
+      { ...liveRun, id: 903, startedAt: at(10), outcome: 'stopped', stopReason: 'Noise ticket skipped', actions: [] },
+      { ...liveRun, id: 904, startedAt: at(5), outcome: 'stopped', stopReason: 'Workflow stopped', stopCause: 'Did not pass: Ticket status is one of Resolved, Closed', actions: [] },
+    ] });
+    const byKey = Object.fromEntries(items.map((i) => [i.key, i]));
+    expect(byKey['wf-902']).toMatchObject({ verb: 'Shadow — nothing sent', reason: 'would e-mail 1 person', machine: true, shadow: true });
+    expect(byKey['wf-903']).toMatchObject({ verb: 'skipped', reason: 'Noise ticket skipped', machine: true });
+    expect(byKey['wf-904']).toMatchObject({ reason: 'Did not pass: Ticket status is one of Resolved, Closed' });
+    expect(countMachine(items)).toBe(3);
+  });
+
+  test('a run that assigned someone takes the episode it started as a detail', () => {
+    const items = buildHistoryItems({
+      workflowRuns: [{ ...liveRun, id: 905, startedAt: at(0), actions: [{ type: 'update', fields: [], status: null, assignedTo: 'Jordan Lee' }] }],
+      assignmentEpisodes: [{ ...aiEpisode, startAssignedByName: 'Workflow', startedAt: at(0.05) }],
+    });
+    expect(items.map((i) => i.key)).toEqual(['wf-905']);
+    expect(items[0].reason).toBe('assigned Jordan Lee');
+    expect(items[0].extra).toEqual(['assigned Jordan Lee']);
+  });
+
+  test('with machine activity, every machine row is its own line', () => {
+    const items = buildHistoryItems({ activities: [
+      { id: 1, activityType: 'mirror_conflict', performedBy: 'Mirror reconciliation', performedAt: at(0), details: { note: 'a' } },
+      { id: 2, activityType: 'mirror_conflict', performedBy: 'Mirror reconciliation', performedAt: at(1), details: { note: 'b' } },
+      { id: 3, activityType: 'ai_triage', performedBy: 'Ticket Pulse AI', performedAt: at(2), details: { note: 'c' } },
+    ] });
+    expect(items).toHaveLength(3);
+    expect(items.every((i) => i.machine && !i.items)).toBe(true);
+    expect(groupByActor(items).map((r) => r.items.length)).toEqual([1, 2]);
+  });
+
+  test('workflowRunSummary reads the actions in plain words', () => {
+    expect(workflowRunSummary({ actions: [{ type: 'email', to: 2, cc: 1, sent: true }, { type: 'note' }] })).toBe('e-mailed 3 people, added a note');
+    expect(workflowRunSummary({ actions: [{ type: 'update', fields: ['priority', 'internalCategoryId'], status: null }] })).toBe('set priority, category');
+    expect(workflowRunSummary({})).toBe('');
+  });
+});
+describe('macro_applied (lane D macros, QA 11-05)', () => {
+  test('one people-visible line by the person who applied it; the steps go to the details', () => {
+    const [it] = buildHistoryItems({ activities: [{
+      id: 81, activityType: 'macro_applied', performedBy: 'Alex Rivera', performedAt: '2026-11-05T18:00:00.000Z',
+      details: {
+        source: 'ticketpulse_native', actorKind: 'human', macroId: 4, macroName: 'Laptop handover',
+        note: 'Applied macro “Laptop handover”: set priority to High; added a note',
+        steps: [
+          { type: 'priority', summary: 'Set priority to High', ok: true },
+          { type: 'note', summary: 'Added a note', ok: true },
+          { type: 'status', summary: 'Set status to Pending', ok: true, skipped: true, reason: 'A later status step in this macro wins' },
+          { type: 'assign', summary: 'Assigned to Sam Ortiz', ok: false, error: 'Sam Ortiz is away' },
+        ],
+      },
+    }] });
+    expect(it).toMatchObject({ event: 'macro', actor: 'Alex Rivera', actorType: 'person', machine: false, verb: 'applied macro “Laptop handover”', reason: '1 step failed', detail: null });
+    expect(it.extra).toEqual([
+      'Set priority to High',
+      'Added a note',
+      'Set status to Pending · skipped: A later status step in this macro wins',
+      'Assigned to Sam Ortiz · failed: Sam Ortiz is away',
+    ]);
+    const [clean] = buildHistoryItems({ activities: [{ id: 82, activityType: 'macro_applied', performedBy: 'Alex Rivera', performedAt: '2026-11-05T18:00:00.000Z', details: { actorKind: 'human', macroName: 'Close as duplicate', steps: [{ type: 'status', summary: 'Set status to Closed', ok: true }] } }] });
+    expect(clean).toMatchObject({ reason: '1 step', machine: false });
   });
 });

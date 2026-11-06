@@ -7,6 +7,13 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 // Availability (native Vacation Tracker replacement): My time (balances, live
 // verdict, booking), Team calendar, Approvals and the admin-only Settings tab.
 
+// QA 11-05: the booking form's options are the app switch (Radix). Inside a
+// <form> Radix measures its hidden input with ResizeObserver, which jsdom
+// lacks — every browser has it.
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
+}
+
 const pad = (n) => String(n).padStart(2, '0');
 const now = new Date();
 const TODAY = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;

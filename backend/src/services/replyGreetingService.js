@@ -77,18 +77,38 @@ export function clearReplyGreetingCache() {
 const firstName = (name) => String(name || '').trim().split(/\s+/)[0] || '';
 const nameFromEmail = (email) => String(email || '').split('@')[0].replace(/[._-]+/g, ' ').replace(/(^|\s)(\w)/g, (m, sp, c) => sp + c.toUpperCase());
 
+const escapeHtml = (value) => String(value)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
 /**
  * Fill the greeting placeholders. Unknown tokens are removed rather than
  * shipped literally ("Hi {{requester.firstName}}," in a customer's inbox).
+ *
+ * Macros (QA 11-05) reuse this filler with three more inputs — the assignee,
+ * the workspace and the requester's address — and `{{ticket.displayRef}}`, the
+ * Mail Workflows spelling of the ticket number. `escape: true` when the text
+ * is HTML, so a name like "O'Neil <IT>" cannot break the markup.
  */
-export function fillGreetingPlaceholders(text, { requester = null, agent = null, ticket = null } = {}) {
+export function fillGreetingPlaceholders(text, {
+  requester = null, agent = null, ticket = null, assignee = null, workspace = null,
+} = {}, { escape = false } = {}) {
+  const ref = String(ticket?.displayRef || ticket?.ref || '').trim();
   const map = {
     'requester.firstName': firstName(requester?.name) || firstName(nameFromEmail(requester?.email)) || 'there',
     'requester.name': String(requester?.name || '').trim() || nameFromEmail(requester?.email) || 'there',
+    'requester.email': String(requester?.email || '').trim(),
     'agent.firstName': firstName(agent?.name) || '',
     'agent.name': String(agent?.name || '').trim(),
-    'ticket.ref': String(ticket?.displayRef || ticket?.ref || '').trim(),
+    'assignee.firstName': firstName(assignee?.name) || '',
+    'assignee.name': String(assignee?.name || '').trim(),
+    'ticket.ref': ref,
+    'ticket.displayRef': ref,
     'ticket.subject': String(ticket?.subject || '').trim(),
+    'workspace.name': String(workspace?.name || '').trim(),
   };
-  return String(text || '').replace(/\{\{\s*([a-zA-Z.]+)\s*\}\}/g, (_, key) => (key in map ? map[key] : ''));
+  return String(text || '').replace(/\{\{\s*([a-zA-Z.]+)\s*\}\}/g, (_, key) => {
+    if (!(key in map)) return '';
+    return escape ? escapeHtml(map[key]) : map[key];
+  });
 }

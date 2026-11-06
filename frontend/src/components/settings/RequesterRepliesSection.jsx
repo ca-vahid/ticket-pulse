@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AlertTriangle, Check, MessageSquareReply } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
 import FancySelect from '../common/FancySelect';
+import { Switch as SharedSwitch } from '../ui/switch';
 
 /**
  * Settings → Ticket Ops → When a requester replies (13 Oct 2026; one page
@@ -33,19 +34,15 @@ const FOLLOW_UP_SWITCHES = [
 const REOPEN_LABEL = 'Reopen the ticket';
 const THANKS_LABEL = 'A thank-you or out-of-office reply does not reopen';
 
+// QA 11-05 #1: the shared app switch, with this page's "<label> on/off" name.
 function Switch({ checked, disabled, label, onClick }) {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked === true}
+    <SharedSwitch
+      checked={checked === true}
       aria-label={`${label} ${checked ? 'on' : 'off'}`}
-      onClick={onClick}
+      onCheckedChange={() => onClick?.()}
       disabled={disabled}
-      className={`tp-focus-ring relative inline-flex h-5 w-9 shrink-0 rounded-full disabled:opacity-60 ${checked ? 'bg-primary' : 'bg-muted-foreground/40'}`}
-    >
-      <span className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-card shadow" style={{ transform: checked ? 'translateX(16px)' : 'translateX(0)' }} aria-hidden="true" />
-    </button>
+    />
   );
 }
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Activity, AtSign, CheckCircle2, RefreshCw, Save, XCircle } from 'lucide-react';
 import { settingsAPI } from '../../services/api';
+import { Switch } from '../ui/switch';
 
 /**
  * Sender identity card (Phase EB) — sits at the top of the Email Branding
@@ -20,21 +21,12 @@ function LaneSwitch({ label, help, checked, busy, onToggle, testId }) {
           <p className="text-sm font-semibold text-foreground/85">{label}</p>
           <p className="mt-0.5 text-xs text-muted-foreground">{help}</p>
         </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={checked}
+        <Switch
+          checked={checked === true}
           aria-label={`${label} ${checked ? 'on' : 'off'}`}
-          onClick={onToggle}
+          onCheckedChange={() => onToggle?.()}
           disabled={busy}
-          className={`tp-focus-ring relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-60 ${checked ? 'bg-blue-600' : 'bg-muted-foreground/40'}`}
-        >
-          <span
-            className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-card shadow transition-transform"
-            style={{ transform: checked ? 'translateX(16px)' : 'translateX(0)' }}
-            aria-hidden="true"
-          />
-        </button>
+        />
       </div>
     </div>
   );
@@ -263,21 +255,12 @@ export default function SenderIdentityCard() {
                   (Exchange usually shows the mailbox&apos;s directory name).
                 </p>
               </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={replyUsesAgentName}
+              <Switch
+                checked={replyUsesAgentName === true}
                 aria-label={`Replies show the agent's name ${replyUsesAgentName ? 'on' : 'off'}`}
-                onClick={toggleReplyUsesAgentName}
+                onCheckedChange={() => toggleReplyUsesAgentName()}
                 disabled={togglingReplyName}
-                className={`tp-focus-ring relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-60 ${replyUsesAgentName ? 'bg-blue-600' : 'bg-muted-foreground/40'}`}
-              >
-                <span
-                  className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-card shadow transition-transform"
-                  style={{ transform: replyUsesAgentName ? 'translateX(16px)' : 'translateX(0)' }}
-                  aria-hidden="true"
-                />
-              </button>
+              />
             </div>
             {toggleError && <p className="mt-1.5 text-xs text-red-600 dark:text-red-300" role="alert">{toggleError}</p>}
           </div>
@@ -310,21 +293,12 @@ export default function SenderIdentityCard() {
                   copy them too. Never use an address FreshService reads: it would file the copy as a ticket.
                 </p>
               </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={requesterReplyCopy}
+              <Switch
+                checked={requesterReplyCopy === true}
                 aria-label={`E-mail agents a copy of requester replies ${requesterReplyCopy ? 'on' : 'off'}`}
-                onClick={() => toggleLaneFlag('requesterReplyCopy', !requesterReplyCopy)}
+                onCheckedChange={() => toggleLaneFlag('requesterReplyCopy', !requesterReplyCopy)}
                 disabled={togglingLane === 'requesterReplyCopy'}
-                className={`tp-focus-ring relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-60 ${requesterReplyCopy ? 'bg-blue-600' : 'bg-muted-foreground/40'}`}
-              >
-                <span
-                  className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-card shadow transition-transform"
-                  style={{ transform: requesterReplyCopy ? 'translateX(16px)' : 'translateX(0)' }}
-                  aria-hidden="true"
-                />
-              </button>
+              />
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <label htmlFor="sender-identity-copy-extra" className="text-xs font-medium text-muted-foreground">Also copy</label>

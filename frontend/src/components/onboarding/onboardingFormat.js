@@ -78,9 +78,25 @@ export function fmtWhen(value) {
 
 const SIDE_LABEL = { leave: 'Leave', officeChange: 'Transfer' };
 
+export const NOTICE_CATEGORY_LABELS = {
+  departure: 'Departure notices', new_hire: 'New-hire notices', transfer: 'Transfer notices', leave: 'Leave notices',
+};
+
+/** "Parent › Sub" for a { categoryId, subcategoryId } pair (QA 11-05 #5). */
+export function categoryPairLabel(pair, catById = new Map()) {
+  const top = pair?.categoryId ? catById.get(Number(pair.categoryId)) : null;
+  if (!pair?.categoryId) return 'No category';
+  const sub = pair.subcategoryId ? catById.get(Number(pair.subcategoryId)) : null;
+  const topName = top?.name || `Category ${pair.categoryId}`;
+  return sub ? `${topName} › ${sub.name}` : (pair.subcategoryId ? `${topName} › Category ${pair.subcategoryId}` : topName);
+}
+
 export function changeFieldLabel(field, { templateLabels = {}, templates = {}, item = null } = {}) {
   if (field === 'mode') return 'Mode';
   if (field === 'parentAssigneeTechId') return 'Parent assignee';
+  if (field === 'parentDueOffsetDays') return 'Offboarding parent — due, days after the last day';
+  const n = field.match(/^noticeCategories\.(\w+)$/);
+  if (n) return `${NOTICE_CATEGORY_LABELS[n[1]] || n[1]} — category`;
   let m = field.match(/^(leave|officeChange)\.(assigneeTechId|park)$/);
   if (m) return `${SIDE_LABEL[m[1]]} — ${m[2] === 'park' ? 'park until the date' : 'assignee'}`;
   if (field === 'officeRouting.fallbackTechIds') return 'New hires — any other office: people';
@@ -99,13 +115,15 @@ export function changeFieldLabel(field, { templateLabels = {}, templates = {}, i
   if (m) {
     const list = templateLabels[m[1]] || m[1];
     const title = (templates[m[1]] || []).find((i) => i.key === m[2])?.title || item?.title || m[2];
-    const f = { title: 'title', dueOffsetDays: 'due offset', assigneeTechId: 'assignee', assigneeTechIds: 'people', groupId: 'group' }[m[3]];
+    const f = { title: 'title', dueOffsetDays: 'due offset', assigneeTechId: 'assignee', assigneeTechIds: 'people', groupId: 'group', category: 'category' }[m[3]];
     return f ? `${list} — ${title}: ${f}` : `${list} — ${title}`;
   }
   return field;
 }
 
-export function changeValueLabel(field, value, { techById = new Map(), groupById = new Map() } = {}) {
+export function changeValueLabel(field, value, { techById = new Map(), groupById = new Map(), catById = new Map() } = {}) {
+  if (/\]\.category$/.test(field) || /^noticeCategories\.\w+$/.test(field)) return categoryPairLabel(value, catById);
+  if (field === 'parentDueOffsetDays') return value === null || value === undefined ? '—' : `${value} days`;
   if (/(assigneeTechIds|fallbackTechIds)$/.test(field)) {
     const ids = Array.isArray(value) ? value : [];
     return ids.length ? ids.map((id) => techById.get(Number(id))?.name || `Technician ${id}`).join(', ') : (/^officeRouting/.test(field) ? 'nobody' : 'AI routing');

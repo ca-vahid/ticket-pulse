@@ -1,6 +1,7 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import statusService from './statusService.js';
+import businessCalendarService from './businessCalendarService.js';
 import { ConflictError, NotFoundError, ValidationError } from '../utils/errors.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import {
@@ -66,10 +67,12 @@ const DEFAULT_TEMPLATES = Object.freeze({
     { key: 'disable_account', title: 'Disable Account', dueOffsetDays: 0, assigneeHint: 'Muhammad Shahidullah' },
     { key: 'decommission_account', title: 'Decommissioning Account', dueOffsetDays: 7, assigneeHint: 'Muhammad Shahidullah' },
   ],
+  // QA 11-05 #6: after the fact, a child's offset is BUSINESS days after the
+  // notice (the last day is already past), five by default.
   offboarding_after_fact: [
-    { key: 'laptop', title: 'Laptop', dueOffsetDays: 0 },
-    { key: 'phone', title: 'Phone', dueOffsetDays: 0, assigneeHint: 'Gaby Tonnova' },
-    { key: 'ipad', title: 'iPad', dueOffsetDays: 0 },
+    { key: 'laptop', title: 'Laptop', dueOffsetDays: 5 },
+    { key: 'phone', title: 'Phone', dueOffsetDays: 5, assigneeHint: 'Gaby Tonnova' },
+    { key: 'ipad', title: 'iPad', dueOffsetDays: 5 },
   ],
   // Vahid, 27 Oct 2026: the team works a new hire as User Creation (the
   // account, due a week before the start) then Laptop and Workstation Setup.
@@ -84,6 +87,61 @@ const DEFAULT_TEMPLATES = Object.freeze({
 // and NH Workstation are both the hardware setup).
 const NH_CHILD_KEY = 'workstation';
 const DEFAULT_PARENT_HINT = 'Vahid Haeri';
+
+// QA 11-05 #6: the parent of an offboarding is due a week after the last day
+// (after the fact: a week after the notice). Lives in the templates JSON.
+export const DEFAULT_PARENT_DUE_DAYS = 7;
+export const DEFAULT_AFTER_FACT_BUSINESS_DAYS = 5;
+const MAX_PARENT_DUE_DAYS = 60;
+const PARENT_KEY = '__parent'; // { dueOffsetDays } — its presence also marks settings saved under the 11-05 due rules
+const NOTICE_CATEGORY_KEY = '__noticeCategories';
+
+// QA 11-05 #5: the category every family ticket gets, as the team already
+// files them. Defaults are names (resolved in the workspace's own taxonomy);
+// what is saved is ids. A person's choice on a ticket is never overwritten.
+export const TEMPLATE_CATEGORY_FIT = 'template';
+export const TEMPLATE_CATEGORY_NOTE = 'Set from the onboarding/offboarding template';
+const OO = 'Onboarding & Offboarding';
+const CATEGORY_HINTS = Object.freeze({
+  offboarding: {
+    laptop: [OO, 'Hardware Return / Collection'],
+    phone: [OO, 'Hardware Return / Collection'],
+    ipad: [OO, 'Hardware Return / Collection'],
+    disable_account: [OO, 'Account Decommissioning'],
+    decommission_account: [OO, 'Account Decommissioning'],
+  },
+  // Product decision (11-05): User Creation follows the team's habit (New
+  // Hire Workstation); Onboarding is the alternative.
+  onboarding: {
+    laptop: [OO, 'New Hire Workstation'],
+    workstation: [OO, 'New Hire Workstation'],
+  },
+});
+export const NOTICE_CATEGORY_GROUPS = Object.freeze(['departure', 'new_hire', 'transfer', 'leave']);
+export const NOTICE_CATEGORY_LABELS = Object.freeze({
+  departure: 'Departure notices', new_hire: 'New-hire notices', transfer: 'Transfer notices', leave: 'Leave notices',
+});
+const NOTICE_CATEGORY_HINTS = Object.freeze({
+  departure: [OO, 'Offboarding'],
+  new_hire: [OO, 'Onboarding'],
+  transfer: [OO, 'Onboarding'],
+  leave: ['Service Desk & Routing', 'Non-actionable Notifications'],
+});
+/** classifyHrNotice type → the notice category group (NH automation tickets are not notices). */
+export const NOTICE_TYPE_GROUP = Object.freeze({
+  departure: 'departure',
+  departure_date_change: 'departure',
+  contract_end_change: 'departure',
+  departure_cancelled: 'departure',
+  new_hire: 'new_hire',
+  start_date_change: 'new_hire',
+  new_hire_office_change: 'new_hire',
+  new_hire_cancelled: 'new_hire',
+  transfer: 'transfer',
+  leave: 'leave',
+  leave_change: 'leave',
+});
+const templateFamily = (name) => (name === 'onboarding' ? 'onboarding' : 'offboarding');
 
 // New hires by office (Vahid, 8 Oct 2026): the Laptop and Workstation of a new
 // hire go to ONE person from the list of the hire's office, in turn. An office
@@ -225,6 +283,54 @@ export function dueInstant(iso, timeZone = 'America/Vancouver') {
 
 const dateOnly = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null);
 
+/**
+ * QA 11-05 #6 — the local date a family ticket is due (17:00 that day).
+ *
+ * Offboarding:
+ *   parent                 last day + parentDueOffsetDays (7); after the fact
+ *                          the last day is past, so the notice date + 7
+ *   child, standard        last day + its offset (calendar days), as before
+ *   child, after the fact  its offset in BUSINESS days after the notice
+ *                          (workspace calendar: Settings → Business Hours &
+ *                          Holidays; none = Monday to Friday)
+ *   `floor` (a local date, normally today): a due date on or before it — past,
+ *   or "today at 5 PM" — becomes the next business day, so nothing is ever
+ *   created already overdue.
+ * Onboarding: unchanged (start date + offset; the parent on the start date).
+ */
+export function familyDueDate({
+  kind, afterTheFact = false, role = 'child', offsetDays = 0, date = null, noticeDate = null,
+  parentDueOffsetDays = DEFAULT_PARENT_DUE_DAYS, calendar = null, floor = null,
+}) {
+  const base = date ? (noticeDate && date < noticeDate ? noticeDate : date) : (afterTheFact ? noticeDate : null);
+  if (kind !== 'offboarding') {
+    if (!base) return null;
+    return role === 'parent' ? base : addDays(base, offsetDays || 0);
+  }
+  let due = null;
+  if (role === 'parent') due = base ? addDays(base, parentDueOffsetDays ?? DEFAULT_PARENT_DUE_DAYS) : null;
+  else if (afterTheFact && noticeDate) due = businessCalendarService.addBusinessDays(noticeDate, offsetDays || 0, calendar);
+  else due = base ? addDays(base, offsetDays || 0) : null;
+  if (due && floor && due <= floor) due = businessCalendarService.nextBusinessDate(floor, calendar);
+  return due;
+}
+
+/** Category hint [parent name, sub name] → { categoryId, subcategoryId } in this taxonomy (nulls when absent). */
+export function resolveCategoryHint(hint, categories = []) {
+  if (!Array.isArray(hint) || !hint[0]) return { categoryId: null, subcategoryId: null };
+  const same = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+  const top = categories.find((c) => !c.parentId && same(c.name, hint[0]));
+  if (!top) return { categoryId: null, subcategoryId: null };
+  const sub = hint[1] ? categories.find((c) => c.parentId === top.id && same(c.name, hint[1])) : null;
+  return { categoryId: top.id, subcategoryId: sub?.id ?? null };
+}
+
+const catPair = (v) => ({
+  categoryId: Number(v?.categoryId) > 0 ? Number(v.categoryId) : null,
+  subcategoryId: Number(v?.categoryId) > 0 && Number(v?.subcategoryId) > 0 ? Number(v.subcategoryId) : null,
+});
+const hasOwn = (o, k) => Boolean(o) && Object.prototype.hasOwnProperty.call(o, k);
+
 function plainBody(ticket) {
   const raw = ticket?.descriptionText
     || String(ticket?.description || '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li|tr)>/gi, '\n').replace(/<[^>]+>/g, ' ');
@@ -329,42 +435,79 @@ class HrLifecycleService {
     }), []);
   }
 
+  /** The workspace's active categories ({ id, name, parentId }). Never throws. */
+  async _categories(workspaceId) {
+    return soft(() => prisma.competencyCategory.findMany({
+      where: { workspaceId: Number(workspaceId), isActive: true },
+      select: { id: true, name: true, parentId: true },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      take: 1000,
+    }), []) || [];
+  }
+
   // ------------------------------------------------------------ settings
 
-  _defaults(techs = []) {
+  _defaults(techs = [], categories = []) {
     const byName = new Map(techs.map((t) => [normalizePersonName(t.name), t.id]));
     const resolve = (hint) => (hint ? byName.get(normalizePersonName(hint)) ?? null : null);
     const templates = {};
     for (const name of TEMPLATE_NAMES) {
       templates[name] = DEFAULT_TEMPLATES[name].map(({ assigneeHint, ...item }) => {
         const id = resolve(assigneeHint);
-        return { ...item, assigneeTechId: id, assigneeTechIds: id ? [id] : [], groupId: null };
+        return {
+          ...item, assigneeTechId: id, assigneeTechIds: id ? [id] : [], groupId: null,
+          ...resolveCategoryHint(CATEGORY_HINTS[templateFamily(name)]?.[item.key], categories),
+        };
       });
     }
     const offices = DEFAULT_OFFICE_ROUTING.map(({ hints, ...o }) => ({ ...o, match: [...o.match], assigneeTechIds: hints.map(resolve).filter(Boolean) }));
     return {
       mode: 'off',
       parentAssigneeTechId: resolve(DEFAULT_PARENT_HINT),
+      parentDueOffsetDays: DEFAULT_PARENT_DUE_DAYS,
       officeRouting: { offices, fallbackTechIds: [...new Set(offices.flatMap((o) => o.assigneeTechIds))] },
       templates,
+      noticeCategories: Object.fromEntries(NOTICE_CATEGORY_GROUPS.map((g) => [g, resolveCategoryHint(NOTICE_CATEGORY_HINTS[g], categories)])),
       leave: { assigneeTechId: null, park: true },
       officeChange: { assigneeTechId: null, park: true },
       wake: { leadDays: DEFAULT_LEAD_DAYS, holidayAware: false, rules: [] },
     };
   }
 
+  /** Does a stored row still lean on a category default (an item or notice group saved before 11-05)? */
+  _needsCategoryDefaults(row) {
+    const stored = row?.templates && typeof row.templates === 'object' ? row.templates : null;
+    if (!stored) return true;
+    const notices = stored[NOTICE_CATEGORY_KEY];
+    if (!notices || NOTICE_CATEGORY_GROUPS.some((g) => !hasOwn(notices, g))) return true;
+    return TEMPLATE_NAMES.some((name) => !Array.isArray(stored[name]) || stored[name].some((i) => !hasOwn(i, 'categoryId') && CATEGORY_HINTS[templateFamily(name)]?.[i.key]));
+  }
+
   _normalize(row, defaults) {
     const templates = {};
     const stored = row?.templates && typeof row.templates === 'object' ? row.templates : {};
+    // Saved before the 11-05 due rules: an after-the-fact offset of 0 meant
+    // "the notice day at 5 PM" — the overdue-on-arrival bug — and reads as
+    // the new default of 5 business days until the settings are saved again.
+    const legacyDue = Boolean(row) && !stored[PARENT_KEY];
     for (const name of TEMPLATE_NAMES) {
+      const fallback = new Map((defaults.templates[name] || []).map((d) => [d.key, d]));
       templates[name] = Array.isArray(stored[name]) ? stored[name].map((i) => {
         const ids = assigneeIds(i);
+        let offset = Number(i.dueOffsetDays) || 0;
+        if (legacyDue && name === 'offboarding_after_fact' && offset === 0) offset = DEFAULT_AFTER_FACT_BUSINESS_DAYS;
+        const cat = hasOwn(i, 'categoryId') ? catPair(i) : catPair(fallback.get(String(i.key)));
         return {
-          key: String(i.key), title: String(i.title), dueOffsetDays: Number(i.dueOffsetDays) || 0,
+          key: String(i.key), title: String(i.title), dueOffsetDays: offset,
           assigneeTechId: ids[0] ?? null, assigneeTechIds: ids, groupId: i.groupId ? Number(i.groupId) : null,
+          ...cat,
         };
       }) : defaults.templates[name];
     }
+    const storedNotices = stored[NOTICE_CATEGORY_KEY] && typeof stored[NOTICE_CATEGORY_KEY] === 'object' ? stored[NOTICE_CATEGORY_KEY] : {};
+    const noticeCategories = Object.fromEntries(NOTICE_CATEGORY_GROUPS.map((g) => [g, hasOwn(storedNotices, g) ? catPair(storedNotices[g]) : catPair(defaults.noticeCategories?.[g])]));
+    const parentDue = Number(stored[PARENT_KEY]?.dueOffsetDays);
+    const parentDueOffsetDays = Number.isInteger(parentDue) && parentDue >= 0 && parentDue <= MAX_PARENT_DUE_DAYS ? parentDue : defaults.parentDueOffsetDays;
     const side = (v, d) => ({
       assigneeTechId: v?.assigneeTechId ? Number(v.assigneeTechId) : (v ? null : d.assigneeTechId),
       park: v ? v.park !== false : d.park,
@@ -372,8 +515,10 @@ class HrLifecycleService {
     return {
       mode: HR_LIFECYCLE_MODES.includes(row?.mode) ? row.mode : defaults.mode,
       parentAssigneeTechId: row ? (row.parentAssigneeTechId ?? null) : defaults.parentAssigneeTechId,
+      parentDueOffsetDays,
       officeRouting: normalizeRouting(stored[ROUTING_KEY]) || defaults.officeRouting,
       templates,
+      noticeCategories,
       leave: side(row?.leave, defaults.leave),
       officeChange: side(row?.officeChange, defaults.officeChange),
       wake: normalizeWake(stored[WAKE_KEY]) || defaults.wake,
@@ -387,7 +532,9 @@ class HrLifecycleService {
     // carries the office lists too (rows saved before 8 Oct 2026 do not).
     const seeded = row && row.templates && typeof row.templates === 'object' && row.templates[ROUTING_KEY];
     const techs = seeded || !withTechs ? [] : await this._technicians(workspaceId);
-    const settings = this._normalize(row, this._defaults(techs));
+    // Category defaults are names: one read of the taxonomy, only while something still uses a default.
+    const categories = this._needsCategoryDefaults(row) ? await this._categories(workspaceId) : [];
+    const settings = this._normalize(row, this._defaults(techs, categories));
     return {
       workspaceId: Number(workspaceId),
       ...settings,
@@ -421,11 +568,45 @@ class HrLifecycleService {
       return n;
     };
 
+    // Categories (QA 11-05 #5): a top-level category of this workspace, and a
+    // subcategory under it (or none). Read only when the input carries one.
+    let catById = null;
+    const categoryPair = async (v, where) => {
+      const pair = catPair(v);
+      if (!pair.categoryId) {
+        if (Number(v?.subcategoryId) > 0) throw new ValidationError(`${where}: pick a category before its subcategory`);
+        return { categoryId: null, subcategoryId: null };
+      }
+      if (!catById) catById = new Map((await this._categories(workspaceId)).map((c) => [c.id, c]));
+      const top = catById.get(pair.categoryId);
+      if (!top || top.parentId) throw new ValidationError(`${where}: pick a category of this workspace`);
+      if (pair.subcategoryId) {
+        const sub = catById.get(pair.subcategoryId);
+        if (!sub || sub.parentId !== top.id) throw new ValidationError(`${where}: the subcategory must sit under ${top.name}`);
+      }
+      return pair;
+    };
+
     const next = JSON.parse(JSON.stringify({
       mode: current.mode, parentAssigneeTechId: current.parentAssigneeTechId, templates: current.templates, leave: current.leave, officeChange: current.officeChange,
       officeRouting: current.officeRouting,
       wake: current.wake || { leadDays: DEFAULT_LEAD_DAYS, holidayAware: false, rules: [] },
+      parentDueOffsetDays: current.parentDueOffsetDays ?? DEFAULT_PARENT_DUE_DAYS,
+      noticeCategories: current.noticeCategories || {},
     }));
+    if (input.parentDueOffsetDays !== undefined) {
+      const n = Number(input.parentDueOffsetDays);
+      if (!Number.isInteger(n) || n < 0 || n > MAX_PARENT_DUE_DAYS) throw new ValidationError(`Parent due: a whole number of days from 0 to ${MAX_PARENT_DUE_DAYS} after the last day`);
+      next.parentDueOffsetDays = n;
+    }
+    if (input.noticeCategories !== undefined) {
+      const v = input.noticeCategories || {};
+      if (typeof v !== 'object' || Array.isArray(v)) throw new ValidationError('Notice categories must be an object');
+      for (const g of Object.keys(v)) {
+        if (!NOTICE_CATEGORY_GROUPS.includes(g)) throw new ValidationError(`Unknown notice kind: ${g}`);
+        next.noticeCategories[g] = await categoryPair(v[g], NOTICE_CATEGORY_LABELS[g]);
+      }
+    }
     if (input.officeRouting !== undefined) {
       const r = input.officeRouting || {};
       if (!Array.isArray(r.offices)) throw new ValidationError('New hires by office: the office list must be a list');
@@ -462,6 +643,13 @@ class HrLifecycleService {
         if (!Array.isArray(list)) throw new ValidationError(`${TEMPLATE_LABELS[name]}: the child list must be a list`);
         if (list.length > MAX_CHILDREN) throw new ValidationError(`${TEMPLATE_LABELS[name]}: at most ${MAX_CHILDREN} children`);
         const seen = new Set();
+        const before = new Map((current.templates?.[name] || []).map((i) => [i.key, i]));
+        const cats = [];
+        for (const [i, item] of list.entries()) {
+          const where = `${TEMPLATE_LABELS[name]} — ${String(item?.title || `#${i + 1}`).trim()}`;
+          // An older tab that knows nothing of categories keeps what is saved.
+          cats.push(hasOwn(item, 'categoryId') ? await categoryPair(item, where) : catPair(before.get(String(item?.key || ''))));
+        }
         next.templates[name] = list.map((item, i) => {
           const title = String(item?.title || '').replace(/\s+/g, ' ').trim();
           if (!title || title.length > 120) throw new ValidationError(`${TEMPLATE_LABELS[name]} #${i + 1}: a title of 1–120 characters is required`);
@@ -471,6 +659,7 @@ class HrLifecycleService {
           seen.add(key);
           const offset = Number(item?.dueOffsetDays ?? 0);
           if (!Number.isInteger(offset) || offset < -30 || offset > 90) throw new ValidationError(`${TEMPLATE_LABELS[name]} — ${title}: due offset must be a whole number of days between -30 and 90`);
+          if (name === 'offboarding_after_fact' && offset < 0) throw new ValidationError(`${TEMPLATE_LABELS[name]} — ${title}: business days after the notice cannot be negative`);
           // Several people may share a child: they take turns (see _pickAssignee).
           // A page that only knows the single field (an older tab) sends a stale list: the single field wins then.
           const listed = Array.isArray(item?.assigneeTechIds) ? item.assigneeTechIds : null;
@@ -485,6 +674,7 @@ class HrLifecycleService {
             assigneeTechId: ids[0] ?? null,
             assigneeTechIds: ids,
             groupId: groupOrNull(item?.groupId, `${TEMPLATE_LABELS[name]} — ${title}`),
+            ...cats[i],
           };
         });
       }
@@ -536,6 +726,10 @@ class HrLifecycleService {
     };
     push('mode', before.mode, after.mode);
     push('parentAssigneeTechId', before.parentAssigneeTechId, after.parentAssigneeTechId);
+    push('parentDueOffsetDays', before.parentDueOffsetDays, after.parentDueOffsetDays);
+    for (const g of NOTICE_CATEGORY_GROUPS) {
+      push(`noticeCategories.${g}`, catPair(before.noticeCategories?.[g]), catPair(after.noticeCategories?.[g]));
+    }
     for (const side of ['leave', 'officeChange']) {
       push(`${side}.assigneeTechId`, before[side]?.assigneeTechId, after[side]?.assigneeTechId);
       push(`${side}.park`, before[side]?.park, after[side]?.park);
@@ -569,6 +763,7 @@ class HrLifecycleService {
         if (was.length > 1 || now.length > 1) push(`templates.${name}[${item.key}].assigneeTechIds`, was, now);
         else push(`templates.${name}[${item.key}].assigneeTechId`, was[0], now[0]);
         push(`templates.${name}[${item.key}].groupId`, prev.groupId, item.groupId);
+        push(`templates.${name}[${item.key}].category`, catPair(prev), catPair(item));
       }
       const order = (list) => list.map((i) => i.key).filter((k) => aBy.has(k) && bBy.has(k));
       if (JSON.stringify(order(a)) !== JSON.stringify(order(b))) push(`templates.${name}.order`, order(a), order(b));
@@ -587,7 +782,13 @@ class HrLifecycleService {
     const data = {
       mode: next.mode,
       parentAssigneeTechId: next.parentAssigneeTechId,
-      templates: { ...next.templates, [ROUTING_KEY]: next.officeRouting, [WAKE_KEY]: next.wake },
+      templates: {
+        ...next.templates,
+        [ROUTING_KEY]: next.officeRouting,
+        [WAKE_KEY]: next.wake,
+        [PARENT_KEY]: { dueOffsetDays: next.parentDueOffsetDays ?? DEFAULT_PARENT_DUE_DAYS },
+        [NOTICE_CATEGORY_KEY]: Object.fromEntries(NOTICE_CATEGORY_GROUPS.map((g) => [g, catPair(next.noticeCategories?.[g])])),
+      },
       leave: next.leave,
       officeChange: next.officeChange,
       updatedBy: who,
@@ -647,6 +848,128 @@ class HrLifecycleService {
   }
 
   _isNative(t) { return t?.origin === 'ticketpulse'; }
+
+  /** The business calendar an offboarding's due dates walk (null = Monday to Friday; onboarding needs none). */
+  async _calendarFor(workspaceId, kind) {
+    return kind === 'offboarding' ? businessCalendarService.loadCalendarSafe(Number(workspaceId)) : null;
+  }
+
+  /** The day HR's notice reached IT (stored since 11-05; older families: the day the family was made). */
+  _noticeDateOf(family, tz) {
+    return family?.details?.noticeDate || (family?.createdAt ? localDate(family.createdAt, tz) : null);
+  }
+
+  /** Due date of one member of an existing family when its date moves or it wakes (familyDueDate). */
+  _memberDue(family, { role, offsetDays = 0, date, settings, calendar, tz, floor = null }) {
+    return familyDueDate({
+      kind: family.kind, afterTheFact: family.afterTheFact === true, role, offsetDays, date,
+      noticeDate: family.kind === 'offboarding' ? this._noticeDateOf(family, tz) : null,
+      parentDueOffsetDays: settings?.parentDueOffsetDays ?? DEFAULT_PARENT_DUE_DAYS, calendar,
+      floor: family.kind === 'offboarding' ? floor : null,
+    });
+  }
+
+  /** A child's category from its template (settings), else the built-in default for that key. */
+  _categoryForKey(settings, familyKind, key, template = null) {
+    const names = template ? [template] : (familyKind === 'onboarding' ? ['onboarding'] : ['offboarding_standard', 'offboarding_after_fact']);
+    for (const name of names) {
+      const item = (settings?.templates?.[name] || []).find((i) => i.key === key);
+      if (item && hasOwn(item, 'categoryId')) return catPair(item);
+    }
+    return { categoryId: null, subcategoryId: null };
+  }
+
+  /** The category a notice of this type gets (Settings → notice categories), or nulls. */
+  _noticeCategory(settings, type) {
+    const group = NOTICE_TYPE_GROUP[type];
+    return group ? catPair(settings?.noticeCategories?.[group]) : { categoryId: null, subcategoryId: null };
+  }
+
+  /**
+   * QA 11-05 #5: give an uncategorized family ticket its template category,
+   * as a system change in its history (no workflow event). Never overwrites
+   * a category somebody — or the AI — already set. The AI run that may
+   * follow keeps it (fit 'template', see assignmentPipelineService).
+   *
+   * Live (default): TP-born through updateTicketFields with no fields_updated
+   * event, then the one ticket.categorized the AI would have fired (workflows
+   * may wait for the category, QA 09-23 #1); FS-born through the FS
+   * write-back, like the notice's owner and due date.
+   * backfill: no event at all; FS-born tickets get the Ticket Pulse category
+   * on our row only (no FreshService write), with the same history row.
+   * Returns true when it wrote. Never throws.
+   */
+  async _applyCategory(t, pair, out, { recheck = true, backfill = false } = {}) {
+    const { categoryId, subcategoryId } = catPair(pair);
+    if (!t || !categoryId) return false;
+    try {
+      const row = recheck
+        ? await soft(() => prisma.ticket.findFirst({ where: { id: t.id, workspaceId: t.workspaceId }, select: { internalCategoryId: true } }))
+        : { internalCategoryId: t.internalCategoryId ?? null };
+      if (row?.internalCategoryId) return false;
+      const svc = await this._ticketService();
+      const input = { internalCategoryId: categoryId, internalSubcategoryId: subcategoryId };
+      if (this._isNative(t)) {
+        await svc.updateTicketFields(t.id, t.workspaceId, input, HR_LIFECYCLE_ACTOR, { emitEvent: false });
+      } else if (backfill) {
+        await this._writeCategoryLocally(t, input);
+      } else {
+        await svc.updateFsTicket(t.id, t.workspaceId, input, HR_LIFECYCLE_ACTOR, { notifyLifecycle: false, auditDetails: { reason: TEMPLATE_CATEGORY_NOTE } });
+      }
+      await this._markTemplateCategory(t.id);
+      t.internalCategoryId = categoryId;
+      if (!backfill && this._isNative(t)) {
+        import('./ticketLifecycleNotificationService.js')
+          .then(({ emitTicketEvent }) => emitTicketEvent?.('ticket.categorized', t.id, {
+            source: 'hr_lifecycle',
+            dedupeStamp: `categorized:${t.id}:${categoryId}:${subcategoryId || 0}`,
+            extra: { first: true, fromCategoryId: null, toCategoryId: categoryId, toSubcategoryId: subcategoryId || null, fit: TEMPLATE_CATEGORY_FIT, by: 'automation' },
+          }))
+          .catch(() => {});
+      }
+      return true;
+    } catch (err) {
+      out?.warnings?.push(`Category on ${ticketDisplayRef(t)} not set: ${err.message}`);
+      return false;
+    }
+  }
+
+  /** FS-born, backfill only: the Ticket Pulse category on our row and a history row; FreshService is not written. */
+  async _writeCategoryLocally(t, { internalCategoryId, internalSubcategoryId }) {
+    const names = await soft(() => prisma.competencyCategory.findMany({
+      where: { id: { in: [internalCategoryId, internalSubcategoryId].filter(Boolean) } }, select: { id: true, name: true },
+    }), []) || [];
+    const name = (id) => names.find((n) => n.id === id)?.name || null;
+    await prisma.ticket.update({
+      where: { id: t.id },
+      data: {
+        internalCategoryId, internalSubcategoryId: internalSubcategoryId || null,
+        tpSkill: name(internalCategoryId), tpSubskill: internalSubcategoryId ? name(internalSubcategoryId) : null,
+      },
+    });
+    const { default: activityRepo } = await import('./ticketActivityRepository.js');
+    await activityRepo.create({
+      ticketId: t.id,
+      activityType: 'fields_updated',
+      performedBy: HR_LIFECYCLE_ACTOR.name,
+      performedAt: new Date(),
+      details: {
+        source: 'hr_lifecycle_backfill', actorKind: 'system', reason: TEMPLATE_CATEGORY_NOTE,
+        changes: {
+          internalCategoryId: { from: null, to: internalCategoryId },
+          ...(internalSubcategoryId ? { internalSubcategoryId: { from: null, to: internalSubcategoryId } } : {}),
+        },
+      },
+    }).catch(() => {});
+  }
+
+  /** Mark a category as the template's, so the AI classification keeps it. */
+  async _markTemplateCategory(ticketId) {
+    return soft(() => prisma.ticket.update({
+      where: { id: Number(ticketId) },
+      data: { internalCategoryFit: TEMPLATE_CATEGORY_FIT, internalCategoryRationale: TEMPLATE_CATEGORY_NOTE },
+    }));
+  }
 
   async _assign(t, techId, out) {
     if (!techId || Number(t.assignedTechId) === Number(techId)) return;
@@ -1186,9 +1509,12 @@ class HrLifecycleService {
       }
       if (fx.effect === 'move' || fx.effect === 'office') {
         if (!c.date && fx.effect === 'move') return { decision: 'no_date', familyKind: fx.family, shadowOf: shadowFamily.eventId, summary: `${person}: the change notice has no clear new date — left for a person${tag}` };
+        const shadowFam = { kind: fx.family, afterTheFact: sp?.afterTheFact === true, details: { noticeDate: sp?.noticeDate || null }, createdAt: null };
+        const calendar = c.date ? await this._calendarFor(ws, fx.family) : null;
+        const due = (role, offsetDays = 0) => this._memberDue(shadowFam, { role, offsetDays, date: c.date, settings, calendar, tz, floor: localDate(new Date(), tz) });
         const moves = c.date ? [
-          ...(sp?.parent ? [{ ticketId: sp.parent.ticketId, role: 'parent', dueDate: c.date }] : []),
-          ...(sp?.children || []).map((ch) => ({ ticketId: null, title: ch.title, role: 'child', dueDate: addDays(c.date, ch.dueOffsetDays || 0) })),
+          ...(sp?.parent ? [{ ticketId: sp.parent.ticketId, role: 'parent', dueDate: due('parent') }] : []),
+          ...(sp?.children || []).map((ch) => ({ ticketId: null, title: ch.title, role: 'child', dueDate: due('child', ch.dueOffsetDays || 0) })),
         ] : [];
         const fromDate = sp?.effectiveDate || sp?.parent?.dueDate || null;
         return {
@@ -1212,9 +1538,11 @@ class HrLifecycleService {
           const officeChange = changes.find((x) => x.field === 'office');
           const fam = await this._familyTickets(family);
           const openChildren = fam.members.filter((m) => !m.terminal && m.member.role === 'child');
+          const calendar = dateChange ? await this._calendarFor(ws, family.kind) : null;
+          const due = (role, offsetDays = 0) => this._memberDue(family, { role, offsetDays, date: c.date, settings, calendar, tz, floor: localDate(new Date(), tz) });
           const moves = dateChange ? [
-            ...(fam.parent && !fam.parentTerminal ? [{ ticketId: fam.parent.id, ref: ticketDisplayRef(fam.parent), dueDate: c.date, role: 'parent' }] : []),
-            ...openChildren.map((m) => ({ ticketId: m.ticket.id, ref: ticketDisplayRef(m.ticket), dueDate: addDays(c.date, m.member.dueOffsetDays || 0), role: 'child' })),
+            ...(fam.parent && !fam.parentTerminal ? [{ ticketId: fam.parent.id, ref: ticketDisplayRef(fam.parent), dueDate: due('parent'), role: 'parent' }] : []),
+            ...openChildren.map((m) => ({ ticketId: m.ticket.id, ref: ticketDisplayRef(m.ticket), dueDate: due('child', m.member.dueOffsetDays || 0), role: 'child' })),
           ] : [];
           return {
             decision: 'hr_correction',
@@ -1234,6 +1562,13 @@ class HrLifecycleService {
       const template = fx.family === 'onboarding' ? 'onboarding' : (afterTheFact ? 'offboarding_after_fact' : 'offboarding_standard');
       // After the fact the last day is already past: the work is due from today.
       const baseDate = c.date ? (c.noticeDate && c.date < c.noticeDate ? c.noticeDate : c.date) : (afterTheFact ? c.noticeDate : null);
+      // QA 11-05 #6: one rule for every due date of the family (familyDueDate).
+      const calendar = await this._calendarFor(ws, fx.family);
+      const today = localDate(new Date(), tz);
+      const dueOf = (role, offsetDays = 0) => familyDueDate({
+        kind: fx.family, afterTheFact, role, offsetDays, date: c.date || null, noticeDate: c.noticeDate || null,
+        parentDueOffsetDays: settings.parentDueOffsetDays, calendar, floor: fx.family === 'offboarding' ? today : null,
+      });
       const children = [];
       let byOffice = null;
       for (const item of settings.templates[template] || []) {
@@ -1245,11 +1580,13 @@ class HrLifecycleService {
           key: item.key,
           title: item.title,
           dueOffsetDays: item.dueOffsetDays,
-          dueDate: baseDate ? addDays(baseDate, item.dueOffsetDays) : null,
+          dueDate: dueOf('child', item.dueOffsetDays),
           assigneeTechId: office ? byOffice.techId : await this._pickAssignee(ws, item, tz),
           ...(office && byOffice.techId ? { byOffice: byOffice.label } : {}),
           ...(ids.length > 1 ? { assigneeTechIds: ids } : {}),
           groupId: item.groupId || null,
+          categoryId: item.categoryId || null,
+          subcategoryId: item.categoryId ? item.subcategoryId || null : null,
           subject: `Child Ticket - ${item.title} - ${ticket.subject}`.slice(0, 500),
         });
       }
@@ -1266,7 +1603,9 @@ class HrLifecycleService {
         }
         for (const e of existing) {
           if (used.has(e.ticket.id)) continue;
-          children.push({ key: e.key, title: e.title, dueOffsetDays: e.dueOffsetDays, dueDate: baseDate ? addDays(baseDate, e.dueOffsetDays) : null, assigneeTechId: null, groupId: null, subject: e.ticket.subject, ...card(e) });
+          const item = (settings.templates[template] || []).find((i) => i.key === e.key);
+          const cat = item ? { categoryId: item.categoryId || null, subcategoryId: item.categoryId ? item.subcategoryId || null : null } : this._categoryForKey(settings, fx.family, e.key);
+          children.push({ key: e.key, title: e.title, dueOffsetDays: e.dueOffsetDays, dueDate: dueOf('child', e.dueOffsetDays), assigneeTechId: null, groupId: null, subject: e.ticket.subject, ...cat, ...card(e) });
         }
       }
       const taken = children.filter((x) => x.adoptTicketId);
@@ -1278,7 +1617,8 @@ class HrLifecycleService {
         template,
         afterTheFact,
         effectiveDate: c.date || null,
-        parent: { ticketId: ticket.id, assigneeTechId: settings.parentAssigneeTechId || null, dueDate: baseDate },
+        noticeDate: c.noticeDate || null,
+        parent: { ticketId: ticket.id, assigneeTechId: settings.parentAssigneeTechId || null, dueDate: dueOf('parent') },
         children,
         ...(adopt ? { adopt: true } : {}),
         summary: adopt
@@ -1296,9 +1636,11 @@ class HrLifecycleService {
 
     if (fx.effect === 'move' || (fx.effect === 'office' && c.date && c.date !== dateOnly(family.effectiveDate))) {
       if (!c.date) return { decision: 'no_date', familyId: family.id, familyKind: fx.family, summary: `${person}: the change notice has no clear new date — left for a person` };
+      const calendar = await this._calendarFor(ws, family.kind);
+      const due = (role, offsetDays = 0) => this._memberDue(family, { role, offsetDays, date: c.date, settings, calendar, tz, floor: localDate(new Date(), tz) });
       const moves = [
-        ...(fam.parent && !fam.parentTerminal ? [{ ticketId: fam.parent.id, ref: ticketDisplayRef(fam.parent), dueDate: c.date, role: 'parent' }] : []),
-        ...openChildren.map((m) => ({ ticketId: m.ticket.id, ref: ticketDisplayRef(m.ticket), dueDate: addDays(c.date, m.member.dueOffsetDays || 0), role: 'child' })),
+        ...(fam.parent && !fam.parentTerminal ? [{ ticketId: fam.parent.id, ref: ticketDisplayRef(fam.parent), dueDate: due('parent'), role: 'parent' }] : []),
+        ...openChildren.map((m) => ({ ticketId: m.ticket.id, ref: ticketDisplayRef(m.ticket), dueDate: due('child', m.member.dueOffsetDays || 0), role: 'child' })),
       ];
       return {
         decision: fx.effect === 'office' ? 'office_changed' : 'move_dates',
@@ -1369,6 +1711,11 @@ class HrLifecycleService {
     let familyId = plan.familyId || null;
     let outcome = 'done';
     try {
+      // QA 11-05 #5: every HR notice (a family's parent, a re-send, a change,
+      // leave, transfer) gets its kind's category when it has none.
+      if (c?.type && NOTICE_TYPE_GROUP[c.type] && plan.decision !== 'ignored') {
+        await this._applyCategory(ticket, this._noticeCategory(settings, c.type), out);
+      }
       switch (plan.decision) {
       case 'create_family':
       case 'create_family_after_the_fact':
@@ -1432,7 +1779,12 @@ class HrLifecycleService {
         status: 'open',
         template: plan.template,
         sourceTicketIds: [ticket.id],
-        details: { title: c.title || null, manager: c.manager || null, noticeType: c.type, effectiveImmediately: c.effectiveImmediately === true, ...(plan.adopt ? { organisedLater: true } : {}) },
+        details: {
+          title: c.title || null, manager: c.manager || null, noticeType: c.type, effectiveImmediately: c.effectiveImmediately === true,
+          // QA 11-05 #6: after the fact, the children are due business days after THIS date.
+          noticeDate: c.noticeDate || plan.noticeDate || null,
+          ...(plan.adopt ? { organisedLater: true } : {}),
+        },
       },
     });
 
@@ -1461,6 +1813,10 @@ class HrLifecycleService {
           });
           // FreshService's own children are already parent/child there; an NH ticket is not.
           if (plan.familyKind === 'onboarding') await this._link(ticket, { id: child.adoptTicketId, origin: child.adoptOrigin, freshserviceTicketId: null, nativeNumber: null }, out);
+          // QA 11-05 #5: a taken-in ticket with no category gets its template's (one that has a category keeps it).
+          if (child.categoryId) {
+            await this._applyCategory({ id: child.adoptTicketId, workspaceId: ws, origin: child.adoptOrigin, nativeNumber: null, freshserviceTicketId: null }, child, out);
+          }
           out.adopted.push({ ticketId: child.adoptTicketId, ref: child.adoptRef, key: child.key, title: child.title });
           lines.push(`<li>${esc(child.adoptRef)} — ${esc(child.title)} (already existed${child.adoptClosed ? ', closed' : ''})</li>`);
         } catch (err) {
@@ -1477,7 +1833,7 @@ class HrLifecycleService {
         else if (g?.freshserviceId) groupFields = { groupId: String(g.freshserviceId) };
       }
       try {
-        const created = await svc.createTicket(ws, {
+        const input = {
           subject: child.subject,
           description: html,
           priority: [1, 2, 3, 4].includes(Number(ticket.priority)) ? Number(ticket.priority) : 2,
@@ -1485,10 +1841,24 @@ class HrLifecycleService {
           ...(child.assigneeTechId && !defer ? { assignedTechId: child.assigneeTechId } : {}),
           ...groupFields,
           ...(child.dueDate ? { dueBy: dueInstant(child.dueDate, tz) } : {}),
+          // QA 11-05 #5: the template's category from the start.
+          ...(child.categoryId ? { internalCategoryId: child.categoryId, internalSubcategoryId: child.subcategoryId || null } : {}),
           // Blank default = the normal AI routing. HR never gets an ack per child.
           runAiTriage: !defer && !child.assigneeTechId,
           notifyRequester: false,
-        }, HR_LIFECYCLE_ACTOR);
+        };
+        let created;
+        try {
+          created = await svc.createTicket(ws, input, HR_LIFECYCLE_ACTOR);
+        } catch (err) {
+          // A category retired since it was picked must never cost the child.
+          if (!input.internalCategoryId) throw err;
+          out.warnings.push(`${child.title}: the template's category was refused (${err.message}); created without it`);
+          delete input.internalCategoryId;
+          delete input.internalSubcategoryId;
+          created = await svc.createTicket(ws, input, HR_LIFECYCLE_ACTOR);
+        }
+        if (input.internalCategoryId) await this._markTemplateCategory(created.id);
         await prisma.hrLifecycleFamilyMember.create({
           data: { familyId: family.id, workspaceId: ws, ticketId: created.id, role: 'child', templateKey: child.key, title: child.title, dueOffsetDays: child.dueOffsetDays },
         });
@@ -1900,7 +2270,16 @@ class HrLifecycleService {
     const tz = await this._timeZone(ws);
     const out = { warnings: [], created: [] };
     const date = dateOnly(family.effectiveDate);
-    if (date && this._isNative(t)) await this._setDue(t, addDays(date, member.dueOffsetDays || 0), tz, out);
+    if (date && this._isNative(t)) {
+      // QA 11-05 #6: the family's own rule (after the fact: business days after
+      // the notice), never earlier than the day after the ticket was made.
+      const calendar = await this._calendarFor(ws, family.kind);
+      const due = this._memberDue(family, {
+        role: 'child', offsetDays: member.dueOffsetDays || 0, date, settings, calendar, tz,
+        floor: t.createdAt ? localDate(t.createdAt, tz) : null,
+      });
+      await this._setDue(t, due, tz, out);
+    }
     if (date && bySystem && !family.afterTheFact) {
       const again = await this._parkUntilNeeded(t, family.kind, date, out, { release: true });
       if (again && again !== 'woken') return { ticketId: t.id, action: 'parked_again' };
@@ -2372,8 +2751,8 @@ class HrLifecycleService {
   }
 
   async people(workspaceId) {
-    const [technicians, groups] = await Promise.all([this._technicians(workspaceId), this._groups(workspaceId)]);
-    return { technicians, groups };
+    const [technicians, groups, categories] = await Promise.all([this._technicians(workspaceId), this._groups(workspaceId), this._categories(workspaceId)]);
+    return { technicians, groups, categories };
   }
 }
 

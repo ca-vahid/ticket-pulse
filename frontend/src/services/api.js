@@ -1002,6 +1002,8 @@ export const ticketsAPI = {
   // Macros (quick-action bundles)
   macros: async () => await api.get('/tickets/macros'),
   applyMacro: async (id, macroId) => await api.post(`/tickets/${id}/macros/${macroId}/apply`),
+  // QA 11-05 #2: what a macro will do on this ticket, for the confirm.
+  previewMacro: async (id, macroId) => await api.get(`/tickets/${id}/macros/${macroId}/preview`),
 
   // Tags (gap plan P1) — TP-side layer, both origins, never written to FS
   listTags: async () => await api.get('/tickets/tags'),

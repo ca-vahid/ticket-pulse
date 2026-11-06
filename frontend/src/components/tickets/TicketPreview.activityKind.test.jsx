@@ -8,6 +8,7 @@ import { ticketsAPI } from '../../services/api';
 
 // MEGA 09-01 TU-2 — peek Activity tab parity: actor-kind chip per row and the
 // per-viewer "hide machine activity" preference (default ON) with a count.
+// QA 11-05 #9: rows are the Activity tab's one-line rows (HistoryRow).
 
 vi.mock('../../services/api', () => ({
   ticketsAPI: {
@@ -75,7 +76,9 @@ describe('TicketPreview activity tab actor kinds (TU-2)', () => {
   test('default: machine rows hidden with a count, visible rows carry kind chips', async () => {
     await openActivity();
     expect(screen.getByTestId('peek-machine-hidden')).toHaveTextContent('2 machine events hidden');
-    const kinds = screen.getAllByTestId('actor-kind-chip').map((c) => c.getAttribute('data-kind'));
+    // QA 11-05 #9: the peek uses the Activity tab's one-line rows; the kind rides on the row, no pill.
+    const kinds = screen.getAllByTestId('history-row').map((r) => r.getAttribute('data-kind'));
+    expect(screen.queryByTestId('actor-kind-chip')).not.toBeInTheDocument();
     expect(kinds).toEqual(expect.arrayContaining(['human', 'freshservice_sync']));
     expect(kinds).not.toContain('reconcile');
     expect(kinds).not.toContain('mirror');
@@ -86,6 +89,6 @@ describe('TicketPreview activity tab actor kinds (TU-2)', () => {
     localStorage.setItem('tp.ticketHistory.hideMachine', 'false');
     await openActivity();
     expect(screen.queryByTestId('peek-machine-hidden')).not.toBeInTheDocument();
-    expect(screen.getAllByTestId('actor-kind-chip').map((c) => c.getAttribute('data-kind'))).toEqual(expect.arrayContaining(['reconcile', 'mirror']));
+    expect(screen.getAllByTestId('history-row').map((r) => r.getAttribute('data-kind'))).toEqual(expect.arrayContaining(['reconcile', 'mirror']));
   });
 });

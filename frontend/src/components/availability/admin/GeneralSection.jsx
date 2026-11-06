@@ -46,7 +46,7 @@ export default function GeneralSection({ config, reload, toast }) {
       </div>
 
       <div className="border-t border-border pt-5">
-        <SectionTitle hint="Both are off by default. When on, the booking form offers them as unticked boxes.">Outlook</SectionTitle>
+        <SectionTitle hint="Both are off by default. When on, the booking form offers them as switches, off to start.">Outlook</SectionTitle>
         <div className="space-y-3">
           <Toggle checked={draft.outlookEventsEnabled} onChange={(v) => set({ outlookEventsEnabled: v })} label="Offer “Add to my Outlook calendar”" hint={outlookHint} />
           <Toggle checked={draft.autoRepliesEnabled} onChange={(v) => set({ autoRepliesEnabled: v })} label="Offer “Set my automatic reply”" hint={outlookHint} />

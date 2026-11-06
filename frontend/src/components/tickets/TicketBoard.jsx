@@ -8,6 +8,7 @@ import { Activity, Circle, Clock3, CheckCircle2, Lock } from 'lucide-react';
 import { PersonAvatar, SlaChip, StatusPill, TypePill, PRIORITY_STRIP_COLORS, PRIORITY_LABELS } from './ticketUi';
 import { baseStatusOf, statusToneFromDefs } from './statusDefs';
 import ErrorBoundary from '../ErrorBoundary';
+import { useDelayedFlag } from '../../hooks/useDelayedFlag';
 
 /**
  * Board view for the tickets queue (QA 07-27 #3): Open / Pending / Closed
@@ -273,6 +274,8 @@ function BoardColumn({ column, tickets, activeBucket, paginated, emptyState, tot
   const highlight = isOver && activeBucket && activeBucket !== column.key;
   // Per-column fetch (QA 10-27 #4): the header carries the column's true total.
   const count = total ?? tickets.length;
+  // Refetching with cards already showing: keep them, dim after a beat.
+  const dimmed = useDelayedFlag(loading && tickets.length > 0);
   return (
     <section
       ref={setNodeRef}
@@ -303,11 +306,14 @@ function BoardColumn({ column, tickets, activeBucket, paginated, emptyState, tot
           the 50-card board page (QA 08-07 #12): on 1080p the columns now run
           to roughly the filter rail's Tags facet instead of stopping at a
           third of the screen. */}
-      <div className="settings-scrollbar flex min-h-[42rem] max-h-[max(48rem,calc(100vh-200px))] flex-col gap-2 overflow-y-auto p-2">
+      <div
+        className={`settings-scrollbar flex min-h-[42rem] max-h-[max(48rem,calc(100vh-200px))] flex-col gap-2 overflow-y-auto p-2 transition-opacity duration-200 ease-out motion-off:transition-none ${dimmed ? 'opacity-60' : ''}`}
+        data-refetching={dimmed ? 'true' : undefined}
+      >
         {children}
         {loading && tickets.length === 0 && (
           <p className="flex items-center justify-center gap-1.5 py-6 text-xs text-muted-foreground">
-            <Activity className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> Loading…
+            <Activity className="h-3.5 w-3.5 animate-spin motion-off:animate-none" aria-hidden="true" /> Loading…
           </p>
         )}
         {!loading && error && tickets.length === 0 && (

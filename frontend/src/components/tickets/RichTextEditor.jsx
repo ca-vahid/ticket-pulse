@@ -354,9 +354,46 @@ const RichTextEditor = forwardRef(function RichTextEditor({
     return () => document.removeEventListener('selectionchange', onSelection);
   }, [headings]);
 
+  // Where the caret last was inside the editor, so a host button (Macros'
+  // "Insert variable", "Insert picture" — QA 11-05 #2) can drop content there
+  // after focus moved to the button.
+  const lastRangeRef = useRef(null);
+  const rememberRange = () => {
+    const el = editorRef.current;
+    const sel = typeof window !== 'undefined' ? window.getSelection() : null;
+    if (el && sel && sel.rangeCount > 0 && el.contains(sel.anchorNode)) lastRangeRef.current = sel.getRangeAt(0).cloneRange();
+  };
+  const insertAtCaret = (command, value) => {
+    const el = editorRef.current;
+    if (!el) return;
+    el.focus();
+    const sel = window.getSelection();
+    if (sel) {
+      sel.removeAllRanges();
+      if (lastRangeRef.current && el.contains(lastRangeRef.current.startContainer)) {
+        sel.addRange(lastRangeRef.current);
+      } else {
+        const end = document.createRange();
+        end.selectNodeContents(el);
+        end.collapse(false);
+        sel.addRange(end);
+      }
+    }
+    const done = typeof document.execCommand === 'function' && document.execCommand(command, false, value);
+    // No editing commands (jsdom, very old engines): append at the end instead.
+    if (!done) {
+      if (command === 'insertText') el.appendChild(document.createTextNode(value));
+      else el.insertAdjacentHTML('beforeend', value);
+    }
+    rememberRange();
+    emit();
+  };
+
   useImperativeHandle(ref, () => ({
     focus: () => editorRef.current?.focus(),
-  }), []);
+    insertText: (text) => insertAtCaret('insertText', String(text ?? '')),
+    insertHtml: (html) => insertAtCaret('insertHTML', String(html ?? '')),
+  }));
 
   // Adopt external value changes (draft restore, clear-after-send).
   useEffect(() => {
@@ -906,8 +943,10 @@ const RichTextEditor = forwardRef(function RichTextEditor({
             role="textbox"
             aria-multiline="true"
             aria-label={ariaLabel}
-            onInput={() => { tidyMentionMarks(); emit(); updateMention(); }}
-            onBlur={() => { emit(); setMention(null); }}
+            onInput={() => { tidyMentionMarks(); emit(); updateMention(); rememberRange(); }}
+            onKeyUp={rememberRange}
+            onMouseUp={rememberRange}
+            onBlur={() => { rememberRange(); emit(); setMention(null); }}
             onKeyDown={(e) => {
               if (onMentionKey(e)) return;
               if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); onSubmit?.(); return; }

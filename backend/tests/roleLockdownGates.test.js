@@ -120,7 +120,7 @@ jest.unstable_mockModule('../src/services/aiProviders/providerModelResolver.js',
 jest.unstable_mockModule('../src/integrations/graphMailClient.js', () => ({ default: {}, createGraphMailClient: jest.fn() }));
 jest.unstable_mockModule('../src/integrations/freshservice.js', () => ({ createFreshServiceClient: jest.fn() }));
 jest.unstable_mockModule('../src/integrations/freshserviceTransformer.js', () => ({ analyzeTicketActivities: jest.fn() }));
-jest.unstable_mockModule('../src/utils/timezone.js', () => ({ convertToTimezone: jest.fn() }));
+jest.unstable_mockModule('../src/utils/timezone.js', () => ({ convertToTimezone: jest.fn(), getDateColumnMonthDay: jest.fn(() => null) }));
 jest.unstable_mockModule('../src/utils/anthropicModels.js', () => ({ DEFAULT_ANTHROPIC_MODEL: 'claude-test' }));
 jest.unstable_mockModule('../src/utils/aiProviders.js', () => ({
   normalizeAiModel: jest.fn((m) => m), providerForModel: jest.fn(() => 'anthropic'),

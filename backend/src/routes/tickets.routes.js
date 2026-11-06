@@ -1807,6 +1807,15 @@ router.get('/:id', asyncHandler(async (req, res) => {
         logger.debug?.(`Urgent clock not attached to ticket ${ticketId}: ${error.message}`);
       }
     }
+    // QA 11-05 #9: Ticket Pulse workflow runs on this ticket, for the Activity
+    // tab (a run that only e-mailed, or stopped, left no other trace). Here in
+    // the internal route, never in getTicket, so the public v1 shape cannot
+    // pick it up. A failure only hides the rows.
+    if (ticket) {
+      ticket.workflowRuns = await import('../services/ticketWorkflowRunsService.js')
+        .then(({ listTicketWorkflowRuns }) => listTicketWorkflowRuns(ticketId))
+        .catch(() => []);
+    }
     res.json({ success: true, data: ticket });
   } catch (err) {
     if (!(err instanceof NotFoundError)) throw err;
@@ -2082,6 +2091,16 @@ router.patch('/:id/tasks/:taskId', asyncHandler(async (req, res) => {
 router.delete('/:id/tasks/:taskId', asyncHandler(async (req, res) => {
   const { default: ticketTaskService } = await import('../services/ticketTaskService.js');
   const result = await ticketTaskService.remove(Number(req.params.taskId), req.workspaceId, req.ticketActor, parseTicketId(req));
+  res.json({ success: true, data: result });
+}));
+
+// What a macro would do on this ticket (QA 11-05 #2): the confirm dialog's
+// step list, with the note/reply rendered and skipped steps explained.
+router.get('/:id/macros/:macroId/preview', asyncHandler(async (req, res) => {
+  const { default: ticketMacroService } = await import('../services/ticketMacroService.js');
+  const result = await ticketMacroService.preview(
+    parseTicketId(req), req.workspaceId, req.params.macroId, req.ticketActor,
+  );
   res.json({ success: true, data: result });
 }));
 

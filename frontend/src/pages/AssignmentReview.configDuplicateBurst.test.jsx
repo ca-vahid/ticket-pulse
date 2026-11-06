@@ -60,9 +60,8 @@ const BASE_CONFIG = {
 };
 
 function findToggleButton() {
-  // ConfigToggle renders label + description next to an icon-only button.
-  const label = screen.getByText('Collapse duplicate bursts');
-  return label.closest('.flex.items-center.justify-between').querySelector('button');
+  // QA 11-05 #1: ConfigToggle is the shared switch, labelled by its <label>.
+  return screen.getByRole('switch', { name: 'Collapse duplicate bursts' });
 }
 
 describe('AssignmentConfigPanel — Collapse duplicate bursts', () => {
@@ -84,9 +83,8 @@ describe('AssignmentConfigPanel — Collapse duplicate bursts', () => {
 
     expect(await screen.findByText('Collapse duplicate bursts')).toBeInTheDocument();
     expect(screen.getByText(/identical subject within 15 minutes/i)).toBeInTheDocument();
-    // Missing field = enabled (back-compat): the ON glyph, not the muted OFF one.
-    const btn = findToggleButton();
-    expect(btn.querySelector('svg')).toHaveClass('text-sky-600');
+    // Missing field = enabled (back-compat).
+    expect(findToggleButton()).toHaveAttribute('aria-checked', 'true');
   });
 
   test('reflects a stored false as OFF', async () => {
@@ -94,7 +92,7 @@ describe('AssignmentConfigPanel — Collapse duplicate bursts', () => {
     render(<AssignmentConfigPanel />);
 
     await screen.findByText('Collapse duplicate bursts');
-    expect(findToggleButton().querySelector('svg')).toHaveClass('text-muted-foreground/50');
+    expect(findToggleButton()).toHaveAttribute('aria-checked', 'false');
   });
 
   test('toggling off and saving sends duplicateBurstEnabled:false', async () => {

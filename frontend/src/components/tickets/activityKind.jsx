@@ -131,12 +131,14 @@ export function ActorKindChip({ kind, className = '' }) {
       </span>
     );
   }
+  // QA 11-05 #9: no pills anywhere — the kind is a quiet coloured word.
+  const text = meta.tone.split(/\s+/).filter((c) => /(^|:)text-/.test(c)).join(' ');
   return (
     <span
       data-testid="actor-kind-chip"
       data-kind={kind}
       title={meta.title}
-      className={`inline-flex items-center rounded-full border px-1.5 py-px text-[10px] font-semibold leading-4 whitespace-nowrap ${meta.tone} ${className}`}
+      className={`inline-flex items-center text-[11px] font-medium leading-4 whitespace-nowrap ${text} ${className}`}
     >
       {meta.label}
     </span>

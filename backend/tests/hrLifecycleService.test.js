@@ -12,7 +12,7 @@ import { jest } from '@jest/globals';
 const db = {};
 let seq = 1000;
 const reset = () => {
-  for (const k of ['settings', 'changes', 'families', 'members', 'events', 'tickets', 'leaves']) db[k] = [];
+  for (const k of ['settings', 'changes', 'families', 'members', 'events', 'tickets', 'leaves', 'categories']) db[k] = [];
   db.technicians = [
     { id: 1, name: 'Vahid Haeri', email: 'vahid@x.ca', photoUrl: null, workspaceId: 1, isActive: true },
     { id: 2, name: 'Muhammad Shahidullah', email: 'ms@x.ca', photoUrl: null, workspaceId: 1, isActive: true },
@@ -80,7 +80,9 @@ const prismaMock = {
       return t ? { ...t, assignedTech: db.technicians.find((x) => x.id === t.assignedTechId) || null } : null;
     }),
     findMany: jest.fn(async ({ where }) => db.tickets.filter((r) => matches(r, where)).map((t) => ({ ...t, assignedTech: db.technicians.find((x) => x.id === t.assignedTechId) || null }))),
+    update: jest.fn(async ({ where, data }) => { const t = db.tickets.find((r) => r.id === where.id); if (t) Object.assign(t, data); return t; }),
   },
+  competencyCategory: { findMany: jest.fn(async ({ where = {} } = {}) => (db.categories || []).filter((c) => !where.id?.in || where.id.in.includes(c.id))) },
   technician: { findMany: jest.fn(async () => db.technicians) },
   requester: { findMany: jest.fn(async () => db.requesters || []) },
   technicianLeave: { findMany: jest.fn(async ({ where }) => db.leaves.filter((l) => where.technicianId.in.includes(l.technicianId))) },
@@ -109,6 +111,7 @@ const ticketSvc = {
   _startAiTriage: jest.fn(async () => ({ queued: true })),
   updateFsTicket: jest.fn(async (id, ws, input) => {
     const t = ticketById(id);
+    if (input.internalCategoryId !== undefined) Object.assign(t, { internalCategoryId: input.internalCategoryId, internalSubcategoryId: input.internalSubcategoryId ?? null });
     if (input.assignedTechId !== undefined) t.assignedTechId = input.assignedTechId;
     if (input.dueBy !== undefined) t.dueBy = new Date(input.dueBy);
     if (input.status !== undefined) t.status = input.status;
@@ -145,7 +148,8 @@ jest.unstable_mockModule('../src/services/statusService.js', () => ({
   default: { baseStatusOf: jest.fn(async (_ws, s) => ({ Open: 'Open', Pending: 'Pending', Resolved: 'Resolved', Closed: 'Closed' }[s] ?? null)) },
 }));
 
-const { default: hr, dueInstant, addDays } = await import('../src/services/hrLifecycleService.js');
+const { default: hr, dueInstant, addDays, familyDueDate } = await import('../src/services/hrLifecycleService.js');
+const { default: cal } = await import('../src/services/businessCalendarService.js');
 const { hrWakeDate } = await import('../src/utils/hrNoticeDates.js');
 
 // ---------------------------------------------------------------- fixtures
@@ -334,7 +338,8 @@ describe('live: family creation', () => {
 
     // Parent (FS-born): assigned to the parent assignee and due on the last day, via the FS write-back path.
     expect(ticketSvc.updateFsTicket).toHaveBeenCalledWith(parent.id, 1, { assignedTechId: 1 }, expect.objectContaining({ name: 'Ticket Pulse (Onboarding)' }));
-    expect(ticketSvc.updateFsTicket).toHaveBeenCalledWith(parent.id, 1, { dueBy: dueInstant(last) }, expect.anything());
+    // QA 11-05 #6: the parent is due a week after the last day.
+    expect(ticketSvc.updateFsTicket).toHaveBeenCalledWith(parent.id, 1, { dueBy: dueInstant(addDays(last, 7)) }, expect.anything());
 
     expect(ticketSvc.createTicket).toHaveBeenCalledTimes(5);
     const inputs = ticketSvc.createTicket.mock.calls.map((c) => c[1]);
@@ -357,7 +362,7 @@ describe('live: family creation', () => {
     expect(parentNote).toMatch(/TP-5000/);
   });
 
-  test('after the fact by date: the notice arrives after the last day → 3 children, due from today', async () => {
+  test('after the fact by date: the notice arrives after the last day → 3 children, due 5 business days after the notice (QA 11-05 #6)', async () => {
     await setMode('live');
     const parent = departure('Kai Lo', day(-3));
     const ev = await hr.onTicketCreated(parent.id, 1);
@@ -365,7 +370,16 @@ describe('live: family creation', () => {
     expect(ticketSvc.createTicket.mock.calls.map((c) => c[1].subject.split(' - ')[1])).toEqual(['Laptop', 'Phone', 'iPad']);
     expect(db.families[0]).toMatchObject({ afterTheFact: true, template: 'offboarding_after_fact' });
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Vancouver' }).format(new Date());
-    expect(ticketSvc.createTicket.mock.calls[0][1].dueBy).toBe(dueInstant(today));
+    // No calendar in this store: Monday to Friday.
+    let due = today;
+    for (let n = 0; n < 5;) {
+      due = addDays(due, 1);
+      const dow = new Date(`${due}T12:00:00Z`).getUTCDay();
+      if (dow !== 0 && dow !== 6) n += 1;
+    }
+    expect(ticketSvc.createTicket.mock.calls.map((c) => c[1].dueBy)).toEqual([dueInstant(due), dueInstant(due), dueInstant(due)]);
+    // The parent: a week after the notice.
+    expect(ticketSvc.updateFsTicket).toHaveBeenCalledWith(parent.id, 1, { dueBy: dueInstant(addDays(today, 7)) }, expect.anything());
   });
 
   test('after the fact by "effective immediately", even with a future date', async () => {
@@ -521,7 +535,7 @@ describe('live: date changes and cancellations', () => {
     const ev = await hr.onTicketCreated(notice.id, 1);
     expect(ev).toMatchObject({ decision: 'move_dates', outcome: 'done' });
     // Parent (FS-born) through the FS path, children (TP-born) through updateTicketFields.
-    expect(ticketSvc.updateFsTicket).toHaveBeenCalledWith(parent.id, 1, { dueBy: dueInstant(to) }, expect.anything());
+    expect(ticketSvc.updateFsTicket).toHaveBeenCalledWith(parent.id, 1, { dueBy: dueInstant(addDays(to, 7)) }, expect.anything());
     const moved = ticketSvc.updateTicketFields.mock.calls.map((c) => [c[0], c[2].dueBy]);
     expect(moved).toHaveLength(4);
     const decom = children.find((t) => t.subject.includes('Decommissioning'));
@@ -785,7 +799,7 @@ describe('organise now: existing tickets are taken in, only the missing ones cre
     expect(members.filter((m) => [laptop.id, phone.id, disable.id].includes(m.ticketId))).toHaveLength(3);
     // The notice already had an owner: not reassigned. Its due date was blank: set.
     expect(ticketSvc.updateFsTicket.mock.calls.some((c) => c[0] === parent.id && c[2].assignedTechId !== undefined)).toBe(false);
-    expect(ticketSvc.updateFsTicket).toHaveBeenCalledWith(parent.id, 1, { dueBy: dueInstant(day(8)) }, expect.anything());
+    expect(ticketSvc.updateFsTicket).toHaveBeenCalledWith(parent.id, 1, { dueBy: dueInstant(addDays(day(8), 7)) }, expect.anything());
     const note = ticketSvc.addPrivateNote.mock.calls.find((c) => c[0] === parent.id)[2].bodyHtml;
     expect(note).toMatch(/Laptop \(already existed\)/);
     expect(note).toMatch(/Disable Account \(already existed, closed\)/);
@@ -1169,5 +1183,239 @@ describe('asleep with no owner until the lead time; the owner is chosen on wakin
     await hr.onTicketCreated(soon.id, 1);
     expect((await hr.parkFamily(famOf(soon).id, 1)).parked).toEqual([]);
     expect(kidsOf(soon).map((t) => t.assignedTechId)).toEqual([3, 3]);
+  });
+});
+
+
+// ---------------------------------------------------------------- QA 11-05 #5: categories
+
+const TAXONOMY = [
+  { id: 132, name: 'Onboarding & Offboarding', parentId: null },
+  { id: 2, name: 'Offboarding', parentId: 132 },
+  { id: 10, name: 'Onboarding', parentId: 132 },
+  { id: 133, name: 'New Hire Workstation', parentId: 132 },
+  { id: 134, name: 'Account Decommissioning', parentId: 132 },
+  { id: 135, name: 'Hardware Return / Collection', parentId: 132 },
+  { id: 144, name: 'Service Desk & Routing', parentId: null },
+  { id: 148, name: 'Non-actionable Notifications', parentId: 144 },
+  { id: 160, name: 'Hardware', parentId: null },
+];
+const pairOf = (t) => [t.internalCategoryId ?? null, t.internalSubcategoryId ?? null];
+
+describe('QA 11-05 #5: every family ticket gets its category', () => {
+  beforeEach(() => { db.categories = TAXONOMY.map((c) => ({ ...c })); });
+
+  test('defaults come from the taxonomy by name: devices → Hardware Return, accounts → Account Decommissioning, new hire → New Hire Workstation; notices by kind', async () => {
+    const s = await hr.getSettings(1);
+    const cat = (name, key) => { const i = s.templates[name].find((x) => x.key === key); return [i.categoryId, i.subcategoryId]; };
+    expect(cat('offboarding_standard', 'laptop')).toEqual([132, 135]);
+    expect(cat('offboarding_standard', 'phone')).toEqual([132, 135]);
+    expect(cat('offboarding_after_fact', 'ipad')).toEqual([132, 135]);
+    expect(cat('offboarding_standard', 'disable_account')).toEqual([132, 134]);
+    expect(cat('offboarding_standard', 'decommission_account')).toEqual([132, 134]);
+    expect(cat('onboarding', 'laptop')).toEqual([132, 133]); // User Creation: the team's habit (product decision)
+    expect(cat('onboarding', 'workstation')).toEqual([132, 133]);
+    expect(s.noticeCategories).toEqual({
+      departure: { categoryId: 132, subcategoryId: 2 },
+      new_hire: { categoryId: 132, subcategoryId: 10 },
+      transfer: { categoryId: 132, subcategoryId: 10 },
+      leave: { categoryId: 144, subcategoryId: 148 },
+    });
+    // A workspace without those names gets no category, never a wrong one.
+    db.categories = [{ id: 7, name: 'Other', parentId: null }];
+    expect((await hr.getSettings(1)).templates.offboarding_standard[0]).toMatchObject({ categoryId: null, subcategoryId: null });
+  });
+
+  test('saved and audited; a subcategory from another category, or a subcategory as the category, is refused', async () => {
+    await setMode('live');
+    const s = await hr.getSettings(1);
+    const items = s.templates.onboarding.map((i) => (i.key === 'laptop' ? { ...i, categoryId: 132, subcategoryId: 10 } : i));
+    const { changes } = await hr.updateSettings(1, { templates: { onboarding: items }, noticeCategories: { transfer: { categoryId: null } } }, { email: 'kim@x.ca' });
+    expect(changes).toEqual(expect.arrayContaining([
+      { field: 'templates.onboarding[laptop].category', before: { categoryId: 132, subcategoryId: 133 }, after: { categoryId: 132, subcategoryId: 10 } },
+      { field: 'noticeCategories.transfer', before: { categoryId: 132, subcategoryId: 10 }, after: { categoryId: null, subcategoryId: null } },
+    ]));
+    expect((await hr.getSettings(1)).templates.onboarding[0]).toMatchObject({ categoryId: 132, subcategoryId: 10 });
+    await expect(hr.updateSettings(1, { noticeCategories: { leave: { categoryId: 144, subcategoryId: 135 } } })).rejects.toThrow(/must sit under Service Desk/);
+    await expect(hr.updateSettings(1, { noticeCategories: { leave: { categoryId: 148 } } })).rejects.toThrow(/category of this workspace/);
+    // An older tab that sends items without categories keeps what is saved.
+    const bare = (await hr.getSettings(1)).templates.onboarding.map((i) => {
+      const rest = { ...i };
+      delete rest.categoryId;
+      delete rest.subcategoryId;
+      return rest;
+    });
+    await hr.updateSettings(1, { templates: { onboarding: bare } });
+    expect((await hr.getSettings(1)).templates.onboarding[0]).toMatchObject({ categoryId: 132, subcategoryId: 10 });
+  });
+
+  test('a new child is created with its template category and marked so the AI run keeps it', async () => {
+    await setMode('live');
+    const parent = departure('Alex Rivera', day(10));
+    await hr.onTicketCreated(parent.id, 1);
+    const inputs = Object.fromEntries(ticketSvc.createTicket.mock.calls.map((c) => [c[1].subject.split(' - ')[1], c[1]]));
+    expect(inputs.Laptop).toMatchObject({ internalCategoryId: 132, internalSubcategoryId: 135, runAiTriage: true });
+    expect(inputs['Disable Account']).toMatchObject({ internalCategoryId: 132, internalSubcategoryId: 134 });
+    const kids = db.members.filter((m) => m.role === 'child').map((m) => ticketById(m.ticketId));
+    expect(kids.every((k) => k.internalCategoryFit === 'template')).toBe(true);
+    // The notice (the parent) is a departure: Offboarding, through the FS write-back (it is FS-born).
+    expect(ticketSvc.updateFsTicket).toHaveBeenCalledWith(parent.id, 1, { internalCategoryId: 132, internalSubcategoryId: 2 }, expect.anything(), expect.objectContaining({ notifyLifecycle: false }));
+    expect(pairOf(parent)).toEqual([132, 2]);
+    expect(parent.internalCategoryFit).toBe('template');
+  });
+
+  test('a retired category never costs the child: created without it, with a warning', async () => {
+    await setMode('live');
+    ticketSvc.createTicket.mockImplementationOnce(async () => { throw new Error('Category is not active'); });
+    const parent = departure('Sam Ortiz', day(10));
+    const ev = await hr.onTicketCreated(parent.id, 1);
+    expect(ticketSvc.createTicket).toHaveBeenCalledTimes(6); // one retry
+    expect(ticketSvc.createTicket.mock.calls[1][1].internalCategoryId).toBeUndefined();
+    expect(ev.details.warnings.join(' ')).toMatch(/category was refused/);
+  });
+
+  test.each([
+    ['new hire', { subject: 'New Hire: Jordan Lee', sender: BAMBOO, text: `Start Date: ${day(40)} Employee #: 4001 Position: Analyst Location: Calgary` }, [132, 10]],
+    ['leave', { subject: 'On Leave Notification: Casey Moore', text: `Expected Leave Date ${day(20)} Expected Return Date 2027-10-12` }, [144, 148]],
+    ['transfer', { subject: 'Transfer Notification: Riley Chen will be transferring from Calgary office to Vancouver office', text: `Transfer date ${day(15)}` }, [132, 10]],
+  ])('a %s notice gets its kind\'s category', async (_kind, notice, pair) => {
+    await setMode('live');
+    const t = fsNotice(notice);
+    await hr.onTicketCreated(t.id, 1);
+    expect(pairOf(t)).toEqual(pair);
+  });
+
+  test('a category somebody already set is never overwritten (notice and adopted ticket alike)', async () => {
+    await setMode('live');
+    const t = fsNotice({ subject: 'On Leave Notification: Casey Moore', text: `Expected Leave Date ${day(20)}` });
+    t.internalCategoryId = 160; t.internalSubcategoryId = null;
+    await hr.onTicketCreated(t.id, 1);
+    expect(pairOf(t)).toEqual([160, null]);
+    expect(ticketSvc.updateFsTicket.mock.calls.some((c) => c[0] === t.id && c[2].internalCategoryId !== undefined)).toBe(false);
+    expect(ticketSvc.updateTicketFields.mock.calls.some((c) => c[0] === t.id && c[2].internalCategoryId !== undefined)).toBe(false);
+  });
+
+  test('organise now: a taken-in ticket with no category gets its template\'s; one with a category keeps it', async () => {
+    await setMode('live');
+    const parent = departure('Morgan Diaz', day(8));
+    const mk = (title) => fsNotice({ subject: `Child Ticket - ${title} - ${parent.subject}`, text: 'Please take the necessary steps' });
+    const laptop = mk('Laptop');
+    const phone = mk('Phone');
+    phone.internalCategoryId = 160;
+    jest.clearAllMocks();
+    await hr.organise(parent.id, 1, { email: 'admin@example.com', name: 'Admin' });
+    expect(pairOf(laptop)).toEqual([132, 135]);
+    expect(pairOf(phone)).toEqual([160, null]);
+  });
+});
+
+// ---------------------------------------------------------------- QA 11-05 #6: offboarding due dates
+
+describe('QA 11-05 #6: offboarding due dates give the family time', () => {
+  // Monday to Friday, with Wednesday 11 Nov 2026 a holiday.
+  const calendar = { timezone: 'America/Vancouver', byDay: new Map([1, 2, 3, 4, 5].map((d) => [d, {}])), isHolidayDate: (d) => d === '2026-11-11' };
+
+  test('business-day walk: a Friday notice + 5 skips the weekend and the holiday', () => {
+    expect(cal.addBusinessDays('2026-11-06', 5, calendar)).toBe('2026-11-16'); // Mon 9, Tue 10, (Wed 11 off), Thu 12, Fri 13, Mon 16
+    expect(cal.addBusinessDays('2026-11-06', 1, calendar)).toBe('2026-11-09');
+    expect(cal.addBusinessDays('2026-11-07', 0, calendar)).toBe('2026-11-09'); // Saturday → Monday
+    expect(cal.nextBusinessDate('2026-11-10', calendar)).toBe('2026-11-12');
+    // No calendar: Monday to Friday.
+    expect(cal.addBusinessDays('2026-11-06', 5, null)).toBe('2026-11-13');
+  });
+
+  test('after the fact: children 5 business days after the notice, the parent notice + 7', () => {
+    const base = { kind: 'offboarding', afterTheFact: true, date: '2026-11-04', noticeDate: '2026-11-06', calendar, floor: '2026-11-06' };
+    expect(familyDueDate({ ...base, role: 'child', offsetDays: 5 })).toBe('2026-11-16');
+    expect(familyDueDate({ ...base, role: 'parent' })).toBe('2026-11-13');
+    expect(familyDueDate({ ...base, role: 'parent', parentDueOffsetDays: 10 })).toBe('2026-11-16');
+  });
+
+  test('standard: the parent is due the last day + 7, the children stay on the last day + their offset', () => {
+    const base = { kind: 'offboarding', afterTheFact: false, date: '2026-11-20', noticeDate: '2026-11-02', calendar, floor: '2026-11-02' };
+    expect(familyDueDate({ ...base, role: 'parent' })).toBe('2026-11-27');
+    expect(familyDueDate({ ...base, role: 'child', offsetDays: 0 })).toBe('2026-11-20');
+    expect(familyDueDate({ ...base, role: 'child', offsetDays: 7 })).toBe('2026-11-27');
+  });
+
+  test('nothing is created already overdue: a due date on or before today moves to the next business day', () => {
+    expect(familyDueDate({ kind: 'offboarding', afterTheFact: true, role: 'child', offsetDays: 0, date: '2026-11-04', noticeDate: '2026-11-05', calendar, floor: '2026-11-05' })).toBe('2026-11-06');
+    expect(familyDueDate({ kind: 'offboarding', afterTheFact: false, role: 'child', offsetDays: 0, date: '2026-11-10', noticeDate: '2026-11-10', calendar, floor: '2026-11-10' })).toBe('2026-11-12');
+  });
+
+  test('onboarding is unchanged: start date + offset, the parent on the start date, no floor', () => {
+    const base = { kind: 'onboarding', date: '2026-12-01', noticeDate: '2026-11-05', calendar, floor: '2026-11-05' };
+    expect(familyDueDate({ ...base, role: 'child', offsetDays: -7 })).toBe('2026-11-24');
+    expect(familyDueDate({ ...base, role: 'parent' })).toBe('2026-12-01');
+  });
+
+  test('live: a settings row saved before 11-05 reads its after-the-fact 0 as 5 business days; the family remembers its notice date', async () => {
+    db.settings.push({
+      workspaceId: 1, mode: 'live', parentAssigneeTechId: null, leave: null, officeChange: null,
+      templates: { offboarding_after_fact: [{ key: 'laptop', title: 'Laptop', dueOffsetDays: 0 }] },
+    });
+    const s = await hr.getSettings(1);
+    expect(s.templates.offboarding_after_fact[0].dueOffsetDays).toBe(5);
+    expect(s.parentDueOffsetDays).toBe(7);
+    const parent = departure('Quinn Park', day(-1));
+    await hr.onTicketCreated(parent.id, 1);
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Vancouver' }).format(new Date());
+    expect(ticketSvc.createTicket.mock.calls[0][1].dueBy).toBe(dueInstant(cal.addBusinessDays(today, 5, null)));
+    expect(db.families[0].details.noticeDate).toBe(today);
+    expect(db.members[0].dueOffsetDays).toBe(5);
+    // Saving the settings again stores the new rules: 5 stays 5, the parent offset is kept.
+    await hr.updateSettings(1, { parentDueOffsetDays: 9 });
+    expect(db.settings[0].templates.__parent).toEqual({ dueOffsetDays: 9 });
+    expect((await hr.getSettings(1)).templates.offboarding_after_fact[0].dueOffsetDays).toBe(5);
+    await expect(hr.updateSettings(1, { parentDueOffsetDays: 90 })).rejects.toThrow(/0 to 60/);
+  });
+
+  test('an after-the-fact child that wakes unowned keeps its business-day due date (never back to the notice day)', async () => {
+    await setMode('live');
+    const parent = departure('Drew Hale', day(-2));
+    await hr.onTicketCreated(parent.id, 1);
+    const member = db.members.find((m) => m.role === 'child' && m.templateKey === 'laptop');
+    const t = ticketById(member.ticketId);
+    const due = t.dueBy.toISOString();
+    t.assignedTechId = null;
+    t.dueBy = new Date(Date.now() - 86400e3); // somehow moved
+    t.createdAt = new Date(Date.now() - 10 * 60e3);
+    jest.clearAllMocks();
+    await hr.onTicketAwake(t.id, 1, { reason: 'unparked' });
+    expect(ticketSvc.updateTicketFields).toHaveBeenCalledWith(t.id, 1, { dueBy: due }, expect.anything());
+  });
+});
+
+// ---------------------------------------------------------------- QA 11-05 #5: the 6-month backfill (dry run)
+
+describe('QA 11-05 #5: backfill dry run', () => {
+  test('counts the uncategorized family tickets, notices and old FreshService children only', async () => {
+    db.categories = TAXONOMY.map((c) => ({ ...c }));
+    const { planHrCategoryBackfill, childFromSubject } = await import('../scripts/backfill-hr-categories.mjs');
+    expect(childFromSubject('Child Ticket - Decommissioning Account - Departure Notification: X')).toMatchObject({ kind: 'offboarding', key: 'decommission_account' });
+    expect(childFromSubject('Child Ticket - Laptop - New Hire: X')).toMatchObject({ kind: 'onboarding', key: 'laptop' });
+    expect(childFromSubject('Child Ticket - Laptop and Workstation Setup - New Hire: X')).toMatchObject({ kind: 'onboarding', key: 'workstation' });
+    expect(childFromSubject('Laptop request')).toBeNull();
+
+    const now = new Date();
+    const t = (id, over) => ({ id, workspaceId: 1, origin: 'ticketpulse', nativeNumber: id, freshserviceTicketId: null, status: 'Open', createdAt: now, internalCategoryId: null, descriptionText: '', requester: { email: 'someone@example.com' }, ...over });
+    const tickets = [
+      t(1, { subject: 'Departure Notification: Alex Rivera from the Calgary office will be departing', requester: { email: HR } }), // family parent
+      t(2, { subject: 'Child Ticket - Phone - Departure Notification: Alex Rivera …' }), // family child
+      t(3, { subject: 'Child Ticket - Laptop - Departure Notification: Alex Rivera …', internalCategoryId: 160 }), // already categorized
+      t(4, { subject: 'On Leave Notification: Casey Moore', requester: { email: HR } }), // notice outside a family
+      t(5, { subject: 'Child Ticket - iPad - Departure Notification: Old Person', origin: 'freshservice', nativeNumber: null, freshserviceTicketId: 900005n }), // old FS child
+      t(6, { subject: 'Printer jammed' }), // nothing to do with it
+    ];
+    const fakeDb = {
+      hrLifecycleFamily: { findMany: async () => [{ id: 1, kind: 'offboarding', template: 'offboarding_standard', parentTicketId: 1 }] },
+      hrLifecycleFamilyMember: { findMany: async () => [{ familyId: 1, ticketId: 2, role: 'child', templateKey: 'phone' }, { familyId: 1, ticketId: 3, role: 'child', templateKey: 'laptop' }] },
+      ticket: { findMany: async ({ where }) => tickets.filter((x) => (where.internalCategoryId === null ? !x.internalCategoryId : true)) },
+    };
+    const { rows } = await planHrCategoryBackfill(fakeDb, hr, { workspaceId: 1, now });
+    expect(rows.map((r) => [r.ticketId, r.to.categoryId, r.to.subcategoryId])).toEqual([[1, 132, 2], [2, 132, 135], [4, 144, 148], [5, 132, 135]]);
+    // Reads only.
+    for (const fn of Object.values(ticketSvc)) expect(fn).not.toHaveBeenCalled();
+    expect(prismaMock.ticket.update).not.toHaveBeenCalled();
   });
 });

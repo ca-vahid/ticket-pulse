@@ -23,6 +23,7 @@ import {
 import { settingsAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { Button } from '../ui';
+import { SwitchRow } from '../ui/switch';
 import { SettingsChip, SettingsHero } from './SettingsLayoutPrimitives';
 
 const DEFAULTS = {
@@ -72,23 +73,12 @@ function classificationLabel(source) {
   return 'Not classified';
 }
 
+// QA 11-05 #1: the shared switch row; the words toggle it too.
 function Toggle({ label, description, checked, onChange }) {
   return (
-    <button
-      type="button"
-      onClick={() => onChange(!checked)}
-      className={`flex w-full items-start justify-between gap-4 rounded-lg border p-4 text-left transition ${
-        checked ? 'border-blue-200 dark:border-blue-500/30 bg-blue-50/60 dark:bg-blue-500/10' : 'border-border bg-card hover:bg-muted/50'
-      }`}
-    >
-      <span>
-        <span className="block text-sm font-semibold text-foreground">{label}</span>
-        {description && <span className="mt-1 block text-sm text-muted-foreground">{description}</span>}
-      </span>
-      <span className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 rounded-full transition ${checked ? 'bg-blue-600' : 'bg-muted-foreground/40'}`}>
-        <span className={`absolute top-1 h-4 w-4 rounded-full bg-card transition ${checked ? 'left-6' : 'left-1'}`} />
-      </span>
-    </button>
+    <div className="rounded-lg border border-border bg-card px-4">
+      <SwitchRow label={label} description={description} checked={checked === true} onCheckedChange={(v) => onChange(v)} />
+    </div>
   );
 }
 

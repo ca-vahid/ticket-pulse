@@ -111,8 +111,14 @@ export function useBoardColumns({ enabled, baseParams, scopes, refreshKey }) {
     setColumns((prev) => {
       const next = {};
       for (const s of live) {
-        const keep = !filtersChanged && prev[s.key];
-        next[s.key] = keep ? { ...prev[s.key], refreshing: true } : { items: [], total: 0, loading: true, error: null };
+        const had = prev[s.key];
+        // A sort or filter change keeps the column's cards on screen (dimmed,
+        // `loading`) until its new page lands, instead of blanking every
+        // column into "Loading…" (5 Nov 2026). Only a column with nothing yet
+        // starts empty.
+        if (!had) next[s.key] = { items: [], total: 0, loading: true, error: null };
+        else if (filtersChanged) next[s.key] = { ...had, loading: true, refreshing: false, error: null };
+        else next[s.key] = { ...had, refreshing: true };
       }
       return next;
     });

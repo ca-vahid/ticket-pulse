@@ -40,6 +40,7 @@ import {
   Pencil,
   Play,
   Plus,
+  Radio,
   RefreshCw,
   Repeat,
   Rows3,
@@ -47,8 +48,6 @@ import {
   Search,
   Send,
   StickyNote,
-  ToggleLeft,
-  ToggleRight,
   Trash2,
   Type,
   RotateCcw,
@@ -82,6 +81,21 @@ import WorkflowPreviewPage, {
 import { useTheme } from '../../contexts/ThemeContext';
 import { compactTemplateHtml, formatTemplateHtml } from '../../utils/templateHtmlFormat';
 import { groupWorkflowsByStage } from '../../utils/workflowStages';
+import { Switch, SwitchCue, SwitchRow } from '../ui/switch';
+import {
+  DraftRestoreLine,
+  LeaveWithoutSavingDialog,
+  WORKFLOW_DRAFT_AUTOSAVE_MS,
+  clearStoredWorkflowDraft,
+  draftRestoreOffer,
+  hashFingerprint,
+  historyStateWithoutGuard,
+  onLeaveGuardEntry,
+  readStoredWorkflowDraft,
+  useLeaveGuard,
+  workflowDraftStorageKey,
+  writeStoredWorkflowDraft,
+} from './workflowEditorGuard';
 
 // Inspector width (px) and the minimap choice are remembered per browser.
 const WORKFLOW_INSPECTOR_WIDTH_KEY = 'ticket-pulse-notification-workflow-inspector-w';
@@ -4557,21 +4571,16 @@ function SendEmailBrandingControls({ nodeData = {}, blocks = EMPTY_EMAIL_BLOCKS,
 
       <div className="space-y-3">
         <div className="rounded-md border border-emerald-100 dark:border-emerald-500/20 bg-card p-3">
-          <button
-            type="button"
-            aria-pressed={includeHeader}
-            onClick={() => onChange({
+          <SwitchRow
+            className="py-0"
+            label="Include header"
+            description="Optional content above the generated email body."
+            checked={includeHeader}
+            onCheckedChange={() => onChange({
               includeHeader: !includeHeader,
               headerBlockId: includeHeader ? null : (nodeData.headerBlockId || null),
             })}
-            className="flex w-full items-start gap-2 text-left"
-          >
-            {includeHeader ? <ToggleRight className="mt-0.5 h-5 w-5 text-emerald-600 dark:text-emerald-300" /> : <ToggleLeft className="mt-0.5 h-5 w-5 text-muted-foreground/75" />}
-            <span>
-              <span className="block text-sm font-semibold text-foreground">Include header</span>
-              <span className="block text-xs leading-5 text-muted-foreground">Optional content above the generated email body.</span>
-            </span>
-          </button>
+          />
           {renderSelect({
             type: 'Header',
             enabled: includeHeader,
@@ -4591,21 +4600,16 @@ function SendEmailBrandingControls({ nodeData = {}, blocks = EMPTY_EMAIL_BLOCKS,
         </div>
 
         <div className="rounded-md border border-emerald-100 dark:border-emerald-500/20 bg-card p-3">
-          <button
-            type="button"
-            aria-pressed={includeFooter}
-            onClick={() => onChange({
+          <SwitchRow
+            className="py-0"
+            label="Include footer/sign-off"
+            description="On by default so existing workflows keep their workspace footer."
+            checked={includeFooter}
+            onCheckedChange={() => onChange({
               includeFooter: !includeFooter,
               footerBlockId: includeFooter ? null : (nodeData.footerBlockId || null),
             })}
-            className="flex w-full items-start gap-2 text-left"
-          >
-            {includeFooter ? <ToggleRight className="mt-0.5 h-5 w-5 text-emerald-600 dark:text-emerald-300" /> : <ToggleLeft className="mt-0.5 h-5 w-5 text-muted-foreground/75" />}
-            <span>
-              <span className="block text-sm font-semibold text-foreground">Include footer/sign-off</span>
-              <span className="block text-xs leading-5 text-muted-foreground">On by default so existing workflows keep their workspace footer.</span>
-            </span>
-          </button>
+          />
           {renderSelect({
             type: 'Footer',
             enabled: includeFooter,
@@ -5384,65 +5388,38 @@ function AfterHoursRoutingPanel({
         </button>
       </div>
 
-      <div className="rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-3 py-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2 text-sm font-semibold text-amber-950 dark:text-amber-200">
-              {workflowEnabled ? <ToggleRight className="h-5 w-5 text-emerald-700 dark:text-emerald-200" /> : <ToggleLeft className="h-5 w-5 text-muted-foreground" />}
-              Live after-hours routing
-            </div>
-            <p className="mt-1 text-xs leading-5 text-amber-900 dark:text-amber-200">
-              {workflowEnabled
-                ? 'On because this workflow is enabled. Ticket arrivals can use this workflow when the window matches.'
-                : workflowPublished
-                  ? 'Off because this workflow is disabled. The window preview is still shown for configuration.'
-                  : 'Publish this workflow before it can be enabled for live after-hours routing.'}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onToggleWorkflow}
-            disabled={saving || !workflowPublished}
-            className={cls(
-              'inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-semibold disabled:opacity-50',
-              workflowEnabled ? 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 hover:bg-red-100 dark:hover:bg-red-500/20' : 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-100 dark:hover:bg-emerald-500/20',
-            )}
-          >
-            {workflowEnabled ? <ToggleLeft className="h-4 w-4" /> : <ToggleRight className="h-4 w-4" />}
-            {workflowEnabled ? 'Disable workflow' : workflowPublished ? 'Enable workflow' : 'Publish first'}
-          </button>
-        </div>
-      </div>
+      {/* QA 11-05 (one app switch): the state is said in words next to the
+          label ("Live" / "Off" / "Publish first"), not by a green/red colour. */}
+      <SwitchRow
+        className="rounded-md border border-border bg-card px-3 py-3"
+        testId="after-hours-live-switch"
+        label="Live after-hours routing"
+        cue={<SwitchCue icon={workflowEnabled ? Radio : null}>{workflowEnabled ? 'Live' : workflowPublished ? 'Off' : 'Publish first'}</SwitchCue>}
+        description={workflowEnabled
+          ? 'On because this workflow is enabled. Ticket arrivals can use this workflow when the window matches.'
+          : workflowPublished
+            ? 'Off because this workflow is disabled. The window preview is still shown for configuration.'
+            : 'Publish this workflow before it can be enabled for live after-hours routing.'}
+        checked={workflowEnabled}
+        onCheckedChange={() => onToggleWorkflow()}
+        disabled={saving || !workflowPublished}
+      />
 
       <div className="grid gap-3 md:grid-cols-2">
-        <button
-          type="button"
-          onClick={() => setAfterHoursDraft((current) => ({ ...current, holidaysEnabled: !current.holidaysEnabled }))}
-          className={cls(
-            'rounded-md border px-3 py-3 text-left transition',
-            afterHoursDraft.holidaysEnabled ? 'border-violet-300 dark:border-violet-500/40 bg-violet-50 dark:bg-violet-500/15 text-violet-950 dark:text-violet-200' : 'border-border bg-card text-foreground/85 hover:bg-muted/50',
-          )}
-        >
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            {afterHoursDraft.holidaysEnabled ? <ToggleRight className="h-5 w-5 text-violet-700 dark:text-violet-200" /> : <ToggleLeft className="h-5 w-5 text-muted-foreground/75" />}
-            Include holidays
-          </div>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">Use the workspace holiday calendar as an off-hours route.</p>
-        </button>
-        <button
-          type="button"
-          onClick={() => setAfterHoursDraft((current) => ({ ...current, suppressStandardTicketCreated: !current.suppressStandardTicketCreated }))}
-          className={cls(
-            'rounded-md border px-3 py-3 text-left transition',
-            afterHoursDraft.suppressStandardTicketCreated ? 'border-blue-300 dark:border-blue-500/40 bg-blue-50 dark:bg-blue-500/15 text-blue-950 dark:text-blue-200' : 'border-border bg-card text-foreground/85 hover:bg-muted/50',
-          )}
-        >
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            {afterHoursDraft.suppressStandardTicketCreated ? <ToggleRight className="h-5 w-5 text-blue-700 dark:text-blue-200" /> : <ToggleLeft className="h-5 w-5 text-muted-foreground/75" />}
-            Replace normal received email
-          </div>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">On: only this workflow runs. Off: this and the normal Ticket arrived workflow both run.</p>
-        </button>
+        <SwitchRow
+          className="rounded-md border border-border bg-card px-3 py-3"
+          label="Include holidays"
+          description="Use the workspace holiday calendar as an off-hours route."
+          checked={afterHoursDraft.holidaysEnabled}
+          onCheckedChange={() => setAfterHoursDraft((current) => ({ ...current, holidaysEnabled: !current.holidaysEnabled }))}
+        />
+        <SwitchRow
+          className="rounded-md border border-border bg-card px-3 py-3"
+          label="Replace normal received email"
+          description="On: only this workflow runs. Off: this and the normal Ticket arrived workflow both run."
+          checked={afterHoursDraft.suppressStandardTicketCreated}
+          onCheckedChange={() => setAfterHoursDraft((current) => ({ ...current, suppressStandardTicketCreated: !current.suppressStandardTicketCreated }))}
+        />
       </div>
 
       <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
@@ -6127,24 +6104,22 @@ export function LlmContextToolsPanel({
                 {sourceRows.map((row) => (
                   <div
                     key={row.key}
-                    className={cls(
-                      'relative rounded-md border transition',
-                      mode === 'off' ? 'opacity-50' : '',
-                      row.enabled && mode !== 'off' ? 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-950 dark:text-emerald-200' : 'border-border bg-muted/50 text-muted-foreground',
-                    )}
+                    className={cls('relative rounded-md border border-border bg-card px-3 py-2 pr-10', mode === 'off' ? 'opacity-60' : '')}
                   >
-                    <button
-                      type="button"
-                      onClick={() => onSettingChange('context', { [row.key]: !row.enabled })}
-                      disabled={mode === 'off'}
-                      className="w-full px-3 py-2 pr-10 text-left disabled:cursor-not-allowed"
-                    >
-                      <span className="flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide">
-                        {row.label}
-                        {row.enabled && mode !== 'off' ? <ToggleRight className="h-4 w-4" /> : <ToggleLeft className="h-4 w-4" />}
+                    <div className="flex items-start gap-2.5">
+                      <Switch
+                        id={`llm-source-${row.key}`}
+                        checked={row.enabled && mode !== 'off'}
+                        disabled={mode === 'off'}
+                        onCheckedChange={() => onSettingChange('context', { [row.key]: !row.enabled })}
+                        aria-describedby={`llm-source-${row.key}-hint`}
+                        className="mt-px"
+                      />
+                      <span className="min-w-0">
+                        <label htmlFor={`llm-source-${row.key}`} className={cls('block text-xs font-semibold uppercase tracking-wide text-foreground/85', mode === 'off' ? 'cursor-not-allowed' : 'cursor-pointer')}>{row.label}</label>
+                        <span id={`llm-source-${row.key}-hint`} className="mt-1 block text-xs leading-4 text-muted-foreground">{row.description}</span>
                       </span>
-                      <span className="mt-1 block text-xs leading-4 text-muted-foreground">{row.description}</span>
-                    </button>
+                    </div>
                     <LlmHelpButton topic={row.helpTopic} onOpenHelp={onOpenHelp} className="absolute right-2 top-2 h-6 w-6 shadow-none" />
                   </div>
                 ))}
@@ -6208,34 +6183,30 @@ export function LlmContextToolsPanel({
                 <div>Unsupported outage claims, private/internal note mentions, tool names, provider/model names, and audit wording are blocked from requester-facing fields. Similar-report wording is allowed only after threshold evidence.</div>
               </div>
 
-              <div className="flex flex-wrap gap-2">
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => onChange({ redactionEnabled: !draft.redactionEnabled })}
-                    className={cls(
-                      'inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-semibold',
-                      draft.redactionEnabled ? 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200' : 'border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200',
-                    )}
-                  >
-                    {draft.redactionEnabled ? <ToggleRight className="h-3.5 w-3.5" /> : <ToggleLeft className="h-3.5 w-3.5" />}
-                    Redaction {draft.redactionEnabled ? 'on' : 'off'}
-                  </button>
-                  <LlmHelpButton topic="redaction" onOpenHelp={onOpenHelp} className="h-8 w-8 shadow-none" />
+              {/* QA 11-05: the old green/red and amber buttons carried the
+                  meaning in colour; the words now say it next to the switch. */}
+              <div className="grid gap-2 md:grid-cols-2">
+                <div className="flex items-start gap-1">
+                  <SwitchRow
+                    className="min-w-0 flex-1 rounded-md border border-border bg-card px-3 py-2"
+                    label="Redaction"
+                    cue={<SwitchCue icon={draft.redactionEnabled ? null : AlertCircle}>{draft.redactionEnabled ? 'On' : 'Off: secrets reach the model'}</SwitchCue>}
+                    description="Removes passwords, API keys and tokens before evidence is sent to the model."
+                    checked={draft.redactionEnabled === true}
+                    onCheckedChange={() => onChange({ redactionEnabled: !draft.redactionEnabled })}
+                  />
+                  <LlmHelpButton topic="redaction" onOpenHelp={onOpenHelp} className="mt-1 h-8 w-8 shadow-none" />
                 </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => onChange({ includePrivateNotes: !draft.includePrivateNotes })}
-                    className={cls(
-                      'inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-semibold',
-                      draft.includePrivateNotes ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200' : 'border-border bg-muted/50 text-muted-foreground',
-                    )}
-                  >
-                    {draft.includePrivateNotes ? <ToggleRight className="h-3.5 w-3.5" /> : <ToggleLeft className="h-3.5 w-3.5" />}
-                    Private notes {draft.includePrivateNotes ? 'internal evidence' : 'excluded'}
-                  </button>
-                  <LlmHelpButton topic="privateNotes" onOpenHelp={onOpenHelp} className="h-8 w-8 shadow-none" />
+                <div className="flex items-start gap-1">
+                  <SwitchRow
+                    className="min-w-0 flex-1 rounded-md border border-border bg-card px-3 py-2"
+                    label="Private notes"
+                    cue={<SwitchCue>{draft.includePrivateNotes ? 'Used as internal evidence' : 'Excluded'}</SwitchCue>}
+                    description="When on, internal notes may inform the model. Requester e-mail never quotes or mentions them."
+                    checked={draft.includePrivateNotes === true}
+                    onCheckedChange={() => onChange({ includePrivateNotes: !draft.includePrivateNotes })}
+                  />
+                  <LlmHelpButton topic="privateNotes" onOpenHelp={onOpenHelp} className="mt-1 h-8 w-8 shadow-none" />
                 </div>
               </div>
             </div>
@@ -7264,8 +7235,10 @@ function writeWorkflowParam(id, { push = false } = {}) {
     if (id) url.searchParams.set('wf', String(id));
     else url.searchParams.delete('wf');
     const next = `${url.pathname}${url.search}${url.hash}`;
-    if (push) window.history.pushState(window.history.state, '', next);
-    else window.history.replaceState(window.history.state, '', next);
+    // Never carry the leave-guard marker (QA 11-05 #3) onto another address.
+    const state = historyStateWithoutGuard();
+    if (push) window.history.pushState(state, '', next);
+    else window.history.replaceState(state, '', next);
   } catch { /* the address is a convenience */ }
 }
 
@@ -7290,6 +7263,7 @@ export default function NotificationWorkflowsPanel({
   hideTabBar = false,
   rootClassName = null,
   onHealthChange = null,
+  workspaceId = null,
 } = {}) {
   const { resolvedTheme } = useTheme();
   // R2 inspector: docked width (drag the divider); the shown state lags the
@@ -7380,6 +7354,13 @@ export default function NotificationWorkflowsPanel({
   const [loading, setLoading] = useState(true);
   const [selectedLoading, setSelectedLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  // QA 11-05 #3: leave guard + local draft. `leavePrompt` holds the exit that
+  // is waiting on "Leave without saving?"; `restoreOffer` is a newer local
+  // draft found on open.
+  const [leavePrompt, setLeavePrompt] = useState(null);
+  const [leaveSaving, setLeaveSaving] = useState(false);
+  const [leaveError, setLeaveError] = useState(null);
+  const [restoreOffer, setRestoreOffer] = useState(null);
   const [variableCatalog, setVariableCatalog] = useState([]);
   const [variableSearch, setVariableSearch] = useState('');
   const [activeInsertTarget, setActiveInsertTarget] = useState(null);
@@ -7837,7 +7818,9 @@ export default function NotificationWorkflowsPanel({
   }
 
   function backToWorkflowList() {
-    writeWorkflowParam(null, { push: true });
+    // From the leave guard's same-address entry, replace it instead of
+    // stacking the list on top of it (QA 11-05 #3).
+    writeWorkflowParam(null, { push: !onLeaveGuardEntry() });
     setWorkflowView('list');
     setSelectedNodeId(null);
   }
@@ -7997,10 +7980,17 @@ export default function NotificationWorkflowsPanel({
       writeWorkflowParam(selected.id, { push: false });
     }
   }, [workflowView, selected?.id]);
+  const selectedIdRef = useRef(null);
+  selectedIdRef.current = selected?.id ?? null;
+  const workflowViewRef = useRef(workflowView);
+  workflowViewRef.current = workflowView;
   useEffect(() => {
     const onPop = () => {
       const id = readWorkflowParam();
       if (!id) { setWorkflowView('list'); setSelectedNodeId(null); return; }
+      // Same workflow already open (the leave guard's same-address entry,
+      // QA 11-05 #3): reloading it would throw the working copy away.
+      if (workflowViewRef.current === 'editor' && String(id) === String(selectedIdRef.current)) return;
       setWorkflowView('editor');
       loadWorkflow(id);
     };
@@ -8104,6 +8094,151 @@ export default function NotificationWorkflowsPanel({
     [draft, selected?.triggerType],
   );
   const hasBlockingGraphErrors = draftValidationIssues.length > 0;
+
+  // ---- QA 11-05 #3: unsaved-changes guard + local draft ------------------
+  // Dirty = the working copy differs from the last SAVED draft (not from the
+  // published version — a saved, unpublished draft is not at risk).
+  const savedFingerprint = useMemo(() => definitionFingerprint(selected?.draftDefinition), [selected?.draftDefinition]);
+  const editorDirty = Boolean(selected?.id && draft && !selectedLoading && draftFingerprint !== savedFingerprint);
+  const draftStorageKey = workflowDraftStorageKey(workspaceId, selected?.id);
+  const autosaveRef = useRef({ timer: null, payload: null });
+  autosaveRef.current.payload = editorDirty && draftStorageKey && !restoreOffer
+    ? {
+      key: draftStorageKey,
+      record: {
+        workflowId: selected.id,
+        definition: draft,
+        savedAt: null,
+        baseHash: hashFingerprint(savedFingerprint),
+        basePublishedVersion: Number(selected.publishedVersion || 0),
+      },
+    }
+    : null;
+  const flushDraftAutosave = useCallback(() => {
+    const state = autosaveRef.current;
+    if (state.timer) { window.clearTimeout(state.timer); state.timer = null; }
+    if (!state.payload) return;
+    writeStoredWorkflowDraft(state.payload.key, { ...state.payload.record, savedAt: new Date().toISOString() });
+  }, []);
+  // Every few seconds while dirty (a throttle, so steady typing still saves).
+  // Paused while an older draft is on offer, so it is not overwritten unseen.
+  useEffect(() => {
+    if (!autosaveRef.current.payload || autosaveRef.current.timer) return;
+    autosaveRef.current.timer = window.setTimeout(() => {
+      autosaveRef.current.timer = null;
+      flushDraftAutosave();
+    }, WORKFLOW_DRAFT_AUTOSAVE_MS);
+  }, [draft, editorDirty, draftStorageKey, restoreOffer, flushDraftAutosave]);
+  useEffect(() => {
+    const onHide = () => flushDraftAutosave();
+    window.addEventListener('pagehide', onHide);
+    return () => {
+      window.removeEventListener('pagehide', onHide);
+      flushDraftAutosave();
+    };
+  }, [flushDraftAutosave]);
+  // On open (and whenever the saved version changes): a local draft that
+  // differs from what is saved is offered back — never restored on its own.
+  useEffect(() => {
+    if (!draftStorageKey) { setRestoreOffer(null); return; }
+    const record = readStoredWorkflowDraft(draftStorageKey);
+    const offer = draftRestoreOffer({ record, savedFingerprint, fingerprintOf: definitionFingerprint });
+    if (!offer && record && !editorDirty) clearStoredWorkflowDraft(draftStorageKey);
+    setRestoreOffer(offer && !editorDirty ? offer : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftStorageKey, savedFingerprint]);
+
+  function forgetLocalDraft() {
+    const state = autosaveRef.current;
+    if (state.timer) { window.clearTimeout(state.timer); state.timer = null; }
+    state.payload = null;
+    clearStoredWorkflowDraft(draftStorageKey);
+  }
+
+  function restoreLocalDraft() {
+    if (!restoreOffer) return;
+    const restored = normalizeEditorDefinition(restoreOffer.definition);
+    updateDraft((next) => {
+      for (const key of Object.keys(next)) delete next[key];
+      Object.assign(next, restored);
+    });
+    setSelectedNodeId(null);
+    setRestoreOffer(null);
+    setMessage({ type: 'success', text: 'Restored your unsaved changes. Save & publish when ready.' });
+  }
+
+  function discardLocalDraft() {
+    forgetLocalDraft();
+    setRestoreOffer(null);
+  }
+
+  const { leave: leaveEditor, consumeGuardEntry } = useLeaveGuard({
+    active: editorDirty,
+    // The panel's own tabs (/workflows/<tab>) keep the working copy in memory.
+    isInside: (pathname) => /^\/workflows(\/|$)/.test(pathname || ''),
+    onBlocked: ({ kind, proceed }) => {
+      flushDraftAutosave();
+      setLeaveError(null);
+      setLeavePrompt({ kind, proceed });
+    },
+  });
+
+  /** In-panel exits ("All workflows", Refresh): ask first when dirty. */
+  function guardedEditorExit(proceed, { staysOnPage = false } = {}) {
+    if (!editorDirty) { proceed(); return; }
+    flushDraftAutosave();
+    setLeaveError(null);
+    setLeavePrompt({ kind: 'inside', proceed, staysOnPage });
+  }
+
+  function revertToSavedDraft() {
+    if (!selected) return;
+    setDraft(normalizeEditorDefinition(selected.draftDefinition));
+    undoStackRef.current = [];
+    setUndoDepth(0);
+    setEdgeInsert(null);
+    richEditorDirtyRef.current = false;
+  }
+
+  function finishLeave(prompt) {
+    setLeavePrompt(null);
+    setLeaveError(null);
+    if (prompt.kind !== 'inside') { leaveEditor(prompt.proceed); return; }
+    if (prompt.staysOnPage) consumeGuardEntry();
+    prompt.proceed();
+  }
+
+  function discardAndLeave() {
+    const prompt = leavePrompt;
+    if (!prompt) return;
+    forgetLocalDraft();
+    revertToSavedDraft();
+    finishLeave(prompt);
+  }
+
+  async function saveDraftAndLeave() {
+    const prompt = leavePrompt;
+    if (!prompt || !selected) return;
+    setLeaveSaving(true);
+    setLeaveError(null);
+    try {
+      const response = await notificationWorkflowAPI.saveDraft(selected.id, {
+        name: selected.name,
+        description: selected.description,
+        definition: draft,
+      });
+      richEditorDirtyRef.current = false;
+      forgetLocalDraft();
+      applyWorkflowUpdate(response.data);
+      finishLeave(prompt);
+    } catch (error) {
+      const details = Array.isArray(error?.details) ? error.details : [];
+      setLeaveError(details[0] || error?.message || 'Save failed');
+    } finally {
+      setLeaveSaving(false);
+    }
+  }
+  // ------------------------------------------------------------------------
   const mockAuditOpen = activeGlobalTab === 'mock-audit';
   const workflowTabActive = activeGlobalTab === 'workflows';
   // Keyboard: Esc with nothing else open deselects the step, which closes the
@@ -8398,6 +8533,9 @@ export default function NotificationWorkflowsPanel({
         definition,
       });
       applyWorkflowUpdate(response.data);
+      // The rename saved the whole working copy as the draft.
+      forgetLocalDraft();
+      consumeGuardEntry();
       setMessage({ type: 'success', text: 'Workflow renamed' });
       return true;
     } catch (error) {
@@ -8617,6 +8755,9 @@ export default function NotificationWorkflowsPanel({
         enabled: shouldStayEnabled,
       });
       applyWorkflowUpdate(response.data.workflow);
+      // Saved: the local copy and the Back guard have done their job.
+      forgetLocalDraft();
+      consumeGuardEntry();
       setMessage({
         type: 'success',
         text: shouldStayEnabled
@@ -11161,65 +11302,28 @@ export default function NotificationWorkflowsPanel({
             value={selectedNode.data?.recordInConversation}
             onChange={(checked) => updateNodeData({ recordInConversation: checked })}
           />
+          {/* QA 11-05 (one app switch): the per-link colours carried no
+              meaning, and the "Selected / Off" pill repeated the switch. */}
           {linkOptions.map((option) => {
             const enabled = selectedNode.data?.[option.key] === true;
-            const enabledClass = option.color === 'red'
-              ? 'border-red-300 dark:border-red-500/40 bg-red-50 dark:bg-red-500/15 text-red-950 dark:text-red-200'
-              : option.color === 'amber'
-                ? 'border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 text-amber-950 dark:text-amber-200'
-                : option.color === 'teal'
-                  ? 'border-teal-300 dark:border-teal-500/40 bg-teal-50 dark:bg-teal-500/15 text-teal-950 dark:text-teal-200'
-                  : 'border-blue-300 dark:border-blue-500/40 bg-blue-50 dark:bg-blue-500/15 text-blue-950 dark:text-blue-200';
-            const iconClass = option.color === 'red'
-              ? 'text-red-600 dark:text-red-300'
-              : option.color === 'amber'
-                ? 'text-amber-600 dark:text-amber-300'
-                : option.color === 'teal'
-                  ? 'text-teal-600 dark:text-teal-300'
-                  : 'text-blue-600 dark:text-blue-300';
-            const previewClass = option.color === 'red'
-              ? 'border-red-200 dark:border-red-500/30 text-red-900 dark:text-red-200'
-              : option.color === 'amber'
-                ? 'border-amber-200 dark:border-amber-500/30 text-amber-900 dark:text-amber-200'
-                : option.color === 'teal'
-                  ? 'border-teal-200 dark:border-teal-500/30 text-teal-900 dark:text-teal-200'
-                  : 'border-blue-200 dark:border-blue-500/30 text-blue-900 dark:text-blue-200';
             return (
-              <button
+              <SwitchRow
                 key={option.key}
-                type="button"
-                onClick={() => updateNodeData({ [option.key]: !enabled })}
-                className={cls(
-                  'flex w-full items-start gap-3 rounded-lg border px-3 py-3 text-left transition',
-                  enabled ? enabledClass : 'border-border bg-card text-foreground/85 hover:bg-muted/50',
-                )}
+                testId={`send-email-link-${option.key}`}
+                className="rounded-lg border border-border bg-card px-3 py-3"
+                label={option.title}
+                description={option.description}
+                checked={enabled}
+                onCheckedChange={() => updateNodeData({ [option.key]: !enabled })}
               >
-                {enabled ? (
-                  <ToggleRight className={cls('mt-0.5 h-5 w-5 shrink-0', iconClass)} />
-                ) : (
-                  <ToggleLeft className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground/75" />
-                )}
-                <span className="min-w-0">
-                  <span className="flex flex-wrap items-center gap-2 text-sm font-semibold">
-                    {option.title}
-                    <span className={cls(
-                      'rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-                      enabled ? 'bg-card/80 text-current ring-1 ring-current/20' : 'bg-muted text-muted-foreground',
-                    )}
-                    >
-                      {enabled ? 'Selected' : 'Off'}
-                    </span>
+                <span className="mt-1 block text-xs font-semibold leading-5 text-foreground/85">{option.liveRule}</span>
+                <span className="block text-xs leading-5 text-muted-foreground">Preview/test can force selected blocks so admins can inspect the full email.</span>
+                {enabled && (
+                  <span className="mt-2 block rounded-md border border-border bg-muted/50 px-3 py-2 text-xs leading-5 text-foreground/85">
+                    {option.activePreview}
                   </span>
-                  <span className="mt-1 block text-xs leading-5 text-muted-foreground">{option.description}</span>
-                  <span className="mt-1 block text-xs font-semibold leading-5 text-foreground/85">{option.liveRule}</span>
-                  <span className="block text-xs leading-5 text-muted-foreground">Preview/test can force selected blocks so admins can inspect the full email.</span>
-                  {enabled && (
-                    <span className={cls('mt-2 block rounded-md border bg-card/70 px-3 py-2 text-xs leading-5', previewClass)}>
-                      {option.activePreview}
-                    </span>
-                  )}
-                </span>
-              </button>
+                )}
+              </SwitchRow>
             );
           })}
           <SendEmailBrandingControls
@@ -11358,6 +11462,21 @@ export default function NotificationWorkflowsPanel({
     else if (action === 'delete') setDeleteConfirm({ workflow });
   };
 
+  // QA 11-05 #3 — rendered on the editor and on the preview page alike, so an
+  // exit held from either always has its question on screen.
+  const leaveDialog = (
+    <LeaveWithoutSavingDialog
+      open={Boolean(leavePrompt)}
+      workflowName={selected ? workflowDisplayName(selected) : ''}
+      saving={leaveSaving}
+      error={leaveError}
+      saveBlockedReason={hasBlockingGraphErrors ? draftValidationIssues[0] : null}
+      onKeepEditing={() => { setLeavePrompt(null); setLeaveError(null); }}
+      onSaveAndLeave={saveDraftAndLeave}
+      onDiscard={discardAndLeave}
+    />
+  );
+
   if (loading) {
     return (
       <div className="flex min-h-[420px] items-center justify-center text-sm text-muted-foreground">
@@ -11383,6 +11502,7 @@ export default function NotificationWorkflowsPanel({
     return (
       <div className={rootClassName || 'tp-glass-strong m-3 flex h-[calc(100dvh-8.5rem)] min-h-0 max-h-[calc(100dvh-8.5rem)] flex-col overflow-hidden rounded-2xl border border-card/70 dark:border-white/10 sm:m-4'}>
         <NotificationToast message={message} onDismiss={dismissMessage} />
+        {leaveDialog}
         <WorkflowPreviewPage
           workflowName={workflowDisplayName(selected)}
           onBack={closePreviewPage}
@@ -11422,6 +11542,7 @@ export default function NotificationWorkflowsPanel({
   return (
     <div className={rootClassName || 'tp-glass-strong m-3 flex h-[calc(100dvh-8.5rem)] min-h-0 max-h-[calc(100dvh-8.5rem)] flex-col overflow-hidden rounded-2xl border border-card/70 dark:border-white/10 sm:m-4'}>
       <NotificationToast message={message} onDismiss={dismissMessage} />
+      {leaveDialog}
       {showPanelHeader && (
         <div className="shrink-0 border-b border-border px-5 py-2.5">
           {!hideTabBar && (
@@ -11458,7 +11579,7 @@ export default function NotificationWorkflowsPanel({
               <div className="flex min-h-[36px] flex-wrap items-center gap-2" data-testid="workflow-action-row">
                 <button
                   type="button"
-                  onClick={backToWorkflowList}
+                  onClick={() => guardedEditorExit(backToWorkflowList)}
                   className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-sm font-medium text-foreground/85 hover:bg-muted/50"
                   data-testid="workflow-back-to-list"
                 >
@@ -11490,7 +11611,7 @@ export default function NotificationWorkflowsPanel({
                           ...(canAddVariant(selected) ? [{ key: 'variant', label: 'New variant…', Icon: Plus, disabled: saving, onClick: () => { setVariantSource(null); setVariantDialogOpen(true); }, title: 'Create a variant of the selected workflow — start blank or copy its steps; you pick the name' }] : []),
                           { key: 'archive', label: selected?.archivedAt ? 'Restore' : 'Archive', Icon: selected?.archivedAt ? RefreshCw : XCircle, disabled: saving || !selected || (selected?.isDefaultVariant && !selected?.archivedAt), onClick: () => setArchiveConfirm({ workflow: selected, archived: !selected?.archivedAt }), title: selected?.isDefaultVariant && !selected?.archivedAt ? 'Default variants can be disabled but not archived.' : selected?.archivedAt ? 'Restore this variant.' : 'Archive this custom variant.' },
                           ...(selected?.archivedAt && !selected?.isDefaultVariant ? [{ key: 'delete', label: 'Delete permanently', Icon: Trash2, danger: true, disabled: saving || !selected, onClick: () => setDeleteConfirm({ workflow: selected }), title: 'Permanently delete this archived variant and its workflow audit history.' }] : []),
-                          { key: 'refresh', label: 'Refresh', Icon: RefreshCw, onClick: () => loadWorkflows(selected?.id) },
+                          { key: 'refresh', label: 'Refresh', Icon: RefreshCw, onClick: () => guardedEditorExit(() => loadWorkflows(selected?.id), { staysOnPage: true }) },
                         ].map((item) => (
                           <button
                             key={item.key}
@@ -11613,6 +11734,9 @@ export default function NotificationWorkflowsPanel({
                   {hasPublishableChanges ? 'Save & publish' : 'Saved'}
                 </button>
               </div>
+            )}
+            {workflowTabActive && !workflowListView && restoreOffer && (
+              <DraftRestoreLine offer={restoreOffer} onRestore={restoreLocalDraft} onDiscard={discardLocalDraft} />
             )}
           </div>
         </div>

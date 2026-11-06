@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Code2, MessageSquareOff } from 'lucide-react';
 import ConditionGroupBuilder from './ConditionGroupBuilder';
 import SkipNoiseSwitch from './SkipNoiseSwitch';
+import { Switch } from '../ui/switch';
 import { conditionGroupPatch, visibleConditionGroup } from '../../utils/conditionNoise';
 import { describeConditionStep, describeRuleReads, ruleConversionPatch } from '../../utils/conditionRuleShared';
 import { REPLY_TRIGGER, conditionStepView } from '../../utils/conditionStepView';
@@ -19,19 +20,9 @@ import { REPLY_TRIGGER, conditionStepView } from '../../utils/conditionStepView'
  *      read-only, and "Edit as code" — the only place code is still typed.
  */
 
-function Switch({ on, label, onToggle }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      aria-label={label}
-      onClick={onToggle}
-      className={`tp-focus-ring relative mt-0.5 inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors ${on ? 'bg-primary' : 'bg-muted-foreground/40'}`}
-    >
-      <span className={`inline-block h-4 w-4 rounded-full bg-card shadow transition-transform ${on ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
-    </button>
-  );
+// QA 11-05: the step switches are the app's one switch (components/ui/switch).
+function StepSwitch({ on, label, onToggle }) {
+  return <Switch checked={on} aria-label={label} onCheckedChange={() => onToggle()} className="mt-0.5" />;
 }
 
 /** "Ignore a thank-you or out-of-office reply after an Auto-help close" (ignoreAutoHelpThanks). */
@@ -48,7 +39,7 @@ export function AutoHelpThanksSwitch({ data, onPatch }) {
             : 'Every reply goes on to the conditions below, thank-yous after an Auto-help close included.'}
         </p>
       </div>
-      <Switch on={on} label="Ignore a thank-you or out-of-office reply after an Auto-help close" onToggle={() => onPatch({ ignoreAutoHelpThanks: !on })} />
+      <StepSwitch on={on} label="Ignore a thank-you or out-of-office reply after an Auto-help close" onToggle={() => onPatch({ ignoreAutoHelpThanks: !on })} />
     </div>
   );
 }

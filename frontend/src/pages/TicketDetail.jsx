@@ -91,6 +91,8 @@ import FsDeleteDialog from '../components/tickets/FsDeleteDialog';
 import TeamForwardDialog from '../components/tickets/TeamForwardDialog';
 import { baseStatusOf, fsBornStatusNames, isTerminalStatus, statusDefsFromMeta, statusDotClass, statusToneFromDefs } from '../components/tickets/statusDefs';
 import { looksLikeRealHtml } from '../utils/htmlContent';
+import { readTicketList } from '../utils/lastTicketList';
+import { agoWords, formatPacificFull, formatPacificWhen, whenOnce } from '../utils/ticketDates';
 
 // Canonical 4 — FS-born tickets keep this vocabulary (FreshService owns their
 // fields; custom labels can't write back until 8c). TP-born tickets use the
@@ -815,13 +817,18 @@ export default function TicketDetail() {
     }, 60);
     return () => clearTimeout(t);
   });
+  // QA 11-05 #4: every in-page URL change keeps the router state, or the first
+  // tab switch wiped `from` and Close landed on a bare /tickets.
   const setPageTab = (tab) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       if (tab === 'conversation') next.delete('tab'); else next.set('tab', tab);
       return next;
-    }, { replace: true });
+    }, { replace: true, state: location.state });
   };
+  // Moving to another ticket (prev/next, clone, merged-into, grouped copy)
+  // carries the same return address, so closing that one still goes back.
+  const goToTicket = (targetId) => navigate(`/tickets/${targetId}`, backTo ? { state: { from: backTo } } : undefined);
   const [taskOpenCount, setTaskOpenCount] = useState(0); // drives the Tasks tab badge
   const [mobileAssignOpen, setMobileAssignOpen] = useState(false); // mobile assign bottom sheet
   // Phone header (12 Oct 2026): a long subject shows two lines and the
@@ -1504,9 +1511,10 @@ export default function TicketDetail() {
     activities: ticket?.activities || [],
     assignmentEpisodes: ticket?.assignmentEpisodes || [],
     pipelineRuns: ticket?.pipelineRuns || [],
+    workflowRuns: ticket?.workflowRuns || [],
     thread: ticket?.thread || [],
     techNameById,
-  }), [ticket?.activities, ticket?.assignmentEpisodes, ticket?.pipelineRuns, ticket?.thread, techNameById]);
+  }), [ticket?.activities, ticket?.assignmentEpisodes, ticket?.pipelineRuns, ticket?.workflowRuns, ticket?.thread, techNameById]);
   const techPhotoByName = useMemo(() => {
     const map = new Map();
     for (const t of meta?.technicians || []) if (t.name && t.photoUrl) map.set(String(t.name).trim().toLowerCase(), t.photoUrl);
@@ -1819,7 +1827,7 @@ export default function TicketDetail() {
   const cloneTicket = () => applyChange('clone', async () => {
     const res = await ticketsAPI.clone(ticketId);
     showToast('emerald', `Cloned as ${res.data.displayRef}`);
-    navigate(`/tickets/${res.data.id}`);
+    goToTicket(res.data.id);
   });
 
   const pickUp = () => {
@@ -1831,8 +1839,12 @@ export default function TicketDetail() {
   // After a delete, go back to the list the ticket was opened from — with its
   // filters (2 Oct 2026: deleting from a filtered view dropped every filter).
   // Only a /tickets address counts; anything else falls back to the queue.
+  // QA 11-05 #4: then the list this tab last showed (sessionStorage, per
+  // workspace), which survives a link, a new tab or a lost router state.
   const returnToQueue = (state) => {
-    const target = backTo && /^\/tickets(?:[/?#]|$)/.test(backTo) && !backTo.startsWith(`/tickets/${ticketId}`) ? backTo : '/tickets';
+    const target = backTo && /^\/tickets(?:[/?#]|$)/.test(backTo) && !backTo.startsWith(`/tickets/${ticketId}`)
+      ? backTo
+      : (readTicketList(workspaceId) || '/tickets');
     navigate(target, state ? { state } : undefined);
   };
 
@@ -1867,10 +1879,12 @@ export default function TicketDetail() {
   // "Also for" lives in a popover now (16 Sep 2026) — button + count, editor inside.
   const [alsoForOpen, setAlsoForOpen] = useState(false);
   const alsoForRef = useRef(null);
+  const alsoForButtonRef = useRef(null);
   useEffect(() => {
     if (!alsoForOpen) return undefined;
     const onDoc = (e) => { if (alsoForRef.current && !alsoForRef.current.contains(e.target)) setAlsoForOpen(false); };
-    const onKey = (e) => { if (e.key === 'Escape') setAlsoForOpen(false); };
+    // Escape closes and hands focus back to the button (QA 11-05 #8).
+    const onKey = (e) => { if (e.key === 'Escape') { setAlsoForOpen(false); alsoForButtonRef.current?.focus(); } };
     document.addEventListener('mousedown', onDoc);
     document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
@@ -2332,9 +2346,11 @@ export default function TicketDetail() {
               // Priority: explicit return address (state.from) → real browser
               // back when there IS in-app history (covers every surface that
               // links here without wiring state) → /tickets for direct opens.
+              // QA 11-05 #4: a direct open with no history still finds the
+              // tab's last filtered list before the bare queue.
               if (backTo) navigate(backTo);
               else if (window.history.state?.idx > 0) navigate(-1);
-              else navigate('/tickets');
+              else navigate(readTicketList(workspaceId) || '/tickets');
             }}
             className="tp-focus-ring inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-blue-700 dark:hover:text-blue-200 rounded"
           >
@@ -2343,7 +2359,7 @@ export default function TicketDetail() {
           {navIndex >= 0 && (
             <div className="flex items-center gap-1">
               <button
-                onClick={() => prevId && navigate(`/tickets/${prevId}`)}
+                onClick={() => prevId && goToTicket(prevId)}
                 disabled={!prevId}
                 aria-label="Previous ticket in queue"
                 className="tp-focus-ring p-1.5 rounded-lg border border-border bg-card text-muted-foreground disabled:opacity-40 hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200"
@@ -2352,7 +2368,7 @@ export default function TicketDetail() {
               </button>
               <span className="text-xs text-muted-foreground/75 px-1">{navIndex + 1} / {navIds.length}</span>
               <button
-                onClick={() => nextId && navigate(`/tickets/${nextId}`)}
+                onClick={() => nextId && goToTicket(nextId)}
                 disabled={!nextId}
                 aria-label="Next ticket in queue"
                 className="tp-focus-ring p-1.5 rounded-lg border border-border bg-card text-muted-foreground disabled:opacity-40 hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200"
@@ -2402,14 +2418,33 @@ export default function TicketDetail() {
                         <h1
                           onMouseEnter={liveChanges.subject ? () => ackChange('subject') : undefined}
                           onClick={isPhone ? () => setSubjectFull((v) => !v) : undefined}
+                          // Phone: clamped to two lines; a tap expands it and the full subject is in the tooltip.
+                          title={isPhone && !subjectFull ? ticket.subject || undefined : undefined}
                           className={`text-lg sm:text-xl font-bold text-foreground leading-snug group rounded-lg transition-all ${subjectFull ? '' : 'max-sm:line-clamp-2'} ${
                             liveChanges.subject ? 'ring-2 ring-amber-300 dark:ring-amber-500/50 bg-amber-50 dark:bg-amber-500/15 px-1.5' : ''
                           }`}
                         >
-                          {/* QA 10-09 #8: the number leads the title, one step
-                              smaller than the subject (it was a small grey tag below). */}
+                          {/* QA 10-09 #8: the number leads the title. QA 11-05 #7:
+                              quieter (nobody remembers numbers; the subject is the
+                              headline) but still selectable, and a click copies it —
+                              agents read it out on calls. */}
                           {ticket.displayRef && (
-                            <span className="mr-2 text-base sm:text-lg font-semibold tabular-nums text-muted-foreground" data-testid="ticket-ref">{ticket.displayRef}</span>
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                // A drag-select keeps the selection instead of copying.
+                                if (window.getSelection?.()?.toString()) return;
+                                copyText(ticket.displayRef);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); copyText(ticket.displayRef); }
+                              }}
+                              title={`${ticket.displayRef} — click to copy`}
+                              className="tp-focus-ring mr-2 inline-block cursor-copy select-text rounded align-baseline text-sm sm:text-base font-medium tabular-nums text-muted-foreground hover:text-primary"
+                              data-testid="ticket-ref"
+                            >{ticket.displayRef}</span>
                           )}
                           {ticket.subject || '(no subject)'}
                           {canConverse && ticket.status !== 'Deleted' && (
@@ -2471,11 +2506,36 @@ export default function TicketDetail() {
                     </div>
                   </div>
 
-                  <p className="text-xs text-muted-foreground/75 mt-1 max-sm:truncate">
-                Created <span title={new Date(ticket.createdAt).toLocaleString()}>{timeAgo(ticket.createdAt)}</span>
-                    {ticket.requester?.name ? <> by <span className="text-muted-foreground font-medium">{ticket.requester.name}</span></> : null}
-                    {ticket.resolvedAt ? <> · resolved <span title={new Date(ticket.resolvedAt).toLocaleString()}>{timeAgo(ticket.resolvedAt)}</span></> : null}
-                    {ticket.lastActivityAt ? <> · last activity <span title={new Date(ticket.lastActivityAt).toLocaleString()}>{formatDayTime(ticket.lastActivityAt)} · {timeAgo(ticket.lastActivityAt)}</span></> : null}
+                  {/* QA 11-05 #7: the opened date is the line's lead, in Pacific
+                      time with its age; last activity / resolved read once each
+                      (a date, or "2 h ago" while recent). Wraps, never truncates. */}
+                  <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground" data-testid="ticket-dates">
+                    <span className="whitespace-nowrap">
+                      Created{' '}
+                      <time dateTime={ticket.createdAt} title={formatPacificFull(ticket.createdAt)} className="font-medium text-foreground" data-testid="ticket-created">
+                        {formatPacificWhen(ticket.createdAt)}
+                      </time>
+                      {' · '}{agoWords(ticket.createdAt)}
+                    </span>
+                    {ticket.requester?.name ? <> <span className="whitespace-nowrap">by <span className="font-medium text-foreground/85">{ticket.requester.name}</span></span></> : null}
+                    {ticket.resolvedAt ? (
+                      <>
+                        {' · '}
+                        <span className="whitespace-nowrap">
+                          resolved{' '}
+                          <time dateTime={ticket.resolvedAt} title={formatPacificFull(ticket.resolvedAt)}>{whenOnce(ticket.resolvedAt)}</time>
+                        </span>
+                      </>
+                    ) : null}
+                    {ticket.lastActivityAt ? (
+                      <>
+                        {' · '}
+                        <span className="whitespace-nowrap">
+                          last activity{' '}
+                          <time dateTime={ticket.lastActivityAt} title={formatPacificFull(ticket.lastActivityAt)} data-testid="ticket-last-activity">{whenOnce(ticket.lastActivityAt)}</time>
+                        </span>
+                      </>
+                    ) : null}
                   </p>
 
 
@@ -2602,7 +2662,7 @@ export default function TicketDetail() {
                       title={ticket.solutionVerifiedAt
                         ? 'Remove the verified-solution mark'
                         : 'Mark this ticket as a verified solution — it shows up for tickets in the same category'}
-                      className={`tp-focus-ring hidden sm:inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-colors ${
+                      className={`tp-focus-ring hidden xl:inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-colors ${
                         ticket.solutionVerifiedAt
                           ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200'
                           : 'border-border bg-card text-muted-foreground hover:border-emerald-300 hover:text-emerald-700 dark:hover:border-emerald-500/40 dark:hover:text-emerald-200'
@@ -2672,135 +2732,141 @@ export default function TicketDetail() {
                         Close<span className="max-sm:sr-only"> ticket</span>
                       </button>
                     )}
-                    <span aria-hidden="true" className="mx-0.5 hidden h-5 w-px bg-border/80 sm:block" />
-                    <span ref={noiseMenuRef} className="relative">
-                      <button
-                        onClick={() => { setConfirmDelete(false); setNoiseMenuOpen((v) => !v); }}
-                        aria-expanded={noiseMenuOpen}
-                        aria-haspopup="menu"
-                        aria-label="More actions"
-                        title="More: print, copy link, clone, merge, split"
-                        data-testid="more-actions"
-                        className={`${secondaryActionClass} ${noiseMenuOpen ? 'border-blue-300 text-blue-700 dark:border-blue-500/40 dark:text-blue-200' : ''}`}
-                      >
-                        {savingField === 'clone' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <MoreHorizontal className="w-4 h-4" aria-hidden="true" />}
-                        <span className="max-sm:sr-only">More</span>
-                      </button>
-                      {noiseMenuOpen && (
-                        <span className="absolute left-0 max-sm:left-auto max-sm:right-0 top-full mt-1 z-30 w-64 max-w-[calc(100vw-4rem)] tp-card rounded-xl shadow-soft p-1.5 flex flex-col animate-popIn" role="menu" data-testid="more-actions-menu">
-                          {/* Phone: the three actions that leave the row live here. */}
-                          <span className="flex flex-col sm:hidden" data-testid="more-actions-phone">
-                            <button onClick={() => { setNoiseFlag(!ticket.isNoise); setNoiseMenuOpen(false); }} disabled={savingField === 'noise'} role="menuitem" className={moreItemClass}>
-                              <ActionIcon name="noise" className="h-5 w-5" /> {ticket.isNoise ? 'Unmark noise' : 'Mark as noise'}
+                    {/* QA 11-05: the divider and More wrap together — never a lone
+                        divider at a row's end, or More alone with nothing before it. */}
+                    <span className="inline-flex items-center gap-1.5">
+                      <span aria-hidden="true" className="mx-0.5 hidden h-5 w-px bg-border/80 sm:block" />
+                      <span ref={noiseMenuRef} className="relative">
+                        <button
+                          onClick={() => { setConfirmDelete(false); setNoiseMenuOpen((v) => !v); }}
+                          aria-expanded={noiseMenuOpen}
+                          aria-haspopup="menu"
+                          aria-label="More actions"
+                          title="More: print, copy link, clone, merge, split"
+                          data-testid="more-actions"
+                          className={`${secondaryActionClass} ${noiseMenuOpen ? 'border-blue-300 text-blue-700 dark:border-blue-500/40 dark:text-blue-200' : ''}`}
+                        >
+                          {savingField === 'clone' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <MoreHorizontal className="w-4 h-4" aria-hidden="true" />}
+                          <span className="max-sm:sr-only">More</span>
+                        </button>
+                        {noiseMenuOpen && (
+                          <span className="absolute left-0 max-sm:left-auto max-sm:right-0 top-full mt-1 z-30 w-64 max-w-[calc(100vw-4rem)] tp-card rounded-xl shadow-soft p-1.5 flex flex-col animate-popIn" role="menu" data-testid="more-actions-menu">
+                            {/* Phone: the three actions that leave the row live here. */}
+                            {/* Below xl, Mark as solution lives here too (QA 11-05: the
+                              row then fits at 1024 px without More wrapping alone). */}
+                            <span className="flex flex-col xl:hidden" data-testid="more-actions-phone">
+                              <button onClick={() => { setNoiseFlag(!ticket.isNoise); setNoiseMenuOpen(false); }} disabled={savingField === 'noise'} role="menuitem" className={`sm:hidden ${moreItemClass}`}>
+                                <ActionIcon name="noise" className="h-5 w-5" /> {ticket.isNoise ? 'Unmark noise' : 'Mark as noise'}
+                              </button>
+                              <button
+                                onClick={() => { if (ticket.solutionVerifiedAt) setSolutionFlag(false); else setSolutionPrompt({ note: ticket.solutionNote || ticket.resolutionNote || '' }); setNoiseMenuOpen(false); }}
+                                disabled={savingField === 'solution'} role="menuitem" className={moreItemClass}
+                              >
+                                <BadgeCheck className="h-5 w-5 text-muted-foreground" aria-hidden="true" /> {ticket.solutionVerifiedAt ? 'Remove solution mark' : 'Mark as solution'}
+                              </button>
+                              {isNative && canReview && (
+                                <button onClick={deleteTicket} disabled={savingField === 'delete'} role="menuitem" className={`sm:hidden ${moreItemClass} ${confirmDelete ? '!text-red-700 dark:!text-red-200' : ''}`}>
+                                  <ActionIcon name="delete" className="h-5 w-5" /> {confirmDelete ? 'Tap again to delete' : 'Delete'}
+                                </button>
+                              )}
+                              <span aria-hidden="true" className="my-1 h-px bg-border/60" />
+                            </span>
+                            <button onClick={() => { window.print(); setNoiseMenuOpen(false); }} role="menuitem" className={moreItemClass}>
+                              <ActionIcon name="print" className="h-5 w-5" /> Print
                             </button>
-                            <button
-                              onClick={() => { if (ticket.solutionVerifiedAt) setSolutionFlag(false); else setSolutionPrompt({ note: ticket.solutionNote || ticket.resolutionNote || '' }); setNoiseMenuOpen(false); }}
-                              disabled={savingField === 'solution'} role="menuitem" className={moreItemClass}
-                            >
-                              <BadgeCheck className="h-5 w-5 text-muted-foreground" aria-hidden="true" /> {ticket.solutionVerifiedAt ? 'Remove solution mark' : 'Mark as solution'}
+                            <button onClick={() => { copyLink(); setNoiseMenuOpen(false); }} role="menuitem" className={moreItemClass}>
+                              <ActionIcon name="copylink" className="h-5 w-5" /> Copy link
                             </button>
-                            {isNative && canReview && (
-                              <button onClick={deleteTicket} disabled={savingField === 'delete'} role="menuitem" className={`${moreItemClass} ${confirmDelete ? '!text-red-700 dark:!text-red-200' : ''}`}>
-                                <ActionIcon name="delete" className="h-5 w-5" /> {confirmDelete ? 'Tap again to delete' : 'Delete'}
+                            {canPark && !['Deleted', 'Spam'].includes(ticket.status) && (
+                              <button
+                                onClick={() => { setParkError(null); setParkDialog({ initial: ticket.park || (ticket.parkedUntil ? { until: ticket.parkedUntil } : null) }); setNoiseMenuOpen(false); }}
+                                role="menuitem"
+                                data-testid="park-button"
+                                title="Park until a date — it waits on purpose and comes back to its assignee then"
+                                className={moreItemClass}
+                              >
+                                <PauseCircle className="h-5 w-5 text-muted-foreground" aria-hidden="true" /> {ticket.parkedUntil ? 'Change park date…' : 'Park…'}
                               </button>
                             )}
-                            <span aria-hidden="true" className="my-1 h-px bg-border/60" />
-                          </span>
-                          <button onClick={() => { window.print(); setNoiseMenuOpen(false); }} role="menuitem" className={moreItemClass}>
-                            <ActionIcon name="print" className="h-5 w-5" /> Print
-                          </button>
-                          <button onClick={() => { copyLink(); setNoiseMenuOpen(false); }} role="menuitem" className={moreItemClass}>
-                            <ActionIcon name="copylink" className="h-5 w-5" /> Copy link
-                          </button>
-                          {canPark && !['Deleted', 'Spam'].includes(ticket.status) && (
-                            <button
-                              onClick={() => { setParkError(null); setParkDialog({ initial: ticket.park || (ticket.parkedUntil ? { until: ticket.parkedUntil } : null) }); setNoiseMenuOpen(false); }}
-                              role="menuitem"
-                              data-testid="park-button"
-                              title="Park until a date — it waits on purpose and comes back to its assignee then"
-                              className={moreItemClass}
-                            >
-                              <PauseCircle className="h-5 w-5 text-muted-foreground" aria-hidden="true" /> {ticket.parkedUntil ? 'Change park date…' : 'Park…'}
-                            </button>
-                          )}
-                          {canPark && ticket.parkedUntil && (
-                            <button onClick={() => { unparkTicket(); setNoiseMenuOpen(false); }} role="menuitem" className={moreItemClass}>
-                              <Play className="h-5 w-5 text-muted-foreground" aria-hidden="true" /> Unpark
-                            </button>
-                          )}
-                          {canConverse && forwardAvailable && teamForwards.length > 0 && !['Deleted', 'Spam'].includes(ticket.status) && (
-                            <>
-                              <span aria-hidden="true" className="my-1 h-px bg-border/60" />
-                              {teamForwards.map((tf) => (
+                            {canPark && ticket.parkedUntil && (
+                              <button onClick={() => { unparkTicket(); setNoiseMenuOpen(false); }} role="menuitem" className={moreItemClass}>
+                                <Play className="h-5 w-5 text-muted-foreground" aria-hidden="true" /> Unpark
+                              </button>
+                            )}
+                            {canConverse && forwardAvailable && teamForwards.length > 0 && !['Deleted', 'Spam'].includes(ticket.status) && (
+                              <>
+                                <span aria-hidden="true" className="my-1 h-px bg-border/60" />
+                                {teamForwards.map((tf) => (
+                                  <button
+                                    key={tf.id}
+                                    onClick={() => { setTeamForward(tf); setNoiseMenuOpen(false); }}
+                                    role="menuitem"
+                                    data-testid="team-forward-item"
+                                    title={`Forward the ticket to ${tf.email}`}
+                                    className={moreItemClass}
+                                  >
+                                    <Forward className="h-5 w-5 text-muted-foreground" aria-hidden="true" /> Forward to {tf.label}
+                                  </button>
+                                ))}
+                              </>
+                            )}
+                            {ticketingOn && (
+                              <>
+                                <span aria-hidden="true" className="my-1 h-px bg-border/60" />
                                 <button
-                                  key={tf.id}
-                                  onClick={() => { setTeamForward(tf); setNoiseMenuOpen(false); }}
+                                  onClick={() => { setCloneConfirm(true); setNoiseMenuOpen(false); }}
+                                  disabled={savingField === 'clone'}
                                   role="menuitem"
-                                  data-testid="team-forward-item"
-                                  title={`Forward the ticket to ${tf.email}`}
+                                  title="Create a new draft ticket pre-filled from this one"
                                   className={moreItemClass}
                                 >
-                                  <Forward className="h-5 w-5 text-muted-foreground" aria-hidden="true" /> Forward to {tf.label}
+                                  <ActionIcon name="clone" className="h-5 w-5" /> Clone
                                 </button>
-                              ))}
-                            </>
-                          )}
-                          {ticketingOn && (
-                            <>
-                              <span aria-hidden="true" className="my-1 h-px bg-border/60" />
-                              <button
-                                onClick={() => { setCloneConfirm(true); setNoiseMenuOpen(false); }}
-                                disabled={savingField === 'clone'}
-                                role="menuitem"
-                                title="Create a new draft ticket pre-filled from this one"
-                                className={moreItemClass}
-                              >
-                                <ActionIcon name="clone" className="h-5 w-5" /> Clone
-                              </button>
-                              <button
-                                onClick={mergeBlockedReason ? undefined : () => { setMergeOpen(true); setNoiseMenuOpen(false); }}
-                                disabled={Boolean(mergeBlockedReason)}
-                                aria-disabled={Boolean(mergeBlockedReason)}
-                                title={mergeBlockedReason || 'Merge duplicate or related tickets into this one'}
-                                role="menuitem"
-                                data-testid="merge-button"
-                                className={`${moreItemClass} disabled:opacity-50 disabled:cursor-not-allowed`}
-                              >
-                                <ActionIcon name="merge" className="h-5 w-5" /> Merge
-                              </button>
-                              <button
-                                onClick={() => { setSplitFromId(null); setSplitOpen(true); setNoiseMenuOpen(false); }}
-                                role="menuitem"
-                                title="Carve a separate issue out of this conversation into its own ticket"
-                                data-testid="split-button"
-                                className={moreItemClass}
-                              >
-                                <ActionIcon name="split" className="h-5 w-5" /> Split
-                              </button>
-                            </>
-                          )}
-                          {canDeleteInFs && (
-                            <>
-                              <span aria-hidden="true" className="my-1 h-px bg-border/60" />
-                              <button
-                                onClick={() => { setFsDelete({ busy: false, error: null }); setNoiseMenuOpen(false); }}
-                                role="menuitem"
-                                data-testid="fs-delete-item"
-                                title="Delete this ticket in FreshService (moves it to FreshService's trash)"
-                                className="tp-focus-ring flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/15 dark:hover:text-red-200"
-                              >
-                                <Trash2 className="h-5 w-5" aria-hidden="true" /> Delete in FreshService…
-                              </button>
-                            </>
-                          )}
-                        </span>
-                      )}
+                                <button
+                                  onClick={mergeBlockedReason ? undefined : () => { setMergeOpen(true); setNoiseMenuOpen(false); }}
+                                  disabled={Boolean(mergeBlockedReason)}
+                                  aria-disabled={Boolean(mergeBlockedReason)}
+                                  title={mergeBlockedReason || 'Merge duplicate or related tickets into this one'}
+                                  role="menuitem"
+                                  data-testid="merge-button"
+                                  className={`${moreItemClass} disabled:opacity-50 disabled:cursor-not-allowed`}
+                                >
+                                  <ActionIcon name="merge" className="h-5 w-5" /> Merge
+                                </button>
+                                <button
+                                  onClick={() => { setSplitFromId(null); setSplitOpen(true); setNoiseMenuOpen(false); }}
+                                  role="menuitem"
+                                  title="Carve a separate issue out of this conversation into its own ticket"
+                                  data-testid="split-button"
+                                  className={moreItemClass}
+                                >
+                                  <ActionIcon name="split" className="h-5 w-5" /> Split
+                                </button>
+                              </>
+                            )}
+                            {canDeleteInFs && (
+                              <>
+                                <span aria-hidden="true" className="my-1 h-px bg-border/60" />
+                                <button
+                                  onClick={() => { setFsDelete({ busy: false, error: null }); setNoiseMenuOpen(false); }}
+                                  role="menuitem"
+                                  data-testid="fs-delete-item"
+                                  title="Delete this ticket in FreshService (moves it to FreshService's trash)"
+                                  className="tp-focus-ring flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/15 dark:hover:text-red-200"
+                                >
+                                  <Trash2 className="h-5 w-5" aria-hidden="true" /> Delete in FreshService…
+                                </button>
+                              </>
+                            )}
+                          </span>
+                        )}
+                      </span>
                     </span>
                   </div>
 
                   {/* QA 10-28 #4: a grouped copy is kept out of the totals the way
                       noise is, but it is not noise. Say where it went. */}
-                  <GroupedBanner ticket={ticket} onOpen={(id) => navigate(`/tickets/${id}`)} />
+                  <GroupedBanner ticket={ticket} onOpen={goToTicket} />
                   <MentionNotice mentions={mentionNotice} onJump={jumpToEntry} onDismiss={() => setMentionNotice(null)} />
                   {ticket.isNoise && !isGroupedCopy && (
                     <div className="mt-3 flex flex-wrap items-center gap-2 p-2.5 bg-violet-50 dark:bg-violet-500/15 border border-violet-200 dark:border-violet-500/30 rounded-lg text-xs text-violet-800 dark:text-violet-200">
@@ -2822,7 +2888,7 @@ export default function TicketDetail() {
                       <CopyPlus className="w-3.5 h-3.5 text-violet-500 flex-shrink-0" aria-hidden="true" />
                       This ticket was merged into
                       <button
-                        onClick={() => navigate(`/tickets/${ticket.mergedInto.id}`)}
+                        onClick={() => goToTicket(ticket.mergedInto.id)}
                         className="tp-focus-ring font-mono font-bold text-violet-700 dark:text-violet-200 hover:underline rounded"
                       >
                         {ticket.mergedInto.displayRef}
@@ -2854,7 +2920,7 @@ export default function TicketDetail() {
                 {/* Requester panel (16 Sep 2026 rework): identity first, then a
                     quiet contact list — icon + text, no pills — formatted phone
                     numbers, and the helper copy tucked into an info tooltip. */}
-                <div className="mt-4 lg:mt-0 lg:border-l lg:border-border/60 lg:pl-5 lg:self-center" data-testid="requester-panel">
+                <div className="mt-4 lg:mt-0 lg:border-l lg:border-border/60 lg:pl-5 lg:self-start" data-testid="requester-panel">
                   {ticket.requester ? (
                     <div>
                       <div className="flex items-start gap-3">
@@ -2866,9 +2932,10 @@ export default function TicketDetail() {
                           <PersonAvatar name={ticket.requester.name} size="h-9 w-9 sm:h-12 sm:w-12" textSize="text-sm sm:text-base" />
                         )}
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-bold text-foreground truncate">
+                          {/* QA 11-05: a long name truncates beside "Also for" — the full name is in the tooltip. */}
+                          <p className="text-sm font-bold text-foreground truncate" title={ticket.requester.name || undefined} data-testid="requester-name">
                             {ticket.requesterId
-                              ? <Link to={`/requesters/${ticket.requesterId}`} state={{ from: `${location.pathname}${location.search}` }} className="tp-focus-ring rounded hover:text-primary hover:underline" title="Open this requester's page">{ticket.requester.name}</Link>
+                              ? <Link to={`/requesters/${ticket.requesterId}`} state={{ from: `${location.pathname}${location.search}` }} className="tp-focus-ring rounded hover:text-primary hover:underline" title={`${ticket.requester.name} — open their requester page`}>{ticket.requester.name}</Link>
                               : ticket.requester.name}
                           </p>
                           {(() => {
@@ -2876,7 +2943,7 @@ export default function TicketDetail() {
                               ticket.requester.entraJobTitle || ticket.requester.jobTitle,
                               ticket.requester.entraDepartment || ticket.requester.department,
                             ].filter(Boolean).join(' · ');
-                            return role ? <p className="text-xs text-muted-foreground truncate">{role}</p> : null;
+                            return role ? <p className="text-xs text-muted-foreground truncate" title={role}>{role}</p> : null;
                           })()}
                           {ticket.requesterId && (related?.sameRequesterCount || 0) > 0 && (
                             <Link
@@ -2890,19 +2957,75 @@ export default function TicketDetail() {
                             </Link>
                           )}
                         </div>
+                        {/* "Also for" (16 Sep 2026: a popover; QA 11-05 #8: in the
+                            name row, so the header loses a whole row). Picture +
+                            count; with nobody, the picture and a "+". Stays visible
+                            on phones even while the contact lines are folded.
+                            Every reply to the requester reaches these people; the FS
+                            copy carries them as cc_emails (TP-born → PATCH; FS-born
+                            → write-back). */}
+                        {(() => {
+                          const n = ticket.ccEmails?.length || 0;
+                          const alsoForLabel = n ? `Also for: ${n} ${n === 1 ? 'person' : 'people'}` : 'Also for: nobody else yet';
+                          return (
+                            <div ref={alsoForRef} className="relative flex-shrink-0" data-testid="also-for-card" aria-label="Also for (additional requesters)" role="group">
+                              <button
+                                ref={alsoForButtonRef}
+                                type="button"
+                                onClick={() => setAlsoForOpen((v) => !v)}
+                                aria-expanded={alsoForOpen}
+                                aria-haspopup="dialog"
+                                aria-label={alsoForLabel}
+                                title={n ? `${alsoForLabel} — ${ticket.ccEmails.join(', ')}` : alsoForLabel}
+                                data-testid="also-for-button"
+                                className={`tp-focus-ring inline-flex h-7 items-center gap-1 rounded-lg border px-1.5 text-xs font-semibold tabular-nums transition-colors ${
+                                  alsoForOpen ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-500/40 dark:bg-blue-500/15 dark:text-blue-200'
+                                    : (n ? 'border-blue-200 bg-card text-blue-700 hover:bg-blue-50 dark:border-blue-500/30 dark:text-blue-200 dark:hover:bg-blue-500/15' : 'border-border bg-card text-muted-foreground hover:border-blue-300 hover:text-blue-700 dark:hover:border-blue-500/40 dark:hover:text-blue-200')
+                                }`}
+                              >
+                                <BrandArt name="also-for" className="h-[18px] w-[18px]" />
+                                {n ? <span data-testid="also-for-count">{n}</span> : <Plus className="h-3 w-3" aria-hidden="true" />}
+                              </button>
+                              {alsoForOpen && (
+                                <div role="dialog" aria-label="Also for — additional requesters" className="absolute right-0 top-full z-30 mt-1.5 w-[22rem] max-w-[calc(100vw-2rem)] tp-card rounded-xl p-3 shadow-soft animate-popIn">
+                                  <p className="mb-2 flex items-center gap-2 text-xs font-semibold text-foreground">
+                                    <BrandArt name="also-for" className="h-5 w-5" /> Additional requesters
+                                  </p>
+                                  <CcChips
+                                    value={ticket.ccEmails || []}
+                                    onChange={saveAlsoFor}
+                                    prefix="Also for"
+                                    label="Also for (additional requesters)"
+                                    placeholder={canEditAlsoFor ? 'Add additional requesters…' : 'No additional requesters'}
+                                    readOnly={!canEditAlsoFor}
+                                    disabled={savingField === 'alsoFor'}
+                                  />
+                                  <p
+                                    className="mt-2 text-[11px] leading-snug text-muted-foreground"
+                                    aria-label="About additional requesters"
+                                    title={`Additional requesters receive every reply to the requester.${canEditAlsoFor && !isNative ? ' Saved to FreshService first — the list lives on the FreshService ticket.' : ''}`}
+                                  >
+                                    {savingField === 'alsoFor' ? 'Saving…' : 'They receive every reply to the requester.'}
+                                    {canEditAlsoFor && !isNative && ' Saved to FreshService first — the list lives on the FreshService ticket.'}
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                         <button
                           type="button"
                           onClick={() => setRequesterOpen((v) => !v)}
                           aria-expanded={requesterOpen}
                           aria-label={requesterOpen ? 'Hide requester contact' : 'Show requester contact'}
                           data-testid="requester-toggle"
-                          className="tp-focus-ring -mr-1 inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg text-muted-foreground sm:hidden"
+                          className="tp-focus-ring -mr-1 inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-muted-foreground sm:hidden"
                         >
                           <ChevronDown className={`h-4 w-4 transition-transform ${requesterOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
                         </button>
                       </div>
 
-                      <ul className={`mt-3 space-y-1 text-xs ${requesterOpen ? '' : 'max-sm:hidden'}`} aria-label="Requester contact">
+                      <ul className={`mt-2.5 space-y-1 text-xs ${requesterOpen ? '' : 'max-sm:hidden'}`} aria-label="Requester contact">
                         {ticket.requester.email && (
                           <li className="flex items-center gap-2 min-w-0">
                             <Mail className="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground/60" aria-hidden="true" />
@@ -2956,54 +3079,6 @@ export default function TicketDetail() {
                           </li>
                         )}
                       </ul>
-
-                      {/* "Also for" (16 Sep 2026): a popover, not a permanent input row —
-                          button + count, the chip editor and its helper copy inside.
-                          Every reply to the requester reaches these people; the FS copy
-                          carries them as cc_emails (TP-born → PATCH; FS-born → write-back). */}
-                      <div ref={alsoForRef} className={`relative mt-3 ${requesterOpen ? '' : 'max-sm:hidden'}`} data-testid="also-for-card" aria-label="Also for (additional requesters)" role="group">
-                        <button
-                          type="button"
-                          onClick={() => setAlsoForOpen((v) => !v)}
-                          aria-expanded={alsoForOpen}
-                          aria-haspopup="dialog"
-                          className={`tp-focus-ring inline-flex h-8 items-center gap-2 rounded-lg border px-2.5 text-xs font-semibold transition-colors ${
-                            alsoForOpen ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-500/40 dark:bg-blue-500/15 dark:text-blue-200'
-                              : (ticket.ccEmails?.length ? 'border-blue-200 bg-card text-blue-700 hover:bg-blue-50 dark:border-blue-500/30 dark:text-blue-200 dark:hover:bg-blue-500/15' : 'border-border bg-card text-muted-foreground hover:border-blue-300 hover:text-blue-700 dark:hover:border-blue-500/40 dark:hover:text-blue-200')
-                          }`}
-                        >
-                          <BrandArt name="also-for" className="h-5 w-5" />
-                          Also for
-                          {ticket.ccEmails?.length
-                            ? <span className="inline-flex min-w-[18px] items-center justify-center rounded-full bg-blue-600 px-1.5 text-[10px] font-bold text-white">{ticket.ccEmails.length}</span>
-                            : <span className="font-normal text-muted-foreground/75">· nobody else yet</span>}
-                          <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground/75 transition-transform ${alsoForOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
-                        </button>
-                        {alsoForOpen && (
-                          <div role="dialog" aria-label="Also for — additional requesters" className="absolute right-0 top-full z-30 mt-1.5 w-[22rem] max-w-[calc(100vw-2rem)] tp-card rounded-xl p-3 shadow-soft animate-popIn">
-                            <p className="mb-2 flex items-center gap-2 text-xs font-semibold text-foreground">
-                              <BrandArt name="also-for" className="h-5 w-5" /> Additional requesters
-                            </p>
-                            <CcChips
-                              value={ticket.ccEmails || []}
-                              onChange={saveAlsoFor}
-                              prefix="Also for"
-                              label="Also for (additional requesters)"
-                              placeholder={canEditAlsoFor ? 'Add additional requesters…' : 'No additional requesters'}
-                              readOnly={!canEditAlsoFor}
-                              disabled={savingField === 'alsoFor'}
-                            />
-                            <p
-                              className="mt-2 text-[11px] leading-snug text-muted-foreground"
-                              aria-label="About additional requesters"
-                              title={`Additional requesters receive every reply to the requester.${canEditAlsoFor && !isNative ? ' Saved to FreshService first — the list lives on the FreshService ticket.' : ''}`}
-                            >
-                              {savingField === 'alsoFor' ? 'Saving…' : 'They receive every reply to the requester.'}
-                              {canEditAlsoFor && !isNative && ' Saved to FreshService first — the list lives on the FreshService ticket.'}
-                            </p>
-                          </div>
-                        )}
-                      </div>
                     </div>
                   ) : (
                     <p className="text-sm text-muted-foreground/75">No requester on record</p>
@@ -3784,7 +3859,7 @@ export default function TicketDetail() {
                         ticketId={ticketId}
                         canWrite={meta?.actor?.kind !== 'agent'}
                         refreshToken={ticket?.updatedAt}
-                        onNavigate={(id) => navigate(`/tickets/${id}`)}
+                        onNavigate={goToTicket}
                       />
 
                       <TicketLinksCard
@@ -3794,7 +3869,7 @@ export default function TicketDetail() {
                         onMerged={() => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); showToast('emerald', 'Ticket merged — the conversation continues on the target'); }}
                         onReopened={() => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); showToast('emerald', 'Reopened — this ticket is back in the queue'); }}
                         refreshToken={ticket?.updatedAt}
-                        onNavigate={(id) => navigate(`/tickets/${id}`)}
+                        onNavigate={goToTicket}
                       />
                     </div>
                     <div className="space-y-4 min-w-0">
@@ -4830,7 +4905,7 @@ export default function TicketDetail() {
             setMergeOpen(false);
             lastLocalMutationRef.current = Date.now();
             if (result?.primaryId && result.primaryId !== ticket.id) {
-              navigate(`/tickets/${result.primaryId}`);
+              goToTicket(result.primaryId);
             } else {
               fetchTicket({ silent: true });
             }

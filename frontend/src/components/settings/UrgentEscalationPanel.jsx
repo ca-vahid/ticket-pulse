@@ -12,8 +12,8 @@ import {
   Smartphone,
 } from 'lucide-react';
 import { settingsAPI } from '../../services/api';
-import { cn } from '../../lib/utils';
 import { Button } from '../ui';
+import { SwitchRow } from '../ui/switch';
 import { SettingsHero, StatusBanner } from './SettingsLayoutPrimitives';
 import EscalationPeople from './urgentResponse/EscalationPeople';
 
@@ -42,44 +42,12 @@ function friendlyProviderWarning(missing = []) {
   return parts.join('; ');
 }
 
+// QA 11-05 #1: was a green "Enabled" card with a pill; now the shared switch.
 function ToggleCard({ enabled, title, description, onClick }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={enabled === true}
-      className={cn(
-        'rounded-2xl border p-4 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
-        enabled
-          ? 'border-emerald-300 dark:border-emerald-500/40 bg-emerald-50/90 dark:bg-emerald-500/10 text-foreground shadow-sm ring-1 ring-emerald-100 dark:ring-emerald-500/30'
-          : 'border-border bg-card/85 text-foreground/85 hover:border-input hover:bg-muted/50',
-      )}
-    >
-      <div className="flex items-start gap-3">
-        <span
-          className={cn(
-            'mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border',
-            enabled ? 'border-emerald-400 bg-emerald-600 text-white' : 'border-input bg-muted text-muted-foreground/75',
-          )}
-        >
-          {enabled ? <CheckCircle2 className="h-4 w-4" /> : <span className="h-2 w-2 rounded-full bg-current" />}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center justify-between gap-2">
-            <span className="block text-sm font-semibold">{title}</span>
-            <span
-              className={cn(
-                'rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-                enabled ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-200' : 'bg-muted text-muted-foreground',
-              )}
-            >
-              {enabled ? 'Enabled' : 'Off'}
-            </span>
-          </span>
-          <span className="mt-1 block text-xs leading-5 text-muted-foreground">{description}</span>
-        </span>
-      </div>
-    </button>
+    <div className="rounded-2xl border border-border bg-card/85 px-4">
+      <SwitchRow label={title} description={description} checked={enabled === true} onCheckedChange={() => onClick?.()} />
+    </div>
   );
 }
 
