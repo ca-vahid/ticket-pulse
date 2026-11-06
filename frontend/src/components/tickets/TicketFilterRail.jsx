@@ -951,7 +951,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
   }, [techSeed, catSeed, reqSeed]);
 
   // Snapshot the active filter query for a new saved view.
-  const FILTER_KEYS = ['segment', 'status', 'assignee', 'requesterId', 'priority', 'type', 'category', 'subcategory', 'group', 'source', 'tag', 'tagMode', 'impact', 'urgency', 'due', 'origin', 'createdFrom', 'createdTo', 'created', 'noise', 'solution', 'parked', 'parkKind', 'reopened', 'mentioned', 'q', 'view', 'aiState', 'approval', 'approvalCategory'];
+  const FILTER_KEYS = ['segment', 'status', 'assignee', 'requesterId', 'priority', 'type', 'category', 'subcategory', 'group', 'source', 'tag', 'tagMode', 'impact', 'urgency', 'due', 'origin', 'createdFrom', 'createdTo', 'created', 'resolvedFrom', 'resolvedTo', 'noise', 'solution', 'parked', 'parkKind', 'reopened', 'mentioned', 'q', 'view', 'aiState', 'approval', 'approvalCategory'];
   const captureParams = () => {
     const out = {};
     for (const k of FILTER_KEYS) { const val = searchParams.get(k); if (val) out[k] = val; }
@@ -1915,6 +1915,16 @@ export function ActiveFilterBar({ meta }) {
     chips.push({
       label: `Created ${from ? fmtDay(from) : '…'} – ${to ? fmtDay(to) : 'today'}`,
       onRemove: () => patch({ createdFrom: null, createdTo: null }),
+    });
+  }
+  // Resolved date (5 Nov 2026): set by links such as the daily brief's
+  // "resolved in the last 7 days"; no rail control yet, so the chip explains it.
+  const rFrom = get('resolvedFrom');
+  const rTo = get('resolvedTo');
+  if (rFrom || rTo) {
+    chips.push({
+      label: rFrom && !rTo ? `Resolved since ${fmtDay(rFrom)}` : `Resolved ${rFrom ? fmtDay(rFrom) : '…'} – ${rTo ? fmtDay(rTo) : 'today'}`,
+      onRemove: () => patch({ resolvedFrom: null, resolvedTo: null }),
     });
   }
   for (const d of csvList(get('due'))) chips.push({ label: DUE_LABELS[d] || d, onRemove: () => removeFromCsv('due', d) });

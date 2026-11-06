@@ -381,6 +381,9 @@ export default function Tickets() {
   const source = searchParams.get('source') || '';
   const createdFrom = searchParams.get('createdFrom') || '';
   const createdTo = searchParams.get('createdTo') || '';
+  // Resolved date (5 Nov 2026): ?resolvedFrom/?resolvedTo, e.g. the daily brief's "resolved in the last 7 days" link.
+  const resolvedFrom = searchParams.get('resolvedFrom') || '';
+  const resolvedTo = searchParams.get('resolvedTo') || '';
   const due = searchParams.get('due') || '';
   const noise = searchParams.get('noise') || '';
   const solution = searchParams.get('solution') || '';
@@ -792,6 +795,8 @@ export default function Tickets() {
     if (source) params.source = source;
     if (createdFrom) params.createdFrom = createdFrom;
     if (createdTo) params.createdTo = createdTo;
+    if (resolvedFrom) params.resolvedFrom = resolvedFrom;
+    if (resolvedTo) params.resolvedTo = resolvedTo;
     if (createdWin.applied) params.createdWithin = createdWin.key;
     if (due) params.due = due;
     if (noise) params.noise = noise;
@@ -814,7 +819,7 @@ export default function Tickets() {
     if (debouncedSearch) params.q = debouncedSearch;
     return params;
   }, [page, boardMode, effectivePageSize, statuses, statusFilterNames, assignee, priority, origin, segment, sort, dir, debouncedSearch,
-    type, category, subcategory, group, source, createdFrom, createdTo, createdWin.applied, createdWin.key, due, noise, solution, parkedFilter, parkKindFilter, reopenedFilter, mentionedFilter, tag, tagMode, impactFilter, urgencyFilter, aiState, approval, approvalCategory, requesterId, cfSerialized]);
+    type, category, subcategory, group, source, createdFrom, createdTo, resolvedFrom, resolvedTo, createdWin.applied, createdWin.key, due, noise, solution, parkedFilter, parkKindFilter, reopenedFilter, mentionedFilter, tag, tagMode, impactFilter, urgencyFilter, aiState, approval, approvalCategory, requesterId, cfSerialized]);
 
   // Serialized VALUE of queryParams. Effects that RESET live row state (the
   // pending pill, row FX, bulk selection) key on this instead of the object,
@@ -2006,7 +2011,7 @@ export default function Tickets() {
 
   const activeFilterCount = [
     segment !== 'all', searchParams.has('status'), assignee, priority, type, origin,
-    category, subcategory, group, source, createdFrom || createdTo, due, noise, view, urlSearch,
+    category, subcategory, group, source, createdFrom || createdTo, resolvedFrom || resolvedTo, due, noise, view, urlSearch,
   ].filter(Boolean).length;
 
   // The quick-segment cards and their folded one-line form share these.
