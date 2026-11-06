@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Check, ChevronDown, Copy, ExternalLink, Link2, Loader2, Pencil, Wand2, X } from 'lucide-react';
+import { Check, Copy, ExternalLink, Link2, Loader2, Pencil, X } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
 
 /**
@@ -7,7 +7,7 @@ import { ticketsAPI } from '../../services/api';
  *  - TicketLinksCard: explicit relationships (duplicate_of / related_to /
  *    parent_of) + "mark as duplicate" which also resolves TP-born sources.
  *  - CustomFieldsCard: per-workspace user-defined fields (JSON UDF).
- *  - MacroMenu: one-click quick-action bundles.
+ *  - MacroMenu: re-exported from ./MacroMenu (preview, then apply).
  */
 
 const KIND_LABEL = {
@@ -426,56 +426,5 @@ export function CustomFieldsCard({ ticketId, values = {}, canWrite = false, onSa
 
 // Time tracking was retired on request (QA 07-07 #7).
 
-export function MacroMenu({ ticketId, onApplied, disabled = false }) {
-  const [open, setOpen] = useState(false);
-  const [macros, setMacros] = useState(null);
-  const [applying, setApplying] = useState(null);
-
-  useEffect(() => {
-    if (!open || macros) return;
-    ticketsAPI.macros().then((res) => setMacros(res?.data || [])).catch(() => setMacros([]));
-  }, [open, macros]);
-
-  const apply = async (macro) => {
-    setApplying(macro.id);
-    try {
-      const res = await ticketsAPI.applyMacro(ticketId, macro.id);
-      setOpen(false);
-      onApplied?.(res?.data);
-    } catch { /* refresh shows truth */ }
-    setApplying(null);
-  };
-
-  return (
-    <span className="relative inline-flex">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        disabled={disabled}
-        className="tp-focus-ring inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border bg-card text-xs font-medium text-muted-foreground hover:border-violet-300 dark:hover:border-violet-500/40 hover:text-violet-700 dark:hover:text-violet-200 disabled:opacity-50"
-      >
-        <Wand2 className="w-3.5 h-3.5" aria-hidden="true" /> Macros
-        <ChevronDown className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
-      </button>
-      {open && (
-        <div className="absolute right-0 top-full z-40 mt-1 w-72 tp-card rounded-xl shadow-soft p-1.5 animate-popIn">
-          {macros === null && <p className="px-2 py-2 text-xs text-muted-foreground/75">Loading…</p>}
-          {macros?.length === 0 && <p className="px-2 py-2 text-xs text-muted-foreground/75">No macros yet — admins create them in Settings.</p>}
-          {(macros || []).map((macro) => (
-            <button
-              key={macro.id}
-              onClick={() => apply(macro)}
-              disabled={applying !== null}
-              className="tp-focus-ring w-full rounded-lg px-2 py-1.5 text-left hover:bg-violet-50 dark:hover:bg-violet-500/15 disabled:opacity-60"
-            >
-              <span className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-foreground/85">{macro.name}</span>
-                {applying === macro.id && <Loader2 className="w-3 h-3 animate-spin text-violet-500" aria-hidden="true" />}
-              </span>
-              {macro.description && <span className="block text-[10px] text-muted-foreground/75 truncate">{macro.description}</span>}
-            </button>
-          ))}
-        </div>
-      )}
-    </span>
-  );
-}
+// QA 11-05 #2: the Macros button + its preview/confirm live in MacroMenu.jsx.
+export { MacroMenu } from './MacroMenu';

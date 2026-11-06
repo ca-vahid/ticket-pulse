@@ -11,12 +11,13 @@ import TicketStatusesSection from './TicketStatusesSection';
 import TeamForwardsSection from './TeamForwardsSection';
 import RequesterRepliesSection from './RequesterRepliesSection';
 import ResolvedTicketsSection from './ResolvedTicketsSection';
+import { Switch } from '../ui/switch';
 
 /**
  * Admin config for the enterprise ticket ops shipped with the workflow revamp:
  *  - SLA policies: per-priority first-response/resolution clocks for TP-born
  *    tickets (escalation LADDERS are workflows on the SLA triggers).
- *  - Macros: one-click quick-action bundles for agents.
+ *  - Macros moved to their own Settings tab (QA 11-05 #2); a pointer stays here.
  *  - Custom fields: per-workspace user-defined ticket fields.
  * Deliberately spartan — three focused CRUD sections, one panel.
  */
@@ -44,6 +45,17 @@ const CALENDAR_STYLE_HINT = {
   business_hours: 'The clock only runs inside your business hours, so a 24-hour target spans about three working days.',
   business_days: 'The clock runs around the clock but pauses on weekends and holidays, so a 24-hour target taken Friday 2pm is due Monday 2pm.',
 };
+
+// QA 11-05 #2: Macros left Ticket Ops for their own Settings tab.
+function MacrosMovedNote() {
+  return (
+    <p className="flex items-center gap-2 px-1 text-xs text-muted-foreground" data-testid="macros-moved">
+      <Wand2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      Macros have their own tab now:
+      <a href="#macros" className="tp-focus-ring rounded font-semibold text-primary hover:underline">Settings → Macros</a>
+    </p>
+  );
+}
 
 function SectionCard({ icon: Icon, title, hint, children }) {
   return (
@@ -157,17 +169,12 @@ export function SlaSection() {
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={calendarAware === true}
+          <Switch
+            checked={calendarAware === true}
             aria-label={`Calendar-aware SLAs ${calendarAware ? 'on' : 'off'}`}
-            onClick={toggleCalendar}
+            onCheckedChange={() => toggleCalendar()}
             disabled={calendarAware === null || calendarBusy}
-            className={`tp-focus-ring relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-60 ${calendarAware ? 'bg-blue-600' : 'bg-muted-foreground/40'}`}
-          >
-            <span className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-card shadow transition-transform" style={{ transform: calendarAware ? 'translateX(16px)' : 'translateX(0)' }} aria-hidden="true" />
-          </button>
+          />
         </div>
         {calendarAware === true && (
           <div className="mt-2 ml-6">
@@ -466,80 +473,6 @@ function TicketTypesSection() {
             {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />} Check FreshService
           </button>
         </div>
-      )}
-    </SectionCard>
-  );
-}
-
-function MacrosSection() {
-  const [macros, setMacros] = useState([]);
-  const [draft, setDraft] = useState(null); // { name, description, actions }
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
-  const load = useCallback(() => {
-    settingsAPI.getMacros().then((res) => setMacros(res.data?.data || res.data || [])).catch(() => {});
-  }, []);
-  useEffect(() => { load(); }, [load]);
-
-  const save = async () => {
-    setBusy(true); setError(null);
-    try {
-      await settingsAPI.createMacro(draft);
-      setDraft(null);
-      load();
-    } catch (e) { setError(e.response?.data?.message || e.message); }
-    setBusy(false);
-  };
-
-  return (
-    <SectionCard icon={Wand2} title="Macros" hint="One-click bundles agents apply from a ticket: status + priority + note/reply together, using the same audited paths as manual edits.">
-      <ul className="space-y-1 mb-2">
-        {macros.map((macro) => (
-          <li key={macro.id} className="flex items-center gap-2 text-xs">
-            <span className={`font-semibold ${macro.isActive ? 'text-foreground/85' : 'text-muted-foreground/50 line-through'}`}>{macro.name}</span>
-            <span className="text-muted-foreground/75 truncate flex-1">{Object.keys(macro.actions || {}).join(' · ')}</span>
-            <button
-              onClick={async () => { await settingsAPI.updateMacro(macro.id, { isActive: !macro.isActive }).catch(() => {}); load(); }}
-              className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted/50"
-            >
-              {macro.isActive ? 'Disable' : 'Enable'}
-            </button>
-            <button
-              onClick={async () => { await settingsAPI.deleteMacro(macro.id).catch(() => {}); load(); }}
-              aria-label={`Delete macro ${macro.name}`}
-              className="tp-focus-ring p-1 rounded text-muted-foreground/50 hover:text-red-500"
-            >
-              <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-            </button>
-          </li>
-        ))}
-        {macros.length === 0 && <li className="text-xs text-muted-foreground/75 italic">No macros yet.</li>}
-      </ul>
-      {draft ? (
-        <div className="rounded-lg border border-border p-2.5 space-y-1.5 text-xs">
-          <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Macro name" aria-label="Macro name" className="tp-focus-ring w-full border border-border rounded-md px-2 py-1" />
-          <div className="grid grid-cols-2 gap-1.5">
-            <select value={draft.actions.setStatus || ''} onChange={(e) => setDraft({ ...draft, actions: { ...draft.actions, setStatus: e.target.value || undefined } })} aria-label="Set status" className="tp-focus-ring border border-border rounded-md px-1.5 py-1">
-              <option value="">Status: unchanged</option>
-              {['Open', 'Pending', 'Resolved', 'Closed'].map((s) => <option key={s} value={s}>Status → {s}</option>)}
-            </select>
-            <select value={draft.actions.setPriority || ''} onChange={(e) => setDraft({ ...draft, actions: { ...draft.actions, setPriority: Number(e.target.value) || undefined } })} aria-label="Set priority" className="tp-focus-ring border border-border rounded-md px-1.5 py-1">
-              <option value="">Priority: unchanged</option>
-              {[1, 2, 3, 4].map((p) => <option key={p} value={p}>Priority → {PRIORITY_LABELS[p]}</option>)}
-            </select>
-          </div>
-          <input value={draft.actions.addNote || ''} onChange={(e) => setDraft({ ...draft, actions: { ...draft.actions, addNote: e.target.value || undefined } })} placeholder="Internal note to add (optional)" aria-label="Internal note" className="tp-focus-ring w-full border border-border rounded-md px-2 py-1" />
-          <input value={draft.actions.replyBody || ''} onChange={(e) => setDraft({ ...draft, actions: { ...draft.actions, replyBody: e.target.value || undefined } })} placeholder="Reply to requester (optional)" aria-label="Reply body" className="tp-focus-ring w-full border border-border rounded-md px-2 py-1" />
-          {error && <p className="text-red-500">{error}</p>}
-          <div className="flex gap-1.5">
-            <button onClick={save} disabled={busy} className="tp-focus-ring px-2.5 py-1 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-60">Create</button>
-            <button onClick={() => setDraft(null)} className="tp-focus-ring px-2.5 py-1 rounded-md text-muted-foreground hover:bg-muted/50">Cancel</button>
-          </div>
-        </div>
-      ) : (
-        <button onClick={() => setDraft({ name: '', description: '', actions: {} })} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-300 hover:text-blue-700 dark:hover:text-blue-200">
-          <Plus className="w-3.5 h-3.5" aria-hidden="true" /> New macro
-        </button>
       )}
     </SectionCard>
   );
@@ -1013,16 +946,11 @@ export function ReplyGreetingSection() {
   return (
     <SectionCard icon={Hand} title="Reply greeting" hint="Opens every reply with a greeting and closes it with a sign-off, the way FreshService pre-fills “Hi <Requester>,”. Each agent chooses whether it is added the moment they start a reply or only when they click Greeting in the composer.">
       <label className="flex items-center gap-2.5 cursor-pointer" data-testid="reply-greeting-toggle">
-        <button
-          type="button"
-          role="switch"
-          aria-checked={draft.enabled}
+        <Switch
+          checked={draft.enabled === true}
           disabled={busy}
-          onClick={() => save({ enabled: !draft.enabled })}
-          className={`tp-focus-ring relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${draft.enabled ? 'bg-primary' : 'bg-muted-foreground/40'}`}
-        >
-          <span className={`inline-block h-4 w-4 transform rounded-full bg-card shadow transition-transform ${draft.enabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
-        </button>
+          onCheckedChange={() => save({ enabled: !draft.enabled })}
+        />
         <span className="text-sm text-foreground">Pre-fill replies in this workspace with a greeting and sign-off</span>
       </label>
 
@@ -2293,17 +2221,12 @@ export function AdditionalRequestersSection() {
               When on, ticket-created, status-change and resolution emails that go to the requester are cc&apos;d to the ticket&apos;s &quot;Also for&quot; addresses. Satisfaction surveys stay requester-only.
             </p>
           </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={enabled === true}
+          <Switch
+            checked={enabled === true}
             aria-label={`Also notify additional requesters ${enabled ? 'on' : 'off'}`}
-            onClick={toggle}
+            onCheckedChange={() => toggle()}
             disabled={enabled === null || busy}
-            className={`tp-focus-ring relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-60 ${enabled ? 'bg-blue-600' : 'bg-muted-foreground/40'}`}
-          >
-            <span className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-card shadow transition-transform" style={{ transform: enabled ? 'translateX(16px)' : 'translateX(0)' }} aria-hidden="true" />
-          </button>
+          />
         </div>
         {enabled === true && (
           <p className="text-[11px] text-blue-600/90 mt-1.5">
@@ -2421,17 +2344,12 @@ export function ApiResubmissionSection() {
                   ambiguous — never a guess. Turn off once the sender includes externalRef.
                 </p>
               </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={heuristicOn}
+              <Switch
+                checked={heuristicOn === true}
                 aria-label={`Requester and subject matching ${heuristicOn ? 'on' : 'off'}`}
-                onClick={() => persist({ apiResubmissionMatchEnabled: !heuristicOn })}
+                onCheckedChange={() => persist({ apiResubmissionMatchEnabled: !heuristicOn })}
                 disabled={busy}
-                className={`tp-focus-ring relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-60 ${heuristicOn ? 'bg-blue-600' : 'bg-muted-foreground/40'}`}
-              >
-                <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-card shadow-subtle transition-transform ${heuristicOn ? 'translate-x-4' : 'translate-x-0.5'}`} />
-              </button>
+              />
             </div>
             <div className="mt-2 flex items-center gap-2">
               <label htmlFor="api-resubmission-window" className="text-[11px] font-semibold text-muted-foreground">Window</label>
@@ -2479,7 +2397,7 @@ export default function TicketOpsPanel() {
       <TeamForwardsSection />
       <TagsSection />
       <CategoryGroupSection />
-      <MacrosSection />
+      <MacrosMovedNote />
       <ReplyGreetingSection />
       <MailSubjectSection />
       <QuickNotesSection />

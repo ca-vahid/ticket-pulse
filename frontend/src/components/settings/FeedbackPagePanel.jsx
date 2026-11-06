@@ -21,6 +21,7 @@ import {
 import { settingsAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { Button } from '../ui';
+import { Switch, SwitchRow } from '../ui/switch';
 import { SettingsHero } from './SettingsLayoutPrimitives';
 import { FEEDBACK_THEME_LIST, getFeedbackTheme } from '../../data/feedbackThemes';
 
@@ -87,23 +88,12 @@ function mergeSettings(data = {}) {
   return merged;
 }
 
+// QA 11-05 #1: the shared switch row; the words toggle it too.
 function Toggle({ label, description, checked, onChange }) {
   return (
-    <button
-      type="button"
-      onClick={() => onChange(!checked)}
-      className={`flex w-full items-start justify-between gap-4 rounded-lg border p-4 text-left transition ${
-        checked ? 'border-blue-200 dark:border-blue-500/30 bg-blue-50/60 dark:bg-blue-500/10' : 'border-border bg-card hover:bg-muted/50'
-      }`}
-    >
-      <span>
-        <span className="block text-sm font-semibold text-foreground">{label}</span>
-        {description && <span className="mt-1 block text-sm text-muted-foreground">{description}</span>}
-      </span>
-      <span className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 rounded-full transition ${checked ? 'bg-blue-600' : 'bg-muted-foreground/40'}`}>
-        <span className={`absolute top-1 h-4 w-4 rounded-full bg-card transition ${checked ? 'left-6' : 'left-1'}`} />
-      </span>
-    </button>
+    <div className="rounded-lg border border-border bg-card px-4">
+      <SwitchRow label={label} description={description} checked={checked === true} onCheckedChange={(v) => onChange(v)} />
+    </div>
   );
 }
 
@@ -759,17 +749,10 @@ export default function FeedbackPagePanel() {
 
       {/* Sticky action bar — master toggle + preview + save stay reachable across every tab. */}
       <div className="tp-glass sticky top-3 z-20 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-card/70 dark:border-white/10 px-3 py-2 shadow-subtle">
-        <button
-          type="button"
-          onClick={() => update({ enabled: !settings.enabled })}
-          title="When off, the feedback page shows a friendly closed message and submissions are rejected."
-          className="flex items-center gap-2.5 rounded-lg px-1.5 py-1"
-        >
-          <span className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition ${settings.enabled ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`}>
-            <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-card shadow transition-all ${settings.enabled ? 'left-[18px]' : 'left-0.5'}`} />
-          </span>
-          <span className="text-sm font-semibold text-foreground/85">{settings.enabled ? 'Collecting feedback' : 'Feedback paused'}</span>
-        </button>
+        <div className="flex items-center gap-2.5 rounded-lg px-1.5 py-1" title="When off, the feedback page shows a friendly closed message and submissions are rejected.">
+          <Switch id="feedback-page-enabled" checked={settings.enabled === true} onCheckedChange={(v) => update({ enabled: v })} />
+          <label htmlFor="feedback-page-enabled" className="cursor-pointer text-sm font-semibold text-foreground/85">{settings.enabled ? 'Collecting feedback' : 'Feedback paused'}</label>
+        </div>
         <div className="flex items-center gap-2">
           <button
             type="button"

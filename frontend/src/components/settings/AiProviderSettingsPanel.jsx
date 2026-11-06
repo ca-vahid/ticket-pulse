@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Bot, Loader2, Save, Zap } from 'lucide-react';
 import { aiProviderAPI } from '../../services/api';
 import { Button } from '../ui';
+import { SwitchRow } from '../ui/switch';
 import { SettingsHero } from './SettingsLayoutPrimitives';
 
 const AI_OPERATION_OPTIONS = [
@@ -28,20 +29,12 @@ const AI_OPERATION_OPTIONS = [
   { value: 'knowledge_confluence_import', label: 'Confluence Import' },
 ];
 
+// QA 11-05 #1: a setting that turns on/off is the shared switch, not a checkbox.
 function ConfigToggle({ label, description, checked, onChange }) {
   return (
-    <label className="flex items-start gap-3 rounded-lg border border-border bg-card px-3 py-3">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={onChange}
-        className="mt-0.5 h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
-      />
-      <span>
-        <span className="block text-sm font-medium text-foreground">{label}</span>
-        <span className="block text-xs text-muted-foreground">{description}</span>
-      </span>
-    </label>
+    <div className="rounded-lg border border-border bg-card px-3">
+      <SwitchRow label={label} description={description} checked={checked === true} onCheckedChange={() => onChange?.()} />
+    </div>
   );
 }
 

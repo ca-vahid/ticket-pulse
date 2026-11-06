@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import { agentAPI } from '../../services/api';
 import AlertCategoryTree from './AlertCategoryTree';
+import { Switch as SharedSwitch } from '../ui/switch';
 import {
   PRIORITY_CHOICES, alertSentence, autoAlertName, categorySummary, draftProblem, indexCategoryTree, tidyCategoryIds,
 } from './alertText';
@@ -17,24 +18,17 @@ import {
 
 const EMPTY_OPTIONS = { categories: [], tree: [], tags: [], teams: { available: false, connected: false }, mine: [] };
 
-function Switch({ id, checked, onChange, disabled = false, label, labelledBy, small = false }) {
-  const size = small ? 'h-5 w-9' : 'h-6 w-11';
-  const knob = small ? 'h-4 w-4' : 'h-5 w-5';
-  const shift = small ? 'translate-x-[18px]' : 'translate-x-[22px]';
+// QA 11-05 #1: the shared app switch — one size, so callers' `small` is ignored.
+function Switch({ id, checked, onChange, disabled = false, label, labelledBy }) {
   return (
-    <button
+    <SharedSwitch
       id={id}
-      type="button"
-      role="switch"
-      aria-checked={checked}
+      checked={checked === true}
       aria-label={label}
       aria-labelledby={labelledBy}
       disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={`tp-focus-ring relative inline-flex ${size} flex-shrink-0 items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${checked ? 'bg-primary' : 'bg-muted-foreground/40'}`}
-    >
-      <span className={`inline-block ${knob} rounded-full bg-card shadow transition-transform ${checked ? shift : 'translate-x-0.5'}`} />
-    </button>
+      onCheckedChange={(v) => onChange(v)}
+    />
   );
 }
 

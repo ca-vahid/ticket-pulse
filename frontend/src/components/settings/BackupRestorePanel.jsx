@@ -8,6 +8,7 @@ import { backupAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { formatDayTime, timeAgo, formatBytes } from '../tickets/ticketUi';
+import { Switch } from '../ui/switch';
 
 /**
  * Backup & Restore (Settings → Sync & Data). Three layers from
@@ -654,16 +655,12 @@ function ScheduleCard({ schedules, isGlobalAdmin, currentWorkspace, onChanged, o
       <div className="space-y-1.5">
         {(schedules || []).map((s) => (
           <div key={s.id} className={`flex flex-wrap items-center gap-2 px-3 py-2 rounded-lg border ${s.enabled ? 'border-border bg-card' : 'border-border/60 bg-muted/35 opacity-70'}`}>
-            <button
-              role="switch"
-              aria-checked={!!s.enabled}
+            <Switch
+              checked={!!s.enabled}
               aria-label={`${s.enabled ? 'Disable' : 'Enable'} ${scheduleSummary(s)} schedule`}
-              onClick={() => toggle(s)}
+              onCheckedChange={() => toggle(s)}
               disabled={busyId === s.id}
-              className={`tp-focus-ring relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors ${s.enabled ? 'bg-blue-600' : 'bg-muted-foreground/40'}`}
-            >
-              <span className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-card shadow transition-transform" style={{ transform: s.enabled ? 'translateX(16px)' : 'translateX(0)' }} aria-hidden="true" />
-            </button>
+            />
             {s.scope === 'site'
               ? <ScopeChip snapshot={{ scope: 'site' }} />
               : <ScopeChip snapshot={{ scope: 'workspace', workspaceId: s.workspaceId ?? currentWorkspace?.id }} workspaceName={currentWorkspace?.name} />}

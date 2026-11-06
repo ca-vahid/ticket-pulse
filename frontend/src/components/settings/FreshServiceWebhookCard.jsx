@@ -6,10 +6,9 @@ import {
   Loader2,
   RefreshCw,
   ShieldCheck,
-  ToggleLeft,
-  ToggleRight,
 } from 'lucide-react';
 import { assignmentAPI } from '../../services/api';
+import { Switch } from '../ui/switch';
 import { formatDateTimeInTimezone } from '../../utils/dateHelpers';
 
 export default function FreshServiceWebhookCard({ workspaceTimezone = 'America/Vancouver' }) {
@@ -116,12 +115,7 @@ export default function FreshServiceWebhookCard({ workspaceTimezone = 'America/V
           <h4 className="font-medium text-sm text-foreground">FreshService Ticket Webhook</h4>
           <p className="text-xs text-muted-foreground mt-0.5">Low-latency ticket ingest for this workspace; scheduled polling remains the safety net.</p>
         </div>
-        <button onClick={() => updateEnabled(!enabled)} disabled={saving} className="flex-shrink-0">
-          {enabled
-            ? <ToggleRight className="w-8 h-8 text-blue-600 dark:text-blue-300" />
-            : <ToggleLeft className="w-8 h-8 text-muted-foreground/50" />
-          }
-        </button>
+        <Switch checked={enabled} onCheckedChange={() => updateEnabled(!enabled)} disabled={saving} aria-label="FreshService Ticket Webhook" />
       </div>
 
       <div className="rounded-lg border border-border bg-muted/50 p-3 space-y-3">

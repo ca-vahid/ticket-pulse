@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Layers } from 'lucide-react';
 import { alertCorrelationAPI } from '../../services/api';
 import FancySelect from '../common/FancySelect';
+import { Switch } from '../ui/switch';
 
 /**
  * Settings → Alert correlation → Bursts from connected monitors (17 Oct 2026).
@@ -60,22 +61,18 @@ export default function AlertBundlingSection() {
 
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-foreground/85">{LABEL}</p>
+          <label htmlFor="alert-bundling-switch" className="block cursor-pointer text-sm font-semibold text-foreground/85">{LABEL}</label>
           <p className="text-xs text-muted-foreground mt-0.5">
             When the same check fires on several servers in a short time, Ticket Pulse opens one incident with each server&rsquo;s ticket under it. One person works it: the servers&rsquo; tickets take the incident&rsquo;s owner. The monitor still resolves each server&rsquo;s ticket, and the incident is resolved when they all are. Later alerts of the same check join it.
           </p>
         </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={on}
+        <Switch
+          id="alert-bundling-switch"
+          checked={on}
           aria-label={`${LABEL} ${on ? 'on' : 'off'}`}
-          onClick={() => save({ enabled: !on })}
+          onCheckedChange={() => save({ enabled: !on })}
           disabled={loading || busy}
-          className={`tp-focus-ring relative inline-flex h-5 w-9 shrink-0 rounded-full disabled:opacity-60 ${on ? 'bg-primary' : 'bg-muted-foreground/40'}`}
-        >
-          <span className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-card shadow" style={{ transform: on ? 'translateX(16px)' : 'translateX(0)' }} aria-hidden="true" />
-        </button>
+        />
       </div>
 
       {on && (

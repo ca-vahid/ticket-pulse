@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   VolumeX, Plus, Trash2, Edit3, Save, X, CheckCircle, XCircle,
-  RefreshCw, TestTube, ChevronDown, ChevronUp, ToggleLeft, ToggleRight,
+  RefreshCw, TestTube, ChevronDown, ChevronUp,
   ShieldCheck,
 } from 'lucide-react';
 import { noiseRulesAPI } from '../services/api';
+import { Switch } from './ui/switch';
 
 // NT-4: a rule either flags matches AS noise (classic behavior) or acts as a
 // hard veto that protects matches FROM ever being auto-dismissed as noise.
@@ -196,11 +197,12 @@ function RuleRow({ rule, onUpdate, onDelete }) {
   return (
     <div className={`border rounded-lg transition-all ${rule.isEnabled ? 'border-border bg-card' : 'border-border/60 bg-muted/50 opacity-60'}`}>
       <div className="px-4 py-3 flex items-center gap-3">
-        <button onClick={toggleEnabled} className="flex-shrink-0" title={rule.isEnabled ? 'Disable rule' : 'Enable rule'}>
-          {rule.isEnabled
-            ? <ToggleRight className="w-5 h-5 text-green-500" />
-            : <ToggleLeft className="w-5 h-5 text-muted-foreground/75" />}
-        </button>
+        <Switch
+          checked={rule.isEnabled === true}
+          onCheckedChange={toggleEnabled}
+          title={rule.isEnabled ? 'Disable rule' : 'Enable rule'}
+          aria-label={`${rule.name} rule`}
+        />
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">

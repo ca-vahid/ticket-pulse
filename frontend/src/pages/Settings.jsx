@@ -21,6 +21,7 @@ import SignaturesPanel from '../components/settings/SignaturesPanel';
 import GroupsPanel from '../components/settings/GroupsPanel';
 import ApprovalCategoriesPanel from '../components/settings/ApprovalCategoriesPanel';
 import TicketOpsPanel from '../components/settings/TicketOpsPanel';
+import MacrosPanel from '../components/settings/MacrosPanel';
 import ApiKeysPanel from '../components/settings/ApiKeysPanel';
 import BackupRestorePanel from '../components/settings/BackupRestorePanel';
 import AiUsagePanel from '../components/settings/AiUsagePanel';
@@ -186,7 +187,10 @@ export default function Settings() {
   };
   const visibleNavItems = navFilterQ
     ? navigationItems
-      .map((i) => ({ i, score: Math.max(fuzzyScore(navFilterQ, i.label), fuzzyScore(navFilterQ, i.group) * 0.6) }))
+      // QA 11-05 #2: an item's `keywords` match on a plain substring ("macro"
+      // under Ticket Ops' old home, "scenario" for Macros) — never fuzzily, so
+      // short queries don't light up every section.
+      .map((i) => ({ i, score: Math.max(fuzzyScore(navFilterQ, i.label), fuzzyScore(navFilterQ, i.group) * 0.6, (i.keywords || []).some((k) => k.includes(navFilterQ)) ? 70 : 0) }))
       .filter((x) => x.score > 0)
       .sort((a, b) => b.score - a.score)
       .map((x) => x.i)
@@ -1339,10 +1343,17 @@ export default function Settings() {
                   </div>
                 )}
 
-                {/* Ticket ops: SLA policies, macros, custom fields */}
+                {/* Ticket ops: SLA policies, statuses, custom fields */}
                 {activeSectionId === 'ticket-ops' && (
                   <div className="p-6">
                     <TicketOpsPanel />
+                  </div>
+                )}
+
+                {/* Macros (QA 11-05 #2): their own tab, an ordered action list */}
+                {activeSectionId === 'macros' && (
+                  <div className="p-6">
+                    <MacrosPanel />
                   </div>
                 )}
 
