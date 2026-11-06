@@ -187,7 +187,7 @@ describe('stored shape', () => {
 });
 
 describe('apply on a Ticket Pulse-born ticket', () => {
-  test('runs every action through the normal paths: fields in one write, assignee, tags, note, reply, status LAST', async () => {
+  test('runs every action through the normal paths, in the macro\'s exact order (adjacent fields in one write)', async () => {
     const result = await svc.apply(501, 1, 9, ACTOR);
     expect(result.ok).toBe(true);
 
@@ -207,10 +207,10 @@ describe('apply on a Ticket Pulse-born ticket', () => {
     expect(ticketServiceMock.addPrivateNote).toHaveBeenCalledTimes(1);
     expect(ticketServiceMock.addReply).toHaveBeenCalledTimes(1);
     expect(ticketServiceMock.changeStatus).toHaveBeenCalledWith(501, 1, 'Closed', ACTOR);
-    // Status is the last write.
+    // QA 11-05b #4: exactly the macro's order — reply, note, the fields, assign, tags, status (last because it is last in the list).
     const order = (fn) => fn.mock.invocationCallOrder[0];
-    expect(order(ticketServiceMock.changeStatus)).toBeGreaterThan(order(ticketServiceMock.addReply));
-    expect(order(ticketServiceMock.changeStatus)).toBeGreaterThan(order(ticketServiceMock.updateTicketFields));
+    const seq = ['addReply', 'addPrivateNote', 'updateTicketFields', 'assignTicket', 'setTags', 'changeStatus'].map((k) => order(ticketServiceMock[k]));
+    expect([...seq].sort((a, b) => a - b)).toEqual(seq);
 
     // One "applied macro" history row.
     expect(ticketServiceMock._audit).toHaveBeenCalledTimes(1);
@@ -292,5 +292,67 @@ describe('unattended requester (alert and integration senders)', () => {
     const result = await svc.apply(501, 1, 9, ACTOR);
     expect(ticketServiceMock.addReply).toHaveBeenCalledTimes(1);
     expect(result.steps.find((s) => s.type === 'reply')).toEqual(expect.objectContaining({ ok: true, detail: expect.stringMatching(/not e-mailed/) }));
+  });
+});
+
+describe('QA 11-05b #4: macros run in exactly the order the admin set', () => {
+  const macro = (steps) => ({ id: 21, name: 'Close and thank', isActive: true, actions: { version: 2, steps } });
+  const order = (fn, i = 0) => fn.mock.invocationCallOrder[i];
+
+  test('a close placed BEFORE the reply runs first; the reply still goes out, and the preview says so', async () => {
+    prismaMock.ticketMacro.findFirst.mockResolvedValue(macro([{ type: 'status', status: 'Closed' }, { type: 'reply', html: '<p>Thanks, {{requester.firstName}}</p>' }]));
+    const preview = await svc.preview(501, 1, 21, ACTOR);
+    expect(preview.steps.map((s) => s.type)).toEqual(['status', 'reply']);
+    expect(preview.steps[1]).toEqual(expect.objectContaining({ run: true, notice: 'This reply runs after the ticket is set to Closed: it is still sent, and the ticket stays Closed.' }));
+    const result = await svc.apply(501, 1, 21, ACTOR);
+    expect(result.ok).toBe(true);
+    expect(order(ticketServiceMock.changeStatus)).toBeLessThan(order(ticketServiceMock.addReply));
+    expect(ticketServiceMock.addReply).toHaveBeenCalledWith(501, 1, { bodyHtml: '<p>Thanks, Alex</p>' }, ACTOR);
+  });
+
+  test('a reply on a ticket that is already closed says it is still sent; one after a reopen says nothing', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue(tpTicket({ status: 'Closed' }));
+    prismaMock.ticketMacro.findFirst.mockResolvedValue(macro([{ type: 'reply', html: '<p>Hi</p>' }, { type: 'status', status: 'Open' }, { type: 'reply', html: '<p>Again</p>' }]));
+    const preview = await svc.preview(501, 1, 21, ACTOR);
+    expect(preview.steps[0].notice).toBe('This ticket is Closed: the reply is still sent, and the ticket stays Closed.');
+    expect(preview.steps[2].notice).toBeUndefined();
+  });
+
+  test('fields split by a note are two writes, in place; every status step runs in turn', async () => {
+    prismaMock.ticketMacro.findFirst.mockResolvedValue(macro([
+      { type: 'priority', priority: 3 },
+      { type: 'status', status: 'Pending' },
+      { type: 'note', html: '<p>Waiting on the vendor</p>' },
+      { type: 'category', categoryId: 10, subcategoryId: 11 },
+      { type: 'status', status: 'Closed' },
+    ]));
+    const result = await svc.apply(501, 1, 21, ACTOR);
+    expect(ticketServiceMock.updateTicketFields.mock.calls.map((c) => c[2])).toEqual([{ priority: 3 }, { internalCategoryId: 10, internalSubcategoryId: 11 }]);
+    expect(ticketServiceMock.changeStatus.mock.calls.map((c) => c[2])).toEqual(['Pending', 'Closed']);
+    const seq = [
+      order(ticketServiceMock.updateTicketFields, 0), order(ticketServiceMock.changeStatus, 0), order(ticketServiceMock.addPrivateNote, 0),
+      order(ticketServiceMock.updateTicketFields, 1), order(ticketServiceMock.changeStatus, 1),
+    ];
+    expect([...seq].sort((a, b) => a - b)).toEqual(seq);
+    expect(result.steps.map((s) => [s.type, s.ok, Boolean(s.skipped)])).toEqual([
+      ['priority', true, false], ['status', true, false], ['note', true, false], ['category', true, false], ['status', true, false],
+    ]);
+  });
+
+  test('FS-born: a status step before the reply goes to FreshService first, then the reply', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue(tpTicket({ origin: 'freshservice', nativeNumber: null, freshserviceTicketId: 230001 }));
+    prismaMock.ticketMacro.findFirst.mockResolvedValue(macro([{ type: 'status', status: 'Closed' }, { type: 'reply', html: '<p>Done</p>' }]));
+    await svc.apply(501, 1, 21, ACTOR);
+    expect(ticketServiceMock.updateFsTicket.mock.calls[0][2]).toEqual({ status: 'Closed' });
+    expect(order(ticketServiceMock.updateFsTicket)).toBeLessThan(order(ticketServiceMock.addReply));
+  });
+
+  test('only the last of several assign steps runs (where it sits)', async () => {
+    prismaMock.technician.findMany.mockResolvedValue([{ id: 4, name: 'Kim Lee' }, { id: 5, name: 'Robin Vale' }]);
+    prismaMock.ticketMacro.findFirst.mockResolvedValue(macro([{ type: 'assign', to: 'technician', technicianId: 4 }, { type: 'note', html: '<p>x</p>' }, { type: 'assign', to: 'technician', technicianId: 5 }]));
+    const result = await svc.apply(501, 1, 21, ACTOR);
+    expect(ticketServiceMock.assignTicket.mock.calls.map((c) => c[2])).toEqual([5]);
+    expect(order(ticketServiceMock.addPrivateNote)).toBeLessThan(order(ticketServiceMock.assignTicket));
+    expect(result.steps[0]).toEqual(expect.objectContaining({ skipped: true, reason: 'A later assign step in this macro wins' }));
   });
 });

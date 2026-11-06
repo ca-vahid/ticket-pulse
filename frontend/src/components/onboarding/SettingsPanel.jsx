@@ -21,7 +21,7 @@ const NOTICE_GROUPS = ['departure', 'new_hire', 'transfer', 'leave'];
 const pick = (s) => ({
   mode: s.mode,
   parentAssigneeTechId: s.parentAssigneeTechId ?? null,
-  parentDueOffsetDays: s.parentDueOffsetDays ?? 7,
+  parentDueOffsetDays: s.parentDueOffsetDays ?? 3,
   noticeCategories: s.noticeCategories || {},
   templates: s.templates,
   leave: s.leave,
@@ -468,7 +468,7 @@ export default function SettingsPanel({ data, onSaved }) {
 
   const cleaned = (d) => ({
     ...d,
-    parentDueOffsetDays: Number.isFinite(Number(d.parentDueOffsetDays)) && d.parentDueOffsetDays !== '' ? Number(d.parentDueOffsetDays) : 7,
+    parentDueOffsetDays: Number.isFinite(Number(d.parentDueOffsetDays)) && d.parentDueOffsetDays !== '' ? Number(d.parentDueOffsetDays) : 3,
     templates: cleanTemplates(d.templates),
     officeRouting: cleanRouting(d.officeRouting),
     wake: cleanWake(d.wake),
@@ -527,26 +527,26 @@ export default function SettingsPanel({ data, onSaved }) {
             />
           </div>
           <div className="grid gap-1.5">
-            <span className="text-sm font-medium text-foreground">Offboarding parent due</span>
-            <span className="text-xs text-muted-foreground">Gives the family time to finish. After the fact the last day has passed, so it counts from the day the notice arrived.</span>
+            <span className="text-sm font-medium text-foreground" id="hr-parent-due-label">Main offboarding ticket due</span>
+            <span className="text-xs text-muted-foreground">Business days on the workspace calendar (Settings → Business Hours &amp; Holidays), at 5 PM. After the fact the last day has passed, so it counts from the day the notice arrived. Never due before it arrives.</span>
             <div className="flex flex-wrap items-center gap-2 text-sm text-foreground">
               <input
                 type="number"
                 min={0}
-                max={60}
+                max={30}
                 value={draft.parentDueOffsetDays}
                 onChange={(e) => setDraft((d) => ({ ...d, parentDueOffsetDays: e.target.value === '' ? '' : Number(e.target.value) }))}
-                aria-label="Offboarding parent: days after the last day"
+                aria-label="Main offboarding ticket due: business days after the last day"
                 className={NUMBER}
               />
-              <span>days after the last day</span>
+              <span>business days after the last day</span>
             </div>
           </div>
         </div>
       </section>
 
       <section className="rounded-xl border border-border bg-card p-4 shadow-subtle" aria-label="Notice categories">
-        <SectionTitle hint="The category each HR notice gets when it arrives with none. A category somebody already chose is never changed, and the AI run keeps this one.">
+        <SectionTitle hint="The category each HR notice gets when it arrives with none. A family's master ticket (the notice that holds its children) always gets its family's row below, also at Organise now and over a category the AI gave it. A category a person chose is never changed, and the AI run keeps this one.">
           Notice categories
         </SectionTitle>
         <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">

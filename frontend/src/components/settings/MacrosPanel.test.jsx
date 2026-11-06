@@ -84,7 +84,7 @@ describe('Settings → Macros', () => {
     expect(payload.actions.steps[0].html).toContain('{{requester.firstName}}');
     expect(payload.actions.steps[1]).toEqual(expect.objectContaining({ categoryId: 10, subcategoryId: 11 }));
     expect(payload.actions.steps[2]).toEqual(expect.objectContaining({ status: 'Closed' }));
-  });
+  }, 20000); // the composer editor mounts slowly under a parallel run (it took ~5 s alone)
 
   test('status picker offers only the live statuses; the reply subject defaults to the workspace subject', async () => {
     // A workspace that retired Resolved: /tickets/meta leaves it out, and the picker invents nothing.
@@ -108,6 +108,29 @@ describe('Settings → Macros', () => {
     // The early hardcoded subject reads as empty = the workspace's usual reply subject.
     expect(within(form).getByLabelText('Reply subject')).toHaveValue('');
     expect(within(form).getByText(/Leave empty to use the workspace's usual reply subject \(keeps the thread together\)/)).toBeInTheDocument();
+  });
+
+  test('QA 11-05b #4: exact order — no "status runs last" hint; a reply after a close says it is still sent', async () => {
+    ticketsAPI.meta.mockResolvedValue({ success: true, data: { ...META, statuses: [{ name: 'Open', baseStatus: 'Open' }, { name: 'Done', baseStatus: 'Closed' }] } });
+    settingsAPI.getMacros.mockResolvedValue({ data: { data: [
+      { id: 6, name: 'Close and thank', isActive: true, actions: { steps: [{ type: 'status', status: 'Done' }, { type: 'reply', html: '<p>Thanks</p>' }] } },
+    ] } });
+    render(<MacrosPanel />);
+    await screen.findByText('Close and thank');
+    await waitFor(() => expect(ticketsAPI.meta).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Close and thank' }));
+    const form = screen.getByTestId('macro-form');
+    expect(within(form).queryByText(/runs last/)).not.toBeInTheDocument();
+    expect(within(form).getByText('Run top to bottom, in exactly this order.')).toBeInTheDocument();
+    expect(within(form).getByText(/Runs where it sits in the list/)).toBeInTheDocument();
+    // "Done" is a Closed-base status: the reply after it is flagged.
+    expect(await within(form).findByTestId('macro-reply-after-close')).toHaveTextContent('Runs after the ticket is set to Done: the reply is still sent, and the ticket stays Done.');
+    // Move the reply above the close: no flag; the saved order is what is shown.
+    fireEvent.click(within(form).getByRole('button', { name: /Move “Reply to the requester” up/ }));
+    expect(within(form).queryByTestId('macro-reply-after-close')).not.toBeInTheDocument();
+    fireEvent.click(within(form).getByRole('button', { name: 'Save macro' }));
+    await waitFor(() => expect(settingsAPI.updateMacro).toHaveBeenCalled());
+    expect(settingsAPI.updateMacro.mock.calls[0][1].actions.steps.map((s) => s.type)).toEqual(['reply', 'status']);
   });
 
   test('editing an old-shape macro opens it as steps and saves the new shape', async () => {

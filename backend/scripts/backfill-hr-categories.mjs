@@ -10,10 +10,15 @@
  *   node scripts/backfill-hr-categories.mjs --days=90 --workspace=1
  *   node scripts/backfill-hr-categories.mjs --apply [--undo-file=path.json]
  *
- * Who gets what (uncategorized only — a category somebody set is never touched):
+ * Who gets what (uncategorized only — a category a person set is never touched):
  *   1. family members      a child by its template key (Settings → Comings &
- *                          Goings → the child's category); the parent and
- *                          attached notices by their notice kind
+ *                          Goings → the child's category); the parent (master)
+ *                          by its FAMILY (QA 11-05b #2: Onboarding &
+ *                          Offboarding > Offboarding / > Onboarding); attached
+ *                          notices by their notice kind. A master that has
+ *                          another category the AI or the sync gave it is
+ *                          re-filed too, unless its history shows a person
+ *                          chose it.
  *   2. HR-sender notices   by type (departure, new hire, transfer, leave), in
  *                          a family or not
  *   3. old FreshService    "Child Ticket - <Laptop|Phone|iPad|Disable Account|
@@ -99,7 +104,12 @@ export async function planHrCategoryBackfill(db, hr, { workspaceId = 1, days = 1
       to = hr._categoryForKey(settings, m.family.kind, m.templateKey, m.family.template);
       if (!to.categoryId) to = hr._categoryForKey(settings, m.family.kind, m.templateKey);
       group = `family child: ${m.family.kind} / ${m.templateKey || '?'}`;
-    } else if (m && (m.role === 'parent' || m.role === 'notice') && m.family) {
+    } else if (m && m.role === 'parent' && m.family) {
+      // QA 11-05b #2: the master ticket follows its FAMILY (Onboarding &
+      // Offboarding > Offboarding / > Onboarding), not its notice-type reading.
+      to = hr._familyCategory(settings, m.family.kind);
+      group = `family parent: ${m.family.kind}`;
+    } else if (m && m.role === 'notice' && m.family) {
       const c = hr.classify(t, tz);
       const type = c && NOTICE_EFFECT[c.type] ? c.type : ROLE_NOTICE_TYPE[m.family.kind];
       to = hr._noticeCategory(settings, type);
@@ -123,6 +133,34 @@ export async function planHrCategoryBackfill(db, hr, { workspaceId = 1, days = 1
     if (!group) continue;
     if (!to?.categoryId) { skipped.push({ ticketId: t.id, why: `${group}: no category in the settings` }); continue; }
     rows.push({ ticketId: t.id, ref: refOf(t), origin: t.origin, group, to: { categoryId: to.categoryId, subcategoryId: to.subcategoryId || null } });
+  }
+
+  // QA 11-05b #2: master tickets that DO have a category, but not their
+  // family's, get the family's — unless a person chose theirs (history).
+  const parentIds = families.map((f) => f.parentTicketId).filter(Boolean);
+  const categorized = parentIds.length ? await db.ticket.findMany({
+    where: { workspaceId: ws, id: { in: parentIds }, internalCategoryId: { not: null }, createdAt: { gte: since }, status: { notIn: ['Deleted', 'Spam'] } },
+    select: { id: true, origin: true, nativeNumber: true, freshserviceTicketId: true, internalCategoryId: true, internalSubcategoryId: true },
+    orderBy: { id: 'asc' },
+    take: 5000,
+  }) : [];
+  for (const t of categorized) {
+    const m = membership.get(t.id);
+    const fam = m?.role === 'parent' ? m.family : null;
+    if (!fam || !t.internalCategoryId) continue;
+    const to = hr._familyCategory(settings, fam.kind);
+    if (!to?.categoryId) continue;
+    if (Number(t.internalCategoryId) === to.categoryId && (Number(t.internalSubcategoryId) || null) === (to.subcategoryId || null)) continue;
+    if (await hr._categorySetByPerson(t.id)) {
+      skipped.push({ ticketId: t.id, why: 'family parent: a person chose its category' });
+      continue;
+    }
+    rows.push({
+      ticketId: t.id, ref: refOf(t), origin: t.origin, group: `family parent (re-filed from ${t.internalCategoryId}${t.internalSubcategoryId ? ` > ${t.internalSubcategoryId}` : ''}): ${fam.kind}`,
+      to: { categoryId: to.categoryId, subcategoryId: to.subcategoryId || null },
+      from: { categoryId: Number(t.internalCategoryId), subcategoryId: Number(t.internalSubcategoryId) || null },
+      replace: true,
+    });
   }
   return { rows, skipped };
 }
@@ -167,8 +205,8 @@ async function main() {
     const out = { warnings: [] };
     for (const r of rows) {
       const t = { id: r.ticketId, workspaceId: args.workspaceId, origin: r.origin, nativeNumber: null, freshserviceTicketId: null };
-      const wrote = await hr._applyCategory(t, r.to, out, { recheck: true, backfill: true });
-      if (wrote) undo.push({ ticketId: r.ticketId, ref: r.ref, origin: r.origin, from: { categoryId: null, subcategoryId: null }, to: r.to });
+      const wrote = await hr._applyCategory(t, r.to, out, { recheck: true, backfill: true, replace: r.replace === true });
+      if (wrote) undo.push({ ticketId: r.ticketId, ref: r.ref, origin: r.origin, from: r.from || { categoryId: null, subcategoryId: null }, to: r.to });
     }
     writeFileSync(args.undoFile, JSON.stringify(undo, null, 2));
     console.log(`written: ${undo.length}; warnings: ${out.warnings.length}; undo file: ${args.undoFile}`);

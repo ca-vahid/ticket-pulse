@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowDown, ArrowUp, Braces, ImagePlus, Loader2, Pencil, Plus, Trash2, Wand2, X,
+  ArrowDown, ArrowUp, Braces, ImagePlus, Info, Loader2, Pencil, Plus, Trash2, Wand2, X,
 } from 'lucide-react';
 import { settingsAPI, ticketsAPI } from '../../services/api';
 import RichTextEditor from '../tickets/RichTextEditor';
@@ -358,6 +358,17 @@ export function MacroForm({ initial, lookups, onSave, onCancel, busy = false, er
     e.preventDefault();
     onSave({ name: name.trim(), description: description.trim(), actions: { steps: stepsForSave(steps) } });
   };
+  // QA 11-05b #4: steps run in this exact order, so a reply can follow a
+  // close. closedBefore[i] = the closing status a step at i runs after, or null.
+  const closedBefore = useMemo(() => {
+    const baseOf = new Map((lookups?.statuses || []).map((s) => [s.name, s.baseStatus || s.name]));
+    let closed = null;
+    return steps.map((s) => {
+      const before = closed;
+      if (s.type === 'status' && s.status) closed = ['Resolved', 'Closed'].includes(baseOf.get(s.status) || s.status) ? s.status : null;
+      return before;
+    });
+  }, [steps, lookups?.statuses]);
   return (
     // Two levels at most (house style): the form has no box of its own; the action
     // list is plain rows split by rules.
@@ -376,7 +387,7 @@ export function MacroForm({ initial, lookups, onSave, onCancel, busy = false, er
       <div>
         <div className="flex items-baseline justify-between gap-2">
           <h4 className="text-sm font-semibold text-foreground">Actions</h4>
-          <p className="text-[11px] text-muted-foreground">Run top to bottom; a status change always runs last.</p>
+          <p className="text-[11px] text-muted-foreground">Run top to bottom, in exactly this order.</p>
         </div>
         <ol className="mt-1.5 divide-y divide-border/60 border-y border-border/60" data-testid="macro-steps">
           {steps.length === 0 && <li className="py-3 text-xs text-muted-foreground">No actions yet. Add the first one below.</li>}
@@ -397,6 +408,12 @@ export function MacroForm({ initial, lookups, onSave, onCancel, busy = false, er
                 <div className="mt-2 pl-7">
                   <StepConfig step={step} onPatch={(patch) => patchStep(step.id, patch)} lookups={lookups} />
                   {meta.hint && <p className="mt-1 text-[11px] text-muted-foreground">{meta.hint}</p>}
+                  {step.type === 'reply' && closedBefore[i] && (
+                    <p className="mt-1 flex items-start gap-1 text-[11px] text-amber-800 dark:text-amber-200" data-testid="macro-reply-after-close">
+                      <Info className="mt-px h-3 w-3 shrink-0" aria-hidden="true" />
+                      Runs after the ticket is set to {closedBefore[i]}: the reply is still sent, and the ticket stays {closedBefore[i]}.
+                    </p>
+                  )}
                 </div>
               </li>
             );

@@ -1141,7 +1141,8 @@ class MailboxIngestService {
    *    incoming (the content is the requester's), rawPayload.forwarded.
    *  • agent reply from Outlook with the mailbox in Cc — authorType agent,
    *    NOT incoming (already delivered by Outlook → deliveryState external,
-   *    never re-sent), no reply_received event.
+   *    never re-sent), no reply_received event; it fires
+   *    ticket.public_reply_added marked alreadyDelivered (4.3.49).
    */
   async ingestReply(connection, ticket, email, via, { agent: resolvedAgent = null, ctx = null } = {}) {
     const now = new Date();
@@ -1315,6 +1316,11 @@ class MailboxIngestService {
           await copyAgentsOnRequesterReply(ticket, entry, { fromEmail: email.from, fromName: email.fromName || null });
         } catch { /* non-fatal */ }
       }
+    } else {
+      // QA 11-05b #3 (Vahid): an agent's Outlook reply is "Agent replied to
+      // requester", like an in-app reply — once per entry, marked as already
+      // delivered by Outlook so nothing sends the reply itself again.
+      await this._emitAgentOutlookReply(ticket, entry, agent, via);
     }
 
     try {
@@ -1344,8 +1350,9 @@ class MailboxIngestService {
    *  - the agent takes the reply ownership (a staged Auto-help answer nobody
    *    sent is set aside, as for an in-app reply).
    * Both origins: FS-born tickets read the same field (the FS sync only ever
-   * sets it, never clears it). No event: the mail was already delivered by
-   * Outlook, so nothing is re-sent and no reply_received fires.
+   * sets it, never clears it). Nothing is re-sent and no reply_received
+   * fires; "Agent replied to requester" fires separately since 4.3.49
+   * (_emitAgentOutlookReply).
    * Never throws — the reply is stored either way.
    */
   async _stampAgentFirstResponse(ticket, entry, email, agent, now = new Date()) {
@@ -1372,6 +1379,54 @@ class MailboxIngestService {
       } catch { /* bookkeeping only */ }
     }
     return stamped;
+  }
+
+  /**
+   * "Agent replied to requester" for an agent's own Outlook reply (QA 11-05b
+   * #3). The same event and payload the in-app reply fires
+   * (ticketService._addThreadEntry), plus:
+   *  - `dedupeStamp: reply:<entryId>` — the in-app stamp shape, so one entry
+   *    fires once however often the dispatch is retried (the mail itself is
+   *    ingested once: _alreadyIngested on its Internet message id);
+   *  - `via: 'outlook'`, `alreadyDelivered: true` — Outlook already delivered
+   *    the reply; a workflow step that would mail its text to the requester
+   *    again is skipped (notificationWorkflowEngine.repeatsDeliveredReply);
+   *  - `byEmail` / `actorTechnicianId` — the agent, so the Teams teammate
+   *    update never pings them about their own reply.
+   * The FreshService sync never fires this event (only ticket.reply_received,
+   * for requester replies), so an FS-born ticket cannot get it twice when the
+   * sync later reads the note we wrote back. Never fires reply_received.
+   * Never throws.
+   */
+  async _emitAgentOutlookReply(ticket, entry, agent, matchedVia = null) {
+    try {
+      const { default: lifecycle } = await import('./ticketLifecycleNotificationService.js');
+      const bodyText = String(entry?.bodyText || entry?.content || '').slice(0, 20000);
+      await lifecycle.emitTicketEvent('ticket.public_reply_added', ticket.id, {
+        source: 'email_inbound',
+        dedupeStamp: `reply:${entry.id}`,
+        extra: {
+          entryId: entry.id,
+          byEmail: agent?.email || null,
+          actorTechnicianId: agent?.id ?? null,
+          ref: ticketDisplayRef(ticket),
+          author: entry.actorName,
+          authorType: entry.authorType || 'agent',
+          isPrivate: false,
+          stage: null,
+          agent: null,
+          bodyText,
+          occurredAt: new Date(entry.occurredAt || Date.now()).toISOString(),
+          via: 'outlook',
+          alreadyDelivered: true,
+          ...(matchedVia ? { matchedVia } : {}),
+        },
+      });
+      return true;
+    } catch (err) {
+      logger.warn(`public_reply_added for the Outlook reply on ${ticketDisplayRef(ticket)} not dispatched (non-fatal): ${err.message}`);
+      return false;
+    }
   }
 
   /**

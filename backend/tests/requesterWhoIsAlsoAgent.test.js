@@ -108,8 +108,11 @@ describe('on your own ticket you are the requester, whatever your job title', ()
     expect(e.authorType).toBe('agent');
     expect(e.incoming).toBe(false);
     expect(e.rawPayload.deliveryState).toBe('external');
-    // An agent's own Outlook reply must NOT look like a requester replying.
-    expect(lifecycleMock.emitTicketEvent).not.toHaveBeenCalled();
+    // An agent's own Outlook reply must NOT look like a requester replying:
+    // no reply_received. Since 4.3.49 (QA 11-05b #3) it fires "Agent replied
+    // to requester" instead, marked as already delivered.
+    expect(lifecycleMock.emitTicketEvent.mock.calls.map((c) => c[0])).toEqual(['ticket.public_reply_added']);
+    expect(lifecycleMock.emitTicketEvent.mock.calls[0][2].extra).toMatchObject({ via: 'outlook', alreadyDelivered: true });
   });
 
   test('a plain requester who is not an agent is unchanged', async () => {
