@@ -1,5 +1,6 @@
 import { VolumeX } from 'lucide-react';
 import { noiseState, skipNoisePatch } from '../../utils/conditionNoise';
+import { Switch } from '../ui/switch';
 
 /** The condition step's "Skip noise tickets" switch (QA 10-06 #2) — see utils/conditionNoise.js. */
 export default function SkipNoiseSwitch({ data, onPatch }) {
@@ -15,16 +16,13 @@ export default function SkipNoiseSwitch({ data, onPatch }) {
             : 'Noise and spam tickets are not stopped here — only the conditions below decide.'}
         </p>
       </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={on}
+      {/* QA 11-05: the app's one switch. */}
+      <Switch
+        checked={on}
         aria-label="Skip noise tickets"
-        onClick={() => onPatch(skipNoisePatch(data, !on))}
-        className={`tp-focus-ring relative mt-0.5 inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors ${on ? 'bg-primary' : 'bg-muted-foreground/40'}`}
-      >
-        <span className={`inline-block h-4 w-4 rounded-full bg-card shadow transition-transform ${on ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
-      </button>
+        onCheckedChange={() => onPatch(skipNoisePatch(data, !on))}
+        className="mt-0.5"
+      />
     </div>
   );
 }
