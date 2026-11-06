@@ -129,6 +129,8 @@ async function resolvePrincipal(raw) {
     trustedIntake: client.trustedIntake === true, defaultSource: client.defaultSource ?? null,
     structureOwnTicketsOnly: client.structureOwnTicketsOnly === true,
     fsStatusWrite: client.fsStatusWrite === true,
+    readExcludeCategoryIds: Array.isArray(client.readExcludeCategoryIds) ? client.readExcludeCategoryIds : [],
+    readPrivateNotes: client.readPrivateNotes !== false,
   };
 }
 
@@ -178,6 +180,8 @@ export const requireApiKey = (scope) => async (req, res, next) => {
       trustedIntake: principal.trustedIntake === true, defaultSource: principal.defaultSource ?? null,
       structureOwnTicketsOnly: principal.structureOwnTicketsOnly === true,
       fsStatusWrite: principal.fsStatusWrite === true,
+      readExcludeCategoryIds: Array.isArray(principal.readExcludeCategoryIds) ? principal.readExcludeCategoryIds : [],
+      readPrivateNotes: principal.readPrivateNotes !== false,
     };
     req.workspaceId = principal.workspaceId;
     req.apiMode = principal.mode;

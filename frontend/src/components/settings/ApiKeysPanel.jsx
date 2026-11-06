@@ -208,6 +208,99 @@ function WebhooksSection() {
   );
 }
 
+// Read limits (Simorgh IT read-search, 6 Nov 2026): categories whose tickets
+// this client never sees on any read, and whether it may read private notes.
+// Ticket Pulse enforces both; the integration cannot widen them.
+export function ReadLimitsEditor({ client, onSave, onCancel }) {
+  const [options, setOptions] = useState(null);
+  const [loadError, setLoadError] = useState(null);
+  const [exclude, setExclude] = useState(() => new Set(client.readExcludeCategoryIds || []));
+  const [privateNotes, setPrivateNotes] = useState(client.readPrivateNotes !== false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    ticketsAPI.oauthClientCategoryOptions()
+      .then((r) => setOptions(r.data || []))
+      .catch((e) => setLoadError(loadErrorMessage(e)));
+  }, []);
+
+  const parents = (options || []).filter((o) => !o.parentId);
+  const childrenOf = (id) => (options || []).filter((o) => o.parentId === id);
+  const toggle = (ids, on) => setExclude((prev) => {
+    const next = new Set(prev);
+    ids.forEach((id) => (on ? next.add(id) : next.delete(id)));
+    return next;
+  });
+  const save = async () => {
+    setSaving(true);
+    try { await onSave({ readExcludeCategoryIds: [...exclude], readPrivateNotes: privateNotes }); } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="w-full mt-1 rounded-lg border border-border bg-muted/40 p-2.5 space-y-2">
+      <label className="flex items-start gap-2 text-foreground/85">
+        <input
+          id={`oauth-private-notes-${client.id}`}
+          type="checkbox"
+          checked={privateNotes}
+          onChange={(e) => setPrivateNotes(e.target.checked)}
+          className="tp-focus-ring mt-0.5 h-3.5 w-3.5 rounded border-input text-blue-600 dark:text-blue-300"
+        />
+        <span>
+          <span className="font-medium text-foreground">May read private notes</span>
+          <span className="block text-[10px] text-muted-foreground/75">Off: private notes are left out of conversations and of conversation search.</span>
+        </span>
+      </label>
+      <div>
+        <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75 mb-1">Hidden categories</div>
+        <p className="text-[10px] text-muted-foreground/75 mb-1.5">Tickets in a ticked category are invisible to this client: lists, search, similar search and ticket reads answer as if they don’t exist.</p>
+        {loadError && <p className="text-[11px] text-red-500">Couldn’t load categories: {loadError}</p>}
+        {!options && !loadError && <p className="text-[11px] text-muted-foreground/75">Loading categories…</p>}
+        <div className="max-h-64 overflow-y-auto settings-scrollbar space-y-1.5 pr-1">
+          {parents.map((p) => {
+            const kids = childrenOf(p.id);
+            return (
+              <div key={p.id}>
+                <label className="flex items-center gap-1.5 font-medium text-foreground/85">
+                  <input
+                    id={`oauth-exclude-${client.id}-${p.id}`}
+                    type="checkbox"
+                    checked={exclude.has(p.id)}
+                    onChange={(e) => toggle([p.id], e.target.checked)}
+                    className="tp-focus-ring h-3.5 w-3.5 rounded border-input text-blue-600 dark:text-blue-300"
+                  />
+                  {p.name}
+                  {exclude.has(p.id) && kids.length > 0 && <span className="text-[10px] font-normal text-muted-foreground/75">all {kids.length} subcategories hidden</span>}
+                </label>
+                {!exclude.has(p.id) && kids.length > 0 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-0.5 pl-5 mt-0.5">
+                    {kids.map((k) => (
+                      <label key={k.id} className="flex items-center gap-1.5 text-muted-foreground">
+                        <input
+                          id={`oauth-exclude-${client.id}-${k.id}`}
+                          type="checkbox"
+                          checked={exclude.has(k.id)}
+                          onChange={(e) => toggle([k.id], e.target.checked)}
+                          className="tp-focus-ring h-3.5 w-3.5 rounded border-input text-blue-600 dark:text-blue-300"
+                        />
+                        {k.name}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      <div className="flex gap-1.5">
+        <button onClick={save} disabled={saving || !options} className="tp-focus-ring px-2.5 py-1 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50">{saving ? 'Saving…' : 'Save read limits'}</button>
+        <button onClick={onCancel} className="tp-focus-ring px-2.5 py-1 rounded-md text-muted-foreground hover:bg-muted/50">Cancel</button>
+      </div>
+    </div>
+  );
+}
+
 function OAuthClientsSection() {
   const [clients, setClients] = useState([]);
   const [draft, setDraft] = useState(null); // { name, scopes, expiresInDays }
@@ -215,6 +308,7 @@ function OAuthClientsSection() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [loadError, setLoadError] = useState(null);
+  const [limitsFor, setLimitsFor] = useState(null); // client id whose read limits are open
 
   const load = useCallback(() => { ticketsAPI.listOauthClients().then((r) => { setClients(r.data || []); setLoadError(null); }).catch((e) => setLoadError(loadErrorMessage(e))); }, []);
   useEffect(() => { load(); }, [load]);
@@ -271,6 +365,12 @@ function OAuthClientsSection() {
             {c.fsStatusWrite && (
               <span title="This client may change the status of FreshService tickets; the change is written to FreshService first" className="text-[10px] font-medium text-muted-foreground">FreshService status</span>
             )}
+            {Array.isArray(c.readExcludeCategoryIds) && c.readExcludeCategoryIds.length > 0 && (
+              <span title="Tickets in these categories are invisible to this client" className="text-[10px] font-medium text-muted-foreground">{c.readExcludeCategoryIds.length} hidden categor{c.readExcludeCategoryIds.length === 1 ? 'y' : 'ies'}</span>
+            )}
+            {c.readPrivateNotes === false && (
+              <span title="Private notes are left out of everything this client reads" className="text-[10px] font-medium text-muted-foreground">no private notes</span>
+            )}
             {Array.isArray(c.ipAllowlist) && c.ipAllowlist.length > 0 && (
               <span title={c.ipAllowlist.join(', ')} className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px]">{c.ipAllowlist.length} IP{c.ipAllowlist.length === 1 ? '' : 's'}</span>
             )}
@@ -279,9 +379,17 @@ function OAuthClientsSection() {
               {(c.scopes || []).length > 5 && <span className="text-[10px] text-muted-foreground/75">+{c.scopes.length - 5}</span>}
             </span>
             <span className="ml-auto text-muted-foreground/75 tabular-nums">{c.tokenCount || 0} tokens{c.lastUsedAt ? ` · last ${new Date(c.lastUsedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : ''}</span>
+            <button onClick={() => setLimitsFor(limitsFor === c.id ? null : c.id)} aria-expanded={limitsFor === c.id} className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted/50">Read limits</button>
             <button onClick={() => rotate(c)} title="Rotate secret" className="tp-focus-ring inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted/50"><RefreshCw className="w-3 h-3" aria-hidden="true" /> Rotate</button>
             <button onClick={() => act(() => ticketsAPI.updateOauthClient(c.id, { isEnabled: !c.isEnabled }))} className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted/50">{c.isEnabled ? 'Disable' : 'Enable'}</button>
             <button onClick={() => { if (confirmDestructive(`Delete OAuth client “${c.name}”? Any integration using it loses access immediately.`)) act(() => ticketsAPI.deleteOauthClient(c.id)); }} aria-label={`Delete client ${c.name}`} className="tp-focus-ring p-1 rounded text-muted-foreground/50 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" aria-hidden="true" /></button>
+            {limitsFor === c.id && (
+              <ReadLimitsEditor
+                client={c}
+                onCancel={() => setLimitsFor(null)}
+                onSave={(patch) => act(async () => { await ticketsAPI.updateOauthClient(c.id, patch); setLimitsFor(null); })}
+              />
+            )}
           </li>
         ))}
         {clients.length === 0 && (

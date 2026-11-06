@@ -1557,9 +1557,17 @@ router.post('/oauth-clients', requireTicketingAdmin, asyncHandler(async (req, re
   const client = await oauthClientService.create(req.workspaceId, {
     name: req.body?.name, scopes: req.body?.scopes, expiresInDays: req.body?.expiresInDays,
     trustedIntake: req.body?.trustedIntake, structureOwnTicketsOnly: req.body?.structureOwnTicketsOnly, fsStatusWrite: req.body?.fsStatusWrite, ipAllowlist: req.body?.ipAllowlist, defaultSource: req.body?.defaultSource,
+    readExcludeCategoryIds: req.body?.readExcludeCategoryIds, readPrivateNotes: req.body?.readPrivateNotes,
   }, req.ticketActor);
   // client_secret returned exactly once.
   res.status(201).json({ success: true, data: client });
+}));
+
+// Categories for a client's read limits (Simorgh IT read-search): the
+// workspace's active categories, parents with their subcategories.
+router.get('/oauth-clients/category-options', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const rows = await prisma.competencyCategory.findMany({ where: { workspaceId: req.workspaceId, isActive: true }, select: { id: true, name: true, parentId: true }, orderBy: { name: 'asc' } });
+  res.json({ success: true, data: rows });
 }));
 
 router.patch('/oauth-clients/:clientId', requireTicketingAdmin, asyncHandler(async (req, res) => {

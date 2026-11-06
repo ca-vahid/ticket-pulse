@@ -330,6 +330,12 @@ model OAuthClient {
   structureOwnTicketsOnly Boolean @default(false) @map("structure_own_tickets_only")
   // May change the status of FreshService-born tickets (written to FS first). Opt-in.
   fsStatusWrite          Boolean @default(false) @map("fs_status_write")
+  // Read limits (Simorgh IT read-search, 6 Nov 2026): tickets in these
+  // categories or subcategories are invisible to this client on every read,
+  // and private notes are left out when readPrivateNotes is off. Enforced in
+  // apiV1.routes.js, never by the caller.
+  readExcludeCategoryIds Int[]   @default([]) @map("read_exclude_category_ids")
+  readPrivateNotes       Boolean @default(true) @map("read_private_notes")
   ipAllowlist      String[]  @default([]) @map("ip_allowlist")
   defaultSource    Int?      @map("default_source")
   isEnabled        Boolean   @default(true) @map("is_enabled")

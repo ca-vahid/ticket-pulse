@@ -1043,6 +1043,7 @@ export const ticketsAPI = {
   listOauthClients: async () => await api.get('/tickets/oauth-clients'),
   createOauthClient: async (data) => await api.post('/tickets/oauth-clients', data),
   updateOauthClient: async (id, data) => await api.patch(`/tickets/oauth-clients/${id}`, data),
+  oauthClientCategoryOptions: async () => await api.get('/tickets/oauth-clients/category-options'),
   rotateOauthClient: async (id) => await api.post(`/tickets/oauth-clients/${id}/rotate`),
   revokeOauthClient: async (id) => await api.post(`/tickets/oauth-clients/${id}/revoke`),
   deleteOauthClient: async (id) => await api.delete(`/tickets/oauth-clients/${id}`),

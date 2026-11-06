@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.3.50-preview';
+export const APP_VERSION = '4.3.51-preview';
 
 export const changelog = [
+  {
+    version: '4.3.51-preview',
+    date: 'November 5, 2026',
+    entries: [
+      { type: 'added', html: '<strong>API read limits.</strong> Each OAuth client in Settings &rarr; API now has <em>Read limits</em>. Pick the categories it must never see, and those tickets don&rsquo;t exist for it: lists, search and ticket reads answer as if they were missing. You can also switch off private notes. Ticket Pulse enforces both; the integration can&rsquo;t widen them.' },
+      { type: 'added', html: '<strong>API search</strong> by keyword now takes the same filters as the ticket list (type, status, dates, requester or agent e-mail) and pages through results. Each hit says where it matched and shows a short preview of the description. Every ticket the API returns now carries its link in Ticket Pulse.' },
+    ],
+  },
   {
     version: '4.3.50-preview',
     date: 'November 5, 2026',

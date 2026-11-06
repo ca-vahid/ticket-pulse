@@ -87,6 +87,16 @@ describe('grouped copies are not noise (QA 10-28 #4)', () => {
     expect(where.AND).toEqual(expect.arrayContaining([groupedOut]));
   });
 
+  test('an API read limit hides the categories but keeps uncategorised tickets (Simorgh IT read-search)', async () => {
+    const where = await ticketService.buildListWhere(7, { excludeCategoryIds: [10, 133] });
+    expect(where.AND).toEqual(expect.arrayContaining([
+      { OR: [{ internalCategoryId: null }, { internalCategoryId: { notIn: [10, 133] } }] },
+      { OR: [{ internalSubcategoryId: null }, { internalSubcategoryId: { notIn: [10, 133] } }] },
+    ]));
+    const fromQueryString = await ticketService.buildListWhere(7, { excludeCategoryIds: '10' });
+    expect(JSON.stringify(fromQueryString.AND || [])).not.toContain('notIn');
+  });
+
   test('the default queue is unchanged (no noise at all)', async () => {
     const where = await ticketService.buildListWhere(7, {});
     expect(where.isNoise).toBe(false);
