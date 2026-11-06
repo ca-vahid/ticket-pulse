@@ -2,7 +2,7 @@ import { useId, useMemo, useState } from 'react';
 import {
   Activity, AlertTriangle, ArrowDown, ArrowLeftRight, ArrowRight, ArrowUp, BadgeCheck, BookOpen, Bot, Building2,
   CalendarClock, Check, CheckSquare, ChevronDown, EyeOff, Forward, GitMerge, Hand, History, Inbox, Lock, Mail,
-  MessageSquare, Pencil, Plug, Plus, RefreshCw, RotateCcw, Siren, SkipForward, Sparkles, Tag, VolumeX, Workflow,
+  MessageSquare, Pencil, Play, Plug, Plus, RefreshCw, RotateCcw, Siren, SkipForward, Sparkles, Tag, VolumeX, Wand2, Workflow,
 } from 'lucide-react';
 import { ACTOR_KIND_META, spanLabel } from './activityKind.jsx';
 import { PersonAvatar, STATUS_COLORS } from './ticketUi.jsx';
@@ -70,8 +70,10 @@ const EVENT_STYLE = {
   autohelp: { icon: BookOpen, tone: TONE.blue, label: 'Auto-help' },
   urgent: { icon: Siren, tone: TONE.red, label: 'Urgent response' },
   intake: { icon: Inbox, tone: TONE.violet, label: 'Intake' },
-  workflow: { icon: Workflow, tone: TONE.amber, label: 'Workflow' },
-  wfrun: { icon: Workflow, tone: TONE.amber, label: 'Workflow run' },
+  // The workflow mark is the actor's picture; the event column says what it did.
+  workflow: { icon: Pencil, tone: TONE.amber, label: 'Workflow change' },
+  macro: { icon: Wand2, tone: TONE.violet, label: 'Macro' },
+  wfrun: { icon: Play, tone: TONE.amber, label: 'Workflow run' },
   wfFailed: { icon: AlertTriangle, tone: TONE.red, label: 'Workflow failed' },
   wfShadow: { icon: EyeOff, tone: TONE.muted, label: 'Shadow run' },
   wfSkipped: { icon: SkipForward, tone: TONE.muted, label: 'Workflow skipped' },
@@ -186,44 +188,60 @@ export function ActorPicture({ name, actorType, photoForName, size = 'h-5 w-5', 
   );
 }
 
-function StatusWord({ value, statusTone }) {
+/** The one arrow of the tab: lucide ArrowRight, also inside summaries and notes. */
+function Arrow() {
+  return <ArrowRight className="inline-block w-3.5 h-3.5 text-muted-foreground/70 flex-shrink-0 align-[-2px]" aria-label="to" />;
+}
+
+/** Text whose " → " is drawn as the ArrowRight icon ("set status Pending → Open"). */
+export function ArrowText({ text }) {
+  const parts = String(text ?? '').split(/\s+→\s+/);
+  if (parts.length === 1) return parts[0];
+  return parts.map((p, i) => (
+    <span key={`${i}-${p}`}>{i > 0 && <>{' '}<Arrow />{' '}</>}{p}</span>
+  ));
+}
+
+// `oneLine`: the desktop row (sm and up, not the peek) truncates long values;
+// the two-line phone / peek row wraps them and never cuts them.
+function StatusWord({ value, statusTone, oneLine }) {
   const tone = statusTone?.(String(value)) || STATUS_COLORS[value] || '';
   const text = tone.split(/\s+/).filter((c) => /(^|:)text-/.test(c)).join(' ') || 'text-foreground/85';
   return (
-    <span className={`inline-flex items-center gap-1 min-w-0 font-semibold ${text}`} title={String(value)}>
+    <span className={`inline-flex items-center gap-1 min-w-0 max-w-full font-semibold ${text}`} title={String(value)}>
       <span className="h-1.5 w-1.5 rounded-full bg-current flex-shrink-0" aria-hidden="true" />
-      <span className="truncate">{value}</span>
+      <span className={`break-words ${oneLine ? 'sm:truncate' : ''}`}>{value}</span>
     </span>
   );
 }
 
-function Value({ item, value, statusTone, photoForName }) {
+function Value({ item, value, statusTone, photoForName, oneLine }) {
   if (!has(value)) return <span className="text-muted-foreground">Unassigned</span>;
-  if (item.event === 'status' || item.event === 'reopen') return <StatusWord value={value} statusTone={statusTone} />;
+  if (item.event === 'status' || item.event === 'reopen') return <StatusWord value={value} statusTone={statusTone} oneLine={oneLine} />;
   if (item.event === 'priority') return <span className={`font-semibold ${PRIORITY_TONE[key(value)] || TONE.muted}`}>{value}</span>;
   if (item.event === 'assignment' || item.event === 'ownership') {
     return (
-      <span className="inline-flex items-center gap-1 min-w-0" title={String(value)}>
+      <span className="inline-flex items-center gap-1 min-w-0 max-w-full" title={String(value)}>
         <ActorPicture name={String(value)} actorType="person" photoForName={photoForName} size="h-4 w-4" textSize="text-[7px]" />
-        <span className="font-semibold text-foreground truncate max-w-[11rem]">{value}</span>
+        <span className={`font-semibold text-foreground break-words ${oneLine ? 'sm:truncate sm:max-w-[11rem]' : ''}`}>{value}</span>
       </span>
     );
   }
-  return <span className="font-medium text-foreground truncate max-w-[16rem]" title={String(value)}>{value}</span>;
+  return <span className={`font-medium text-foreground break-words max-w-full ${oneLine ? 'sm:truncate sm:max-w-[16rem]' : ''}`} title={String(value)}>{value}</span>;
 }
 
-function Transition({ item, statusTone, photoForName }) {
+function Transition({ item, statusTone, photoForName, oneLine }) {
   const hasFrom = has(item.from);
   const hasTo = has(item.to);
   if (!hasFrom && !hasTo) return null;
   // "Jordan picked this up" needs no "→ Jordan".
   if (item.event === 'ownership' && !hasFrom && key(item.to) === key(item.actor)) return null;
-  const arrow = <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/70 flex-shrink-0" aria-label="to" />;
   return (
-    <span className="inline-flex items-center gap-1 min-w-0 flex-shrink" data-testid="history-transition">
-      {hasFrom && <Value item={item} value={item.from} statusTone={statusTone} photoForName={photoForName} />}
-      {(hasFrom || item.event === 'assignment' || item.event === 'ownership') && arrow}
-      <Value item={item} value={hasTo ? item.to : null} statusTone={statusTone} photoForName={photoForName} />
+    // Two-line layout: `contents` lets from, arrow and to wrap one by one with the verb.
+    <span className={`contents ${oneLine ? 'sm:inline-flex sm:items-center sm:gap-1 sm:min-w-0 sm:flex-shrink' : ''}`} data-testid="history-transition">
+      {hasFrom && <Value item={item} value={item.from} statusTone={statusTone} photoForName={photoForName} oneLine={oneLine} />}
+      {(hasFrom || item.event === 'assignment' || item.event === 'ownership') && <Arrow />}
+      <Value item={item} value={hasTo ? item.to : null} statusTone={statusTone} photoForName={photoForName} oneLine={oneLine} />
     </span>
   );
 }
@@ -256,16 +274,16 @@ function Details({ item, id }) {
   return (
     <div id={id} className="mt-0.5 mb-1.5 ml-[68px] sm:ml-[88px] border-l border-border pl-3 text-xs text-muted-foreground space-y-1 animate-fadeIn" data-testid="history-details">
       {item.workflowName && <p className="text-foreground/85 font-medium break-words">{item.actorType === 'fs_workflow' ? 'FreshService workflow' : 'Workflow'} “{item.workflowName}”{item.eventType ? <span className="font-normal text-muted-foreground"> · on {item.eventType.replace(/^ticket\./, '').replace(/_/g, ' ')}</span> : null}</p>}
-      {item.detail && item.detail !== reason && <p className="whitespace-pre-wrap break-words text-foreground/85">{item.detail}</p>}
-      {reason && reason.length > 60 && <p className="break-words">{reason}</p>}
-      {(item.extra || []).map((x) => <p key={x} className="break-words">{x}</p>)}
+      {item.detail && item.detail !== reason && <p className="whitespace-pre-wrap break-words text-foreground/85"><ArrowText text={item.detail} /></p>}
+      {reason && reason.length > 60 && <p className="break-words"><ArrowText text={reason} /></p>}
+      {(item.extra || []).map((x) => <p key={x} className="break-words"><ArrowText text={x} /></p>)}
       {steps.length > 0 && (
         <ol className="space-y-0.5" aria-label="Workflow steps">
           {steps.map((s, idx) => (
             <li key={`${s.nodeId}-${idx}`} className="flex items-baseline gap-1.5">
               <span className={`h-1.5 w-1.5 rounded-full flex-shrink-0 translate-y-[-1px] ${s.status === 'failed' ? 'bg-red-500' : s.nodeType === 'stop' ? 'bg-muted-foreground/50' : 'bg-emerald-500'}`} aria-hidden="true" />
               <span className="text-foreground/85">{STEP_LABEL[s.nodeType] || s.nodeType.replace(/_/g, ' ')}</span>
-              {s.note && <span className="min-w-0 break-words">{' '}· {s.note}</span>}
+              {s.note && <span className="min-w-0 break-words">{' '}· <ArrowText text={s.note} /></span>}
               {s.status === 'failed' && <span className="text-red-600 dark:text-red-300">{' '}· failed{s.error ? `: ${s.error}` : ''}</span>}
             </li>
           ))}
@@ -282,9 +300,14 @@ function Details({ item, id }) {
 }
 
 /**
- * One event, one line. `showActor` is false on the 2nd+ row of a run (the
- * picture and name sit on the first). `compact` (the peek panel) keeps only the
- * time and name columns.
+ * One event per row.
+ *
+ * From sm up (not in the peek): ONE line — time · picture + name · event
+ * icon · the change · chevron; long values truncate (with a title).
+ * Below sm, and always in the peek (`compact`): TWO lines — line 1 is time ·
+ * picture · name · chevron; line 2, indented under the name, is the change,
+ * wrapping and never cut. The event icon is dropped there (the verb says
+ * it). A 2nd+ row of a run (`showActor` false) puts its change on line 1.
  */
 export function HistoryRow({ item, showActor = true, statusTone, photoForName, isNew = false, compact = false }) {
   const [open, setOpen] = useState(false);
@@ -294,44 +317,47 @@ export function HistoryRow({ item, showActor = true, statusTone, photoForName, i
   const reason = reasonFor(item);
   const full = lineText(item);
   const actor = actorLabel(item);
+  const oneLine = !compact;
+  const sm = (cls) => (oneLine ? cls : '');
+  const hasMove = has(item.from) || has(item.to) || item.workflowName;
   return (
-    <div className={`relative ${isNew ? 'tp-history-new' : ''}`} data-testid="history-row" data-event={item.event} data-kind={item.kind} data-machine={item.machine ? 'true' : 'false'}>
+    <div className={`relative ${isNew ? 'tp-history-new' : ''}`} data-testid="history-row" data-event={item.event} data-kind={item.kind} data-machine={item.machine ? 'true' : 'false'} data-layout={compact ? 'two-line' : 'responsive'}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-controls={open ? id : undefined}
         title={full}
-        className={`tp-focus-ring group w-full grid items-center gap-x-2 rounded-md px-1.5 py-1 text-left text-[13px] leading-5 hover:bg-muted/60 ${compact
-          ? 'grid-cols-[44px_20px_16px_minmax(0,1fr)_14px]'
-          : 'grid-cols-[44px_20px_16px_minmax(0,1fr)_14px] sm:grid-cols-[64px_168px_16px_minmax(0,1fr)_14px]'} ${item.machine ? 'text-muted-foreground' : 'text-foreground'}`}
+        className={`tp-focus-ring group w-full grid items-start gap-x-2 gap-y-0.5 rounded-md px-1.5 py-1 text-left text-[13px] leading-5 hover:bg-muted/60 grid-cols-[44px_20px_minmax(0,1fr)_14px] ${sm('sm:grid-cols-[64px_168px_16px_minmax(0,1fr)_14px] sm:items-center')} ${item.machine ? 'text-muted-foreground' : 'text-foreground'}`}
       >
         {/* The peek has no day headings: an older row shows its day instead. */}
-        <span className="text-[11px] tabular-nums text-muted-foreground/80 whitespace-nowrap" title={fullTime(item.at)}>
+        <span className={`col-start-1 row-start-1 text-[11px] tabular-nums text-muted-foreground/80 whitespace-nowrap ${sm('sm:col-start-1')}`} title={fullTime(item.at)}>
           {compact && dayKey(item.at) !== dayKey(Date.now())
             ? new Date(item.at).toLocaleDateString('en-GB', { timeZone: TZ, day: 'numeric', month: 'short' })
             : timeLabel(item.at)}
         </span>
-        <span className="flex items-center gap-1.5 min-w-0">
+        <span className={`row-start-1 col-start-2 ${showActor ? 'col-span-2' : 'col-span-1'} ${sm('sm:col-span-1')} flex items-center gap-1.5 min-w-0`}>
           {showActor ? <ActorPicture name={item.actor} actorType={item.actorType} photoForName={photoForName} /> : <span className="h-5 w-5 flex-shrink-0" aria-hidden="true" />}
-          {/* One name element: shown from sm up, read aloud (picture + title) on a phone and in the peek. */}
-          {showActor && !compact
-            ? <span className={`sr-only sm:not-sr-only sm:truncate font-semibold ${item.machine ? 'text-muted-foreground' : 'text-foreground'}`}>{actor}</span>
+          {showActor
+            ? <span className={`truncate font-semibold ${item.machine ? 'text-muted-foreground' : 'text-foreground'}`}>{actor}</span>
             : <span className="sr-only">{actor}</span>}
         </span>
-        <span className={`inline-flex ${S.tone}`}>
+        <span className={`hidden ${sm(`sm:inline-flex sm:col-start-3 sm:row-start-1 ${S.tone}`)}`}>
           <Icon className="w-3.5 h-3.5" aria-hidden="true" />
           <span className="sr-only">{S.label}</span>
         </span>
-        <span className="flex items-center gap-1.5 min-w-0 overflow-hidden whitespace-nowrap">
-          {item.workflowName && <span className="font-semibold text-foreground truncate max-w-[18rem] flex-shrink" title={item.workflowName}>“{item.workflowName}”</span>}
-          <span className={`${has(item.from) || has(item.to) || item.workflowName ? 'flex-shrink-0' : 'min-w-0 truncate'} ${item.event === 'urgent' || item.event === 'reopen' || (item.event === 'status' && TERMINAL.has(key(item.to))) ? 'font-semibold text-foreground' : 'text-muted-foreground'}`}>{verbFor(item)}</span>
-          <Transition item={item} statusTone={statusTone} photoForName={photoForName} />
-          {reason && <span className="min-w-0 truncate text-muted-foreground" title={reason}>· {reason}</span>}
+        <span
+          data-testid="history-change"
+          className={`col-start-2 pl-[26px] flex flex-wrap items-center gap-x-1.5 gap-y-0.5 min-w-0 whitespace-normal ${showActor ? 'row-start-2 col-span-3' : 'row-start-1 col-span-2'} ${sm('sm:col-start-4 sm:col-span-1 sm:row-start-1 sm:pl-0 sm:flex-nowrap sm:overflow-hidden sm:whitespace-nowrap')}`}
+        >
+          {item.workflowName && <span className={`font-semibold text-foreground break-words max-w-full ${sm('sm:truncate sm:max-w-[18rem] sm:flex-shrink')}`} title={item.workflowName}>“{item.workflowName}”</span>}
+          <span className={`max-w-full ${hasMove ? sm('sm:flex-shrink-0') : sm('sm:min-w-0 sm:truncate')} ${item.event === 'urgent' || item.event === 'reopen' || (item.event === 'status' && TERMINAL.has(key(item.to))) ? 'font-semibold text-foreground' : 'text-muted-foreground'}`}>{verbFor(item)}</span>
+          <Transition item={item} statusTone={statusTone} photoForName={photoForName} oneLine={oneLine} />
+          {reason && <span className={`min-w-0 max-w-full break-words text-muted-foreground ${sm('sm:truncate')}`} title={reason}>· <ArrowText text={reason} /></span>}
           {item.count > 1 && <span className="flex-shrink-0 text-[11px] text-muted-foreground/80">×{item.count}</span>}
           {item.duration && !reason && <span className="flex-shrink-0 text-[11px] text-muted-foreground/80">· {item.duration}</span>}
         </span>
-        <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground/60 group-hover:text-muted-foreground ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
+        <ChevronDown className={`col-start-4 row-start-1 mt-[3px] ${sm('sm:col-start-5 sm:mt-0')} w-3.5 h-3.5 text-muted-foreground/60 group-hover:text-muted-foreground ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
       </button>
       {open && <Details item={item} id={id} />}
     </div>

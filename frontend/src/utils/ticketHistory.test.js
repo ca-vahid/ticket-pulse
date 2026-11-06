@@ -366,3 +366,29 @@ describe('QA 11-05 #9 — the right actor, workflow runs, one line per action', 
     expect(workflowRunSummary({})).toBe('');
   });
 });
+describe('macro_applied (lane D macros, QA 11-05)', () => {
+  test('one people-visible line by the person who applied it; the steps go to the details', () => {
+    const [it] = buildHistoryItems({ activities: [{
+      id: 81, activityType: 'macro_applied', performedBy: 'Alex Rivera', performedAt: '2026-11-05T18:00:00.000Z',
+      details: {
+        source: 'ticketpulse_native', actorKind: 'human', macroId: 4, macroName: 'Laptop handover',
+        note: 'Applied macro “Laptop handover”: set priority to High; added a note',
+        steps: [
+          { type: 'priority', summary: 'Set priority to High', ok: true },
+          { type: 'note', summary: 'Added a note', ok: true },
+          { type: 'status', summary: 'Set status to Pending', ok: true, skipped: true, reason: 'A later status step in this macro wins' },
+          { type: 'assign', summary: 'Assigned to Sam Ortiz', ok: false, error: 'Sam Ortiz is away' },
+        ],
+      },
+    }] });
+    expect(it).toMatchObject({ event: 'macro', actor: 'Alex Rivera', actorType: 'person', machine: false, verb: 'applied macro “Laptop handover”', reason: '1 step failed', detail: null });
+    expect(it.extra).toEqual([
+      'Set priority to High',
+      'Added a note',
+      'Set status to Pending · skipped: A later status step in this macro wins',
+      'Assigned to Sam Ortiz · failed: Sam Ortiz is away',
+    ]);
+    const [clean] = buildHistoryItems({ activities: [{ id: 82, activityType: 'macro_applied', performedBy: 'Alex Rivera', performedAt: '2026-11-05T18:00:00.000Z', details: { actorKind: 'human', macroName: 'Close as duplicate', steps: [{ type: 'status', summary: 'Set status to Closed', ok: true }] } }] });
+    expect(clean).toMatchObject({ reason: '1 step', machine: false });
+  });
+});
