@@ -45,6 +45,9 @@ jest.unstable_mockModule('../src/services/fsHelpdeskAddressService.js', () => {
     },
   };
 });
+// A workspace's own FreshService prefixes (6 Nov 2026): workspace 2 numbers tickets [CASE-n].
+const prefixMock = { fsTicketPrefixes: jest.fn(async (workspaceId) => (Number(workspaceId) === 2 ? ['CASE'] : [])) };
+jest.unstable_mockModule('../src/services/fsTicketPrefixService.js', () => ({ fsTicketPrefixes: prefixMock.fsTicketPrefixes, default: prefixMock }));
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
 jest.unstable_mockModule('../src/integrations/graphMailClient.js', () => ({ default: graphMock }));
 jest.unstable_mockModule('../src/services/ticketService.js', () => ({ default: ticketServiceMock }));
@@ -1234,6 +1237,28 @@ describe('helpdesk mailbox profile', () => {
         : null));
     const match = await mailboxIngestService.matchEmailToTicket(1, { ...baseEmail, subject, to: ['helpdesk-pilot@example.com'] }, front.address, { helpdesk: true });
     expect(match).toMatchObject({ via: 'fs_ref_subject', ticket: { id: 800 } });
+  });
+
+  // 6 Nov 2026 (API Dev): IT's FreshService ids sit in the same range as vendors' own case
+  // numbers. A vendor's "CASE-249123" sent to IT must NOT thread onto IT ticket 249123.
+  test('IT: a vendor case number "CASE-249123" never threads onto the IT ticket with that number', async () => {
+    helpdeskMock.fsHelpdeskAddresses.mockResolvedValueOnce(new Set());
+    prismaMock.ticket.findFirst.mockImplementation(async ({ where }) => (
+      where.freshserviceTicketId === 249123n ? { id: 804, workspaceId: 1, origin: 'freshservice', freshserviceTicketId: 249123n, status: 'Open' } : null));
+    for (const subject of ['Microsoft Case #CASE-249123 update', 'Re: [CASE-249123] Dell support', 'Re: CASE-249123 Dell support']) {
+      const match = await mailboxIngestService.matchEmailToTicket(1, { ...baseEmail, subject }, front.address, { helpdesk: true });
+      expect(match?.ticket?.id).not.toBe(804);
+    }
+  });
+
+  test('Accounting (prefix CASE): a reply "[CASE-251037]" finds the ticket with that FreshService number', async () => {
+    helpdeskMock.fsHelpdeskAddresses.mockResolvedValueOnce(new Set());
+    prismaMock.ticket.findFirst.mockImplementation(async ({ where }) => (
+      where.workspaceId === 2 && where.freshserviceTicketId === 251037n
+        ? { id: 805, workspaceId: 2, origin: 'ticketpulse', nativeNumber: 1950, freshserviceTicketId: 251037n, status: 'Open' }
+        : null));
+    const match = await mailboxIngestService.matchEmailToTicket(2, { ...baseEmail, subject: 'Re: [CASE-251037] Invoice 4471', to: ['aptickets@example.com'] }, 'aptickets@example.com', { helpdesk: true });
+    expect(match).toMatchObject({ via: 'fs_ref_subject', ticket: { id: 805 } });
   });
 
   test('two different tickets named in one subject are held with both, not guessed', async () => {

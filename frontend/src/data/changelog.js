@@ -5,7 +5,7 @@ export const changelog = [
     version: '4.3.55-preview',
     date: 'November 6, 2026',
     entries: [
-      { type: 'improved', html: '<strong>Replies to Accounting&rsquo;s FreshService mails find their ticket</strong> &mdash; Accounting&rsquo;s FreshService numbers its tickets <em>[CASE-251037]</em>. Ticket Pulse now reads that number in a reply&rsquo;s subject the way it already reads IT&rsquo;s <em>[INC-&hellip;]</em> and <em>[#SR-&hellip;]</em>, so a reply lands on its ticket instead of opening a new one. This prepares the AP Tickets mailbox to move to Ticket Pulse; nothing changes for Accounting until that switch.' },
+      { type: 'improved', html: '<strong>Replies to Accounting&rsquo;s FreshService mails find their ticket</strong> &mdash; Accounting&rsquo;s FreshService numbers its tickets <em>[CASE-251037]</em>. Ticket Pulse can now read that number in a reply&rsquo;s subject the way it already reads IT&rsquo;s <em>[INC-&hellip;]</em> and <em>[#SR-&hellip;]</em>, so a reply lands on its ticket instead of opening a new one. It is read only in a workspace that says it uses that prefix, so a vendor&rsquo;s own &ldquo;Case #CASE-249123&rdquo; sent to IT never lands on an IT ticket. This prepares the AP Tickets mailbox to move to Ticket Pulse; nothing changes for Accounting until that switch.' },
     ],
   },
   {
