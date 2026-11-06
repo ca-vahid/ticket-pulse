@@ -96,6 +96,25 @@ describe('useBoardColumns', () => {
     expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'Closed', page: 2, pageSize: 50 }));
   });
 
+  // 5 Nov 2026 (QA): a sort change used to blank every column into "Loading…".
+  test('a sort change keeps each column\'s cards (loading) until its new page lands', async () => {
+    let gate = null;
+    list.mockImplementation((params) => {
+      const items = [t(`${params.status}-${params.sort}`, params.status)];
+      if (params.sort === 'dueBy') return new Promise((r) => { gate = () => r({ data: { items, total: 1 } }); });
+      return Promise.resolve({ data: { items, total: 1 } });
+    });
+    const scopes = boardColumnScopes({ statusDefs: DEFS, statuses: ['Open'], allCount: ALL });
+    const { result, rerender } = renderHook(({ sort }) => useBoardColumns({ enabled: true, baseParams: { sort }, scopes, refreshKey: 0 }), { initialProps: { sort: 'createdAt' } });
+    await waitFor(() => expect(result.current.columns.open?.loading).toBe(false));
+    rerender({ sort: 'dueBy' });
+    expect(result.current.columns.open.loading).toBe(true);
+    expect(result.current.columns.open.items.map((x) => x.id)).toEqual(['Open-createdAt']);
+    await act(async () => { gate(); });
+    await waitFor(() => expect(result.current.columns.open.loading).toBe(false));
+    expect(result.current.columns.open.items.map((x) => x.id)).toEqual(['Open-dueBy']);
+  });
+
   test('disabled (list layout) → no requests', () => {
     const scopes = boardColumnScopes({ statusDefs: DEFS, statuses: [], allCount: ALL });
     renderHook(() => useBoardColumns({ enabled: false, baseParams: {}, scopes, refreshKey: 0 }));

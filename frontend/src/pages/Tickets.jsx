@@ -58,6 +58,7 @@ import { applyWidth, useLayoutWidth } from '../contexts/LayoutContext';
 import { useWorkspaceRole } from '../components/nav/navDestinations';
 import { useSSE } from '../hooks/useSSE';
 import useMediaQuery from '../hooks/useMediaQuery';
+import { useDelayedFlag } from '../hooks/useDelayedFlag';
 
 // Status vocabulary comes from the workspace registry in the queue meta
 // (Phase 8b, statusDefs.js) — canonical 4 until meta loads.
@@ -316,6 +317,14 @@ export default function Tickets() {
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  // Sorting must not blank the page (5 Nov 2026, QA): a refetch with rows
+  // already showing keeps them (dimmed after a beat, aria-busy, a small
+  // spinner by the column headings) and swaps the new rows in place. The full
+  // spinner card is only for "nothing to show yet": the first load, or a
+  // previous result that was empty or an error.
+  const loadingBlank = isLoading && (tickets.length === 0 || Boolean(loadError));
+  const refetching = isLoading && !loadingBlank;
+  const refetchDimmed = useDelayedFlag(refetching, 150);
   const [mobileFilters, setMobileFilters] = useState(false);
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const sortMenuRef = useRef(null);
@@ -861,11 +870,16 @@ export default function Tickets() {
   // Board columns refetch when the list does a quiet refresh (live updates,
   // edits, drops); a filter change already refetches them on its own.
   const [boardRefresh, setBoardRefresh] = useState(0);
+  // Latest request wins (5 Nov 2026): two quick sorts used to race, and a slow
+  // first answer could land last and overwrite the newer order.
+  const fetchSeqRef = useRef(0);
   const fetchTickets = useCallback(async ({ silent = false, diffAgainst = null } = {}) => {
+    const seq = ++fetchSeqRef.current;
     if (!silent) setIsLoading(true);
     if (silent) setBoardRefresh((n) => n + 1);
     try {
       const res = await ticketsAPI.list(queryParams);
+      if (seq !== fetchSeqRef.current) return;
       const items = res.data.items || [];
       setTickets(items);
       setTotal(res.data.total || 0);
@@ -935,9 +949,11 @@ export default function Tickets() {
         sessionStorage.setItem('tp_ticket_nav', JSON.stringify(items.map((t) => t.id)));
       } catch { /* sessionStorage unavailable */ }
     } catch (err) {
-      setLoadError(err.response?.data?.message || err.message);
+      if (seq === fetchSeqRef.current) setLoadError(err.response?.data?.message || err.message);
     } finally {
-      if (!silent) setIsLoading(false);
+      // Only the newest request settles the loading state: a loud fetch
+      // overtaken by a quiet one is finished when the quiet one is.
+      if (seq === fetchSeqRef.current) setIsLoading(false);
     }
   }, [queryParams, syncAiHold]);
 
@@ -1633,6 +1649,8 @@ export default function Tickets() {
   const goPage = (p) => {
     setParams({ page: p === 1 ? null : p }, { resetPage: false });
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    // Docked, the list pane is the scroller (the window doesn't move).
+    if (scrollWrapRef.current) scrollWrapRef.current.scrollTop = 0;
   };
   // A new page size keeps the first row on screen in view: it lands on the
   // page that now holds it.
@@ -1844,8 +1862,7 @@ export default function Tickets() {
   useEffect(() => { if (!docked) setCardsFolded(false); }, [docked]);
   // QA 10-21 #3: the slim line shows when the person chose it, or while scrolled.
   const cardsLineShown = cardsHidden || (docked && cardsFolded);
-  // A new filter, sort or page starts the list at its top (the page used to
-  // scroll back up; now the list pane does). Opening the side preview does not.
+  // The view key the scroll memo is kept under (the side preview isn't part of it).
   const listViewKey = queueSearchToKeep(location.search);
   // QA 10-16 #9: where the list was scrolled to is kept for this view, so
   // coming back from a ticket (nav rail, Back) lands on the same rows.
@@ -1901,9 +1918,12 @@ export default function Tickets() {
     window.addEventListener('scroll', onWin, { passive: true });
     return () => window.removeEventListener('scroll', onWin);
   }, [docked, saveListScroll]);
+  // 5 Nov 2026 (QA): a sort or filter change no longer jumps the list back to
+  // its top — the rows swap in place and you keep your place. Only a page
+  // change (goPage) scrolls up on purpose.
   useEffect(() => {
     if (docked && scrollWrapRef.current) scrollWrapRef.current.scrollTop = 0;
-  }, [docked, listViewKey]);
+  }, [docked]);
   // Restore once, on the first load that has rows for the remembered view. The
   // entry is read at mount, before this visit's own scroll events overwrite it.
   const scrollRestoredRef = useRef(false);
@@ -1994,7 +2014,7 @@ export default function Tickets() {
   // is exactly the card's number. The search text, the sort and the date
   // window stay (CARD_KEEP_KEYS).
   const pickCard = (key) => setSearchParams((prev) => cardSearch(prev, key), { replace: true });
-  const listShown = view !== 'scheduled' && view !== 'grouped' && !isLoading && !loadError && tickets.length > 0 && !boardMode;
+  const listShown = view !== 'scheduled' && view !== 'grouped' && !loadingBlank && !loadError && tickets.length > 0 && !boardMode;
   // Cards whose count follows the date window say which one (QA 10-16 #7);
   // read from the counts themselves, so the note never claims a window the
   // numbers were not counted in.
@@ -2329,7 +2349,7 @@ export default function Tickets() {
                     </div>
                   )}
                   {/* Right end: AI-approval worklist connector + pagination */}
-                  {!panelView && !isLoading && !loadError && (tickets.length > 0 || (stats?.awaitingApproval || 0) > 0 || heldCount > 0) && (
+                  {!panelView && !loadingBlank && !loadError && (tickets.length > 0 || (stats?.awaitingApproval || 0) > 0 || heldCount > 0) && (
                     <div className="order-2 ml-auto flex flex-wrap items-center gap-2">
                       {/* Unmatched replies (17 Oct 2026): in this row instead of
                           a row of its own; opens the popup. Hidden when empty. */}
@@ -2388,7 +2408,7 @@ export default function Tickets() {
                 {/* Docked: the list manages its own scroll (headings and pager stay put);
                     every other result (board, scheduled, grouped, empty) scrolls here. */}
                 <div className={docked ? `relative flex min-h-0 flex-1 flex-col ${listShown ? '' : 'overflow-y-auto settings-scrollbar'}` : 'relative'}>
-                  {swipeHint && !panelView && !boardMode && !isLoading && tickets.length > 0 && (
+                  {swipeHint && !panelView && !boardMode && !loadingBlank && tickets.length > 0 && (
                     <p className="mb-2 flex items-center gap-2 rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground md:hidden" data-testid="swipe-hint">
                       <span className="min-w-0 flex-1">Slide a ticket to the left for Mine, Resolve and Select. Tap its status to change it.</span>
                       <button type="button" onClick={dismissSwipeHint} className="tp-focus-ring flex-shrink-0 rounded-md px-2 py-1 font-semibold text-primary">Got it</button>
@@ -2402,17 +2422,22 @@ export default function Tickets() {
                       more of them. Only while a text search is running — on the
                       plain default view this would permanently report the
                       16,000 closed tickets we deliberately do not show. */}
-                  {!isLoading && urlSearch && tickets.length > 0 && !panelView && (
+                  {!loadingBlank && urlSearch && tickets.length > 0 && !panelView && (
                     <FilterReliefNotice relief={relief} variant="inline" onWiden={widenFilters} />
                   )}
+
+                  {/* Says "Updating results" while rows are kept on screen for a refetch. */}
+                  <span aria-live="polite" aria-atomic="true" className="sr-only" data-testid="queue-refetch-status">
+                    {refetchDimmed && view !== 'scheduled' && view !== 'grouped' ? 'Updating results' : ''}
+                  </span>
 
                   {view === 'scheduled' ? (
                     <ScheduledTicketsPanel ticketingOn={ticketingOn} />
                   ) : view === 'grouped' ? (
                     <GroupedTicketsPanel />
-                  ) : isLoading ? (
+                  ) : loadingBlank ? (
                     <div className="tp-card rounded-xl p-16 flex items-center justify-center">
-                      <Activity className="w-8 h-8 animate-spin text-blue-600 dark:text-blue-300" aria-label="Loading tickets" />
+                      <Activity className="w-8 h-8 animate-spin motion-off:animate-none text-blue-600 dark:text-blue-300" aria-label="Loading tickets" />
                     </div>
                   ) : loadError ? (
                     <div className="tp-card rounded-xl p-8 text-center">
@@ -2468,6 +2493,8 @@ export default function Tickets() {
                        classes, so the two can never drift. */
                     <div
                       ref={listCardRef}
+                      aria-busy={refetching || undefined}
+                      data-refetching={refetchDimmed ? 'true' : undefined}
                       className={`tp-card rounded-xl overflow-hidden ${wideByCard ? 'tp-q-wide' : ''} ${docked ? 'flex min-h-0 flex-1 flex-col' : ''}`}
                       style={{ '--tp-q-grid': gridTemplate, '--tp-q-minw': `${listMinWidth + 36}px` }}
                     >
@@ -2519,6 +2546,13 @@ export default function Tickets() {
                                   <button onClick={() => headerSort('subject')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 dark:hover:text-blue-300 rounded">
                                   Subject{sortIndicator('subject')}
                                   </button>
+                                  {refetchDimmed && (
+                                    <Activity
+                                      className="ml-1.5 h-3.5 w-3.5 flex-shrink-0 animate-spin motion-off:animate-none text-primary"
+                                      aria-hidden="true"
+                                      data-testid="queue-refetch-spinner"
+                                    />
+                                  )}
                                   {!focus && <ColumnResizeHandle
                                     colKey="subject"
                                     label="Subject"
@@ -2538,7 +2572,8 @@ export default function Tickets() {
                               panels; the token (214 32% 88%) lands ≈1.25:1. Decorative
                               lines, so this is "measurably more visible", not a WCAG
                               claim. Mobile cards share these <li>s — one change, both. */}
-                            <ul className="divide-y divide-border" data-density={layout}>
+                            {/* Dimmed (never below 60 %) while a refetch runs; rows stay clickable. */}
+                            <ul className={`divide-y divide-border transition-opacity duration-200 ease-out motion-off:transition-none ${refetchDimmed ? 'opacity-60' : ''}`} data-density={layout}>
                               {tickets.map((ticket, rowIndex) => {
                                 const previewing = previewId === ticket.id;
                                 // The AI assignment pipeline is deciding this ticket RIGHT NOW —
