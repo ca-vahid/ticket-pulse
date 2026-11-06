@@ -4,7 +4,9 @@ import { hrLifecycleAPI } from '../../services/api';
 import FancySelect from '../common/FancySelect';
 import { PersonAvatar } from '../tickets/ticketUi';
 import { SectionTitle, StatusDot } from './onboardingUi';
-import { MAX_PEOPLE, MODE_INFO, changeFieldLabel, changeValueLabel, fmtWhen, peopleOf } from './onboardingFormat';
+import {
+  MAX_PEOPLE, MODE_INFO, NOTICE_CATEGORY_LABELS, categoryPairLabel, changeFieldLabel, changeValueLabel, fmtWhen, peopleOf,
+} from './onboardingFormat';
 
 /**
  * Settings → mode, parent assignee, the three child lists, when onboarding
@@ -14,9 +16,13 @@ import { MAX_PEOPLE, MODE_INFO, changeFieldLabel, changeValueLabel, fmtWhen, peo
  * below shows it — "full transparency" (plans/HR_LIFECYCLE_PLAN.md).
  */
 
+const NOTICE_GROUPS = ['departure', 'new_hire', 'transfer', 'leave'];
+
 const pick = (s) => ({
   mode: s.mode,
   parentAssigneeTechId: s.parentAssigneeTechId ?? null,
+  parentDueOffsetDays: s.parentDueOffsetDays ?? 7,
+  noticeCategories: s.noticeCategories || {},
   templates: s.templates,
   leave: s.leave,
   officeChange: s.officeChange,
@@ -37,6 +43,54 @@ const cleanWake = (w = {}) => ({
 });
 
 const assigneeValue = (item) => (item.assigneeTechId ? `t:${item.assigneeTechId}` : item.groupId ? `g:${item.groupId}` : '');
+
+/** A category pair as one picker value: "<category>:<subcategory or 0>", '' = none (QA 11-05 #5). */
+const categoryValue = (pair) => (pair?.categoryId ? `${pair.categoryId}:${pair.subcategoryId || 0}` : '');
+const categoryFromValue = (v) => {
+  if (!v) return { categoryId: null, subcategoryId: null };
+  const [c, s] = String(v).split(':').map(Number);
+  return { categoryId: c || null, subcategoryId: c && s ? s : null };
+};
+
+/** Picker options: each top-level category heads its subcategories; "(any)" = the category alone. */
+function buildCategoryOptions(categories = []) {
+  const tops = categories.filter((c) => !c.parentId);
+  const out = [{ value: '', label: 'No category (AI routing decides)' }];
+  for (const top of tops) {
+    out.push({ value: `${top.id}:0`, label: `${top.name} (no subcategory)`, group: top.name });
+    for (const sub of categories.filter((c) => c.parentId === top.id)) out.push({ value: `${top.id}:${sub.id}`, label: sub.name, group: top.name });
+  }
+  return out;
+}
+
+/**
+ * One category picker. Closed, it leads with the subcategory (the part that
+ * differs from row to row) and the category after it, muted; the tooltip
+ * carries the full "Category › Subcategory".
+ */
+function CategoryPicker({ value, onChange, options, catById, label }) {
+  const top = value?.categoryId ? catById.get(Number(value.categoryId)) : null;
+  const sub = value?.subcategoryId ? catById.get(Number(value.subcategoryId)) : null;
+  const full = value?.categoryId ? categoryPairLabel(value, catById) : 'No category';
+  return (
+    <FancySelect
+      value={categoryValue(value)}
+      onChange={(v) => onChange(categoryFromValue(v))}
+      options={options}
+      aria-label={label}
+      title={full}
+      renderValue={() => (sub && top
+        ? <><span className="text-foreground">{sub.name}</span><span className="text-muted-foreground"> · {top.name}</span></>
+        : full)}
+    />
+  );
+}
+
+const DUE_HEADER = {
+  offboarding_standard: 'Due, days after the last day',
+  offboarding_after_fact: 'Due, business days after the notice',
+  onboarding: 'Due, days from the start',
+};
 
 /** What is sent: half-chosen slots dropped, the first person kept as the single assignee. */
 const cleanTemplates = (templates = {}) => Object.fromEntries(Object.entries(templates).map(([name, list]) => [name, (list || []).map((item) => {
@@ -307,7 +361,9 @@ function AssigneeCell({ item, what, onChange, assigneeOptions, techOptions }) {
   );
 }
 
-function ChildList({ name, label, hint, items, onChange, assigneeOptions, techOptions }) {
+const CHILD_GRID = 'sm:grid-cols-[minmax(0,1fr)_6.5rem_minmax(0,1.15fr)_minmax(0,1fr)_5.5rem]';
+
+function ChildList({ name, label, hint, items, onChange, assigneeOptions, techOptions, categoryOptions, catById }) {
   const update = (i, patch) => onChange(items.map((it, j) => (j === i ? { ...it, ...patch } : it)));
   const move = (i, d) => {
     const next = [...items];
@@ -315,15 +371,16 @@ function ChildList({ name, label, hint, items, onChange, assigneeOptions, techOp
     next.splice(i + d, 0, x);
     onChange(next);
   };
+  const businessDays = name === 'offboarding_after_fact';
   return (
     <section className="rounded-xl border border-border bg-card p-4 shadow-subtle" aria-label={label}>
       <SectionTitle hint={hint}>{label}</SectionTitle>
-      <div className="hidden grid-cols-[minmax(0,1fr)_7rem_minmax(0,1fr)_5.5rem] gap-2 px-1 pb-1 text-xs text-muted-foreground sm:grid">
-        <span>Child ticket</span><span>Due (days after)</span><span>Default assignee</span><span><span className="sr-only">Order</span></span>
+      <div className={`hidden ${CHILD_GRID} gap-2 px-1 pb-1 text-xs text-muted-foreground sm:grid`}>
+        <span>Child ticket</span><span>{DUE_HEADER[name] || 'Due (days after)'}</span><span>Category</span><span>Default assignee</span><span><span className="sr-only">Order</span></span>
       </div>
       <ul className="space-y-2">
         {items.map((item, i) => (
-          <li key={`${name}-${item.key || i}`} className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_7rem_minmax(0,1fr)_5.5rem] sm:items-start">
+          <li key={`${name}-${item.key || i}`} className={`grid grid-cols-1 gap-2 ${CHILD_GRID} sm:items-start`}>
             <input
               type="text"
               value={item.title}
@@ -333,12 +390,19 @@ function ChildList({ name, label, hint, items, onChange, assigneeOptions, techOp
             />
             <input
               type="number"
-              min={-30}
+              min={businessDays ? 0 : -30}
               max={90}
               value={item.dueOffsetDays}
               onChange={(e) => update(i, { dueOffsetDays: e.target.value === '' ? 0 : Number(e.target.value) })}
-              aria-label={`${label}: ${item.title || `child ${i + 1}`} due offset (days)`}
+              aria-label={`${label}: ${item.title || `child ${i + 1}`} due offset (${businessDays ? 'business days after the notice' : 'days'})`}
               className="tp-focus-ring h-9 rounded-md border border-input bg-card shadow-subtle px-2.5 text-sm text-foreground"
+            />
+            <CategoryPicker
+              value={item}
+              onChange={(pair) => update(i, pair)}
+              options={categoryOptions}
+              catById={catById}
+              label={`${label}: ${item.title || `child ${i + 1}`} category`}
             />
             <AssigneeCell
               item={item}
@@ -357,7 +421,9 @@ function ChildList({ name, label, hint, items, onChange, assigneeOptions, techOp
       </ul>
       <button
         type="button"
-        onClick={() => onChange([...items, { key: '', title: 'New child', dueOffsetDays: 0, assigneeTechId: null, assigneeTechIds: [], groupId: null }])}
+        onClick={() => onChange([...items, {
+          key: '', title: 'New child', dueOffsetDays: businessDays ? 5 : 0, assigneeTechId: null, assigneeTechIds: [], groupId: null, categoryId: null, subcategoryId: null,
+        }])}
         className="tp-focus-ring mt-3 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-primary hover:bg-muted"
       >
         <Plus className="h-4 w-4" aria-hidden="true" /> Add a child
@@ -375,6 +441,10 @@ export default function SettingsPanel({ data, onSaved }) {
 
   const techById = useMemo(() => new Map((data.technicians || []).map((t) => [t.id, t])), [data.technicians]);
   const groupById = useMemo(() => new Map((data.groups || []).map((g) => [g.id, g])), [data.groups]);
+  const catById = useMemo(() => new Map((data.categories || []).map((c) => [c.id, c])), [data.categories]);
+  const categoryOptions = useMemo(() => buildCategoryOptions(data.categories || []), [data.categories]);
+  const noticeLabels = { ...NOTICE_CATEGORY_LABELS, ...(data.noticeCategoryLabels || {}) };
+  const noticeGroups = data.noticeCategoryGroups || NOTICE_GROUPS;
   const labels = data.templateLabels || {};
   const names = data.templateNames || Object.keys(draft.templates || {});
 
@@ -396,7 +466,13 @@ export default function SettingsPanel({ data, onSaved }) {
   }, []);
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
-  const cleaned = (d) => ({ ...d, templates: cleanTemplates(d.templates), officeRouting: cleanRouting(d.officeRouting), wake: cleanWake(d.wake) });
+  const cleaned = (d) => ({
+    ...d,
+    parentDueOffsetDays: Number.isFinite(Number(d.parentDueOffsetDays)) && d.parentDueOffsetDays !== '' ? Number(d.parentDueOffsetDays) : 7,
+    templates: cleanTemplates(d.templates),
+    officeRouting: cleanRouting(d.officeRouting),
+    wake: cleanWake(d.wake),
+  });
   const dirty = JSON.stringify(cleaned(draft)) !== JSON.stringify(cleaned(saved));
 
   const save = async () => {
@@ -439,15 +515,53 @@ export default function SettingsPanel({ data, onSaved }) {
             ))}
           </div>
         </fieldset>
-        <div className="mt-4 grid gap-1.5 sm:max-w-sm">
-          <span className="text-sm font-medium text-foreground" id="hr-parent-label">Parent assignee</span>
-          <span className="text-xs text-muted-foreground">The HR notice is the parent; it is assigned to this person.</span>
-          <FancySelect
-            value={draft.parentAssigneeTechId ? `t:${draft.parentAssigneeTechId}` : ''}
-            onChange={(v) => setDraft((d) => ({ ...d, parentAssigneeTechId: v ? Number(v.slice(2)) : null }))}
-            options={parentOptions}
-            aria-label="Parent assignee"
-          />
+        <div className="mt-4 grid gap-4 sm:grid-cols-[minmax(0,24rem)_minmax(0,1fr)] sm:items-start">
+          <div className="grid gap-1.5">
+            <span className="text-sm font-medium text-foreground" id="hr-parent-label">Parent assignee</span>
+            <span className="text-xs text-muted-foreground">The HR notice is the parent; it is assigned to this person.</span>
+            <FancySelect
+              value={draft.parentAssigneeTechId ? `t:${draft.parentAssigneeTechId}` : ''}
+              onChange={(v) => setDraft((d) => ({ ...d, parentAssigneeTechId: v ? Number(v.slice(2)) : null }))}
+              options={parentOptions}
+              aria-label="Parent assignee"
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <span className="text-sm font-medium text-foreground">Offboarding parent due</span>
+            <span className="text-xs text-muted-foreground">Gives the family time to finish. After the fact the last day has passed, so it counts from the day the notice arrived.</span>
+            <div className="flex flex-wrap items-center gap-2 text-sm text-foreground">
+              <input
+                type="number"
+                min={0}
+                max={60}
+                value={draft.parentDueOffsetDays}
+                onChange={(e) => setDraft((d) => ({ ...d, parentDueOffsetDays: e.target.value === '' ? '' : Number(e.target.value) }))}
+                aria-label="Offboarding parent: days after the last day"
+                className={NUMBER}
+              />
+              <span>days after the last day</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-border bg-card p-4 shadow-subtle" aria-label="Notice categories">
+        <SectionTitle hint="The category each HR notice gets when it arrives with none. A category somebody already chose is never changed, and the AI run keeps this one.">
+          Notice categories
+        </SectionTitle>
+        <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
+          {noticeGroups.map((g) => (
+            <div key={g} className="grid gap-1.5">
+              <span className="text-sm text-foreground">{noticeLabels[g] || g}</span>
+              <CategoryPicker
+                value={draft.noticeCategories?.[g]}
+                onChange={(pair) => setDraft((d) => ({ ...d, noticeCategories: { ...d.noticeCategories, [g]: pair } }))}
+                options={categoryOptions}
+                catById={catById}
+                label={`${noticeLabels[g] || g}: category`}
+              />
+            </div>
+          ))}
         </div>
       </section>
 
@@ -457,14 +571,16 @@ export default function SettingsPanel({ data, onSaved }) {
           name={name}
           label={labels[name] || name}
           hint={{
-            offboarding_standard: 'A departure notice that arrives before the last day.',
-            offboarding_after_fact: 'Sudden departures: the notice arrives on/after the last day or says "effective immediately".',
+            offboarding_standard: 'A departure notice that arrives before the last day. Due = last day + offset.',
+            offboarding_after_fact: 'Sudden departures: the notice arrives on/after the last day or says "effective immediately". Due = this many business days after the notice (Settings → Business Hours & Holidays), never already past.',
             onboarding: 'A BambooHR new-hire notice. Due = start date + offset.',
           }[name]}
           items={draft.templates?.[name] || []}
           onChange={(items) => setDraft((d) => ({ ...d, templates: { ...d.templates, [name]: items } }))}
           assigneeOptions={assigneeOptions}
           techOptions={techOptions}
+          categoryOptions={categoryOptions}
+          catById={catById}
         />
       ))}
 
@@ -543,8 +659,8 @@ export default function SettingsPanel({ data, onSaved }) {
                 <span className="truncate text-xs text-foreground/85">{c.changedByName || c.changedBy || 'Unknown'}</span>
                 <span className="min-w-0">
                   <span className="text-foreground">{changeFieldLabel(c.field, { templateLabels: labels, templates: draft.templates, item: /^officeRouting\[/.test(c.field) ? ((draft.officeRouting?.offices || []).find((o) => c.field.startsWith(`officeRouting[${o.key}]`)) || c.after || c.before) : (c.before || c.after) })}</span>
-                  <span className="text-muted-foreground">: {changeValueLabel(c.field, c.before, { techById, groupById })} → </span>
-                  <span className="text-foreground">{changeValueLabel(c.field, c.after, { techById, groupById })}</span>
+                  <span className="text-muted-foreground">: {changeValueLabel(c.field, c.before, { techById, groupById, catById })} → </span>
+                  <span className="text-foreground">{changeValueLabel(c.field, c.after, { techById, groupById, catById })}</span>
                 </span>
               </li>
             ))}

@@ -2,7 +2,9 @@ import express from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
-import hrLifecycleService, { HR_LIFECYCLE_MODES, TEMPLATE_LABELS, TEMPLATE_NAMES, isAvailable } from '../services/hrLifecycleService.js';
+import hrLifecycleService, {
+  HR_LIFECYCLE_MODES, NOTICE_CATEGORY_GROUPS, NOTICE_CATEGORY_LABELS, TEMPLATE_LABELS, TEMPLATE_NAMES, isAvailable,
+} from '../services/hrLifecycleService.js';
 import { resolveTicketRefOrThrow } from '../services/ticketRefResolver.js';
 
 /**
@@ -42,6 +44,8 @@ router.get('/settings', asyncHandler(async (req, res) => {
       modes: HR_LIFECYCLE_MODES,
       templateNames: TEMPLATE_NAMES,
       templateLabels: TEMPLATE_LABELS,
+      noticeCategoryGroups: NOTICE_CATEGORY_GROUPS,
+      noticeCategoryLabels: NOTICE_CATEGORY_LABELS,
       detection: hrLifecycleService.detectionRules(),
       ...people,
     },

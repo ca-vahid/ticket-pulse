@@ -32,6 +32,8 @@ jest.unstable_mockModule('../src/services/hrLifecycleService.js', () => ({
   HR_LIFECYCLE_MODES: ['off', 'observe', 'live'],
   TEMPLATE_NAMES: ['offboarding_standard', 'offboarding_after_fact', 'onboarding'],
   TEMPLATE_LABELS: {},
+  NOTICE_CATEGORY_GROUPS: ['departure', 'new_hire', 'transfer', 'leave'],
+  NOTICE_CATEGORY_LABELS: {},
   isAvailable: (ws) => String(process.env.HR_LIFECYCLE_WORKSPACE_IDS ?? '1').split(',').map(Number).includes(Number(ws)),
 }));
 jest.unstable_mockModule('../src/services/ticketRefResolver.js', () => ({ resolveTicketRefOrThrow: jest.fn(async () => ({ id: 42 })) }));

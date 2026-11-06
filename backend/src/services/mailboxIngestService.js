@@ -1269,6 +1269,10 @@ class MailboxIngestService {
       }).catch(() => {});
     }
 
+    // QA 11-05 #1: an agent's reply from Outlook IS the first response when
+    // nothing answered before it — the same stamp the in-app reply sets.
+    if (isAgentReply) await this._stampAgentFirstResponse(ticket, entry, email, agent, now);
+
     if (ticket.origin === TICKET_ORIGIN.TICKETPULSE) {
       await mirrorService.enqueueThreadEntry(ticket.workspaceId, ticket.id, entry.id);
       if (ccAdded) await mirrorService.enqueueFieldSync?.(ticket.workspaceId, ticket.id)?.catch?.(() => {});
@@ -1327,6 +1331,47 @@ class MailboxIngestService {
 
     logger.info(`Inbound email matched ${ticketDisplayRef(ticket)} via ${via} (from ${email.from}${agent ? `, agent ${agent.id}${isForward ? ' forward' : ' reply'}` : ''})`);
     return entry;
+  }
+
+  /**
+   * First response from Outlook (QA 11-05 #1, TP-11358: answered in 47 min,
+   * `first_public_agent_reply_at` stayed null). What the in-app reply does on
+   * a person's first public reply (ticketService._addThreadEntry), here for an
+   * agent's own Outlook reply that came back through the mailbox:
+   *  - `firstPublicAgentReplyAt` = when Outlook delivered it (`receivedAt`,
+   *    never in the future, never before the ticket existed), set only while
+   *    empty — a conditional update, so a later reply never moves it;
+   *  - the agent takes the reply ownership (a staged Auto-help answer nobody
+   *    sent is set aside, as for an in-app reply).
+   * Both origins: FS-born tickets read the same field (the FS sync only ever
+   * sets it, never clears it). No event: the mail was already delivered by
+   * Outlook, so nothing is re-sent and no reply_received fires.
+   * Never throws — the reply is stored either way.
+   */
+  async _stampAgentFirstResponse(ticket, entry, email, agent, now = new Date()) {
+    if (ticket?.firstPublicAgentReplyAt) return false;
+    const received = email?.receivedAt ? new Date(email.receivedAt) : null;
+    let at = received && Number.isFinite(received.getTime()) && received <= now ? received : now;
+    const created = ticket?.createdAt ? new Date(ticket.createdAt) : null;
+    if (created && Number.isFinite(created.getTime()) && at < created) at = created;
+    let stamped = false;
+    try {
+      const res = await prisma.ticket.updateMany({
+        where: { id: ticket.id, firstPublicAgentReplyAt: null },
+        data: { firstPublicAgentReplyAt: at },
+      });
+      stamped = Boolean(res?.count);
+      if (stamped) logger.info(`${ticketDisplayRef(ticket)}: first response from ${agent?.email || 'an agent'}'s Outlook reply at ${at.toISOString()}`);
+    } catch (err) {
+      logger.warn(`First response not stamped on ${ticketDisplayRef(ticket)} (non-fatal): ${err.message}`);
+    }
+    if (ticket.replyOwner !== 'agent') {
+      try {
+        const { claimForAgentReply } = await import('./autoHelpReplyOwner.js');
+        await claimForAgentReply(ticket.id, { entryId: entry?.id ?? null, actor: agent ? { name: agent.name, email: agent.email } : null });
+      } catch { /* bookkeeping only */ }
+    }
+    return stamped;
   }
 
   /**

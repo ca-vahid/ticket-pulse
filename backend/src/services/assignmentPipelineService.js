@@ -2442,8 +2442,14 @@ class AssignmentPipelineService {
 
       const priorClassification = await prisma.ticket.findUnique({
         where: { id: ticketId },
-        select: { internalCategoryId: true, internalSubcategoryId: true },
+        select: { internalCategoryId: true, internalSubcategoryId: true, internalCategoryFit: true },
       });
+      // QA 11-05 #5: the onboarding/offboarding template set this category at
+      // creation (fit 'template'); the AI run that picks the owner leaves it.
+      if (priorClassification?.internalCategoryId && priorClassification.internalCategoryFit === 'template') {
+        logger.info('Classification not written: category set by the onboarding/offboarding template', { ticketId });
+        return;
+      }
 
       await prisma.ticket.update({
         where: { id: ticketId },
