@@ -51,6 +51,19 @@ const DUE_OPTIONS = [
   { value: 'none', label: 'No due date' },
 ];
 
+// Parked facet (plans/PARKED_BUILD_PLAN.md): one pick; counts follow the view.
+const PARKED_FILTERS = [
+  { value: 'none', label: 'Not parked' },
+  { value: 'any', label: 'Parked (all)' },
+  { value: 'until_date', label: 'Waiting until a date or an ETA' },
+  { value: 'waiting_on', label: 'Waiting on someone' },
+  // QA 10-01 #6: parks made before the two choices merged.
+  { value: 'eta', label: 'With an ETA (older parks)' },
+  { value: 'waking7', label: 'Waking in the next 7 days' },
+];
+
+const ORIGIN_FILTERS = [{ v: 'ticketpulse', label: 'Born in Ticket Pulse' }, { v: 'freshservice', label: 'From FreshService' }];
+
 // Legacy fallback while the per-workspace type registry loads.
 const TYPE_OPTIONS_FALLBACK = ['Incident', 'Service Request'];
 
@@ -62,18 +75,120 @@ const TYPE_OPTIONS_FALLBACK = ['Incident', 'Service Request'];
 // the header you clicked stays under your cursor (click again to reopen).
 const RailScrollContext = createContext(null);
 // "Find a filter" (16 Oct 2026): a section whose title does not contain the
-// typed words hides; one that does opens.
+// typed words hides; one that does opens. 5 Nov 2026 (QA): the words INSIDE a
+// section count too — "overdue" opens Due and shows just Overdue (the rest is
+// one click away), "high" finds the Priority option, "noise" the view.
 const RailFindContext = createContext('');
+// Per section: is it narrowing its rows to the typed words right now?
+const SectionFindContext = createContext(null);
 
-/** One collapsible facet group in the rail. */
-function Section({ title, icon: Icon, activeCount = 0, onClear, defaultOpen = false, children }) {
+/** The rail's find text, normalised (lower case, single spaces). */
+const normFind = (s) => String(s ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+/** Does any of `text` (a string or a list) contain the normalised query? */
+function findMatches(text, q) {
+  if (!q) return true;
+  const list = Array.isArray(text) ? text : [text];
+  return list.some((t) => normFind(t).includes(q));
+}
+
+// Category type-to-filter, shared by the Category section's own box and the
+// rail's find. Light stemming so "license" matches "Licensing", "licenses"…:
+// strip a common trailing suffix from each word, both sides. A parent is kept
+// if it or any child matches; only matching children unless the parent does.
+function filterCategoryTree(tree, query) {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return tree || [];
+  const stem = (word) => word.replace(/(ing|ies|ed|es|s|e)$/, '') || word;
+  const stemText = (s) => String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).map(stem).join(' ');
+  const qTokens = q.split(/[^a-z0-9]+/).filter(Boolean).map(stem);
+  if (!qTokens.length) return [];
+  const matches = (name) => {
+    const hay = stemText(name);
+    return qTokens.every((tok) => hay.includes(tok));
+  };
+  const out = [];
+  for (const cat of tree || []) {
+    const subs = (cat.subcategories || []).filter((s) => matches(s.name));
+    if (matches(cat.name)) out.push({ ...cat }); // parent matches → keep with all its subs
+    else if (subs.length) out.push({ ...cat, subcategories: subs });
+  }
+  return out;
+}
+
+/** A label with the rail's find text in bold where it occurs. */
+function Hit({ text }) {
+  const q = useContext(RailFindContext);
+  const s = String(text ?? '');
+  if (!q) return s;
+  const i = normFind(s).indexOf(q);
+  // normFind collapses runs of spaces; labels here have single spaces, so the
+  // index maps back onto the original string.
+  if (i < 0 || normFind(s) !== s.toLowerCase()) return s;
+  return (
+    <>
+      {s.slice(0, i)}
+      <strong className="font-semibold text-foreground" data-testid="find-hit">{s.slice(i, i + q.length)}</strong>
+      {s.slice(i + q.length)}
+    </>
+  );
+}
+
+/**
+ * Does a section show for the typed find text, and why? `titleHit` = its name
+ * (or an alias) matches: every row shows. Otherwise `optionHit` = some row
+ * inside matches: the section narrows to those rows.
+ */
+function sectionFind({ title, aliases = [], options = [], optionMatch = null }, q) {
+  if (!q) return { hit: true, titleHit: true, optionHit: false };
+  const titleHit = findMatches([title, ...aliases], q);
+  const optionHit = !titleHit && (optionMatch ? Boolean(optionMatch(q)) : findMatches(options, q));
+  return { hit: titleHit || optionHit, titleHit, optionHit };
+}
+
+/**
+ * One collapsible facet group in the rail.
+ * Find a filter: `options` are the words its rows carry, `aliases` extra names
+ * for the section, `optionMatch(q)` replaces plain matching (the category
+ * tree's stemming). `rowFilter={false}` keeps every row when an option hits
+ * (compound controls such as Created). Children may be a function of the
+ * section's find state ({ filtering, query, match }) for rows that aren't Facets.
+ */
+function Section({ title, icon: Icon, activeCount = 0, onClear, defaultOpen = false, options, aliases, optionMatch = null, rowFilter = true, onShowAll = null, children }) {
   const reserveRoom = useContext(RailScrollContext);
   const [open, setOpen] = useState(defaultOpen || activeCount > 0);
   // A filter applied from elsewhere (URL, views) pops its section open.
   useEffect(() => { if (activeCount > 0) setOpen(true); }, [activeCount]);
   const find = useContext(RailFindContext);
-  const findHit = !find || String(title || '').toLowerCase().includes(find);
-  useEffect(() => { if (find && findHit) setOpen(true); }, [find, findHit]);
+  const { hit: findHit, titleHit } = sectionFind({ title, aliases, options, optionMatch }, find);
+  const [showAll, setShowAll] = useState(false);
+  useEffect(() => { setShowAll(false); }, [find]);
+  const filtering = Boolean(find) && !titleHit && rowFilter && !showAll;
+  // Opening on a find hit is temporary: clearing the box (or Escape) puts every
+  // section back the way it was before the search, unless a filter set in the
+  // meantime holds it open.
+  const openRef = useRef(open);
+  openRef.current = open;
+  const activeRef = useRef(activeCount);
+  activeRef.current = activeCount;
+  const beforeFindRef = useRef(null);
+  useEffect(() => {
+    if (find) {
+      if (beforeFindRef.current === null) beforeFindRef.current = openRef.current;
+      if (findHit) setOpen(true);
+    } else if (beforeFindRef.current !== null) {
+      const was = beforeFindRef.current;
+      beforeFindRef.current = null;
+      if (!was && activeRef.current === 0) setOpen(false);
+    }
+  }, [find, findHit]);
+  const findCtx = useMemo(() => ({
+    filtering,
+    query: find,
+    match: (text) => !filtering || findMatches(text, find),
+  }), [filtering, find]);
+  const hiddenCount = filtering && !optionMatch && Array.isArray(options)
+    ? options.filter((o) => !findMatches(o, find)).length
+    : 0;
   // Smooth open/close (16 Sep 2026): the body stays mounted through a
   // grid-rows 0fr → 1fr transition and unmounts once the close has finished,
   // so a collapsed section still costs nothing and nothing snaps.
@@ -135,7 +250,21 @@ function Section({ title, icon: Icon, activeCount = 0, onClear, defaultOpen = fa
           data-open={shown ? 'true' : 'false'}
         >
           <div className="min-h-0 overflow-hidden">
-            <div className="px-3 pb-2.5">{children}</div>
+            <div className="px-3 pb-2.5">
+              <SectionFindContext.Provider value={findCtx}>
+                {typeof children === 'function' ? children(findCtx) : children}
+              </SectionFindContext.Provider>
+              {filtering && (
+                <button
+                  type="button"
+                  onClick={() => { setShowAll(true); onShowAll?.(); }}
+                  data-testid="find-show-all"
+                  className="tp-focus-ring w-full text-left px-1.5 py-1 mt-0.5 rounded-md text-[12px] font-medium text-blue-600 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-500/15"
+                >
+                  Show all in {title}{hiddenCount > 0 ? ` · ${hiddenCount} more` : ''}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -143,8 +272,14 @@ function Section({ title, icon: Icon, activeCount = 0, onClear, defaultOpen = fa
   );
 }
 
-/** Checkbox facet row: label + optional adornment + optional count. */
-function Facet({ checked, onToggle, children, count, onOnly = null }) {
+/**
+ * Checkbox facet row: label + optional adornment + optional count.
+ * `findText`: the words this row answers to in Find a filter — while its
+ * section narrows to the typed words, a row that doesn't match hides.
+ */
+function Facet({ checked, onToggle, children, count, onOnly = null, findText = null }) {
+  const sf = useContext(SectionFindContext);
+  if (findText != null && sf?.filtering && !findMatches(findText, sf.query)) return null;
   // A zero in the current view reads as "nothing here" without hiding the option (1 Oct 2026).
   const empty = count === 0 && !checked;
   return (
@@ -339,7 +474,7 @@ function SortableFacet({ id, order, dragKey, setDragKey, onDropOn, children }) {
  */
 export default function TicketFilterRail({ meta, stats = null, facets = null, mobileOpen = false, onMobileClose, sheet = false, docked = false, tucked = false, pull = null, createdWindow = null, onCreatedWindow = null }) {
   const [findQuery, setFindQuery] = useState('');
-  const find = findQuery.trim().toLowerCase();
+  const find = normFind(findQuery);
   // QA 09-18 #2: Source counts follow the current view when the list sent
   // them; the workspace-wide meta count is the fallback (first paint, errors).
   const sourceCounts = useMemo(() => {
@@ -661,28 +796,10 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
   // narrows to matching categories/subcategories (parent kept if it or any child
   // matches; only matching children shown unless the parent name itself matches).
   const [catQuery, setCatQuery] = useState('');
-  const filteredCategoryTree = useMemo(() => {
-    const q = catQuery.trim().toLowerCase();
-    const tree = meta?.categoryTree || [];
-    if (!q) return tree;
-    // Light stemming so "license" matches "Licensing", "licenses", etc. — strip
-    // a common trailing suffix from each word before comparing, both sides.
-    const stem = (word) => word.replace(/(ing|ies|ed|es|s|e)$/, '') || word;
-    const stemText = (s) => s.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).map(stem).join(' ');
-    const qTokens = q.split(/[^a-z0-9]+/).filter(Boolean).map(stem);
-    const matches = (name) => {
-      const hay = stemText(name);
-      return qTokens.every((tok) => hay.includes(tok));
-    };
-    const out = [];
-    for (const cat of tree) {
-      const catMatch = matches(cat.name);
-      const subs = (cat.subcategories || []).filter((s) => matches(s.name));
-      if (catMatch) out.push({ ...cat }); // parent matches → keep with all its subs
-      else if (subs.length) out.push({ ...cat, subcategories: subs });
-    }
-    return out;
-  }, [meta?.categoryTree, catQuery]);
+  const filteredCategoryTree = useMemo(
+    () => filterCategoryTree(meta?.categoryTree || [], catQuery),
+    [meta?.categoryTree, catQuery],
+  );
   const catSearching = catQuery.trim().length > 0;
 
   // Created range
@@ -773,6 +890,65 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
   };
   const viewActive = (v) => Object.entries(v.params).every(([k, val]) => (searchParams.get(k) || '') === String(val))
     && activeTotal === Object.keys(v.params).length;
+
+  // Find a filter (5 Nov 2026): what each section answers to — its rows'
+  // words, matched against what is loaded. `show` mirrors each section's own
+  // render condition, so "nothing matches" never counts a hidden section.
+  const typeNames = registryTypes.length ? registryTypes.map((t) => t.name) : TYPE_OPTIONS_FALLBACK;
+  const findSpec = {
+    views: { title: 'Views', options: [...CANNED_VIEWS.map((v) => v.label), ...savedViews.map((v) => v.name)] },
+    status: { title: 'Status', options: [...statusDefs.map((d) => d.name), 'Parked'] },
+    technician: {
+      title: 'Members',
+      aliases: ['Assignee', 'Technician', 'Agent'],
+      options: ['Unassigned', ...(meta?.actor?.technicianId ? ['Assigned to me'] : []), ...(meta?.technicians || []).map((t) => t.name)],
+    },
+    requester: { title: 'Requester', options: requesterIds.map((id) => requesterLabel(id)) },
+    priority: { title: 'Priority', options: [4, 3, 2, 1].map((p) => PRIORITY_LABELS[p]) },
+    type: { title: 'Type', options: [...typeNames, 'No type'] },
+    category: {
+      title: 'Category',
+      aliases: ['Subcategory'],
+      optionMatch: (q) => filterCategoryTree(meta?.categoryTree || [], q).length > 0,
+    },
+    group: { title: 'Group', options: (meta?.groups || []).map((g) => g.name), show: (meta?.groups?.length || 0) > 0 },
+    tag: { title: 'Tags', options: [...(meta?.tags || []).map((t) => t.name), 'Untagged'], show: (meta?.tags?.length || 0) > 0 },
+    impact: { title: 'Impact / Urgency', options: ['Low', 'Medium', 'High'], show: Boolean(meta?.hasImpactUrgency) },
+    source: { title: 'Source', options: (meta?.sources || []).map((s) => s.label), show: (meta?.sources?.length || 0) > 0 },
+    parked: { title: 'Parked', options: PARKED_FILTERS.map((o) => o.label) },
+    customFields: {
+      title: 'Custom fields',
+      options: cfDefs.flatMap((d) => [d.label, ...(Array.isArray(d.options) ? d.options : [])]),
+      show: cfDefs.length > 0,
+    },
+    created: { title: 'Created', options: [...WINDOW_CHOICES.map((c) => (c.key === 'all' ? 'All time' : `Last ${c.label}`)), ...CREATED_PRESETS.map((p) => p.label), 'Between days'] },
+    due: { title: 'Due', options: DUE_OPTIONS.map((o) => o.label) },
+    origin: { title: 'Origin', options: ORIGIN_FILTERS.map((o) => o.label) },
+    approval: { title: 'Approvals', options: [...APPROVAL_FILTERS.map((o) => o.label), ...(meta?.approvalCategories || []).map((c) => c.name)] },
+  };
+  const findHits = Object.fromEntries(Object.entries(findSpec).map(([k, s]) => [k, sectionFind(s, find)]));
+  const findNothing = Boolean(find) && !Object.entries(findSpec).some(([k, s]) => s.show !== false && findHits[k].hit);
+
+  // Searchable sections reached through one of their rows get the typed words
+  // in their own box (Members' list is capped, Category's tree stems, the
+  // requester search is the server's), and lose them again when the find box
+  // clears — unless the person has typed something else there since.
+  const seededRef = useRef({ tech: null, cat: null, req: null });
+  const techSeed = find && findHits.technician.optionHit ? find : '';
+  const catSeed = find && findHits.category.optionHit ? find : '';
+  const reqSeed = find && findHits.requester.optionHit ? find : '';
+  useEffect(() => {
+    const seed = (key, value, setter) => {
+      if (value) { seededRef.current[key] = value; setter(value); return; }
+      const was = seededRef.current[key];
+      if (was === null) return;
+      seededRef.current[key] = null;
+      setter((cur) => (cur === was ? '' : cur));
+    };
+    seed('tech', techSeed, setTechQuery);
+    seed('cat', catSeed, setCatQuery);
+    seed('req', reqSeed, setReqQuery);
+  }, [techSeed, catSeed, reqSeed]);
 
   // Snapshot the active filter query for a new saved view.
   const FILTER_KEYS = ['segment', 'status', 'assignee', 'requesterId', 'priority', 'type', 'category', 'subcategory', 'group', 'source', 'tag', 'tagMode', 'impact', 'urgency', 'due', 'origin', 'createdFrom', 'createdTo', 'created', 'noise', 'solution', 'parked', 'parkKind', 'reopened', 'mentioned', 'q', 'view', 'aiState', 'approval', 'approvalCategory'];
@@ -868,125 +1044,134 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
       >
         {/* Desktop: natural height, scrolls with the page (one scrollbar). Mobile
             drawer: this region scrolls inside the fixed-height slide-over. */}
-        <Section title="Views" icon={LayoutList} defaultOpen>
-          <div className="space-y-0.5">
-            {CANNED_VIEWS.map((v) => {
-              const count = {
-                all: stats?.all, unassigned: stats?.unassigned, awaiting: stats?.awaiting,
-                // QA 10-16 #5: each "my" view counts exactly what its list shows.
-                mine: myCount(stats?.byTechnicianOpenOnly),
-                my_tickets: myCount(stats?.byTechnicianActive),
-                awaiting_approval: stats?.awaitingApproval,
-                noise: stats?.noise, deleted: stats?.deleted, resolved: stats?.resolved,
-              }[v.key];
-              return (
-                <button
-                  key={v.key}
-                  onClick={() => applyView(v)}
-                  className={`tp-focus-ring w-full min-w-0 flex items-center gap-1.5 text-left px-1.5 py-1 rounded-md text-sm ${
-                    viewActive(v) ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 font-semibold' : 'text-muted-foreground hover:bg-muted/50'
-                  }`}
-                >
-                  {v.icon && <v.icon className="w-3.5 h-3.5 text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />}
-                  <span className="flex-1 min-w-0 truncate">{v.label}</span>
-                  {count != null && <span className="text-xs font-medium text-muted-foreground/80 tabular-nums flex-shrink-0 pl-1">{count.toLocaleString()}</span>}
-                  {v.key === 'mentions' && unseenMentions > 0 && (
-                    <span data-testid="mentions-unseen" title={`${unseenMentions} not opened yet`} className="text-xs font-semibold text-blue-600 dark:text-blue-300 tabular-nums flex-shrink-0 pl-1">
-                      {unseenMentions} new
-                    </span>
-                  )}
-                </button>
-              );
-            })}
+        {findNothing && (
+          <p className="px-3 py-3 text-xs text-muted-foreground" data-testid="rail-find-none">
+            No filter matches “{findQuery.trim()}”.
+          </p>
+        )}
+        <Section title="Views" icon={LayoutList} defaultOpen options={findSpec.views.options}>
+          {(sf) => (
+            <div className="space-y-0.5">
+              {CANNED_VIEWS.filter((v) => sf.match(v.label)).map((v) => {
+                const count = {
+                  all: stats?.all, unassigned: stats?.unassigned, awaiting: stats?.awaiting,
+                  // QA 10-16 #5: each "my" view counts exactly what its list shows.
+                  mine: myCount(stats?.byTechnicianOpenOnly),
+                  my_tickets: myCount(stats?.byTechnicianActive),
+                  awaiting_approval: stats?.awaitingApproval,
+                  noise: stats?.noise, deleted: stats?.deleted, resolved: stats?.resolved,
+                }[v.key];
+                return (
+                  <button
+                    key={v.key}
+                    onClick={() => applyView(v)}
+                    className={`tp-focus-ring w-full min-w-0 flex items-center gap-1.5 text-left px-1.5 py-1 rounded-md text-sm ${
+                      viewActive(v) ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 font-semibold' : 'text-muted-foreground hover:bg-muted/50'
+                    }`}
+                  >
+                    {v.icon && <v.icon className="w-3.5 h-3.5 text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />}
+                    <span className="flex-1 min-w-0 truncate"><Hit text={v.label} /></span>
+                    {count != null && <span className="text-xs font-medium text-muted-foreground/80 tabular-nums flex-shrink-0 pl-1">{count.toLocaleString()}</span>}
+                    {v.key === 'mentions' && unseenMentions > 0 && (
+                      <span data-testid="mentions-unseen" title={`${unseenMentions} not opened yet`} className="text-xs font-semibold text-blue-600 dark:text-blue-300 tabular-nums flex-shrink-0 pl-1">
+                        {unseenMentions} new
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
 
-            {/* Saved views — the user's own + workspace-shared */}
-            {savedViews.length > 0 && (
-              <div className="mt-1.5 pt-1.5 border-t border-border/60 space-y-0.5">
-                {savedViews.map((v) => (
-                  <div key={v.id} className="group/sv flex items-center gap-1">
-                    <button
-                      onClick={() => applyView(v)}
-                      title={v.shared && !v.mine ? `Shared by ${v.ownerEmail}` : undefined}
-                      className={`tp-focus-ring flex-1 min-w-0 flex items-center gap-1.5 text-left px-1.5 py-1 rounded-md text-sm ${
-                        viewActive(v) ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 font-semibold' : 'text-muted-foreground hover:bg-muted/50'
-                      }`}
-                    >
-                      {v.shared ? <Users className="w-3 h-3 text-indigo-400 flex-shrink-0" aria-hidden="true" /> : <Star className="w-3 h-3 text-amber-400 flex-shrink-0" aria-hidden="true" />}
-                      <span className="flex-1 truncate">{v.name}</span>
-                    </button>
-                    {canShare && v.mine && (
+              {/* Saved views — the user's own + workspace-shared */}
+              {savedViews.some((v) => sf.match(v.name)) && (
+                <div className="mt-1.5 pt-1.5 border-t border-border/60 space-y-0.5">
+                  {savedViews.filter((v) => sf.match(v.name)).map((v) => (
+                    <div key={v.id} className="group/sv flex items-center gap-1">
                       <button
-                        onClick={() => toggleShareView(v)}
-                        title={v.shared ? 'Unshare from workspace' : 'Share to workspace'}
-                        className={`tp-focus-ring p-0.5 rounded opacity-0 group-hover/sv:opacity-100 focus:opacity-100 ${v.shared ? 'text-indigo-500' : 'text-muted-foreground/50 hover:text-indigo-500'}`}
+                        onClick={() => applyView(v)}
+                        title={v.shared && !v.mine ? `Shared by ${v.ownerEmail}` : undefined}
+                        className={`tp-focus-ring flex-1 min-w-0 flex items-center gap-1.5 text-left px-1.5 py-1 rounded-md text-sm ${
+                          viewActive(v) ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 font-semibold' : 'text-muted-foreground hover:bg-muted/50'
+                        }`}
                       >
-                        <Users className="w-3.5 h-3.5" aria-hidden="true" />
+                        {v.shared ? <Users className="w-3 h-3 text-indigo-400 flex-shrink-0" aria-hidden="true" /> : <Star className="w-3 h-3 text-amber-400 flex-shrink-0" aria-hidden="true" />}
+                        <span className="flex-1 truncate"><Hit text={v.name} /></span>
                       </button>
-                    )}
-                    {v.mine && (
-                      confirmDeleteView === v.id ? (
-                        <span className="flex items-center gap-0.5 flex-shrink-0" onMouseLeave={() => setConfirmDeleteView(null)}>
-                          <button
-                            onClick={() => { deleteSavedView(v.id); setConfirmDeleteView(null); }}
-                            title="Confirm delete"
-                            className="tp-focus-ring px-1.5 py-0.5 rounded text-[10px] font-bold text-white bg-red-500 hover:bg-red-600"
-                          >
-                            Delete
-                          </button>
-                          <button
-                            onClick={() => setConfirmDeleteView(null)}
-                            title="Cancel"
-                            className="tp-focus-ring p-0.5 rounded text-muted-foreground/75 hover:text-muted-foreground"
-                          >
-                            <X className="w-3.5 h-3.5" aria-hidden="true" />
-                          </button>
-                        </span>
-                      ) : (
+                      {canShare && v.mine && (
                         <button
-                          onClick={() => setConfirmDeleteView(v.id)}
-                          title="Delete view"
-                          className="tp-focus-ring p-0.5 rounded text-muted-foreground/50 hover:text-red-500 opacity-0 group-hover/sv:opacity-100 focus:opacity-100 flex-shrink-0"
+                          onClick={() => toggleShareView(v)}
+                          title={v.shared ? 'Unshare from workspace' : 'Share to workspace'}
+                          className={`tp-focus-ring p-0.5 rounded opacity-0 group-hover/sv:opacity-100 focus:opacity-100 ${v.shared ? 'text-indigo-500' : 'text-muted-foreground/50 hover:text-indigo-500'}`}
                         >
-                          <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                          <Users className="w-3.5 h-3.5" aria-hidden="true" />
                         </button>
-                      )
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Save current filters */}
-            <div className="mt-1.5 pt-1.5 border-t border-border/60">
-              {savingView ? (
-                <div className="flex items-center gap-1">
-                  <input
-                    autoFocus
-                    value={newViewName}
-                    onChange={(e) => setNewViewName(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') saveCurrentView(); if (e.key === 'Escape') { setSavingView(false); setNewViewName(''); } }}
-                    placeholder="View name…"
-                    className="tp-focus-ring flex-1 min-w-0 px-2 py-1 text-xs bg-card border border-input rounded-md placeholder:text-muted-foreground/75"
-                  />
-                  <button onClick={saveCurrentView} disabled={!newViewName.trim()} className="tp-focus-ring p-1 rounded-md bg-primary text-primary-foreground disabled:opacity-50" title="Save view">
-                    <Plus className="w-3.5 h-3.5" aria-hidden="true" />
-                  </button>
-                  <button onClick={() => { setSavingView(false); setNewViewName(''); }} className="tp-focus-ring p-1 rounded-md text-muted-foreground/75 hover:bg-muted" title="Cancel">
-                    <X className="w-3.5 h-3.5" aria-hidden="true" />
-                  </button>
+                      )}
+                      {v.mine && (
+                        confirmDeleteView === v.id ? (
+                          <span className="flex items-center gap-0.5 flex-shrink-0" onMouseLeave={() => setConfirmDeleteView(null)}>
+                            <button
+                              onClick={() => { deleteSavedView(v.id); setConfirmDeleteView(null); }}
+                              title="Confirm delete"
+                              className="tp-focus-ring px-1.5 py-0.5 rounded text-[10px] font-bold text-white bg-red-500 hover:bg-red-600"
+                            >
+                            Delete
+                            </button>
+                            <button
+                              onClick={() => setConfirmDeleteView(null)}
+                              title="Cancel"
+                              className="tp-focus-ring p-0.5 rounded text-muted-foreground/75 hover:text-muted-foreground"
+                            >
+                              <X className="w-3.5 h-3.5" aria-hidden="true" />
+                            </button>
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => setConfirmDeleteView(v.id)}
+                            title="Delete view"
+                            className="tp-focus-ring p-0.5 rounded text-muted-foreground/50 hover:text-red-500 opacity-0 group-hover/sv:opacity-100 focus:opacity-100 flex-shrink-0"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                          </button>
+                        )
+                      )}
+                    </div>
+                  ))}
                 </div>
-              ) : (
-                <button
-                  onClick={() => setSavingView(true)}
-                  disabled={activeTotal === 0}
-                  title={activeTotal === 0 ? 'Apply some filters first' : 'Save the current filters as a view'}
-                  className="tp-focus-ring w-full flex items-center gap-1.5 px-1.5 py-1 rounded-md text-[13px] text-blue-600 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-500/15 disabled:opacity-40 disabled:hover:bg-transparent"
-                >
-                  <Plus className="w-3.5 h-3.5" aria-hidden="true" /> Save current filters…
-                </button>
+              )}
+
+              {/* Save current filters (not while the find narrows the views) */}
+              {!sf.filtering && (
+                <div className="mt-1.5 pt-1.5 border-t border-border/60">
+                  {savingView ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        autoFocus
+                        value={newViewName}
+                        onChange={(e) => setNewViewName(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') saveCurrentView(); if (e.key === 'Escape') { setSavingView(false); setNewViewName(''); } }}
+                        placeholder="View name…"
+                        className="tp-focus-ring flex-1 min-w-0 px-2 py-1 text-xs bg-card border border-input rounded-md placeholder:text-muted-foreground/75"
+                      />
+                      <button onClick={saveCurrentView} disabled={!newViewName.trim()} className="tp-focus-ring p-1 rounded-md bg-primary text-primary-foreground disabled:opacity-50" title="Save view">
+                        <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+                      </button>
+                      <button onClick={() => { setSavingView(false); setNewViewName(''); }} className="tp-focus-ring p-1 rounded-md text-muted-foreground/75 hover:bg-muted" title="Cancel">
+                        <X className="w-3.5 h-3.5" aria-hidden="true" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setSavingView(true)}
+                      disabled={activeTotal === 0}
+                      title={activeTotal === 0 ? 'Apply some filters first' : 'Save the current filters as a view'}
+                      className="tp-focus-ring w-full flex items-center gap-1.5 px-1.5 py-1 rounded-md text-[13px] text-blue-600 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-500/15 disabled:opacity-40 disabled:hover:bg-transparent"
+                    >
+                      <Plus className="w-3.5 h-3.5" aria-hidden="true" /> Save current filters…
+                    </button>
+                  )}
+                </div>
               )}
             </div>
-          </div>
+          )}
         </Section>
 
         {/* Status */}
@@ -996,6 +1181,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
             activeCount={statusRaw && statusRaw !== 'any' ? statuses.length : 0}
             onClear={() => setParams({ status: null, segment: null })}
             defaultOpen
+            options={findSpec.status.options}
           >
             {statusDefs.map((d) => (
               <Facet
@@ -1004,9 +1190,10 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
                 onToggle={() => toggleStatus(d.name)}
                 count={statusCountMap ? (statusCountMap.get(d.name) || 0) : undefined}
                 onOnly={() => setParams({ segment: null, status: d.name })}
+                findText={d.name}
               >
                 <span aria-hidden="true" className={`w-2 h-2 rounded-full flex-shrink-0 ${statusDotClass(d)}`} />
-                <span className="truncate">{d.name}</span>
+                <span className="truncate"><Hit text={d.name} /></span>
               </Facet>
             ))}
             {/* Parked is its own option: a parked ticket keeps Pending underneath,
@@ -1016,9 +1203,10 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
               onToggle={() => toggleStatus(PARKED_STATUS)}
               count={statusCountMap ? (facets?.statusParked || 0) : undefined}
               onOnly={() => setParams({ segment: null, status: PARKED_STATUS })}
+              findText="Parked"
             >
               <PauseCircle className="w-3 h-3 flex-shrink-0 text-violet-500 dark:text-violet-300" aria-hidden="true" />
-              <span className="truncate">Parked</span>
+              <span className="truncate"><Hit text="Parked" /></span>
             </Facet>
           </Section>
         </SortableFacet>
@@ -1030,6 +1218,9 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
             activeCount={assignees.length}
             onClear={() => setParams({ assignee: null })}
             defaultOpen
+            options={findSpec.technician.options}
+            aliases={findSpec.technician.aliases}
+            onShowAll={() => setTechQuery('')}
           >
             <div className="relative mb-1">
               <Search className="w-3 h-3 text-muted-foreground/50 absolute left-2 top-1/2 -translate-y-1/2" aria-hidden="true" />
@@ -1043,15 +1234,16 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
               />
             </div>
             <div>
-              <Facet checked={assignees.includes('unassigned')} onToggle={() => toggleCsv('assignee', 'unassigned')}>
-                <span className="text-muted-foreground/75 italic">Unassigned</span>
+              <Facet checked={assignees.includes('unassigned')} onToggle={() => toggleCsv('assignee', 'unassigned')} findText="Unassigned">
+                <span className="text-muted-foreground/75 italic"><Hit text="Unassigned" /></span>
               </Facet>
               {meta?.actor?.technicianId && (
                 <Facet
                   checked={assignees.includes(String(meta.actor.technicianId))}
                   onToggle={() => toggleCsv('assignee', String(meta.actor.technicianId))}
+                  findText="Assigned to me"
                 >
-                  <span className="font-medium">Assigned to me</span>
+                  <span className="font-medium"><Hit text="Assigned to me" /></span>
                 </Facet>
               )}
               {shownTechs.map((t) => (
@@ -1060,9 +1252,10 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
                   checked={assignees.includes(String(t.id))}
                   onToggle={() => toggleCsv('assignee', String(t.id))}
                   count={stats?.byTechnician?.[t.id]}
+                  findText={t.name}
                 >
                   <PersonAvatar name={t.name} photoUrl={t.photoUrl} size="h-4.5 w-4.5 h-[18px] w-[18px]" textSize="text-[8px]" />
-                  <span className="truncate">{t.name}</span>
+                  <span className="truncate"><Hit text={t.name} /></span>
                 </Facet>
               ))}
               {!techQuery.trim() && techs.length > techLimit && (
@@ -1083,6 +1276,8 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
             title="Requester"
             activeCount={requesterIds.length}
             onClear={() => setParams({ requesterId: null, requesterName: null })}
+            options={findSpec.requester.options}
+            onShowAll={() => setReqQuery('')}
           >
             <div className="relative mb-1">
               <Search className="w-3 h-3 text-muted-foreground/50 absolute left-2 top-1/2 -translate-y-1/2" aria-hidden="true" />
@@ -1097,9 +1292,9 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
             </div>
             <div data-testid="requester-facet">
               {requesterIds.map((id) => (
-                <Facet key={`picked-${id}`} checked onToggle={() => toggleRequester(id)}>
+                <Facet key={`picked-${id}`} checked onToggle={() => toggleRequester(id)} findText={requesterLabel(id)}>
                   <PersonAvatar name={requesterLabel(id)} size="h-[18px] w-[18px]" textSize="text-[8px]" />
-                  <span className="truncate">{requesterLabel(id)}</span>
+                  <span className="truncate"><Hit text={requesterLabel(id)} /></span>
                 </Facet>
               ))}
               {reqResults.filter((r) => !requesterIds.includes(String(r.id))).map((r) => (
@@ -1123,7 +1318,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
 
         {/* Priority */}
         <SortableFacet {...facetProps('priority')}>
-          <Section title="Priority" activeCount={priorities.length} onClear={() => setParams({ priority: null })} defaultOpen>
+          <Section title="Priority" activeCount={priorities.length} onClear={() => setParams({ priority: null })} defaultOpen options={findSpec.priority.options}>
             {[4, 3, 2, 1].map((p) => (
               <Facet
                 key={p}
@@ -1131,9 +1326,10 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
                 onToggle={() => toggleCsv('priority', String(p))}
                 count={priorityCountMap ? (priorityCountMap.get(String(p)) || 0) : undefined}
                 onOnly={() => setParams({ priority: String(p) })}
+                findText={PRIORITY_LABELS[p]}
               >
                 <span aria-hidden="true" className={`w-2 h-2 rounded-full ${PRIORITY_STRIP_COLORS[p] || 'bg-muted-foreground/40'}`} />
-                {PRIORITY_LABELS[p]}
+                <Hit text={PRIORITY_LABELS[p]} />
               </Facet>
             ))}
           </Section>
@@ -1142,12 +1338,12 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
         {/* Type — the workspace's registry vocabulary + "No type" (FS leaves
             type optional, so type-less tickets are a real population). */}
         <SortableFacet {...facetProps('type')}>
-          <Section title="Type" activeCount={types.length} onClear={() => setParams({ type: null })}>
-            {(registryTypes.length ? registryTypes.map((t) => t.name) : TYPE_OPTIONS_FALLBACK).map((t) => (
-              <Facet key={t} checked={types.includes(t)} onToggle={() => toggleCsv('type', t)}>{t}</Facet>
+          <Section title="Type" activeCount={types.length} onClear={() => setParams({ type: null })} options={findSpec.type.options}>
+            {typeNames.map((t) => (
+              <Facet key={t} checked={types.includes(t)} onToggle={() => toggleCsv('type', t)} findText={t}><Hit text={t} /></Facet>
             ))}
-            <Facet checked={types.includes('none')} onToggle={() => toggleCsv('type', 'none')}>
-              <span className="italic text-muted-foreground/75">No type</span>
+            <Facet checked={types.includes('none')} onToggle={() => toggleCsv('type', 'none')} findText="No type">
+              <span className="italic text-muted-foreground/75"><Hit text="No type" /></span>
             </Facet>
           </Section>
         </SortableFacet>
@@ -1158,6 +1354,9 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
             title="Category"
             activeCount={categories.length + subcategories.length}
             onClear={() => setParams({ category: null, subcategory: null })}
+            aliases={findSpec.category.aliases}
+            optionMatch={findSpec.category.optionMatch}
+            onShowAll={() => setCatQuery('')}
           >
             <div className="relative mb-1">
               <Search className="w-3 h-3 text-muted-foreground/50 absolute left-2 top-1/2 -translate-y-1/2" aria-hidden="true" />
@@ -1189,14 +1388,14 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
                       ) : <span className="w-4" aria-hidden="true" />}
                       <div className="flex-1 min-w-0">
                         <Facet checked={categories.includes(String(cat.id))} onToggle={() => toggleCsv('category', String(cat.id))}>
-                          <span className="truncate">{cat.name}</span>
+                          <span className="truncate"><Hit text={cat.name} /></span>
                         </Facet>
                       </div>
                     </div>
                     {expanded && cat.subcategories.map((sub) => (
                       <div key={sub.id} className="pl-7">
                         <Facet checked={subcategories.includes(String(sub.id))} onToggle={() => toggleCsv('subcategory', String(sub.id))}>
-                          <span className="truncate text-muted-foreground">{sub.name}</span>
+                          <span className="truncate text-muted-foreground"><Hit text={sub.name} /></span>
                         </Facet>
                       </div>
                     ))}
@@ -1213,15 +1412,16 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
         {/* Group */}
         {(meta?.groups?.length || 0) > 0 && (
           <SortableFacet {...facetProps('group')}>
-            <Section title="Group" activeCount={groups.length} onClear={() => setParams({ group: null })}>
+            <Section title="Group" activeCount={groups.length} onClear={() => setParams({ group: null })} options={findSpec.group.options}>
               <div>
                 {meta.groups.map((g) => (
                   <Facet
                     key={g.id}
                     checked={groups.includes(String(g.freshserviceId))}
                     onToggle={() => toggleCsv('group', String(g.freshserviceId))}
+                    findText={g.name}
                   >
-                    <span className="truncate">{g.name}</span>
+                    <span className="truncate"><Hit text={g.name} /></span>
                   </Facet>
                 ))}
               </div>
@@ -1232,7 +1432,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
         {/* Tags (gap plan P1) */}
         {(meta?.tags?.length || 0) > 0 && (
           <SortableFacet {...facetProps('tag')}>
-            <Section title="Tags" activeCount={tags.length} onClear={() => setParams({ tag: null, tagMode: null })}>
+            <Section title="Tags" activeCount={tags.length} onClear={() => setParams({ tag: null, tagMode: null })} options={findSpec.tag.options}>
               {tags.length > 1 && (
                 <div className="flex items-center gap-1 mb-1 px-1.5">
                   <span className="text-[10px] uppercase tracking-wide text-muted-foreground/75">Match</span>
@@ -1255,12 +1455,13 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
                   key={t.id}
                   checked={tags.includes(String(t.id))}
                   onToggle={() => toggleCsv('tag', String(t.id))}
+                  findText={t.name}
                 >
                   <TagChip tag={t} size="xs" />
                 </Facet>
               ))}
-              <Facet checked={tags.includes('none')} onToggle={() => toggleCsv('tag', 'none')}>
-                <span className="text-muted-foreground/75 italic">Untagged</span>
+              <Facet checked={tags.includes('none')} onToggle={() => toggleCsv('tag', 'none')} findText="Untagged">
+                <span className="text-muted-foreground/75 italic"><Hit text="Untagged" /></span>
               </Facet>
             </Section>
           </SortableFacet>
@@ -1269,7 +1470,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
         {/* Impact / urgency (P1.5) — appears once anyone uses the fields */}
         {meta?.hasImpactUrgency && (
           <SortableFacet {...facetProps('impact')}>
-            <Section title="Impact / Urgency" activeCount={impacts.length + urgencies.length} onClear={() => setParams({ impact: null, urgency: null })}>
+            <Section title="Impact / Urgency" activeCount={impacts.length + urgencies.length} onClear={() => setParams({ impact: null, urgency: null })} options={findSpec.impact.options} rowFilter={false}>
               {[['impact', impacts], ['urgency', urgencies]].map(([key, active]) => (
                 <div key={key} className="flex items-center gap-1 px-1.5 py-0.5">
                   <span className="w-14 text-[10px] uppercase tracking-wide text-muted-foreground/75">{key}</span>
@@ -1282,7 +1483,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
                         active.includes(String(v)) ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200' : 'text-muted-foreground hover:bg-muted/50'
                       }`}
                     >
-                      {['Low', 'Med', 'High'][v - 1]}
+                      <Hit text={['Low', 'Med', 'High'][v - 1]} />
                     </button>
                   ))}
                 </div>
@@ -1294,15 +1495,16 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
         {/* Source */}
         {(meta?.sources?.length || 0) > 0 && (
           <SortableFacet {...facetProps('source')}>
-            <Section title="Source" activeCount={sources.length} onClear={() => setParams({ source: null })}>
+            <Section title="Source" activeCount={sources.length} onClear={() => setParams({ source: null })} options={findSpec.source.options}>
               {meta.sources.map((s) => (
                 <Facet
                   key={s.value}
                   checked={sources.includes(String(s.value))}
                   onToggle={() => toggleCsv('source', String(s.value))}
                   count={sourceCounts ? (sourceCounts.get(String(s.value)) || 0) : s.count}
+                  findText={s.label}
                 >
-                  {s.label}
+                  <Hit text={s.label} />
                 </Facet>
               ))}
               <p className="px-1.5 pt-1 text-[10.5px] text-muted-foreground/70">
@@ -1314,23 +1516,16 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
 
         {/* Parked (plans/PARKED_BUILD_PLAN.md): one pick; counts follow the view. */}
         <SortableFacet {...facetProps('parked')}>
-          <Section title="Parked" activeCount={get('parked') ? 1 : 0} onClear={() => setParams({ parked: null })}>
-            {[
-              { value: 'none', label: 'Not parked' },
-              { value: 'any', label: 'Parked (all)' },
-              { value: 'until_date', label: 'Waiting until a date or an ETA' },
-              { value: 'waiting_on', label: 'Waiting on someone' },
-              // QA 10-01 #6: parks made before the two choices merged.
-              { value: 'eta', label: 'With an ETA (older parks)' },
-              { value: 'waking7', label: 'Waking in the next 7 days' },
-            ].map((opt) => (
+          <Section title="Parked" activeCount={get('parked') ? 1 : 0} onClear={() => setParams({ parked: null })} options={findSpec.parked.options}>
+            {PARKED_FILTERS.map((opt) => (
               <Facet
                 key={opt.value}
                 checked={get('parked') === opt.value}
                 onToggle={() => setParams({ parked: get('parked') === opt.value ? null : opt.value })}
                 count={facets?.parked ? (facets.parked[opt.value] ?? 0) : undefined}
+                findText={opt.label}
               >
-                {opt.label}
+                <Hit text={opt.label} />
               </Facet>
             ))}
           </Section>
@@ -1344,12 +1539,15 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
               icon={SlidersHorizontal}
               activeCount={cfActiveKeys.length}
               onClear={clearCustomFieldParams}
+              options={findSpec.customFields.options}
             >
-              <div className="space-y-0.5">
-                {cfDefs.map((def) => (
-                  <CustomFieldFacetInput key={def.key} def={def} get={get} setParams={setParams} />
-                ))}
-              </div>
+              {(sf) => (
+                <div className="space-y-0.5">
+                  {cfDefs.filter((def) => sf.match([def.label, ...(Array.isArray(def.options) ? def.options : [])])).map((def) => (
+                    <CustomFieldFacetInput key={def.key} def={def} get={get} setParams={setParams} />
+                  ))}
+                </div>
+              )}
             </Section>
           </SortableFacet>
         )}
@@ -1361,6 +1559,8 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
             icon={CalendarDays}
             activeCount={createdFrom || createdTo || get('created') ? 1 : 0}
             onClear={() => { setParams({ createdFrom: null, createdTo: null, created: null }); setShowCalendar(false); }}
+            options={findSpec.created.options}
+            rowFilter={false}
           >
             {/* The date window — the toolbar's 7d · 30d · 90d · All. */}
             <div className="mb-1.5 flex items-center gap-0.5" role="group" aria-label="Created in the last" data-testid="rail-window">
@@ -1394,7 +1594,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
                     activePreset === preset.key ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 font-semibold' : 'text-muted-foreground hover:bg-muted/50'
                   }`}
                 >
-                  {preset.label}
+                  <Hit text={preset.label} />
                 </button>
               ))}
               <button
@@ -1434,10 +1634,10 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
 
         {/* Due */}
         <SortableFacet {...facetProps('due')}>
-          <Section title="Due" activeCount={due.length} onClear={() => setParams({ due: null })}>
+          <Section title="Due" activeCount={due.length} onClear={() => setParams({ due: null })} options={findSpec.due.options}>
             {DUE_OPTIONS.map((o) => (
-              <Facet key={o.value} checked={due.includes(o.value)} onToggle={() => toggleCsv('due', o.value)}>
-                {o.label}
+              <Facet key={o.value} checked={due.includes(o.value)} onToggle={() => toggleCsv('due', o.value)} findText={o.label}>
+                <Hit text={o.label} />
               </Facet>
             ))}
           </Section>
@@ -1445,10 +1645,10 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
 
         {/* Origin */}
         <SortableFacet {...facetProps('origin')}>
-          <Section title="Origin" activeCount={origin ? 1 : 0} onClear={() => setParams({ origin: null })}>
-            {[{ v: 'ticketpulse', label: 'Born in Ticket Pulse' }, { v: 'freshservice', label: 'From FreshService' }].map(({ v, label }) => (
-              <Facet key={v} checked={origin === v} onToggle={() => setParams({ origin: origin === v ? null : v })}>
-                {label}
+          <Section title="Origin" activeCount={origin ? 1 : 0} onClear={() => setParams({ origin: null })} options={findSpec.origin.options}>
+            {ORIGIN_FILTERS.map(({ v, label }) => (
+              <Facet key={v} checked={origin === v} onToggle={() => setParams({ origin: origin === v ? null : v })} findText={label}>
+                <Hit text={label} />
               </Facet>
             ))}
           </Section>
@@ -1456,21 +1656,25 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
 
         {/* Approvals — has one / waiting / approved / rejected, by category */}
         <SortableFacet {...facetProps('approval')}>
-          <Section title="Approvals" activeCount={(approval ? 1 : 0) + approvalCats.length} onClear={() => setParams({ approval: null, approvalCategory: null })}>
-            {APPROVAL_FILTERS.map(({ v, label }) => (
-              <Facet key={v} checked={approval === v} onToggle={() => setParams({ approval: approval === v ? null : v })}>
-                {label}
-              </Facet>
-            ))}
-            {(meta?.approvalCategories || []).length > 0 && (
-              <div className="mt-1.5 pt-1.5 border-t border-border/60">
-                <p className="px-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">Category</p>
-                {(meta?.approvalCategories || []).map((c) => (
-                  <Facet key={c.id} checked={approvalCats.includes(String(c.id))} onToggle={() => toggleCsv('approvalCategory', String(c.id))}>
-                    {c.name}
+          <Section title="Approvals" activeCount={(approval ? 1 : 0) + approvalCats.length} onClear={() => setParams({ approval: null, approvalCategory: null })} options={findSpec.approval.options}>
+            {(sf) => (
+              <>
+                {APPROVAL_FILTERS.map(({ v, label }) => (
+                  <Facet key={v} checked={approval === v} onToggle={() => setParams({ approval: approval === v ? null : v })} findText={label}>
+                    <Hit text={label} />
                   </Facet>
                 ))}
-              </div>
+                {(meta?.approvalCategories || []).some((c) => sf.match(c.name)) && (
+                  <div className="mt-1.5 pt-1.5 border-t border-border/60">
+                    <p className="px-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">Category</p>
+                    {(meta?.approvalCategories || []).map((c) => (
+                      <Facet key={c.id} checked={approvalCats.includes(String(c.id))} onToggle={() => toggleCsv('approvalCategory', String(c.id))} findText={c.name}>
+                        <Hit text={c.name} />
+                      </Facet>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </Section>
         </SortableFacet>
