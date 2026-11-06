@@ -833,8 +833,13 @@ class MailboxIngestService {
     // 12 Oct 2026: every shape FreshService mail carries ([INC-n], [#SR-n], [#n]), and the ticket
     // of ANY origin: FreshService mails the requester about the copy of a Ticket Pulse ticket too
     // (its 'Received' e-mail), and the answer carries only the FreshService number.
+    // 6 Nov 2026: plus this workspace's own FreshService prefix ([CASE-n] in Accounting), and only
+    // this workspace's — vendors put their own "CASE-249123" in subjects too.
+    const extraPrefixes = await import('./fsTicketPrefixService.js')
+      .then(({ fsTicketPrefixes }) => fsTicketPrefixes(workspaceId))
+      .catch(() => []);
     const legacy = subject.match(/(?:\[?#|Ticket\s*#?)(\d{4,})\]?/i);
-    const fsNumbers = [...new Set([...freshserviceTicketNumbers(subject), ...(legacy ? [Number(legacy[1])] : [])])].slice(0, 5);
+    const fsNumbers = [...new Set([...freshserviceTicketNumbers(subject, { extraPrefixes }), ...(legacy ? [Number(legacy[1])] : [])])].slice(0, 5);
     if (fsNumbers.length) {
       const found = [];
       for (const n of fsNumbers) {
