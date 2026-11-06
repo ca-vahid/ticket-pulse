@@ -1938,3 +1938,38 @@ describe('buildPreviewEventContext mirrors the live ticket context', () => {
     expect(jsonLogic.apply(rule, ctx)).toBe(true);
   });
 });
+
+// QA 11-05b #1: the list, a workflow and the save/publish answers carry the
+// draft state from the repository; a failure there never breaks them.
+describe('workflow draft state on the list (QA 11-05b #1)', () => {
+  const rows = [{ id: 1, name: 'Ticket arrived' }, { id: 2, name: 'Reopen' }];
+  beforeEach(() => {
+    jest.clearAllMocks();
+    repositoryMock.listWorkflows.mockResolvedValue(rows);
+  });
+  afterEach(() => { delete repositoryMock.withDraftState; });
+
+  test('GET / adds hasUnpublishedChanges per row', async () => {
+    repositoryMock.withDraftState = jest.fn(async (list) => list.map((w) => ({ ...w, hasUnpublishedChanges: w.id === 2, draftState: w.id === 2 ? 'unpublished' : null })));
+    const response = await request(buildApp()).get('/api/notification-workflows').expect(200);
+    expect(response.body.data.map((w) => [w.id, w.hasUnpublishedChanges])).toEqual([[1, false], [2, true]]);
+    expect(response.body.data[1].draftState).toBe('unpublished');
+  });
+
+  test('a failing draft-state read leaves the list as it was', async () => {
+    repositoryMock.withDraftState = jest.fn(async () => { throw new Error('boom'); });
+    const response = await request(buildApp()).get('/api/notification-workflows').expect(200);
+    expect(response.body.data.map((w) => w.id)).toEqual([1, 2]);
+    expect(response.body.data[0]).not.toHaveProperty('hasUnpublishedChanges');
+  });
+
+  test('GET /:id and PUT /:id/draft carry it too', async () => {
+    repositoryMock.withDraftState = jest.fn(async (w) => ({ ...w, hasUnpublishedChanges: true, draftSavedBy: 'admin@example.com' }));
+    repositoryMock.getWorkflow.mockResolvedValue({ id: 2, name: 'Reopen' });
+    repositoryMock.saveDraft.mockResolvedValue({ id: 2, name: 'Reopen' });
+    const one = await request(buildApp()).get('/api/notification-workflows/2').expect(200);
+    expect(one.body.data).toMatchObject({ id: 2, hasUnpublishedChanges: true });
+    const saved = await request(buildApp()).put('/api/notification-workflows/2/draft').send({ definition: {} }).expect(200);
+    expect(saved.body.data).toMatchObject({ id: 2, hasUnpublishedChanges: true, draftSavedBy: 'admin@example.com' });
+  });
+});

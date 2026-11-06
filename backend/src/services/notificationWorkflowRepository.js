@@ -233,9 +233,27 @@ async function ensureDefaultWorkflowsMemo(workspaceId) {
 export async function ensureDefaultWorkflows(workspaceId, actor = null) {
   const changedBy = actorEmail(actor);
   const results = [];
+  // QA 11-05b #1: rows that are already right are left alone. The upsert used
+  // to rewrite every default on each list load, which moved `updatedAt` and
+  // hid when a person last saved the draft. A failed read just upserts all.
+  const existingByKey = new Map(
+    (await Promise.resolve()
+      .then(() => prisma.notificationWorkflow.findMany({
+        where: { workspaceId, key: { in: DEFAULT_WORKFLOW_SPECS.map((spec) => defaultWorkflowMetadataForSpec(spec).key) } },
+      }))
+      .catch(() => []) || []).map((row) => [row.key, row]),
+  );
 
   for (const spec of DEFAULT_WORKFLOW_SPECS) {
     const metadata = defaultWorkflowMetadataForSpec(spec);
+    const existing = existingByKey.get(metadata.key);
+    if (existing && existing.routingMode === 'exclusive'
+      && existing.routingPriority === defaultRoutingPriorityForSpec(spec)
+      && existing.isDefaultVariant === true
+      && (spec.retirable || (!existing.archivedAt && !existing.archivedBy))) {
+      results.push(existing);
+      continue;
+    }
     const draftDefinition = buildDefaultWorkflowDefinition(spec.triggerType, {
       scheduleMode: spec.scheduleMode,
     });
@@ -310,6 +328,82 @@ export async function listWorkflows(workspaceId) {
       },
     },
   });
+}
+
+/** JSON with object keys sorted, so key order never reads as a change. */
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object' && !(value instanceof Date)) {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+/**
+ * QA 11-05b #1 — does this workflow carry a saved draft nobody has published?
+ *
+ *  - `unpublished`: published, and the saved draft differs from the live one.
+ *  - `never_published`: never published, and a person has saved or created it
+ *    (`lastChangedBy` set). A seeded default nobody touched is not a draft
+ *    anyone made (19 of the 20 never-published rows in prod on 5 Nov were
+ *    those), so it is left out.
+ *  - archived workflows never count (their drafts can not be edited).
+ *
+ * `draftSavedAt` is `updatedAt`, except when that time is only the routing
+ * suppression stamp (the engine's updateMany moves it): then it is null and
+ * the list shows who without when. There is no separate draft-saved column.
+ */
+export function workflowDraftState(workflow) {
+  const none = { hasUnpublishedChanges: false, draftState: null, draftSavedAt: null, draftSavedBy: null };
+  if (!workflow || workflow.archivedAt) return none;
+  const published = Boolean(workflow.publishedDefinition) && Number(workflow.publishedVersion || 0) > 0;
+  let draftState = null;
+  if (!published) draftState = workflow.lastChangedBy ? 'never_published' : null;
+  else if (stableJson(workflow.draftDefinition) !== stableJson(workflow.publishedDefinition)) draftState = 'unpublished';
+  if (!draftState) return none;
+  const updatedAt = safeDate(workflow.updatedAt);
+  const suppressedAt = safeDate(workflow.lastSuppressedAt);
+  const stampIsSuppression = Boolean(updatedAt && suppressedAt && Math.abs(updatedAt - suppressedAt) < 2000);
+  return {
+    hasUnpublishedChanges: true,
+    draftState,
+    draftSavedAt: updatedAt && !stampIsSuppression ? updatedAt.toISOString() : null,
+    draftSavedBy: workflow.lastChangedBy || null,
+  };
+}
+
+/** e-mail (lower case) → display name, for the "saved … by" line. Never fails. */
+export async function namesForEmails(emails = []) {
+  const wanted = [...new Set((emails || []).map((email) => String(email || '').trim().toLowerCase()).filter((email) => email.includes('@')))].slice(0, 50);
+  if (wanted.length === 0) return {};
+  const rows = await Promise.resolve()
+    .then(() => prisma.technician.findMany({
+      where: { email: { in: wanted, mode: 'insensitive' } },
+      select: { name: true, email: true, isActive: true },
+      take: 200,
+    }))
+    .catch(() => []);
+  const names = {};
+  for (const row of rows || []) {
+    const key = String(row?.email || '').toLowerCase();
+    if (!key || !row.name) continue;
+    if (!names[key] || row.isActive) names[key] = row.name;
+  }
+  return names;
+}
+
+/** Adds the draft state (+ the saver's name) to one or more workflows. */
+export async function withDraftState(workflows) {
+  const list = Array.isArray(workflows) ? workflows : [workflows];
+  const states = list.map((workflow) => workflowDraftState(workflow));
+  const names = await namesForEmails(states.map((state) => state.draftSavedBy));
+  const out = list.map((workflow, index) => {
+    if (!workflow) return workflow;
+    const state = states[index];
+    const name = state.draftSavedBy ? names[String(state.draftSavedBy).toLowerCase()] || null : null;
+    return { ...workflow, ...state, draftSavedByName: name };
+  });
+  return Array.isArray(workflows) ? out : out[0];
 }
 
 export async function getWorkflow(workspaceId, id) {
@@ -883,6 +977,8 @@ export async function recordSuppressionDecisions(suppressed = []) {
 export default {
   ensureDefaultWorkflows,
   listWorkflows,
+  workflowDraftState,
+  withDraftState,
   getWorkflow,
   saveDraft,
   publishWorkflow,

@@ -1210,10 +1210,22 @@ async function createTestEmailDelivery({
   return { delivery, result, actorEmail, auditId };
 }
 
+/**
+ * QA 11-05b #1: `hasUnpublishedChanges` (+ draftState, draftSavedAt,
+ * draftSavedBy, draftSavedByName) on each workflow. Computed from what the
+ * row already carries; a failure leaves the rows as they were.
+ */
+async function withDraftState(workflows) {
+  if (typeof notificationWorkflowRepository.withDraftState !== 'function') return workflows;
+  return Promise.resolve()
+    .then(() => notificationWorkflowRepository.withDraftState(workflows))
+    .catch(() => workflows);
+}
+
 router.get(
   '/',
   asyncHandler(async (req, res) => {
-    const workflows = await notificationWorkflowRepository.listWorkflows(req.workspaceId);
+    const workflows = await withDraftState(await notificationWorkflowRepository.listWorkflows(req.workspaceId));
     // QA 10-05 #5: watch signals (noise check replaced, went quiet …) ride on
     // each row; a failure here never breaks the list.
     const signals = await import('../services/notificationWorkflowWatchService.js')
@@ -2493,7 +2505,7 @@ router.post(
 router.get(
   '/:id',
   asyncHandler(async (req, res) => {
-    const workflow = await notificationWorkflowRepository.getWorkflow(req.workspaceId, req.params.id);
+    const workflow = await withDraftState(await notificationWorkflowRepository.getWorkflow(req.workspaceId, req.params.id));
     res.json({ success: true, data: workflow });
   }),
 );
@@ -2511,12 +2523,12 @@ router.get(
 router.put(
   '/:id/draft',
   asyncHandler(async (req, res) => {
-    const workflow = await notificationWorkflowRepository.saveDraft(
+    const workflow = await withDraftState(await notificationWorkflowRepository.saveDraft(
       req.workspaceId,
       req.params.id,
       req.body,
       requestActor(req),
-    );
+    ));
     res.json({ success: true, data: workflow });
   }),
 );
@@ -2537,6 +2549,7 @@ router.post(
         afterHoursEnabled: result.workflow.isEnabled === true,
       }, requestActor(req));
     }
+    if (result?.workflow) result.workflow = await withDraftState(result.workflow);
     res.json({ success: true, data: result });
   }),
 );

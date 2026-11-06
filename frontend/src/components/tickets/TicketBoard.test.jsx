@@ -135,7 +135,10 @@ describe('TicketBoard queue UX batch (QA 08-07 #6/#7/#12, Phase 3)', () => {
     const line = screen.getByText('Rita Requester');
     expect(line).toBeInTheDocument();
     // Dark mode (DM-B): the muted requester line rides the token, not slate-400.
-    expect(line).toHaveClass('text-[11px]', 'text-muted-foreground/75', 'truncate');
+    // QA 11-05b #2: the line also carries the opened date, so the muted
+    // classes sit on the line and the name truncates inside it.
+    expect(line).toHaveClass('truncate');
+    expect(line.closest('[data-testid="board-card-meta"]')).toHaveClass('text-[11px]', 'text-muted-foreground/75');
     // No requester on the ticket → no empty line rendered.
     const card2 = screen.getByText('Ticket 2').closest('[role="button"]');
     expect(within(card2).queryByText(/requester/i)).not.toBeInTheDocument();
