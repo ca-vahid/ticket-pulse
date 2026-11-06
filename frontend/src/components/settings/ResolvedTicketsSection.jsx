@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AlertTriangle, Check, CheckCircle2 } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
 import FancySelect from '../common/FancySelect';
+import { Switch as SharedSwitch } from '../ui/switch';
 
 /**
  * Settings → Ticket Ops → When a ticket is resolved (17 Oct 2026).
@@ -21,19 +22,15 @@ const LABEL = 'Close resolved tickets automatically';
 const RETIRE_LABEL = 'Retire Resolved';
 const FALLBACK_CHOICES = [1, 4, 24, 48, 72, 168].map((hours) => ({ hours, label: hours < 24 ? `${hours} hour${hours === 1 ? '' : 's'}` : hours === 168 ? '1 week' : `${hours / 24} day${hours === 24 ? '' : 's'}` }));
 
+// QA 11-05 #1: the shared app switch, with this page's "<label> on/off" name.
 function Switch({ checked, disabled, label, onClick }) {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked === true}
+    <SharedSwitch
+      checked={checked === true}
       aria-label={`${label} ${checked ? 'on' : 'off'}`}
-      onClick={onClick}
+      onCheckedChange={() => onClick?.()}
       disabled={disabled}
-      className={`tp-focus-ring relative inline-flex h-5 w-9 shrink-0 rounded-full disabled:opacity-60 ${checked ? 'bg-primary' : 'bg-muted-foreground/40'}`}
-    >
-      <span className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-card shadow" style={{ transform: checked ? 'translateX(16px)' : 'translateX(0)' }} aria-hidden="true" />
-    </button>
+    />
   );
 }
 

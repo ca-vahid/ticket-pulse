@@ -32,6 +32,7 @@ import UrgentResponseOps from '../components/analytics/UrgentResponseOps';
 import AiPickAccuracy from '../components/analytics/AiPickAccuracy';
 import MetricHint from '../components/analytics/MetricHint';
 import NoiseRepeatsLine from '../components/analytics/NoiseRepeatsLine';
+import { Switch } from '../components/ui/switch';
 import { metricHintText } from '../utils/metricsGlossary';
 import { Link, useLocation } from 'react-router-dom';
 import Highcharts from 'highcharts';
@@ -2940,21 +2941,12 @@ export default function Analytics({ view = 'standard' }) {
                 </>
               )}
               <div className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-semibold text-foreground/85 shadow-sm">
-                <span>Live effects</span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={mapEffectsEnabled}
-                  onClick={() => setMapEffectsEnabled((enabled) => !enabled)}
-                  className={`relative h-5 w-9 rounded-full transition ${
-                    mapEffectsEnabled ? 'bg-blue-600' : 'bg-muted-foreground/40'
-                  }`}
-                >
-                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-card shadow-sm transition ${
-                    mapEffectsEnabled ? 'left-4' : 'left-0.5'
-                  }`}
-                  />
-                </button>
+                <label htmlFor="analytics-map-effects" className="cursor-pointer">Live effects</label>
+                <Switch
+                  id="analytics-map-effects"
+                  checked={mapEffectsEnabled === true}
+                  onCheckedChange={() => setMapEffectsEnabled((enabled) => !enabled)}
+                />
               </div>
             </div>
           )}

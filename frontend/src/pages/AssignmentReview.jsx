@@ -22,9 +22,10 @@ import FilterDropdown from '../components/FilterDropdown';
 import FilterBar from '../components/FilterBar';
 import useFilterUrlSync from '../hooks/useFilterUrlSync';
 import { getRecommendationList } from '../utils/assignmentRecommendations';
+import { Switch, SwitchCue, SwitchRow } from '../components/ui/switch';
 import {
   ArrowLeft, Inbox, History, Settings2, Award, RefreshCw, Loader2,
-  ChevronLeft, ChevronRight, ChevronDown, ToggleLeft, ToggleRight, AlertCircle,
+  ChevronLeft, ChevronRight, ChevronDown, Upload, AlertCircle,
   Play, Search, Mail, Zap, FileText, Trash2, XCircle, RotateCcw, Brain,
   ArrowUpDown, ArrowUp, ArrowDown, Filter, Save, Check,
   ShieldCheck, Users, Bot, Sparkles, Clock, X, CalendarDays,
@@ -3982,20 +3983,22 @@ function getSyncPillMeta(run) {
   return { label: run.syncStatus, className: 'bg-muted text-muted-foreground' };
 }
 
-function ConfigToggle({ label, description, checked, onChange, color = 'text-blue-600 dark:text-blue-300' }) {
+// QA 11-05 #1: one switch, one on colour. The per-toggle colours this row used
+// to take (emerald, sky, indigo, amber, red, violet, orange) were decoration
+// added toggle by toggle; the one real meaning among them — "this writes to
+// FreshService" / "Shadow vs Live" — is now a word next to the label (`cue`).
+const WRITES_TO_FS = <SwitchCue icon={Upload}>Writes to FreshService</SwitchCue>;
+
+function ConfigToggle({ label, description, checked, onChange, cue = null, testId }) {
   return (
-    <div className="flex items-center justify-between py-3">
-      <div className="mr-4">
-        <h4 className="font-medium text-sm text-foreground">{label}</h4>
-        <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
-      </div>
-      <button onClick={onChange} className="flex-shrink-0">
-        {checked
-          ? <ToggleRight className={`w-8 h-8 ${color}`} />
-          : <ToggleLeft className="w-8 h-8 text-muted-foreground/50" />
-        }
-      </button>
-    </div>
+    <SwitchRow
+      label={label}
+      description={description}
+      cue={cue}
+      checked={Boolean(checked)}
+      onCheckedChange={() => onChange()}
+      testId={testId}
+    />
   );
 }
 
@@ -4117,12 +4120,7 @@ function WebhookConfigCard({ workspaceTimezone = 'America/Vancouver' }) {
           <h4 className="font-medium text-sm text-foreground">FreshService Ticket Webhook</h4>
           <p className="text-xs text-muted-foreground mt-0.5">Low-latency ticket ingest for this workspace; scheduled polling remains the safety net.</p>
         </div>
-        <button onClick={() => updateEnabled(!enabled)} disabled={saving} className="flex-shrink-0">
-          {enabled
-            ? <ToggleRight className="w-8 h-8 text-blue-600 dark:text-blue-300" />
-            : <ToggleLeft className="w-8 h-8 text-muted-foreground/50" />
-          }
-        </button>
+        <Switch checked={enabled} onCheckedChange={() => updateEnabled(!enabled)} disabled={saving} aria-label="FreshService Ticket Webhook" />
       </div>
 
       <div className="rounded-lg border border-border bg-muted/50 p-3 space-y-3">
@@ -4694,7 +4692,7 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Vancouver' 
           description="Write the AI's category to the ticket and FreshService even while assignment waits for human approval — and on after-hours priority runs, which classify anyway. Observe-only groups are always exempt (unless their category carve-out is on)."
           checked={!!config.autoCategorizeEnabled}
           onChange={() => setConfig({ ...config, autoCategorizeEnabled: !config.autoCategorizeEnabled })}
-          color="text-emerald-600 dark:text-emerald-300"
+          cue={WRITES_TO_FS}
         />
         {!!config.autoCategorizeEnabled && !config.priorityAssessmentAfterHoursEnabled && (
           <div className="rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
@@ -4705,27 +4703,24 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Vancouver' 
             (it turns on after-hours AI runs for this workspace).
           </div>
         )}
-        <ConfigToggle label="Auto-Close Noise Tickets" description="Automatically close/resolve noise and spam tickets in FreshService without admin review" checked={config.autoCloseNoise} onChange={() => setConfig({ ...config, autoCloseNoise: !config.autoCloseNoise })} />
+        <ConfigToggle label="Auto-Close Noise Tickets" description="Automatically close/resolve noise and spam tickets in FreshService without admin review" checked={config.autoCloseNoise} onChange={() => setConfig({ ...config, autoCloseNoise: !config.autoCloseNoise })} cue={WRITES_TO_FS} />
         <ConfigToggle
           label="Collapse duplicate bursts"
           description="Same requester + identical subject within 15 minutes: later copies get linked as duplicates, Ticket-Pulse-born copies auto-resolve, and the AI run is skipped. Turn off for teams whose legitimate requests share subjects (e.g. Power App submissions that differ only in the body)."
           checked={config.duplicateBurstEnabled !== false}
           onChange={() => setConfig({ ...config, duplicateBurstEnabled: config.duplicateBurstEnabled === false })}
-          color="text-sky-600 dark:text-sky-300"
         />
         <ConfigToggle
           label="Show AI Suggestions to Basic-Access and Read-Only Members"
           description="When off, the Suggested-assignee chip and AI runs are shown only to reviewers and admins in this workspace; basic-access technicians and read-only members see the ticket as plainly Unassigned. Reviewers and admins always see suggestions."
           checked={config.aiSuggestionsForBasic !== false}
           onChange={() => setConfig({ ...config, aiSuggestionsForBasic: config.aiSuggestionsForBasic === false })}
-          color="text-indigo-600 dark:text-indigo-300"
         />
         <ConfigToggle
           label="Learn Competencies From Closed Tickets"
           description="When someone closes a ticket, the person holding it gains — or strengthens — a competency in the ticket's category: Basic from 1 closed ticket, Comfortable from 10, Advanced from 25. Expert is only ever set by a person. Assignments alone teach nothing. System-added entries carry an amber dot in the matrix and are listed under Competencies → Learned skills for review. Turn off to change the matrix by hand only."
           checked={config.competencyFeedbackEnabled !== false}
           onChange={() => setConfig({ ...config, competencyFeedbackEnabled: config.competencyFeedbackEnabled === false })}
-          color="text-amber-600 dark:text-amber-300"
         />
         <div className="py-3">
           <h4 className="font-medium text-sm text-foreground mb-1.5">Max Recommendations</h4>
@@ -4740,14 +4735,13 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Vancouver' 
           description="Persist Ticket Pulse assessed priority and allow priority-only runs. Turn off to stop workspace priority detection while assignment routing continues."
           checked={config.priorityAssessmentEnabled !== false}
           onChange={() => setConfig({ ...config, priorityAssessmentEnabled: !(config.priorityAssessmentEnabled !== false) })}
-          color="text-red-600 dark:text-red-300"
         />
         <ConfigToggle
           label="FreshService Priority Writeback"
           description="Write assessed priority to FreshService native priority. Turn off to keep priority assessment local to Ticket Pulse."
           checked={config.priorityWritebackEnabled !== false}
           onChange={() => setConfig({ ...config, priorityWritebackEnabled: !(config.priorityWritebackEnabled !== false) })}
-          color="text-amber-600 dark:text-amber-300"
+          cue={WRITES_TO_FS}
         />
         {config.priorityAssessmentEnabled === false && (
           <div className="rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
@@ -4759,7 +4753,7 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Vancouver' 
           description="Write the AI's assessed ticket type (from Settings → Ticket Ops → Ticket types) to FreshService. Only types mapped to an FS choice are ever sent; Ticket Pulse–native types stay local."
           checked={!!config.typeWritebackEnabled}
           onChange={() => setConfig({ ...config, typeWritebackEnabled: !config.typeWritebackEnabled })}
-          color="text-violet-600 dark:text-violet-300"
+          cue={WRITES_TO_FS}
         />
       </ConfigSection>
 
@@ -4792,17 +4786,22 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Vancouver' 
           description="Carve-out: observed tickets still get the AI's category on the ticket (and in FreshService when Auto-Categorize is on) — assignment, noise, and priority stay recorded-only."
           checked={!!config.observeCategoryWritebackEnabled}
           onChange={() => setConfig({ ...config, observeCategoryWritebackEnabled: !config.observeCategoryWritebackEnabled })}
-          color="text-violet-600 dark:text-violet-300"
         />
       </ConfigSection>
 
       {/* Section 3: FreshService Sync */}
       <ConfigSection icon={RefreshCw} title="FreshService Sync">
-        <ConfigToggle label="Dry-Run Mode" description="Preview all FreshService changes without executing them. Turn off when ready to go live." checked={config.dryRunMode} onChange={() => setConfig({ ...config, dryRunMode: !config.dryRunMode })} color="text-orange-500" />
+        <ConfigToggle
+          label="Shadow mode"
+          description="Shadow: preview all FreshService changes without executing them. Turn off when ready to go live."
+          checked={config.dryRunMode}
+          onChange={() => setConfig({ ...config, dryRunMode: !config.dryRunMode })}
+          cue={config.dryRunMode ? <SwitchCue icon={Eye}>Shadow</SwitchCue> : <SwitchCue icon={Zap}>Live</SwitchCue>}
+        />
         <div className="py-3">
           <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium ${config.dryRunMode ? 'bg-orange-100 dark:bg-orange-500/20 text-orange-800 dark:text-orange-200' : 'bg-green-100 dark:bg-green-500/20 text-green-800 dark:text-green-200'}`}>
             <span className={`w-2 h-2 rounded-full ${config.dryRunMode ? 'bg-orange-500' : 'bg-green-500'}`} />
-            {config.dryRunMode ? 'Dry-run active — FreshService will NOT be modified' : 'Live mode — changes will be written to FreshService'}
+            {config.dryRunMode ? 'Shadow — FreshService will NOT be modified' : 'Live — changes will be written to FreshService'}
           </div>
         </div>
       </ConfigSection>

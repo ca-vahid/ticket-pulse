@@ -24,6 +24,9 @@ describe('filterSettingsNavItems', () => {
   test('workspace admin sees admin sections but not global-only ones', () => {
     const items = filterSettingsNavItems({ isWsAdmin: true, isWsReviewer: true });
     expect(ids(items)).toContain('ticket-ops');
+    // QA 11-05 #2: Macros are their own admin tab (#macros), found by "scenario" too.
+    expect(ids(items)).toContain('macros');
+    expect(items.find((i) => i.id === 'macros').keywords).toContain('scenario automations');
     expect(ids(items)).toContain('approval-categories');
     expect(ids(items)).toContain('dashboard');
     expect(ids(items)).not.toContain('freshservice');

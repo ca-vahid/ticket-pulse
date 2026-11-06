@@ -2094,6 +2094,16 @@ router.delete('/:id/tasks/:taskId', asyncHandler(async (req, res) => {
   res.json({ success: true, data: result });
 }));
 
+// What a macro would do on this ticket (QA 11-05 #2): the confirm dialog's
+// step list, with the note/reply rendered and skipped steps explained.
+router.get('/:id/macros/:macroId/preview', asyncHandler(async (req, res) => {
+  const { default: ticketMacroService } = await import('../services/ticketMacroService.js');
+  const result = await ticketMacroService.preview(
+    parseTicketId(req), req.workspaceId, req.params.macroId, req.ticketActor,
+  );
+  res.json({ success: true, data: result });
+}));
+
 // Apply a macro (quick-action bundle) to this ticket.
 router.post('/:id/macros/:macroId/apply', asyncHandler(async (req, res) => {
   const { default: ticketMacroService } = await import('../services/ticketMacroService.js');

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertCircle, Check, ChevronDown, Loader2, Pencil, Plus, Play, Radar, RefreshCw, Sparkles, TestTube, Trash2 } from 'lucide-react';
 import { alertCorrelationAPI } from '../../services/api';
 import AlertBundlingSection from './AlertBundlingSection';
+import { Switch } from '../ui/switch';
 
 /**
  * Settings → Alert correlation (20 Sep 2026). Pair rules ("server down" ↔
@@ -194,13 +195,12 @@ export default function AlertCorrelationPanel() {
                 <RuleForm initial={rule} onSave={save} onCancel={() => setEditing(null)} busy={busy} error={formError} />
               ) : (
                 <div className="flex flex-wrap items-start gap-3">
-                  <button
-                    type="button" role="switch" aria-checked={rule.isEnabled} aria-label={`${rule.isEnabled ? 'Disable' : 'Enable'} ${rule.name}`}
-                    onClick={() => toggle(rule)}
-                    className={`tp-focus-ring relative mt-0.5 inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${rule.isEnabled ? 'bg-primary' : 'bg-muted-foreground/40'}`}
-                  >
-                    <span className={`inline-block h-4 w-4 transform rounded-full bg-card shadow transition-transform ${rule.isEnabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                  </button>
+                  <Switch
+                    checked={rule.isEnabled === true}
+                    aria-label={`${rule.isEnabled ? 'Disable' : 'Enable'} ${rule.name}`}
+                    onCheckedChange={() => toggle(rule)}
+                    className="mt-0.5"
+                  />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-foreground">{rule.name}</p>
                     {rule.description && <p className="text-[11.5px] text-muted-foreground">{rule.description}</p>}

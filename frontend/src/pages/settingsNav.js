@@ -29,6 +29,7 @@ import {
   Users2,
   VolumeX,
   Wand2,
+  Zap,
 } from 'lucide-react';
 
 /**
@@ -53,9 +54,12 @@ export const ALL_SETTINGS_NAV_ITEMS = [
   // Reviewers manage approval categories from Approvals → Categories (v3.7.02);
   // this Settings mount is the admin's second door to the same panel.
   { id: 'approval-categories', label: 'Approval Categories', Icon: Stamp, minRole: 'admin', group: 'Tickets & AI' },
+  // QA 11-05 #2: Macros left Ticket Ops for their own tab. `keywords` feed the
+  // section filter ("scenario" is what FreshService calls them).
+  { id: 'macros', label: 'Macros', Icon: Zap, minRole: 'admin', group: 'Tickets & AI', keywords: ['scenario automations', 'quick actions', 'canned replies', 'one click'] },
   { id: 'noise-rules', label: 'Noise Rules', Icon: VolumeX, minRole: 'admin', group: 'Tickets & AI' },
   { id: 'alert-correlation', label: 'Alert correlation', Icon: Radar, minRole: 'admin', group: 'Tickets & AI' },
-  { id: 'ticket-ops', label: 'Ticket Ops', Icon: Wand2, minRole: 'admin', group: 'Tickets & AI' },
+  { id: 'ticket-ops', label: 'Ticket Ops', Icon: Wand2, minRole: 'admin', group: 'Tickets & AI', keywords: ['sla', 'statuses', 'tags', 'custom fields', 'reply greeting'] },
   { id: 'tone-of-voice', label: 'Tone of Voice', Icon: MessageSquareQuote, minRole: 'admin', group: 'Tickets & AI' },
   // Urgent Response (Oct 2026) took over the old Urgent Escalation section:
   // requester escalation is its fourth tab; #urgent-escalation aliases below.

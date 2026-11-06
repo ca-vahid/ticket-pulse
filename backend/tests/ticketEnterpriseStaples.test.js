@@ -183,6 +183,15 @@ describe('SLA policies — calendar-aware mode matrix', () => {
 });
 
 describe('macros', () => {
+  // QA 11-05 #2: macros became an ordered step list; these pin that a macro
+  // saved in the OLD key shape still applies the same way.
+  beforeEach(() => {
+    prismaMock.ticket.findFirst.mockResolvedValue({
+      id: 501, workspaceId: 1, origin: 'ticketpulse', status: 'Open', subject: 'Printer jam', nativeNumber: 77,
+      requester: { name: 'Alex Rivera', email: 'alex@example.com', unattended: false }, assignedTech: null, tagLinks: [], ccEmails: [],
+    });
+  });
+
   test('apply runs each configured action through the normal service paths, status LAST', async () => {
     prismaMock.ticketMacro.findFirst.mockResolvedValue({
       id: 5, name: 'Resolve as no-fault',
@@ -193,7 +202,7 @@ describe('macros', () => {
 
     expect(result.ok).toBe(true);
     expect(ticketServiceMock.updateTicketFields).toHaveBeenCalledWith(501, 1, { priority: 1 }, { email: 'agent@x.io' });
-    expect(ticketServiceMock.addPrivateNote).toHaveBeenCalledWith(501, 1, { bodyText: 'No fault found' }, { email: 'agent@x.io' });
+    expect(ticketServiceMock.addPrivateNote).toHaveBeenCalledWith(501, 1, { bodyHtml: '<p>No fault found</p>' }, { email: 'agent@x.io' });
     expect(ticketServiceMock.changeStatus).toHaveBeenCalledWith(501, 1, 'Resolved', { email: 'agent@x.io' });
     // Status change is the LAST step so it can't race the other writes.
     expect(result.steps.at(-1).label).toBe('status');
@@ -231,7 +240,7 @@ describe('macros', () => {
     prismaMock.ticketMacro.create.mockImplementation(({ data }) => Promise.resolve({ id: 9, ...data }));
 
     const macro = await ticketMacroService.create(77, { name: 'Park it', actions: { setStatus: 'waiting ON vendor' } }, null);
-    expect(macro.actions.setStatus).toBe('Waiting on vendor');
+    expect(macro.actions.steps[0]).toEqual({ type: 'status', status: 'Waiting on vendor' });
 
     // Retired statuses can't be chosen for new changes.
     await expect(ticketMacroService.create(77, { name: 'y', actions: { setStatus: 'Needs Rework' } }, null))

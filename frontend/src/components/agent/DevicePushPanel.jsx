@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Activity, BellRing, Send } from 'lucide-react';
 import { disablePush, enablePush, getPushState, sendPushTest } from '../../utils/push';
+import { Switch } from '../ui/switch';
 
 /**
  * Notifications on this device (12 Oct 2026). One switch per browser or
@@ -46,18 +47,13 @@ export default function DevicePushPanel({ compact = false }) {
   if (compact && (info.state === 'unsupported' || info.state === 'unconfigured')) return null;
 
   const toggle = (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
+    <Switch
+      checked={on}
       aria-label="Notifications on this device"
       disabled={busy || !canToggle}
-      onClick={() => run(on ? disablePush : enablePush, on ? 'Off for this device.' : 'On. You can send a test.')}
+      onCheckedChange={() => run(on ? disablePush : enablePush, on ? 'Off for this device.' : 'On. You can send a test.')}
       data-testid="device-push-toggle"
-      className={`tp-focus-ring relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${on ? 'bg-primary' : 'bg-muted-foreground/40'}`}
-    >
-      <span className={`inline-block h-5 w-5 rounded-full bg-card shadow transition-transform ${on ? 'translate-x-[22px]' : 'translate-x-0.5'}`} />
-    </button>
+    />
   );
 
   if (compact) {
