@@ -22,8 +22,10 @@ export const QUEUE_CARD_REGISTRY = {
   all: { label: 'All tickets', Icon: Ticket, tile: 'bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300', num: 'text-blue-600 dark:text-blue-300', countKey: 'all', windowed: true },
   open: { label: 'Open', Icon: Inbox, tile: 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-300', num: 'text-emerald-600 dark:text-emerald-300', countKey: 'open' },
   awaiting: { label: 'Awaiting reply', Icon: MessageSquare, tile: 'bg-sky-50 dark:bg-sky-500/15 text-sky-600 dark:text-sky-300', num: 'text-foreground', countKey: 'awaiting' },
-  due_today: { label: 'Due today', Icon: CalendarDays, tile: 'bg-amber-50 dark:bg-amber-500/15 text-amber-600 dark:text-amber-300', num: 'text-foreground', countKey: 'dueToday' },
-  overdue: { label: 'Overdue', Icon: AlertCircle, tile: 'bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-300', num: 'text-red-600 dark:text-red-300', countKey: 'overdue' },
+  // `hint` (5 Nov 2026): what the card counts, as its tooltip — FreshService
+  // tickets count by due date only (their first reply is not known here).
+  due_today: { label: 'Due today', Icon: CalendarDays, tile: 'bg-amber-50 dark:bg-amber-500/15 text-amber-600 dark:text-amber-300', num: 'text-foreground', countKey: 'dueToday', hint: 'Due today. Ticket Pulse tickets also count when their first reply is due today; FreshService tickets count by due date only.' },
+  overdue: { label: 'Overdue', Icon: AlertCircle, tile: 'bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-300', num: 'text-red-600 dark:text-red-300', countKey: 'overdue', hint: 'Past the due date. Ticket Pulse tickets also count when their first reply is late; FreshService tickets count by due date only.' },
   resolved: { label: 'Resolved', Icon: CheckCircle2, tile: 'bg-violet-50 dark:bg-violet-500/15 text-violet-600 dark:text-violet-300', num: 'text-foreground', countKey: 'resolved', windowed: true },
   // Created-period cards (calendar boundaries on the WORKSPACE clock,
   // Monday-start weeks — backend zonedBoundaries).

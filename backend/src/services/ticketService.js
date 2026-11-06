@@ -584,13 +584,40 @@ export function trustedReviewNeeded(customFields) {
   return false;
 }
 
+// First-response SLA counts only on TP-born tickets (5 Nov 2026): FreshService
+// replies don't stamp firstPublicAgentReplyAt, so 70 of 81 open FS-born IT
+// tickets read as never answered and sat on the Overdue card for months.
+// Used by the overdue / due_today segments and their card counts, so the card,
+// the list and the row chip agree.
+export const FIRST_RESPONSE_TRACKED = Object.freeze({ origin: 'ticketpulse' });
+
+/**
+ * A from/to date pair → a Prisma range, or null. A date-only upper bound is
+ * inclusive of that whole day (the createdFrom/createdTo rule).
+ */
+export function parseDateRange(fromRaw, toRaw) {
+  if (!fromRaw && !toRaw) return null;
+  const range = {};
+  const from = fromRaw ? new Date(fromRaw) : null;
+  const to = toRaw ? new Date(toRaw) : null;
+  if (from && !Number.isNaN(from.getTime())) range.gte = from;
+  if (to && !Number.isNaN(to.getTime())) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(toRaw))) to.setHours(23, 59, 59, 999);
+    range.lte = to;
+  }
+  return Object.keys(range).length ? range : null;
+}
+
 export function deriveStateChip(ticket, awaitingReply = false, statusSets = null) {
   const isTerminal = statusSets
     ? statusSets.terminal.has(ticket.status)
     : ['Resolved', 'Closed'].includes(ticket.status);
   if (isTerminal || ['Deleted', 'Spam'].includes(ticket.status)) return null;
   const now = Date.now();
-  const fr = ticket.frDueBy ? new Date(ticket.frDueBy).getTime() : null;
+  // First-response lateness only where Ticket Pulse knows the first reply
+  // (TP-born): FreshService replies don't stamp firstPublicAgentReplyAt, so an
+  // answered FS-born ticket read as "overdue / response due" forever (5 Nov 2026).
+  const fr = ticket.frDueBy && ticket.origin === 'ticketpulse' ? new Date(ticket.frDueBy).getTime() : null;
   const due = ticket.dueBy ? new Date(ticket.dueBy).getTime() : null;
   const noFirstReply = !ticket.firstPublicAgentReplyAt;
   // Pending-base = the clock is stopped (waiting on the requester/a third
@@ -1599,11 +1626,15 @@ class TicketService {
       }
       if (Object.keys(range).length) where.createdAt = range;
     }
+    // Resolved date (5 Nov 2026, daily brief links): ?resolvedFrom / ?resolvedTo
+    // — "resolved in the last 7 days". Same parsing as the created range.
+    const resolvedRange = parseDateRange(query.resolvedFrom, query.resolvedTo);
+    if (resolvedRange) where.resolvedAt = resolvedRange;
     // Date window (QA 10-16 #7): ?createdWithin=7d|30d|90d hides FINISHED
     // tickets created before the window; work still in progress always shows.
-    // Explicit Created dates and the created_* cards carry their own dates.
+    // Explicit Created or Resolved dates and the created_* cards carry their own dates.
     const windowStart = createdWindowStart(query.createdWithin);
-    if (windowStart && !query.createdFrom && !query.createdTo && !String(query.segment || '').startsWith('created_')) {
+    if (windowStart && !query.createdFrom && !query.createdTo && !resolvedRange && !String(query.segment || '').startsWith('created_')) {
       where.AND = [...(where.AND || []), {
         OR: [
           { createdAt: { gte: windowStart } },
@@ -1715,7 +1746,7 @@ class TicketService {
       where.AND = [...(where.AND || []), {
         OR: [
           { dueBy: { gte: now, lte: endOfDay } },
-          { frDueBy: { gte: now, lte: endOfDay }, firstPublicAgentReplyAt: null },
+          { ...FIRST_RESPONSE_TRACKED, frDueBy: { gte: now, lte: endOfDay }, firstPublicAgentReplyAt: null },
         ],
       }];
     } else if (query.segment === 'overdue') {
@@ -1723,7 +1754,7 @@ class TicketService {
       where.AND = [...(where.AND || []), {
         OR: [
           { dueBy: { lt: now } },
-          { frDueBy: { lt: now }, firstPublicAgentReplyAt: null },
+          { ...FIRST_RESPONSE_TRACKED, frDueBy: { lt: now }, firstPublicAgentReplyAt: null },
         ],
       }];
     } else if (query.segment === 'resolved') {
@@ -2635,7 +2666,7 @@ class TicketService {
           status: { in: openBaseNames },
           OR: [
             { dueBy: { gte: now, lte: endOfDay } },
-            { frDueBy: { gte: now, lte: endOfDay }, firstPublicAgentReplyAt: null },
+            { ...FIRST_RESPONSE_TRACKED, frDueBy: { gte: now, lte: endOfDay }, firstPublicAgentReplyAt: null },
           ],
         },
       }),
@@ -2645,7 +2676,7 @@ class TicketService {
           status: { in: openBaseNames },
           OR: [
             { dueBy: { lt: now } },
-            { frDueBy: { lt: now }, firstPublicAgentReplyAt: null },
+            { ...FIRST_RESPONSE_TRACKED, frDueBy: { lt: now }, firstPublicAgentReplyAt: null },
           ],
         },
       }),

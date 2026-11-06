@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.3.52-preview';
+export const APP_VERSION = '4.3.53-preview';
 
 export const changelog = [
+  {
+    version: '4.3.53-preview',
+    date: 'November 5, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>The Overdue card no longer counts answered FreshService tickets</strong> &mdash; a FreshService ticket whose first-response time had passed stayed &ldquo;Overdue&rdquo; for months even after someone answered it in FreshService, because a reply sent there never told Ticket Pulse. Now only Ticket Pulse tickets count as late on their first response; a FreshService ticket is overdue when its due date passes, whether or not it has been answered (Ticket Pulse cannot tell). In IT the card goes from 21 to 14: the 7 that drop off were only late on a first reply, so this is a change in how the card counts, not work getting done. Hover the card to see how it counts. The Due today card, the Overdue list and the row&rsquo;s Overdue / Response due marker follow the same rule.' },
+      { type: 'new', html: '<strong>Filter by when a ticket was resolved</strong> &mdash; a link can now open &ldquo;resolved in the last 7 days&rdquo;: <code>?resolvedFrom=2026-10-29</code> (and <code>resolvedTo</code>). It shows as a <em>Resolved since 29 Oct</em> chip you can remove, and it works with the Resolved card and with a person. The daily brief&rsquo;s &ldquo;out in the last 7 days&rdquo; link uses it, so its number and its list agree.' },
+    ],
+  },
   {
     version: '4.3.52-preview',
     date: 'November 5, 2026',

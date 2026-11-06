@@ -99,7 +99,7 @@ jest.unstable_mockModule('../src/services/attachmentService.js', () => ({
   MAX_ATTACHMENTS_PER_TICKET: 20,
 }));
 
-const { default: ticketService, deriveQueueState, deriveStateChip, describeOversizeBody, extractInlineImages, MAX_BODY_CHARS } = await import('../src/services/ticketService.js');
+const { default: ticketService, deriveQueueState, deriveStateChip, parseDateRange, FIRST_RESPONSE_TRACKED, describeOversizeBody, extractInlineImages, MAX_BODY_CHARS } = await import('../src/services/ticketService.js');
 const { invalidateStatusCache } = await import('../src/services/statusService.js');
 const { ValidationError, ExternalAPIError } = await import('../src/utils/errors.js');
 
@@ -1122,6 +1122,23 @@ describe('ticketService.listTickets sorting', () => {
     }));
   });
 
+  test('resolvedFrom/resolvedTo filter on resolvedAt and switch off the created-date window (5 Nov 2026)', async () => {
+    await ticketService.listTickets(1, { segment: 'resolved', assignee: '7', resolvedFrom: '2026-10-29', createdWithin: '7d' });
+    const where = prismaMock.ticket.findMany.mock.calls.at(-1)[0].where;
+    expect(where.resolvedAt.gte.toISOString()).toBe(new Date('2026-10-29').toISOString());
+    expect(JSON.stringify(where)).not.toContain('"createdAt"');
+  });
+
+  test('the overdue segment counts first-response lateness on TP-born tickets only', async () => {
+    await ticketService.listTickets(1, { segment: 'overdue' });
+    const where = prismaMock.ticket.findMany.mock.calls.at(-1)[0].where;
+    const or = where.AND.find((c) => c.OR).OR;
+    expect(or).toEqual(expect.arrayContaining([
+      expect.objectContaining({ dueBy: expect.any(Object) }),
+      expect.objectContaining({ origin: 'ticketpulse', firstPublicAgentReplyAt: null }),
+    ]));
+  });
+
   test('unknown sort values still fall back to createdAt', async () => {
     await ticketService.listTickets(1, { sort: 'evil;drop', dir: 'asc' });
 
@@ -1277,6 +1294,23 @@ describe('ticketService.deriveQueueState (Phase QX)', () => {
     const late = tp({ frDueBy: past, assignedTechId: 7 });
     expect(deriveStateChip(late, false)).toBe('overdue');
     expect(deriveQueueState(late, false)).toBe('response_due');
+  });
+
+  test('first-response lateness is TP-born only (5 Nov 2026): an FS-born row with no reply stamp is overdue only by its due date', () => {
+    expect(deriveStateChip(fs({ frDueBy: past, assignedTechId: 7 }), false)).toBeNull();
+    expect(deriveStateChip(fs({ frDueBy: future, assignedTechId: 7 }), false)).toBeNull();
+    expect(deriveStateChip(fs({ frDueBy: past, dueBy: past, assignedTechId: 7 }), false)).toBe('overdue');
+    expect(deriveStateChip(tp({ frDueBy: past, assignedTechId: 7 }), false)).toBe('overdue');
+    expect(deriveStateChip(tp({ frDueBy: future, assignedTechId: 7 }), false)).toBe('response_due');
+  });
+
+  test('parseDateRange: date-only upper bound covers the whole day; bad input → null', () => {
+    const r = parseDateRange('2026-10-29', '2026-11-05');
+    expect(r.gte.toISOString()).toBe(new Date('2026-10-29').toISOString());
+    expect(r.lte.getHours()).toBe(23);
+    expect(parseDateRange(null, null)).toBeNull();
+    expect(parseDateRange('nope', null)).toBeNull();
+    expect(FIRST_RESPONSE_TRACKED).toEqual({ origin: 'ticketpulse' });
   });
 
   test('custom status registry: custom terminal → null, custom Pending-base pauses, custom Open-base runs', () => {
