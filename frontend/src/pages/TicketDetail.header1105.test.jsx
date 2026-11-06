@@ -206,6 +206,23 @@ describe('QA 11-05 #7: the creation date leads, the number is quieter', () => {
   });
 });
 
+describe('QA 11-05 review: the action row wraps cleanly', () => {
+  test('the divider and More wrap as one group; Mark as solution leaves the row below xl and sits under More', async () => {
+    await renderAt(FROM);
+    const more = screen.getByTestId('more-actions');
+    const group = more.parentElement.parentElement;
+    expect(group.querySelector('[aria-hidden="true"].w-px')).not.toBeNull();
+    expect(group.className).toContain('inline-flex');
+    const rowSolution = within(screen.getByTestId('ticket-actions')).getAllByRole('button', { name: 'Mark as solution' })[0];
+    expect(rowSolution.className).toContain('hidden xl:inline-flex');
+    fireEvent.click(more);
+    const phoneSection = screen.getByTestId('more-actions-phone');
+    expect(phoneSection.className).toContain('xl:hidden');
+    expect(within(phoneSection).getByRole('menuitem', { name: 'Mark as solution' }).className).not.toContain('sm:hidden');
+    expect(within(phoneSection).getByRole('menuitem', { name: /Mark as noise/ }).className).toContain('sm:hidden');
+  });
+});
+
 describe('QA 11-05 #8: "Also for" in the requester name row', () => {
   test('the button sits in the name row with its count; there is no separate row', async () => {
     await renderAt(FROM);
@@ -220,6 +237,16 @@ describe('QA 11-05 #8: "Also for" in the requester name row', () => {
     expect(contact.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
     // Visible on phones even while the contact lines are folded.
     expect(screen.getByTestId('also-for-card').className).not.toContain('max-sm:hidden');
+  });
+
+  test('a long requester name keeps its full text in a tooltip; the panel aligns to the top', async () => {
+    const long = 'Alexandra Montgomery-Riveraweather';
+    apiOverrides.get = vi.fn(() => Promise.resolve({ data: { ...BASE, requester: { ...BASE.requester, name: long } } }));
+    await renderAt(FROM);
+    expect(screen.getByTestId('requester-name')).toHaveAttribute('title', long);
+    const panel = screen.getByTestId('requester-panel');
+    expect(panel.className).toContain('lg:self-start');
+    expect(panel.className).not.toContain('lg:self-center');
   });
 
   test('with nobody, still a focusable button that says so', async () => {

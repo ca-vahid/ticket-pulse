@@ -2417,6 +2417,8 @@ export default function TicketDetail() {
                         <h1
                           onMouseEnter={liveChanges.subject ? () => ackChange('subject') : undefined}
                           onClick={isPhone ? () => setSubjectFull((v) => !v) : undefined}
+                          // Phone: clamped to two lines; a tap expands it and the full subject is in the tooltip.
+                          title={isPhone && !subjectFull ? ticket.subject || undefined : undefined}
                           className={`text-lg sm:text-xl font-bold text-foreground leading-snug group rounded-lg transition-all ${subjectFull ? '' : 'max-sm:line-clamp-2'} ${
                             liveChanges.subject ? 'ring-2 ring-amber-300 dark:ring-amber-500/50 bg-amber-50 dark:bg-amber-500/15 px-1.5' : ''
                           }`}
@@ -2659,7 +2661,7 @@ export default function TicketDetail() {
                       title={ticket.solutionVerifiedAt
                         ? 'Remove the verified-solution mark'
                         : 'Mark this ticket as a verified solution — it shows up for tickets in the same category'}
-                      className={`tp-focus-ring hidden sm:inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-colors ${
+                      className={`tp-focus-ring hidden xl:inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-colors ${
                         ticket.solutionVerifiedAt
                           ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200'
                           : 'border-border bg-card text-muted-foreground hover:border-emerald-300 hover:text-emerald-700 dark:hover:border-emerald-500/40 dark:hover:text-emerald-200'
@@ -2729,129 +2731,135 @@ export default function TicketDetail() {
                         Close<span className="max-sm:sr-only"> ticket</span>
                       </button>
                     )}
-                    <span aria-hidden="true" className="mx-0.5 hidden h-5 w-px bg-border/80 sm:block" />
-                    <span ref={noiseMenuRef} className="relative">
-                      <button
-                        onClick={() => { setConfirmDelete(false); setNoiseMenuOpen((v) => !v); }}
-                        aria-expanded={noiseMenuOpen}
-                        aria-haspopup="menu"
-                        aria-label="More actions"
-                        title="More: print, copy link, clone, merge, split"
-                        data-testid="more-actions"
-                        className={`${secondaryActionClass} ${noiseMenuOpen ? 'border-blue-300 text-blue-700 dark:border-blue-500/40 dark:text-blue-200' : ''}`}
-                      >
-                        {savingField === 'clone' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <MoreHorizontal className="w-4 h-4" aria-hidden="true" />}
-                        <span className="max-sm:sr-only">More</span>
-                      </button>
-                      {noiseMenuOpen && (
-                        <span className="absolute left-0 max-sm:left-auto max-sm:right-0 top-full mt-1 z-30 w-64 max-w-[calc(100vw-4rem)] tp-card rounded-xl shadow-soft p-1.5 flex flex-col animate-popIn" role="menu" data-testid="more-actions-menu">
-                          {/* Phone: the three actions that leave the row live here. */}
-                          <span className="flex flex-col sm:hidden" data-testid="more-actions-phone">
-                            <button onClick={() => { setNoiseFlag(!ticket.isNoise); setNoiseMenuOpen(false); }} disabled={savingField === 'noise'} role="menuitem" className={moreItemClass}>
-                              <ActionIcon name="noise" className="h-5 w-5" /> {ticket.isNoise ? 'Unmark noise' : 'Mark as noise'}
+                    {/* QA 11-05: the divider and More wrap together — never a lone
+                        divider at a row's end, or More alone with nothing before it. */}
+                    <span className="inline-flex items-center gap-1.5">
+                      <span aria-hidden="true" className="mx-0.5 hidden h-5 w-px bg-border/80 sm:block" />
+                      <span ref={noiseMenuRef} className="relative">
+                        <button
+                          onClick={() => { setConfirmDelete(false); setNoiseMenuOpen((v) => !v); }}
+                          aria-expanded={noiseMenuOpen}
+                          aria-haspopup="menu"
+                          aria-label="More actions"
+                          title="More: print, copy link, clone, merge, split"
+                          data-testid="more-actions"
+                          className={`${secondaryActionClass} ${noiseMenuOpen ? 'border-blue-300 text-blue-700 dark:border-blue-500/40 dark:text-blue-200' : ''}`}
+                        >
+                          {savingField === 'clone' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <MoreHorizontal className="w-4 h-4" aria-hidden="true" />}
+                          <span className="max-sm:sr-only">More</span>
+                        </button>
+                        {noiseMenuOpen && (
+                          <span className="absolute left-0 max-sm:left-auto max-sm:right-0 top-full mt-1 z-30 w-64 max-w-[calc(100vw-4rem)] tp-card rounded-xl shadow-soft p-1.5 flex flex-col animate-popIn" role="menu" data-testid="more-actions-menu">
+                            {/* Phone: the three actions that leave the row live here. */}
+                            {/* Below xl, Mark as solution lives here too (QA 11-05: the
+                              row then fits at 1024 px without More wrapping alone). */}
+                            <span className="flex flex-col xl:hidden" data-testid="more-actions-phone">
+                              <button onClick={() => { setNoiseFlag(!ticket.isNoise); setNoiseMenuOpen(false); }} disabled={savingField === 'noise'} role="menuitem" className={`sm:hidden ${moreItemClass}`}>
+                                <ActionIcon name="noise" className="h-5 w-5" /> {ticket.isNoise ? 'Unmark noise' : 'Mark as noise'}
+                              </button>
+                              <button
+                                onClick={() => { if (ticket.solutionVerifiedAt) setSolutionFlag(false); else setSolutionPrompt({ note: ticket.solutionNote || ticket.resolutionNote || '' }); setNoiseMenuOpen(false); }}
+                                disabled={savingField === 'solution'} role="menuitem" className={moreItemClass}
+                              >
+                                <BadgeCheck className="h-5 w-5 text-muted-foreground" aria-hidden="true" /> {ticket.solutionVerifiedAt ? 'Remove solution mark' : 'Mark as solution'}
+                              </button>
+                              {isNative && canReview && (
+                                <button onClick={deleteTicket} disabled={savingField === 'delete'} role="menuitem" className={`sm:hidden ${moreItemClass} ${confirmDelete ? '!text-red-700 dark:!text-red-200' : ''}`}>
+                                  <ActionIcon name="delete" className="h-5 w-5" /> {confirmDelete ? 'Tap again to delete' : 'Delete'}
+                                </button>
+                              )}
+                              <span aria-hidden="true" className="my-1 h-px bg-border/60" />
+                            </span>
+                            <button onClick={() => { window.print(); setNoiseMenuOpen(false); }} role="menuitem" className={moreItemClass}>
+                              <ActionIcon name="print" className="h-5 w-5" /> Print
                             </button>
-                            <button
-                              onClick={() => { if (ticket.solutionVerifiedAt) setSolutionFlag(false); else setSolutionPrompt({ note: ticket.solutionNote || ticket.resolutionNote || '' }); setNoiseMenuOpen(false); }}
-                              disabled={savingField === 'solution'} role="menuitem" className={moreItemClass}
-                            >
-                              <BadgeCheck className="h-5 w-5 text-muted-foreground" aria-hidden="true" /> {ticket.solutionVerifiedAt ? 'Remove solution mark' : 'Mark as solution'}
+                            <button onClick={() => { copyLink(); setNoiseMenuOpen(false); }} role="menuitem" className={moreItemClass}>
+                              <ActionIcon name="copylink" className="h-5 w-5" /> Copy link
                             </button>
-                            {isNative && canReview && (
-                              <button onClick={deleteTicket} disabled={savingField === 'delete'} role="menuitem" className={`${moreItemClass} ${confirmDelete ? '!text-red-700 dark:!text-red-200' : ''}`}>
-                                <ActionIcon name="delete" className="h-5 w-5" /> {confirmDelete ? 'Tap again to delete' : 'Delete'}
+                            {canPark && !['Deleted', 'Spam'].includes(ticket.status) && (
+                              <button
+                                onClick={() => { setParkError(null); setParkDialog({ initial: ticket.park || (ticket.parkedUntil ? { until: ticket.parkedUntil } : null) }); setNoiseMenuOpen(false); }}
+                                role="menuitem"
+                                data-testid="park-button"
+                                title="Park until a date — it waits on purpose and comes back to its assignee then"
+                                className={moreItemClass}
+                              >
+                                <PauseCircle className="h-5 w-5 text-muted-foreground" aria-hidden="true" /> {ticket.parkedUntil ? 'Change park date…' : 'Park…'}
                               </button>
                             )}
-                            <span aria-hidden="true" className="my-1 h-px bg-border/60" />
-                          </span>
-                          <button onClick={() => { window.print(); setNoiseMenuOpen(false); }} role="menuitem" className={moreItemClass}>
-                            <ActionIcon name="print" className="h-5 w-5" /> Print
-                          </button>
-                          <button onClick={() => { copyLink(); setNoiseMenuOpen(false); }} role="menuitem" className={moreItemClass}>
-                            <ActionIcon name="copylink" className="h-5 w-5" /> Copy link
-                          </button>
-                          {canPark && !['Deleted', 'Spam'].includes(ticket.status) && (
-                            <button
-                              onClick={() => { setParkError(null); setParkDialog({ initial: ticket.park || (ticket.parkedUntil ? { until: ticket.parkedUntil } : null) }); setNoiseMenuOpen(false); }}
-                              role="menuitem"
-                              data-testid="park-button"
-                              title="Park until a date — it waits on purpose and comes back to its assignee then"
-                              className={moreItemClass}
-                            >
-                              <PauseCircle className="h-5 w-5 text-muted-foreground" aria-hidden="true" /> {ticket.parkedUntil ? 'Change park date…' : 'Park…'}
-                            </button>
-                          )}
-                          {canPark && ticket.parkedUntil && (
-                            <button onClick={() => { unparkTicket(); setNoiseMenuOpen(false); }} role="menuitem" className={moreItemClass}>
-                              <Play className="h-5 w-5 text-muted-foreground" aria-hidden="true" /> Unpark
-                            </button>
-                          )}
-                          {canConverse && forwardAvailable && teamForwards.length > 0 && !['Deleted', 'Spam'].includes(ticket.status) && (
-                            <>
-                              <span aria-hidden="true" className="my-1 h-px bg-border/60" />
-                              {teamForwards.map((tf) => (
+                            {canPark && ticket.parkedUntil && (
+                              <button onClick={() => { unparkTicket(); setNoiseMenuOpen(false); }} role="menuitem" className={moreItemClass}>
+                                <Play className="h-5 w-5 text-muted-foreground" aria-hidden="true" /> Unpark
+                              </button>
+                            )}
+                            {canConverse && forwardAvailable && teamForwards.length > 0 && !['Deleted', 'Spam'].includes(ticket.status) && (
+                              <>
+                                <span aria-hidden="true" className="my-1 h-px bg-border/60" />
+                                {teamForwards.map((tf) => (
+                                  <button
+                                    key={tf.id}
+                                    onClick={() => { setTeamForward(tf); setNoiseMenuOpen(false); }}
+                                    role="menuitem"
+                                    data-testid="team-forward-item"
+                                    title={`Forward the ticket to ${tf.email}`}
+                                    className={moreItemClass}
+                                  >
+                                    <Forward className="h-5 w-5 text-muted-foreground" aria-hidden="true" /> Forward to {tf.label}
+                                  </button>
+                                ))}
+                              </>
+                            )}
+                            {ticketingOn && (
+                              <>
+                                <span aria-hidden="true" className="my-1 h-px bg-border/60" />
                                 <button
-                                  key={tf.id}
-                                  onClick={() => { setTeamForward(tf); setNoiseMenuOpen(false); }}
+                                  onClick={() => { setCloneConfirm(true); setNoiseMenuOpen(false); }}
+                                  disabled={savingField === 'clone'}
                                   role="menuitem"
-                                  data-testid="team-forward-item"
-                                  title={`Forward the ticket to ${tf.email}`}
+                                  title="Create a new draft ticket pre-filled from this one"
                                   className={moreItemClass}
                                 >
-                                  <Forward className="h-5 w-5 text-muted-foreground" aria-hidden="true" /> Forward to {tf.label}
+                                  <ActionIcon name="clone" className="h-5 w-5" /> Clone
                                 </button>
-                              ))}
-                            </>
-                          )}
-                          {ticketingOn && (
-                            <>
-                              <span aria-hidden="true" className="my-1 h-px bg-border/60" />
-                              <button
-                                onClick={() => { setCloneConfirm(true); setNoiseMenuOpen(false); }}
-                                disabled={savingField === 'clone'}
-                                role="menuitem"
-                                title="Create a new draft ticket pre-filled from this one"
-                                className={moreItemClass}
-                              >
-                                <ActionIcon name="clone" className="h-5 w-5" /> Clone
-                              </button>
-                              <button
-                                onClick={mergeBlockedReason ? undefined : () => { setMergeOpen(true); setNoiseMenuOpen(false); }}
-                                disabled={Boolean(mergeBlockedReason)}
-                                aria-disabled={Boolean(mergeBlockedReason)}
-                                title={mergeBlockedReason || 'Merge duplicate or related tickets into this one'}
-                                role="menuitem"
-                                data-testid="merge-button"
-                                className={`${moreItemClass} disabled:opacity-50 disabled:cursor-not-allowed`}
-                              >
-                                <ActionIcon name="merge" className="h-5 w-5" /> Merge
-                              </button>
-                              <button
-                                onClick={() => { setSplitFromId(null); setSplitOpen(true); setNoiseMenuOpen(false); }}
-                                role="menuitem"
-                                title="Carve a separate issue out of this conversation into its own ticket"
-                                data-testid="split-button"
-                                className={moreItemClass}
-                              >
-                                <ActionIcon name="split" className="h-5 w-5" /> Split
-                              </button>
-                            </>
-                          )}
-                          {canDeleteInFs && (
-                            <>
-                              <span aria-hidden="true" className="my-1 h-px bg-border/60" />
-                              <button
-                                onClick={() => { setFsDelete({ busy: false, error: null }); setNoiseMenuOpen(false); }}
-                                role="menuitem"
-                                data-testid="fs-delete-item"
-                                title="Delete this ticket in FreshService (moves it to FreshService's trash)"
-                                className="tp-focus-ring flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/15 dark:hover:text-red-200"
-                              >
-                                <Trash2 className="h-5 w-5" aria-hidden="true" /> Delete in FreshService…
-                              </button>
-                            </>
-                          )}
-                        </span>
-                      )}
+                                <button
+                                  onClick={mergeBlockedReason ? undefined : () => { setMergeOpen(true); setNoiseMenuOpen(false); }}
+                                  disabled={Boolean(mergeBlockedReason)}
+                                  aria-disabled={Boolean(mergeBlockedReason)}
+                                  title={mergeBlockedReason || 'Merge duplicate or related tickets into this one'}
+                                  role="menuitem"
+                                  data-testid="merge-button"
+                                  className={`${moreItemClass} disabled:opacity-50 disabled:cursor-not-allowed`}
+                                >
+                                  <ActionIcon name="merge" className="h-5 w-5" /> Merge
+                                </button>
+                                <button
+                                  onClick={() => { setSplitFromId(null); setSplitOpen(true); setNoiseMenuOpen(false); }}
+                                  role="menuitem"
+                                  title="Carve a separate issue out of this conversation into its own ticket"
+                                  data-testid="split-button"
+                                  className={moreItemClass}
+                                >
+                                  <ActionIcon name="split" className="h-5 w-5" /> Split
+                                </button>
+                              </>
+                            )}
+                            {canDeleteInFs && (
+                              <>
+                                <span aria-hidden="true" className="my-1 h-px bg-border/60" />
+                                <button
+                                  onClick={() => { setFsDelete({ busy: false, error: null }); setNoiseMenuOpen(false); }}
+                                  role="menuitem"
+                                  data-testid="fs-delete-item"
+                                  title="Delete this ticket in FreshService (moves it to FreshService's trash)"
+                                  className="tp-focus-ring flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/15 dark:hover:text-red-200"
+                                >
+                                  <Trash2 className="h-5 w-5" aria-hidden="true" /> Delete in FreshService…
+                                </button>
+                              </>
+                            )}
+                          </span>
+                        )}
+                      </span>
                     </span>
                   </div>
 
@@ -2911,7 +2919,7 @@ export default function TicketDetail() {
                 {/* Requester panel (16 Sep 2026 rework): identity first, then a
                     quiet contact list — icon + text, no pills — formatted phone
                     numbers, and the helper copy tucked into an info tooltip. */}
-                <div className="mt-4 lg:mt-0 lg:border-l lg:border-border/60 lg:pl-5 lg:self-center" data-testid="requester-panel">
+                <div className="mt-4 lg:mt-0 lg:border-l lg:border-border/60 lg:pl-5 lg:self-start" data-testid="requester-panel">
                   {ticket.requester ? (
                     <div>
                       <div className="flex items-start gap-3">
@@ -2923,9 +2931,10 @@ export default function TicketDetail() {
                           <PersonAvatar name={ticket.requester.name} size="h-9 w-9 sm:h-12 sm:w-12" textSize="text-sm sm:text-base" />
                         )}
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-bold text-foreground truncate">
+                          {/* QA 11-05: a long name truncates beside "Also for" — the full name is in the tooltip. */}
+                          <p className="text-sm font-bold text-foreground truncate" title={ticket.requester.name || undefined} data-testid="requester-name">
                             {ticket.requesterId
-                              ? <Link to={`/requesters/${ticket.requesterId}`} state={{ from: `${location.pathname}${location.search}` }} className="tp-focus-ring rounded hover:text-primary hover:underline" title="Open this requester's page">{ticket.requester.name}</Link>
+                              ? <Link to={`/requesters/${ticket.requesterId}`} state={{ from: `${location.pathname}${location.search}` }} className="tp-focus-ring rounded hover:text-primary hover:underline" title={`${ticket.requester.name} — open their requester page`}>{ticket.requester.name}</Link>
                               : ticket.requester.name}
                           </p>
                           {(() => {
@@ -2933,7 +2942,7 @@ export default function TicketDetail() {
                               ticket.requester.entraJobTitle || ticket.requester.jobTitle,
                               ticket.requester.entraDepartment || ticket.requester.department,
                             ].filter(Boolean).join(' · ');
-                            return role ? <p className="text-xs text-muted-foreground truncate">{role}</p> : null;
+                            return role ? <p className="text-xs text-muted-foreground truncate" title={role}>{role}</p> : null;
                           })()}
                           {ticket.requesterId && (related?.sameRequesterCount || 0) > 0 && (
                             <Link
