@@ -115,6 +115,27 @@ describe('tick — pulls, stands down when busy, never drops on a busy queue', (
     expect(client.fetchTicketConversations).toHaveBeenCalledTimes(20);
   });
 
+  test('weekend boost: a Saturday with a short FS queue pulls 40 a tick; the setting turns it off (7 Nov 2026)', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue({ id: 1, workspaceId: 1, origin: 'freshservice', freshserviceTicketId: 1n });
+    client.fetchTicketConversations.mockResolvedValue([]);
+    const saturdayNoonPt = Date.parse('2030-01-05T20:00:00Z');
+    for (let i = 0; i < 60; i++) svc.enqueue(6000 + i, 1, 'backfill', { delayMs: 0 });
+    limiter.queueDepth = 5;
+    await svc.tick(saturdayNoonPt + 5000);
+    expect(client.fetchTicketConversations).toHaveBeenCalledTimes(40);
+    // Busy brakes still apply on a weekend.
+    limiter.queueDepth = 80;
+    await svc.tick(saturdayNoonPt + 6000);
+    expect(client.fetchTicketConversations).toHaveBeenCalledTimes(43);
+    // Off switch: back to the plain quiet-hours 20.
+    settings.set('fs_thread_pull_boost', 'false');
+    limiter.queueDepth = 5;
+    for (let i = 0; i < 40; i++) svc.enqueue(7000 + i, 1, 'backfill', { delayMs: 0 });
+    client.fetchTicketConversations.mockClear();
+    await svc.tick(saturdayNoonPt + 7000);
+    expect(client.fetchTicketConversations).toHaveBeenCalledTimes(20);
+  });
+
   test('a ticket deleted in FreshService (404) is marked checked, not retried (28 Sep 2026)', async () => {
     prismaMock.ticket.findUnique.mockResolvedValue({ id: 11449, workspaceId: 1, origin: 'freshservice', freshserviceTicketId: 215684n });
     client.fetchTicketConversations.mockRejectedValueOnce(Object.assign(new Error('Request failed with status code 404'), { response: { status: 404 } }));

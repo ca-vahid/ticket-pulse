@@ -4,7 +4,7 @@ import settingsRepository from './settingsRepository.js';
 import mirrorService from './mirrorService.js';
 import ticketThreadRepository from './ticketThreadRepository.js';
 import { TICKET_ORIGIN } from '../utils/ticketOrigin.js';
-import { isQuietHours } from '../utils/quietHours.js';
+import { isQuietHours, pacificParts } from '../utils/quietHours.js';
 
 /**
  * FreshService notes and replies on FS-born tickets (plans/FS_THREAD_SYNC_GAP_REPORT.md,
@@ -47,6 +47,17 @@ const MAX_ATTEMPTS = 6;
 const SWEEP_EVERY_TICKS = 2; // one sweep step a minute
 const SWEEP_SCAN_IDS = 2500; // ticket-id range examined per sweep step
 const SWEEP_QUEUE_CEILING = 40; // do not feed the queue past this
+// Weekend boost (7 Nov 2026, after the IT history import added ~36k tickets
+// with no conversation yet): Saturdays and Sundays (Pacific), with a short FS
+// queue, pull twice as many tickets and feed the queue every tick. The busy
+// brakes above are unchanged. `fs_thread_pull_boost=false` turns it off.
+const PULLS_PER_TICK_WEEKEND_OPEN = 40;
+const SWEEP_QUEUE_CEILING_WEEKEND = 160;
+const BOOST_KEY = 'fs_thread_pull_boost';
+export function isWeekendPacific(date = new Date()) {
+  const { weekday } = pacificParts(date);
+  return weekday === 'Sat' || weekday === 'Sun';
+}
 const STATE_KEY = 'fs_thread_backfill_state';
 const ENABLED_KEY = 'fs_thread_backfill_enabled';
 // Workspace order for the backfill: IT's last 90 days first (Vahid, 24 Sep).
@@ -177,8 +188,9 @@ class FsThreadPullService {
       }
       // Quiet hours (20:00–05:59 PT, weekends) open wider: the regular night
       // load keeps 30–60 queued and the budget still has room (25 Sep 2026).
+      const boost = await this._boosted(now);
       const perTick = isQuietHours(new Date(now))
-        ? (depth < BUSY_QUEUE_DEPTH ? PULLS_PER_TICK_QUIET_OPEN : depth < 60 ? PULLS_PER_TICK_QUIET : 3)
+        ? (depth < BUSY_QUEUE_DEPTH ? (boost ? PULLS_PER_TICK_WEEKEND_OPEN : PULLS_PER_TICK_QUIET_OPEN) : depth < 60 ? PULLS_PER_TICK_QUIET : 3)
         : (depth < BUSY_QUEUE_DEPTH ? PULLS_PER_TICK : 1);
       if (depth >= BUSY_QUEUE_DEPTH) this.stats.trickled += 1;
       const due = [...this.queue.entries()]
@@ -205,7 +217,7 @@ class FsThreadPullService {
           }
         }
       }
-      if (this.ticks % SWEEP_EVERY_TICKS === 0) await this.sweepStep().catch((err) => logger.warn(`FS thread gap sweep step failed (non-fatal): ${err.message}`));
+      if (boost || this.ticks % SWEEP_EVERY_TICKS === 0) await this.sweepStep({ ceiling: boost ? SWEEP_QUEUE_CEILING_WEEKEND : SWEEP_QUEUE_CEILING }).catch((err) => logger.warn(`FS thread gap sweep step failed (non-fatal): ${err.message}`));
       // The notes gap, logged every 6 h so the briefs and the hourly review can
       // see it move (target: about 0 per workspace for the last 90 days).
       if (!this.lastGapLogAt || now - this.lastGapLogAt >= 6 * 60 * 60 * 1000) {
@@ -273,6 +285,17 @@ class FsThreadPullService {
     return upserted || 0;
   }
 
+  /** Weekend boost: on Saturdays/Sundays (Pacific) unless the setting says false. */
+  async _boosted(now = Date.now()) {
+    if (!isWeekendPacific(new Date(now))) return false;
+    try {
+      const raw = await settingsRepository.get(BOOST_KEY);
+      return raw === null || raw === undefined || String(raw) !== 'false';
+    } catch {
+      return true;
+    }
+  }
+
   async _enabled() {
     try {
       const raw = await settingsRepository.get(ENABLED_KEY);
@@ -303,8 +326,8 @@ class FsThreadPullService {
    * matter most to briefs and follow-ups). Wraps round after the last phase,
    * so it keeps catching new gaps after the backfill is done.
    */
-  async sweepStep() {
-    if (this.queue.size >= SWEEP_QUEUE_CEILING) return { skipped: 'queue_full' };
+  async sweepStep({ ceiling = SWEEP_QUEUE_CEILING } = {}) {
+    if (this.queue.size >= ceiling) return { skipped: 'queue_full' };
     if (!(await this._enabled())) return { skipped: 'disabled' };
     const state = await this._state();
     const phase = SWEEP_PHASES[state.phase % SWEEP_PHASES.length];
