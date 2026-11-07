@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.57-preview';
+export const APP_VERSION = '4.3.58-preview';
 
 export const changelog = [
+  {
+    version: '4.3.58-preview',
+    date: 'November 7, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Old IT tickets get their conversations faster</strong> &mdash; IT&rsquo;s FreshService history now goes back to November 2014 (about 52,000 more tickets). Their replies, notes and attachments are fetched in the background; on Saturdays and Sundays, while FreshService is quiet, that now runs twice as fast. It still slows down by itself whenever FreshService gets busy.' },
+    ],
+  },
   {
     version: '4.3.57-preview',
     date: 'November 7, 2026',
