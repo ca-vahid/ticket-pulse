@@ -150,6 +150,16 @@ function isCcEmailsRejection(err) {
   return /cc_emails/i.test(String(err?.message || ''));
 }
 
+// A support address id FreshService does not know or will not take (a typo in
+// fs_email_config_by_group_ws<N>, a retired mailbox): the copy is still made or
+// synced, with FreshService's default address (6 Nov 2026).
+function isEmailConfigRejection(err) {
+  const detail = err?.freshserviceDetail;
+  const fieldErrors = Array.isArray(detail?.errors) ? detail.errors : [];
+  if (fieldErrors.some((fe) => String(fe.field || '').toLowerCase() === 'email_config_id')) return true;
+  return /email_config_id/i.test(String(err?.message || ''));
+}
+
 // "Assigned agent isn't a member of the group." FreshService checks the
 // assignee against the group on ITS copy (set there by an FS rule), even when
 // the Ticket Pulse ticket has no group. The whole field sync failed, so status
@@ -802,6 +812,11 @@ class MirrorService {
       // as cc_emails so FS-side replies reach them too (before MR the
       // fallback copy silently lost every additional requester).
       cc_emails: mirrorCcEmails(ticket),
+      // The support address the copy replies from (6 Nov 2026): without it FreshService uses the
+      // workspace default, so an Accounts Receivable copy answered as Accounts Payable.
+      email_config_id: await import('../utils/fsEmailConfig.js')
+        .then(({ fsEmailConfigIdFor }) => fsEmailConfigIdFor(ticket.workspaceId, ticket.groupId))
+        .catch(() => undefined),
     };
     // Ticket type rides along only when the registry maps it to an FS choice
     // for this workspace — TP-native-only types (fsTypeValue null) stay
@@ -818,7 +833,14 @@ class MirrorService {
     markCreating(ticket.id, { workspaceId: ticket.workspaceId, subject: basePayload.subject, email: basePayload.email });
     let fsTicket;
     try {
-      fsTicket = await client.createTicket({ ...basePayload });
+      try {
+        fsTicket = await client.createTicket({ ...basePayload });
+      } catch (err) {
+        // A support address FreshService refuses must not cost the copy: make it with the default.
+        if (basePayload.email_config_id === undefined || !isEmailConfigRejection(err)) throw err;
+        logger.warn(`Mirror: FreshService refused support address ${basePayload.email_config_id} for ${ref} (${err.message}) — creating the copy with its default address`);
+        fsTicket = await client.createTicket({ ...basePayload, email_config_id: undefined });
+      }
       if (!fsTicket?.id) throw new Error('FreshService did not return a ticket id');
     } catch (err) {
       clearCreating(ticket.id);
@@ -911,6 +933,11 @@ class MirrorService {
       // field sync still lands (and log it — the copy then keeps the cc list
       // it got at create time).
       cc_emails: mirrorCcEmails(ticket),
+      // The support address follows the group (6 Nov 2026): a ticket moved from Accounts
+      // Payable to Accounts Receivable replies as ARTickets@ from then on.
+      email_config_id: await import('../utils/fsEmailConfig.js')
+        .then(({ fsEmailConfigIdFor }) => fsEmailConfigIdFor(ticket.workspaceId, ticket.groupId))
+        .catch(() => undefined),
     };
     let assigneeNote = null;
     // Already refused for this same assignee: don't ask again on every sync
@@ -927,7 +954,10 @@ class MirrorService {
     try {
       await client.updateTicket(Number(ticket.freshserviceTicketId), payload);
     } catch (err) {
-      if (payload.due_by !== undefined && isDueByRejection(err)) {
+      if (payload.email_config_id !== undefined && isEmailConfigRejection(err)) {
+        logger.warn(`Mirror: FreshService rejected support address ${payload.email_config_id} on update for #${ticket.freshserviceTicketId} (${err.message}) — re-sending the field sync without it`);
+        await client.updateTicket(Number(ticket.freshserviceTicketId), { ...payload, email_config_id: undefined });
+      } else if (payload.due_by !== undefined && isDueByRejection(err)) {
         logger.warn(`Mirror: FreshService rejected due_by on update for #${ticket.freshserviceTicketId} (${err.message}) — re-sending the field sync without it`);
         await client.updateTicket(Number(ticket.freshserviceTicketId), { ...payload, due_by: undefined });
       } else if (payload.cc_emails !== undefined && isCcEmailsRejection(err)) {

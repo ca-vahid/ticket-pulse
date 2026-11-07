@@ -18,6 +18,7 @@ const clientMock = {
 };
 const settingsMock = {
   getFreshServiceConfigForWorkspace: jest.fn().mockResolvedValue({ domain: 'demo', apiKey: 'key' }),
+  get: jest.fn().mockResolvedValue(null),
 };
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
@@ -123,6 +124,39 @@ describe('mirrorService — inactive (sandbox) workspaces never reach FreshServi
 });
 
 describe('mirrorService job processing', () => {
+  // 6 Nov 2026: the copy replies from its group's FreshService support address (an Accounts
+  // Receivable copy must not answer customers as Accounts Payable, the workspace default).
+  test('create_ticket names the support address mapped to the ticket group; none mapped → left out', async () => {
+    settingsMock.get.mockImplementation(async (key) => (key === 'fs_email_config_by_group_ws1' ? JSON.stringify({ 1000210021: 1000018224 }) : null));
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, groupId: 1000210021n });
+    clientMock.createTicket.mockResolvedValue({ id: 90002, requester_id: 555001 });
+    clientMock.updateTicket.mockResolvedValue({ id: 90002 });
+    await mirrorService._processJob({ id: 2, ticketId: 501, workspaceId: 1, kind: 'create_ticket', attempts: 0 });
+    expect(clientMock.createTicket).toHaveBeenCalledWith(expect.objectContaining({ group_id: 1000210021, email_config_id: 1000018224 }));
+
+    clientMock.createTicket.mockClear();
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, groupId: 1000209106n });
+    await mirrorService._processJob({ id: 3, ticketId: 501, workspaceId: 1, kind: 'create_ticket', attempts: 0 });
+    expect(clientMock.createTicket.mock.calls[0][0].email_config_id).toBeUndefined();
+    settingsMock.get.mockResolvedValue(null);
+  });
+
+  test('a support address FreshService refuses never costs the copy: created again with the default', async () => {
+    settingsMock.get.mockImplementation(async (key) => (key === 'fs_email_config_by_group_ws1' ? JSON.stringify({ 1000210021: 999 }) : null));
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, groupId: 1000210021n });
+    const refusal = Object.assign(new Error('Validation failed (email_config_id: is invalid)'), { freshserviceStatus: 400, freshserviceDetail: { errors: [{ field: 'email_config_id', message: 'is invalid' }] } });
+    clientMock.createTicket.mockReset();
+    clientMock.createTicket.mockRejectedValueOnce(refusal).mockResolvedValueOnce({ id: 90003, requester_id: 555001 });
+    clientMock.updateTicket.mockResolvedValue({ id: 90003 });
+    const ok = await mirrorService._processJob({ id: 4, ticketId: 501, workspaceId: 1, kind: 'create_ticket', attempts: 0 });
+    expect(ok).toBe(true);
+    expect(clientMock.createTicket).toHaveBeenCalledTimes(2);
+    expect(clientMock.createTicket.mock.calls[0][0].email_config_id).toBe(999);
+    expect(clientMock.createTicket.mock.calls[1][0].email_config_id).toBeUndefined();
+    expect(loggerMock.warn).toHaveBeenCalledWith(expect.stringMatching(/refused support address 999/));
+    settingsMock.get.mockResolvedValue(null);
+  });
+
   test('create_ticket pushes the full snapshot, saves the FS id, backfills the requester', async () => {
     prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket });
     clientMock.createTicket.mockResolvedValue({ id: 90001, requester_id: 555001 });
@@ -204,6 +238,19 @@ describe('mirrorService job processing', () => {
     const sent = clientMock.updateTicket.mock.calls[0][1];
     expect(sent.status).toBe(3);
     expect(sent.due_by).toBeUndefined();
+  });
+
+  test('update_fields sends the group\'s support address, and a refusal re-sends the sync without it (6 Nov 2026)', async () => {
+    settingsMock.get.mockImplementation(async (key) => (key === 'fs_email_config_by_group_ws1' ? JSON.stringify({ 1000210021: 1000018224 }) : null));
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, freshserviceTicketId: BigInt(90001), status: 'Open', assignedTech: null, groupId: 1000210021n });
+    const refusal = Object.assign(new Error('Validation failed (email_config_id: unexpected_field)'), { freshserviceDetail: { errors: [{ field: 'email_config_id', code: 'invalid_field' }] } });
+    clientMock.updateTicket.mockReset();
+    clientMock.updateTicket.mockRejectedValueOnce(refusal).mockResolvedValueOnce({ id: 90001 });
+    expect(await mirrorService._processJob({ id: 32, ticketId: 501, workspaceId: 1, kind: 'update_fields', attempts: 0 })).toBe(true);
+    expect(clientMock.updateTicket.mock.calls[0][1].email_config_id).toBe(1000018224);
+    expect(clientMock.updateTicket.mock.calls[1][1].email_config_id).toBeUndefined();
+    expect(clientMock.updateTicket.mock.calls[1][1].group_id).toBe(1000210021);
+    settingsMock.get.mockResolvedValue(null);
   });
 
   test('update_fields: a copy FreshService now wants a department for gets one and the sync is re-sent (7 Oct 2026, job 3434)', async () => {
