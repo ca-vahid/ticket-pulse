@@ -18,6 +18,7 @@ const clientMock = {
 };
 const settingsMock = {
   getFreshServiceConfigForWorkspace: jest.fn().mockResolvedValue({ domain: 'demo', apiKey: 'key' }),
+  get: jest.fn().mockResolvedValue(null),
 };
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
@@ -123,6 +124,23 @@ describe('mirrorService — inactive (sandbox) workspaces never reach FreshServi
 });
 
 describe('mirrorService job processing', () => {
+  // 6 Nov 2026: the copy replies from its group's FreshService support address (an Accounts
+  // Receivable copy must not answer customers as Accounts Payable, the workspace default).
+  test('create_ticket names the support address mapped to the ticket group; none mapped → left out', async () => {
+    settingsMock.get.mockImplementation(async (key) => (key === 'fs_email_config_by_group_ws1' ? JSON.stringify({ 1000210021: 1000018224 }) : null));
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, groupId: 1000210021n });
+    clientMock.createTicket.mockResolvedValue({ id: 90002, requester_id: 555001 });
+    clientMock.updateTicket.mockResolvedValue({ id: 90002 });
+    await mirrorService._processJob({ id: 2, ticketId: 501, workspaceId: 1, kind: 'create_ticket', attempts: 0 });
+    expect(clientMock.createTicket).toHaveBeenCalledWith(expect.objectContaining({ group_id: 1000210021, email_config_id: 1000018224 }));
+
+    clientMock.createTicket.mockClear();
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, groupId: 1000209106n });
+    await mirrorService._processJob({ id: 3, ticketId: 501, workspaceId: 1, kind: 'create_ticket', attempts: 0 });
+    expect(clientMock.createTicket.mock.calls[0][0].email_config_id).toBeUndefined();
+    settingsMock.get.mockResolvedValue(null);
+  });
+
   test('create_ticket pushes the full snapshot, saves the FS id, backfills the requester', async () => {
     prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket });
     clientMock.createTicket.mockResolvedValue({ id: 90001, requester_id: 555001 });

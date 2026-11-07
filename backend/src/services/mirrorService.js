@@ -802,6 +802,11 @@ class MirrorService {
       // as cc_emails so FS-side replies reach them too (before MR the
       // fallback copy silently lost every additional requester).
       cc_emails: mirrorCcEmails(ticket),
+      // The support address the copy replies from (6 Nov 2026): without it FreshService uses the
+      // workspace default, so an Accounts Receivable copy answered as Accounts Payable.
+      email_config_id: await import('../utils/fsEmailConfig.js')
+        .then(({ fsEmailConfigIdFor }) => fsEmailConfigIdFor(ticket.workspaceId, ticket.groupId))
+        .catch(() => undefined),
     };
     // Ticket type rides along only when the registry maps it to an FS choice
     // for this workspace — TP-native-only types (fsTypeValue null) stay

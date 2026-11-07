@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.55-preview';
+export const APP_VERSION = '4.3.56-preview';
 
 export const changelog = [
+  {
+    version: '4.3.56-preview',
+    date: 'November 6, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>FreshService copies reply from the right support address</strong> &mdash; when Ticket Pulse makes the FreshService copy of a ticket, it now tells FreshService which support address the copy belongs to, by its group (Accounts Payable &rarr; APTickets@, Accounts Receivable &rarr; ARTickets@). Without it FreshService used its default address, so a reply on an Accounts Receivable copy would have gone out as Accounts Payable. Set per workspace; nothing changes where it is not set.' },
+    ],
+  },
   {
     version: '4.3.55-preview',
     date: 'November 6, 2026',
