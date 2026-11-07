@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.56-preview';
+export const APP_VERSION = '4.3.57-preview';
 
 export const changelog = [
+  {
+    version: '4.3.57-preview',
+    date: 'November 7, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>FreshService copies no longer stall when FreshService is busy</strong> &mdash; when Ticket Pulse had to wait its turn to talk to FreshService and the wait ran out, the request was never sent, but the copy counted it as a real failure: it used up one of its tries and waited longer and longer before trying again. On Saturday morning a new Accounting ticket waited an hour and a half for its FreshService copy this way. A wait that runs out now just tries again on the next round, as it was meant to.' },
+    ],
+  },
   {
     version: '4.3.56-preview',
     date: 'November 6, 2026',

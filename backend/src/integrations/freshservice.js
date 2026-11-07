@@ -130,6 +130,9 @@ export function wrapFreshServiceError(error) {
   const wrapped = new Error(fieldErrors ? `${baseMsg} (${fieldErrors})` : baseMsg);
   wrapped.freshserviceDetail = detail;
   wrapped.freshserviceStatus = httpStatus;
+  // Keep the queue-timeout marker (7 Nov 2026): without it the mirror read "never
+  // sent, queue busy" as a real failure and burned attempts on hours of backoff.
+  if (error?.code === 'FS_QUEUE_TIMEOUT') wrapped.code = error.code;
   return wrapped;
 }
 
