@@ -84,8 +84,17 @@ describe('Attachments tab · Download all', () => {
     expect(Object.keys(entries).sort()).toEqual(['photo (2).txt', 'photo.txt']);
   });
 
-  test('over ~300 MB asks first, inline', async () => {
-    const big = 200 * 1024 * 1024;
+  test('over 1 GB is refused with a clear message, nothing fetched', () => {
+    const huge = 600 * 1024 * 1024;
+    renderTab([file(1, 'huge-a.txt', { sizeBytes: huge }), file(2, 'huge-b.txt', { sizeBytes: huge })]);
+    fireEvent.click(screen.getByTestId('attachments-download-all'));
+    expect(screen.getByText(/too much to zip in the browser/)).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Confirm large download' })).toBeNull();
+    expect(ticketsAPI.attachmentBytes).not.toHaveBeenCalled();
+  });
+
+  test('over 200 MB asks first, inline', async () => {
+    const big = 150 * 1024 * 1024;
     renderTab([file(1, 'big-a.txt', { sizeBytes: big }), file(2, 'big-b.txt', { sizeBytes: big })]);
     fireEvent.click(screen.getByTestId('attachments-download-all'));
     expect(screen.getByRole('group', { name: 'Confirm large download' })).toHaveTextContent('These 2 files add up to');

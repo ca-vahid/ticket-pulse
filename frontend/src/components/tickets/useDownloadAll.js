@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ticketsAPI } from '../../services/api';
-import { MISSING_FILES_NAME, SIZE_CONFIRM_BYTES, buildAttachmentsZip, zipFileName } from './attachmentZip';
+import { MISSING_FILES_NAME, SIZE_CONFIRM_BYTES, SIZE_LIMIT_BYTES, buildAttachmentsZip, zipFileName } from './attachmentZip';
 
 /**
  * "Download all" (QA 11-06 #5): one zip of the files the Attachments tab is
@@ -58,6 +58,10 @@ export function useDownloadAll({ ticketId, attachments, ticketRef, subject }) {
   const start = useCallback(() => {
     if (running) { abortRef.current?.abort(); return; }
     listRef.current = [...attachments];
+    if (totalBytes > SIZE_LIMIT_BYTES) {
+      setNote({ tone: 'warn', text: `These ${attachments.length} files add up to more than 1 GB, too much to zip in the browser. Pick a filter to zip fewer files, or download them one by one.`, missing: [] });
+      return;
+    }
     if (totalBytes > SIZE_CONFIRM_BYTES) { setNote(null); setPhase('confirm'); return; }
     run(listRef.current);
   }, [attachments, running, totalBytes, run]);

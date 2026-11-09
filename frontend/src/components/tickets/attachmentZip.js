@@ -11,7 +11,10 @@ import { strToU8, zip } from 'fflate';
  */
 
 export const MISSING_FILES_NAME = 'missing-files.txt';
-export const SIZE_CONFIRM_BYTES = 300 * 1024 * 1024;
+// The zip is built in the browser's memory (UI Design review): ask above 200 MB,
+// refuse above 1 GB, where a tab would run out of memory.
+export const SIZE_CONFIRM_BYTES = 200 * 1024 * 1024;
+export const SIZE_LIMIT_BYTES = 1024 * 1024 * 1024;
 export const ZIP_CONCURRENCY = 3;
 
 // Formats that are already compressed: storing them (level 0) is as small and much faster.

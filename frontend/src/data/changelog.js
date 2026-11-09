@@ -1,6 +1,17 @@
-export const APP_VERSION = '4.3.59-preview';
+export const APP_VERSION = '4.3.60-preview';
 
 export const changelog = [
+  {
+    version: '4.3.60-preview',
+    date: 'November 9, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Macros keep the reply subject you typed</strong> &mdash; a reply subject of exactly <em>[{{ticket.ref}}] {{ticket.subject}}</em> was emptied every time the macro was saved or opened, because it means the usual reply subject. It now stays in the field with a line saying so; the mail it sends is the same.' },
+      { type: 'fix', html: '<strong>Files from FreshService tickets show up, closed ones included</strong> &mdash; files on a FreshService ticket&rsquo;s first e-mail (an invoice PDF, say) were only fetched for open tickets, so closed ones showed no attachments. Opening any FreshService ticket now brings its files and conversation, at most once every six hours per ticket.' },
+      { type: 'new', html: '<strong>A proper preview for PDFs and e-mails</strong> &mdash; PDFs open in a viewer with a page rail down the side, page numbers, zoom, fit to width and full screen, whatever the file was labelled as. E-mail files (.eml and Outlook .msg) open as e-mails with their header, message and attached files. Old Word (.doc), PowerPoint and zip files say plainly that they need a download.' },
+      { type: 'new', html: '<strong>Shares shows who was or will be away</strong> &mdash; Assignment &rarr; Shares has an Away column: working days away in the period you picked and in the next 14 days. A long absence is flagged, and a sentence under the table says how much of the gap it explains.' },
+      { type: 'new', html: '<strong>Download all attachments as one zip</strong> &mdash; the Attachments tab has a Download all button when a ticket has two or more files. It zips what the tab is showing, shows its progress, can be cancelled, and lists any file it could not fetch in missing-files.txt.' },
+    ],
+  },
   {
     version: '4.3.59-preview',
     date: 'November 9, 2026',

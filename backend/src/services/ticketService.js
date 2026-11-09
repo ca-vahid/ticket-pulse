@@ -186,6 +186,17 @@ const FS_BUSY_MESSAGE = 'FreshService is busy with background sync right now —
 // per ticket in this window (QA 11-06 #2), so re-opening one costs nothing.
 const CLOSED_FS_REFRESH_MS = 6 * 60 * 60 * 1000;
 const closedFsRefreshAt = new Map(); // ticketId -> last refresh (ms)
+/**
+ * Should opening this ticket refresh it from FreshService although it is closed?
+ * Never for API reads (`reconcile: false`, so an integration reading a hundred
+ * closed tickets makes no FreshService calls), never for Ticket Pulse-born
+ * tickets or Deleted/Spam ones.
+ */
+export function closedFsRefreshWanted(ticket, withReconcile) {
+  return Boolean(withReconcile && ticket?.freshserviceTicketId && ticket.origin !== TICKET_ORIGIN.TICKETPULSE
+    && !['Deleted', 'Spam'].includes(String(ticket.status)));
+}
+
 export function closedFsRefreshDue(ticketId, now = Date.now()) {
   const last = closedFsRefreshAt.get(ticketId);
   if (last && now - last < CLOSED_FS_REFRESH_MS) return false;
@@ -2807,8 +2818,7 @@ class TicketService {
       } else {
         this._refreshFsBornThread(ticket).catch(() => null);
       }
-    } else if (withReconcile && ticket.freshserviceTicketId && ticket.origin !== TICKET_ORIGIN.TICKETPULSE
-      && !['Deleted', 'Spam'].includes(String(ticket.status)) && closedFsRefreshDue(ticket.id)) {
+    } else if (closedFsRefreshWanted(ticket, withReconcile) && closedFsRefreshDue(ticket.id)) {
       // QA 11-06 #2: a closed FS-born ticket was never refreshed on open, so the
       // files on its original e-mail (ticket-level attachments, only in the FS
       // ticket detail) never reached Ticket Pulse: TP 18853 showed no invoice PDF.

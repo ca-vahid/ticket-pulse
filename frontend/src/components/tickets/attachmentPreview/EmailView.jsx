@@ -1,5 +1,7 @@
-import { Paperclip } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { ImageOff, Paperclip } from 'lucide-react';
 import { LinkedText, SafeHtml, formatBytes } from '../ticketUi';
+import { prepareEmailHtml } from './prepareEmailHtml';
 
 const formatDate = (value) => {
   if (!value) return '';
@@ -26,6 +28,8 @@ function HeaderRow({ label, children }) {
  */
 export default function EmailView({ email }) {
   const { subject, from, to = [], cc = [], date, html, text, attachments = [] } = email;
+  const [showImages, setShowImages] = useState(false);
+  const body = useMemo(() => prepareEmailHtml(html, { showImages }), [html, showImages]);
   return (
     <div data-preview-scroll data-testid="email-preview" className="settings-scrollbar h-full w-full overflow-auto overscroll-contain bg-card">
       <header className="px-5 pb-3 pt-4 sm:px-6">
@@ -51,9 +55,16 @@ export default function EmailView({ email }) {
         )}
       </header>
       <div className="border-t border-border/60 bg-muted/50 p-2 sm:p-3">
+        {body.blocked > 0 && !showImages && (
+          <p className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-xs text-muted-foreground" data-testid="email-images-blocked">
+            <ImageOff className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>{body.blocked === 1 ? '1 picture from the internet is hidden' : `${body.blocked} pictures from the internet are hidden`}, so the sender can&apos;t tell this e-mail was opened.</span>
+            <button type="button" onClick={() => setShowImages(true)} className="tp-focus-ring rounded font-semibold text-primary hover:underline">Show pictures</button>
+          </p>
+        )}
         <div className="tp-light rounded-md bg-card px-5 py-4 text-foreground shadow-subtle sm:px-6">
           {html
-            ? <SafeHtml html={html} isDark={false} />
+            ? <SafeHtml html={body.html} isDark={false} />
             : text
               ? <LinkedText text={text} className="text-sm text-foreground/85" />
               : <p className="text-sm text-muted-foreground">This e-mail has no message text.</p>}
