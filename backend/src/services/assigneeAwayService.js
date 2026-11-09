@@ -91,6 +91,7 @@ class AssigneeAwayService {
         timezone: cal.timezone || FALLBACK_TIMEZONE,
         isWorkingDay: (d) => cal.byDay.has(dayOfWeekOf(d)) && !cal.isHolidayDate(d),
         endTimeOf: (d) => cal.byDay.get(dayOfWeekOf(d))?.endTime || '17:00',
+        fromBusinessHours: true,
       };
     }
     const ws = await Promise.resolve()
@@ -101,6 +102,17 @@ class AssigneeAwayService {
       isWorkingDay: (d) => { const dow = dayOfWeekOf(d); return dow >= 1 && dow <= 5; },
       endTimeOf: () => '17:00',
     };
+  }
+
+  /**
+   * The working-day test the pickers use: business days minus holidays from
+   * Settings → Business Hours, Mon–Fri when none are set. `fromBusinessHours`
+   * says which. Never throws. (Shares report, QA 11-06 #4.)
+   * @returns {Promise<{ timezone:string, isWorkingDay:(d:string)=>boolean, fromBusinessHours:boolean }>}
+   */
+  async workingCalendar(workspaceId) {
+    const cal = await this._calendar(Number(workspaceId));
+    return { timezone: cal.timezone, isWorkingDay: cal.isWorkingDay, fromBusinessHours: cal.fromBusinessHours === true };
   }
 
   /**

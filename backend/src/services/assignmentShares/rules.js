@@ -263,6 +263,80 @@ export function workingAt(person = {}, at = new Date(), fallbackZone = 'America/
   return now >= start && now < end;
 }
 
+// ---- days away, for the report (QA 11-06 #4) ------------------------------------
+
+/** Past share of working days at or above which a person's absence is flagged. */
+export const AWAY_HEAVY_SHARE = 0.25;
+export const AWAY_AHEAD_DAYS = 14;
+
+/**
+ * The calendar dates of the report window and of the days coming up, in the
+ * workspace's zone: the last `pastDays` dates ending today, and the
+ * `aheadDays` dates after today.
+ * @returns {{ today:string, past:string[], ahead:string[] }}
+ */
+export function awayWindows(now, timeZone = 'America/Vancouver', { pastDays = 14, aheadDays = AWAY_AHEAD_DAYS } = {}) {
+  const today = formatInTimeZone(now, safeZone(timeZone), 'yyyy-MM-dd');
+  const past = [];
+  for (let i = pastDays - 1; i >= 0; i -= 1) past.push(addDaysStr(today, -i));
+  const ahead = [];
+  for (let i = 1; i <= aheadDays; i += 1) ahead.push(addDaysStr(today, i));
+  return { today, past, ahead };
+}
+
+/**
+ * The days a person is away on some dates: the leave the rule itself treats
+ * as out (approved; WFH and IGNORED are not away), the same rows as "Out now".
+ * A part-day leave counts as half a day; several rows on one date count once.
+ * @param {Array} leaves  rows with leaveDate|date, category, status, isFullDay
+ * @param {string[]} dates  'yyyy-MM-dd' — pass working days only
+ * @returns {{ days:number, dates: Array<{date:string, half:boolean}> }}
+ */
+export function awayDays(leaves, dates) {
+  const span = new Set(dates || []);
+  const weight = new Map();
+  for (const l of leaves || []) {
+    if (!l || ['WFH', 'IGNORED'].includes(String(l.category || '').toUpperCase())) continue;
+    if (l.status && String(l.status).toUpperCase() !== 'APPROVED') continue;
+    const date = toDateStr(l.date ?? l.leaveDate);
+    if (!date || !span.has(date)) continue;
+    weight.set(date, Math.max(weight.get(date) || 0, l.isFullDay === false ? 0.5 : 1));
+  }
+  const list = [...weight].sort(([a], [b]) => a.localeCompare(b)).map(([date, w]) => ({ date, half: w < 1 }));
+  return { days: list.reduce((sum, d) => sum + (d.half ? 0.5 : 1), 0), dates: list };
+}
+
+/**
+ * Days away per report row, in the window and coming up, plus the counts the
+ * sentence under the table needs. Working days only (the caller filters).
+ * @param {object} p
+ * @param {Array<{techId, pct, gotPct}>} p.rows  summarizeReport() rows
+ * @param {Map<number, Array>} p.leavesByTech
+ * @param {string[]} p.pastDates   working days in the report window
+ * @param {string[]} p.aheadDates  working days coming up
+ * @returns {{ rows: Array, belowShareWithAway:number, awaySoon:number }}
+ */
+export function summarizeAway({ rows = [], leavesByTech = new Map(), pastDates = [], aheadDates = [] } = {}) {
+  const heavy = (days, of) => of > 0 && days / of >= AWAY_HEAVY_SHARE;
+  let belowShareWithAway = 0;
+  let awaySoon = 0;
+  const out = rows.map((r) => {
+    const leaves = leavesByTech.get(Number(r.techId)) || [];
+    const past = awayDays(leaves, pastDates);
+    const ahead = awayDays(leaves, aheadDates);
+    if (past.days > 0 && r.gotPct !== null && r.gotPct !== undefined && r.gotPct < r.pct) belowShareWithAway += 1;
+    if (ahead.days > 0) awaySoon += 1;
+    return {
+      ...r,
+      away: {
+        past: { ...past, heavy: heavy(past.days, pastDates.length) },
+        ahead: { ...ahead, from: ahead.dates[0]?.date || null, heavy: heavy(ahead.days, aheadDates.length) },
+      },
+    };
+  });
+  return { rows: out, belowShareWithAway, awaySoon };
+}
+
 // ---- the ledger --------------------------------------------------------------
 
 /**
@@ -521,5 +595,5 @@ export function summarizeReport({ members = [], tickets = [], runs = [], names =
 export default {
   UNIT, MODES, PERIODS, SETTING_FIELDS,
   defaultSettings, normalizeSettings, validateDraft, applyPatch, toStored, totalPct, categoryMatches,
-  periodOf, onLeaveAt, workingAt, splitCredit, buildLedger, pickNext, previewSequence, decide, recordFor, promoteSuggestion, summarizeReport,
+  periodOf, onLeaveAt, workingAt, awayWindows, awayDays, summarizeAway, splitCredit, buildLedger, pickNext, previewSequence, decide, recordFor, promoteSuggestion, summarizeReport,
 };

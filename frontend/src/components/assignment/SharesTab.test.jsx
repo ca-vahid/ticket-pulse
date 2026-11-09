@@ -145,6 +145,51 @@ describe('SharesTab', () => {
     expect(draftProblems({ mode: 'off', period: 'week', categoryIds: [], members: [] })).toEqual([]);
   });
 
+  // QA 11-06 #4: days away per person, in the window and coming up.
+  const AWAY = {
+    availability: {
+      today: '2026-11-09', unit: 'working days', calendar: 'business hours',
+      past: { days: 14, from: '2026-10-27', to: '2026-11-09', workingDays: 10 },
+      ahead: { days: 14, from: '2026-11-10', to: '2026-11-23', workingDays: 9 },
+      belowShareWithAway: 1, awaySoon: 1,
+    },
+    rows: DATA.rows.map((r) => ({
+      ...r,
+      away: r.techId === 3
+        ? {
+          past: { days: 3, heavy: true, dates: [{ date: '2026-11-02', half: false }, { date: '2026-11-03', half: false }, { date: '2026-11-04', half: false }] },
+          ahead: { days: 2, heavy: false, from: '2026-11-18', dates: [{ date: '2026-11-18', half: false }, { date: '2026-11-19', half: true }] },
+        }
+        : { past: { days: 0, heavy: false, dates: [] }, ahead: { days: 0, heavy: false, from: null, dates: [] } },
+    })),
+  };
+
+  test('the report shows days away per person, flags a long absence and says what it explains', async () => {
+    getSpy.mockResolvedValue({ success: true, data: { ...DATA, ...AWAY } });
+    mount();
+    await screen.findByTestId('shares-tab');
+    expect(screen.getByRole('columnheader', { name: 'Away' })).toBeInTheDocument();
+    const jo = screen.getByTestId('shares-away-3');
+    expect(jo).toHaveTextContent('3 days away (last 14)');
+    expect(jo).toHaveTextContent('2 coming up (from 18 Nov)');
+    expect(jo).toHaveTextContent('away for a large part of the time');
+    expect(jo.querySelector('[title]').getAttribute('title')).toMatch(/Away in the last 14 days: Mon 2 Nov, Tue 3 Nov, Wed 4 Nov\. Coming up in the next 14 days: Wed 18 Nov, Thu 19 Nov \(half\)\./);
+    expect(within(jo).getByText('3 days away (last 14)')).toHaveClass('text-amber-700');
+    expect(screen.getByTestId('shares-away-1')).toHaveTextContent('no days away');
+    expect(screen.getByTestId('shares-away-note')).toHaveTextContent('Away days explain part of the gap for 1 person: the rule counts a share only on days someone is in.');
+    expect(screen.getByTestId('shares-away-note')).toHaveTextContent('1 person is away in the next 14 days.');
+    // Still in share order.
+    const table = screen.getByRole('columnheader', { name: 'Share' }).closest('table');
+    expect(within(table).getAllByRole('row').slice(1).map((row) => row.cells[0].textContent)).toEqual(['Alex Doe', 'Jo Park', 'Sam Lee', 'Kit Moss']);
+  });
+
+  test('no availability data: no Away column and no sentence', async () => {
+    mount();
+    await screen.findByTestId('shares-tab');
+    expect(screen.queryByRole('columnheader', { name: 'Away' })).toBeNull();
+    expect(screen.queryByTestId('shares-away-note')).toBeNull();
+  });
+
   test('a reviewer who is not an admin sees it read-only', async () => {
     getSpy.mockResolvedValue({ success: true, data: { ...DATA, canManage: false } });
     mount();

@@ -8,7 +8,7 @@ import { Switch, SwitchCue } from '../ui/switch';
 import { RESOLUTION_REASONS } from '../../utils/resolutionReasons';
 import {
   MACRO_ACTIONS, MACRO_ACTION_BY_TYPE, MACRO_VARIABLES, PRIORITY_LABELS,
-  blankStep, describeStep, editableSteps, stepsForSave,
+  blankStep, describeStep, editableSteps, isUsualSubject, stepsForSave,
 } from '../../utils/macroActions';
 
 /**
@@ -177,7 +177,9 @@ function StepConfig({ step, onPatch, lookups }) {
         <label className="block text-xs font-medium text-muted-foreground">Subject <span className="font-normal">(optional)</span></label>
         <SubjectInput value={step.subject} onChange={(subject) => onPatch({ subject })} />
         <p id="macro-subject-hint" className="text-[11px] text-muted-foreground">
-          Leave empty to use the workspace&apos;s usual reply subject (keeps the thread together). A subject you type still gets the ticket number. FreshService tickets use FreshService&apos;s own subject.
+          {isUsualSubject(step.subject)
+            ? 'This is the usual reply subject: the ticket number goes where this workspace puts it, so the thread stays together.'
+            : <>Leave empty to use the workspace&apos;s usual reply subject (keeps the thread together). A subject you type still gets the ticket number. FreshService tickets use FreshService&apos;s own subject.</>}
         </p>
         <label className="block text-xs font-medium text-muted-foreground">Message</label>
         <MacroBodyEditor value={step.html} onChange={(html) => onPatch({ html })} ariaLabel="Reply to the requester" placeholder="Hi {{requester.firstName}}, …" testId="macro-reply-body" />

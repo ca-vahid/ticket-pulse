@@ -1251,6 +1251,37 @@ export const ticketsAPI = {
     setTimeout(() => URL.revokeObjectURL(url), 10000);
   },
 
+  // Raw bytes of one attachment (QA 11-06 "Download all" zips them in the
+  // browser). Same authenticated route as downloadAttachment; `signal` cancels.
+  attachmentBytes: async (id, attachmentId, { signal } = {}) => {
+    const response = await axios.get(
+      `${API_BASE_URL}/tickets/${id}/attachments/${attachmentId}/download`,
+      {
+        responseType: 'arraybuffer',
+        withCredentials: true,
+        signal,
+        timeout: 180000,
+        headers: {
+          ...(_authToken ? { Authorization: `Bearer ${_authToken}` } : {}),
+          ...(_workspaceId ? { 'X-Workspace-Id': String(_workspaceId) } : {}),
+        },
+      },
+    );
+    return response.data;
+  },
+
+  // Save a Blob the way downloadAttachment does (hidden anchor + object URL).
+  saveBlob: (blob, fileName) => {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName || 'download';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  },
+
   // Approvals
   requestApproval: async (id, payload) => {
     return await api.post(`/tickets/${id}/approvals`, payload);

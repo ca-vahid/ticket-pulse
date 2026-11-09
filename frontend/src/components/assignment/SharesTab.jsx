@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Activity, PieChart, RefreshCw, X } from 'lucide-react';
+import { Activity, AlertTriangle, PieChart, RefreshCw, X } from 'lucide-react';
 import { assignmentSharesAPI } from '../../services/api';
 import { formatDateTimeInTimezone } from '../../utils/dateHelpers';
 import { draftProblems, sharesTotal as total } from '../../utils/assignmentShares';
@@ -31,6 +31,50 @@ const pickSettings = (s) => ({
 const sameDraft = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const percent = (part, whole) => (whole ? Math.round((part / whole) * 100) : 0);
+
+// QA 11-06 #4: days away per person ('yyyy-MM-dd' working days from the server).
+const dayCount = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+const shortDate = (d, weekday = false) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-GB', {
+  timeZone: 'UTC', day: 'numeric', month: 'short', ...(weekday ? { weekday: 'short' } : {}),
+});
+const dateList = (dates) => dates.map((d) => `${shortDate(d.date, true)}${d.half ? ' (half)' : ''}`).join(', ');
+const FLAG = 'font-medium text-amber-700 dark:text-amber-300';
+
+function AwayCell({ away, pastDays, aheadDays }) {
+  const past = away?.past;
+  const ahead = away?.ahead;
+  if (!past?.days && !ahead?.days) return <span className="text-muted-foreground/75">—<span className="sr-only">no days away</span></span>;
+  const title = [
+    past?.days ? `Away in the last ${pastDays} days: ${dateList(past.dates)}.` : `No days away in the last ${pastDays} days.`,
+    ahead?.days ? `Coming up in the next ${aheadDays} days: ${dateList(ahead.dates)}.` : '',
+    past?.heavy || ahead?.heavy ? 'Away for a large part of the time, so their part of the split runs below their share.' : '',
+  ].filter(Boolean).join(' ');
+  return (
+    <span className="inline-flex items-center gap-1 whitespace-nowrap tabular-nums" title={title}>
+      {past?.heavy || ahead?.heavy ? <AlertTriangle className="h-3 w-3 shrink-0 text-amber-700 dark:text-amber-300" aria-hidden="true" /> : null}
+      {past?.days ? (
+        <span className={past.heavy ? FLAG : 'text-foreground/85'}>{dayCount(past.days)} {past.days === 1 ? 'day' : 'days'} away (last {pastDays})</span>
+      ) : null}
+      {past?.days && ahead?.days ? <span className="text-muted-foreground" aria-hidden="true">·</span> : null}
+      {ahead?.days ? (
+        <span className={ahead.heavy ? FLAG : 'text-muted-foreground'}>{dayCount(ahead.days)} coming up (from {shortDate(ahead.from || ahead.dates[0].date)})</span>
+      ) : null}
+      {past?.heavy || ahead?.heavy ? <span className="sr-only"> — away for a large part of the time</span> : null}
+    </span>
+  );
+}
+
+function awayNote(availability, rows) {
+  if (!availability) return '';
+  const anyPast = rows.some((r) => r.away?.past?.days > 0);
+  const gap = availability.belowShareWithAway || 0;
+  const soon = availability.awaySoon || 0;
+  const parts = [];
+  if (gap) parts.push(`Away days explain part of the gap for ${plural(gap, 'person', 'people')}: the rule counts a share only on days someone is in.`);
+  else if (anyPast) parts.push('Days away in this window left nobody below their share.');
+  if (soon) parts.push(`${plural(soon, 'person', 'people')} ${soon === 1 ? 'is' : 'are'} away in the next ${availability.ahead?.days || 14} days. The rule skips people while they are out, so the others take their part.`);
+  return parts.join(' ');
+}
 
 function Choice({ name, options, value, onChange, disabled, label }) {
   return (
@@ -218,6 +262,9 @@ export default function SharesTab({ workspaceTimezone = 'America/Vancouver' }) {
     live: 'Live: the rule picks the person for tickets in the chosen categories.',
   }[settings.mode] || '';
   const { rows = [], totals = null, events = [] } = data;
+  const availability = data.availability || null;
+  const awayText = awayNote(availability, rows);
+  const calendarWords = availability?.calendar === 'business hours' ? 'Settings → Business Hours, holidays left out' : 'Monday to Friday';
 
   return (
     <div className="space-y-6" data-testid="shares-tab">
@@ -405,14 +452,22 @@ export default function SharesTab({ workspaceTimezone = 'America/Vancouver' }) {
                 : 'No ticket has a rule pick to compare yet. In Shadow, each new ticket in these categories records one.'}
             </p>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[560px] text-xs">
+              <table className={`w-full text-xs ${availability ? 'min-w-[760px]' : 'min-w-[560px]'}`}>
                 <thead>
                   <tr className="border-b border-border text-left text-muted-foreground">
                     <th className="py-1 pr-3 font-medium">Person</th>
                     <th className="py-1 pr-3 text-right font-medium">Share</th>
                     <th className="py-1 pr-3 text-right font-medium">Tickets they got</th>
                     <th className="py-1 pr-3 font-medium">Part of the split</th>
-                    <th className="py-1 font-medium">When the rule picked them, they got it</th>
+                    <th className={`py-1 font-medium ${availability ? 'pr-3' : ''}`}>When the rule picked them, they got it</th>
+                    {availability ? (
+                      <th
+                        className="py-1 font-medium"
+                        title={`Working days on approved leave (${calendarWords}), in the last ${availability.past?.days || days} days and the next ${availability.ahead?.days || 14}. Working from home does not count; a half day counts as half.`}
+                      >
+                        Away
+                      </th>
+                    ) : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -430,7 +485,12 @@ export default function SharesTab({ workspaceTimezone = 'America/Vancouver' }) {
                           <span className="tabular-nums text-muted-foreground">{r.gotPct === null ? '—' : `${r.gotPct}%`}</span>
                         </span>
                       </td>
-                      <td className="py-1 tabular-nums text-muted-foreground">{r.rulePicked ? `${r.ruleMatched} of ${r.rulePicked}` : '—'}</td>
+                      <td className={`py-1 tabular-nums text-muted-foreground ${availability ? 'pr-3' : ''}`}>{r.rulePicked ? `${r.ruleMatched} of ${r.rulePicked}` : '—'}</td>
+                      {availability ? (
+                        <td className="py-1" data-testid={`shares-away-${r.techId}`}>
+                          <AwayCell away={r.away} pastDays={availability.past?.days || days} aheadDays={availability.ahead?.days || 14} />
+                        </td>
+                      ) : null}
                     </tr>
                   ))}
                 </tbody>
@@ -441,6 +501,10 @@ export default function SharesTab({ workspaceTimezone = 'America/Vancouver' }) {
               {totals.outside ? ` ${totals.outside} went to people not on the list.` : ''}
               {totals.unassigned ? ` ${totals.unassigned} not assigned yet.` : ''}
             </p>
+            {/* QA 11-06 #4: days away, so the admin can tell leave from an uneven split. */}
+            {awayText ? (
+              <p className="text-xs text-muted-foreground" data-testid="shares-away-note">{awayText}</p>
+            ) : null}
             {/* QA 10-20 #4: say who really decided these tickets. */}
             {Number.isFinite(totals.selfPicked) && totals.selfPicked > 0 && (
               <p className="text-xs text-muted-foreground" data-testid="shares-self-picked">

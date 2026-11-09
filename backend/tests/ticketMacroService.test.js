@@ -51,7 +51,7 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
   default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
 
-const { default: svc, macroSteps, UNATTENDED_REPLY_REASON } = await import('../src/services/ticketMacroService.js');
+const { default: svc, macroSteps, presentMacro, UNATTENDED_REPLY_REASON } = await import('../src/services/ticketMacroService.js');
 const { clearMailSubjectCache } = await import('../src/services/mailSubjectService.js');
 
 const ACTOR = { email: 'sam@example.com', name: 'Sam Ortiz', technicianId: 42 };
@@ -129,9 +129,16 @@ describe('reply subject follows the workspace ticket-number position (4.3.45)', 
     expect(ticketServiceMock.addReply.mock.calls[0][2].subject).toBe('Laptop update');
   });
 
-  test('a stored "[{{ticket.ref}}] {{ticket.subject}}" (the early editor default) reads as empty', () => {
+  test('a stored "[{{ticket.ref}}] {{ticket.subject}}" (the early editor default) reads as empty when the macro runs', () => {
     const [step] = macroSteps({ steps: [{ type: 'reply', subject: '[{{ ticket.ref }}] {{ticket.subject}}', html: '<p>x</p>' }] });
     expect(step).not.toHaveProperty('subject');
+  });
+
+  test('QA 11-06 #1: saving and editing keep the subject as typed', () => {
+    const actions = { steps: [{ type: 'reply', subject: '[{{ticket.ref}}] {{ticket.subject}}', html: '<p>x</p>' }] };
+    const [step] = macroSteps(actions, { tidy: false });
+    expect(step.subject).toBe('[{{ticket.ref}}] {{ticket.subject}}');
+    expect(presentMacro({ id: 1, actions }).actions.steps[0].subject).toBe('[{{ticket.ref}}] {{ticket.subject}}');
   });
 });
 

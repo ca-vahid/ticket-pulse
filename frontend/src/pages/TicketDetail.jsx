@@ -4010,6 +4010,8 @@ export default function TicketDetail() {
                     onUpload={uploadAttachments}
                     uploading={savingField === 'attachments'}
                     nameForEmail={nameForEmail}
+                    ticketRef={ticket.displayRef || `TP-${ticket.nativeNumber || ticket.id}`}
+                    subject={ticket.subject}
                   />
                 )}
 

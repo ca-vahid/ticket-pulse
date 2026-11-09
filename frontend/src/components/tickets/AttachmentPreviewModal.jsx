@@ -3,6 +3,9 @@ import { ChevronLeft, ChevronRight, Download, Expand, FileText, File as FileIcon
 import DOMPurify from 'dompurify';
 import { ticketsAPI } from '../../services/api';
 import { formatBytes } from './ticketUi';
+import PdfViewer from './attachmentPreview/PdfViewer';
+import EmailView from './attachmentPreview/EmailView';
+import { parseEmailFile } from './attachmentPreview/parseEmail';
 
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 6;
@@ -10,9 +13,13 @@ const ZOOM_STEP = 0.35;
 const MAX_TEXT_PREVIEW_BYTES = 2 * 1024 * 1024; // beyond this, offer download only
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const FULL_KEY = 'tp.attachmentPreview.full';
+const RAIL_KEY = 'tp.attachmentPreview.pdfRail';
 
 const readFull = () => {
   try { return localStorage.getItem(FULL_KEY) === '1'; } catch { return false; }
+};
+const readRail = () => {
+  try { return localStorage.getItem(RAIL_KEY) !== '0'; } catch { return true; }
 };
 
 /**
@@ -30,7 +37,8 @@ const ext = (name) => {
   return idx >= 0 ? String(name).slice(idx + 1).toLowerCase() : '';
 };
 
-const TEXT_EXTENSIONS = new Set(['txt', 'log', 'md', 'json', 'xml', 'yml', 'yaml', 'ini', 'conf', 'ics', 'sql', 'py', 'ts', 'tsx', 'jsx', 'css', 'html', 'htm', 'sh', 'eml']);
+const TEXT_EXTENSIONS = new Set(['txt', 'log', 'md', 'json', 'xml', 'yml', 'yaml', 'ini', 'conf', 'ics', 'sql', 'py', 'ts', 'tsx', 'jsx', 'css', 'html', 'htm', 'sh']);
+const EMAIL_TYPES = new Set(['message/rfc822', 'application/vnd.ms-outlook']);
 const SHEET_EXTENSIONS = new Set(['xlsx', 'xls', 'csv', 'tsv', 'ods']);
 
 /**
@@ -44,15 +52,46 @@ export function previewKind(a) {
   if (type === 'application/pdf' || e === 'pdf') return 'pdf';
   if (/^audio\//.test(type) || ['mp3', 'wav', 'm4a', 'ogg'].includes(e)) return 'audio';
   if (/^video\//.test(type) || ['mp4', 'webm', 'mov'].includes(e)) return 'video';
+  // QA 11-06 #3: attached e-mails (FS labels most of them application/octet-stream).
+  if (e === 'eml' || e === 'msg' || EMAIL_TYPES.has(type)) return 'email';
   if (e === 'docx') return 'docx';
   if (SHEET_EXTENSIONS.has(e)) return 'sheet';
   if (/^text\//.test(type) || TEXT_EXTENSIONS.has(e)) return 'text';
   return 'none';
 }
 
+const NO_PREVIEW = {
+  doc: 'Old Word (.doc) files can’t be shown in the browser — download to open it',
+  dot: 'Old Word templates (.dot) can’t be shown in the browser — download to open it',
+  rtf: 'Rich Text (.rtf) files can’t be shown in the browser — download to open it',
+  ppt: 'PowerPoint files can’t be shown in the browser — download to open it',
+  pptx: 'PowerPoint files can’t be shown in the browser — download to open it',
+  pps: 'PowerPoint files can’t be shown in the browser — download to open it',
+  ppsx: 'PowerPoint files can’t be shown in the browser — download to open it',
+  zip: 'Zip archives can’t be opened in the browser — download to see what’s inside',
+  '7z': 'Compressed archives can’t be opened in the browser — download to see what’s inside',
+  rar: 'Compressed archives can’t be opened in the browser — download to see what’s inside',
+  gz: 'Compressed archives can’t be opened in the browser — download to see what’s inside',
+  exe: 'Programs aren’t previewed — download only if you trust the sender',
+  msi: 'Installers aren’t previewed — download only if you trust the sender',
+  vsd: 'Visio drawings can’t be shown in the browser — download to open it',
+  vsdx: 'Visio drawings can’t be shown in the browser — download to open it',
+  one: 'OneNote files can’t be shown in the browser — download to open it',
+  pub: 'Publisher files can’t be shown in the browser — download to open it',
+  dwg: 'CAD drawings can’t be shown in the browser — download to open it',
+};
+
+/** Why a file has no inline preview, in words that say what to do instead. */
+export function noPreviewMessage(a) {
+  const e = ext(a?.fileName);
+  if (NO_PREVIEW[e]) return NO_PREVIEW[e];
+  return e ? `.${e} files can’t be shown in the browser — download to open it` : 'This file can’t be shown in the browser — download to open it';
+}
+
 /**
  * Universal attachment preview. Images keep the zoom/pan lightbox; PDFs render
- * in the browser's native viewer; Word docs via mammoth and spreadsheets via
+ * with pdf.js (pages + a thumbnail rail, QA 11-06 #3; the browser's own viewer
+ * is the fallback); attached e-mails (.eml / .msg) read like a mail client; Word docs via mammoth and spreadsheets via
  * SheetJS (both lazy-loaded); plain text in a scrollable pane; audio/video in
  * native players. Anything else gets a friendly download card. The download
  * button is always present.
@@ -73,6 +112,7 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose, 
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [full, setFull] = useState(readFull);
+  const [railOpen, setRailOpen] = useState(readRail);
   const dragRef = useRef(null);
   const rootRef = useRef(null);
 
@@ -80,6 +120,13 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose, 
     setFull((f) => {
       try { localStorage.setItem(FULL_KEY, f ? '0' : '1'); } catch { /* per-viewer convenience only */ }
       return !f;
+    });
+  }, []);
+
+  const toggleRail = useCallback(() => {
+    setRailOpen((open) => {
+      try { localStorage.setItem(RAIL_KEY, open ? '0' : '1'); } catch { /* per-viewer convenience only */ }
+      return !open;
     });
   }, []);
 
@@ -96,6 +143,19 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose, 
           if ((attachment.sizeBytes || 0) > MAX_TEXT_PREVIEW_BYTES) throw new Error('File is too large to preview — download it instead');
           const text = await (await fetch(res.url)).text();
           if (alive) setRich({ text });
+        } else if (kind === 'pdf') {
+          // pdf.js reads the bytes, so the server's content type doesn't matter.
+          const data = await (await fetch(res.url)).arrayBuffer();
+          if (alive) setRich({ data });
+        } else if (kind === 'email') {
+          const buf = await (await fetch(res.url)).arrayBuffer();
+          let email;
+          try {
+            email = await parseEmailFile(buf);
+          } catch {
+            throw new Error('This e-mail file couldn’t be read here — download it to open it in Outlook');
+          }
+          if (alive) setRich({ email });
         } else if (kind === 'docx') {
           const [{ default: mammoth }, buf] = await Promise.all([
             import('mammoth/mammoth.browser'),
@@ -180,9 +240,12 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose, 
   const onPointerUp = () => { dragRef.current = null; };
 
   const zoomed = zoom > 1;
-  const wide = kind === 'pdf' || kind === 'docx' || kind === 'sheet' || kind === 'text';
+  const wide = kind === 'docx' || kind === 'sheet' || kind === 'text';
+  // The PDF viewer and the e-mail reader fill the card edge to edge (their own
+  // toolbar / header is the chrome), like FreshService's document viewer.
+  const fills = kind === 'pdf' || kind === 'email';
   const download = () => ticketsAPI.downloadAttachment(ticketId, attachment.id, attachment.fileName);
-  const ready = kind === 'none' || Boolean(error) || (url && (kind === 'image' || kind === 'pdf' || kind === 'audio' || kind === 'video' || rich));
+  const ready = kind === 'none' || Boolean(error) || (url && (kind === 'image' || kind === 'audio' || kind === 'video' || rich));
 
   const body = () => {
     if (kind === 'none' || error) {
@@ -194,7 +257,7 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose, 
           <div>
             <p className="text-sm font-semibold text-foreground">{attachment.fileName}</p>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              {error || 'No inline preview for this file type yet'}
+              {error || noPreviewMessage(attachment)}
               {attachment.sizeBytes ? ` · ${formatBytes(attachment.sizeBytes)}` : ''}
             </p>
           </div>
@@ -210,8 +273,9 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose, 
     }
     if (!ready) return <Loader2 className="w-6 h-6 animate-spin text-muted-foreground/75" aria-hidden="true" />;
     if (kind === 'pdf') {
-      return <iframe src={url} title={attachment.fileName} className={`${full ? 'h-full w-full' : 'h-[78vh] w-[min(92vw,960px)]'} rounded-lg bg-card shadow-subtle`} />;
+      return <PdfViewer key={attachment.id} data={rich.data} fileName={attachment.fileName} railOpen={railOpen} onToggleRail={toggleRail} />;
     }
+    if (kind === 'email') return <EmailView email={rich.email} />;
     if (kind === 'audio') return <audio controls src={url} className="w-[min(80vw,480px)]" aria-label={attachment.fileName} />;
     if (kind === 'video') return <video controls src={url} className={`${full ? 'max-h-full' : 'max-h-[80vh]'} max-w-full rounded-lg shadow-subtle`} aria-label={attachment.fileName} />;
     if (kind === 'text') {
@@ -270,9 +334,11 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose, 
 
   // Maximized (21 Oct 2026): the card fills the window less an 8 px margin and
   // the picture or document fills the card. The choice is remembered.
+  const fillsNow = fills && Boolean(ready) && !error;
   const cardSize = full
     ? 'h-full w-full'
-    : `${wide ? 'max-w-5xl' : 'max-w-[min(94vw,1280px)]'} max-h-[94vh]`;
+    : fills ? (kind === 'pdf' ? 'h-[92vh] w-[min(96vw,1240px)]' : 'h-[88vh] w-[min(94vw,960px)]')
+      : `${wide ? 'max-w-5xl' : 'max-w-[min(94vw,1280px)]'} max-h-[94vh]`;
 
   return (
     <div ref={rootRef} className={`fixed inset-0 z-[60] flex items-center justify-center ${full ? 'p-2' : 'p-4'} overscroll-contain animate-fadeIn`} role="dialog" aria-modal="true" aria-label={`Preview ${attachment.fileName}`}>
@@ -345,7 +411,7 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose, 
         </div>
         <div
           data-preview-stage
-          className={`relative flex-1 overflow-hidden settings-scrollbar bg-muted/70 flex items-center justify-center ${full ? 'p-2' : 'p-4'} min-h-[240px] min-w-[min(320px,100%)] rounded-b-2xl`}
+          className={`relative min-h-0 flex-1 overflow-hidden settings-scrollbar bg-muted/70 flex items-center justify-center ${fillsNow ? 'p-0' : full ? 'p-2' : 'p-4'} min-h-[240px] min-w-[min(320px,100%)] rounded-b-2xl`}
         >
           {body()}
           {prev && (
@@ -354,7 +420,7 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose, 
               onClick={() => onNavigate(prev)}
               aria-label={`Previous: ${prev.fileName}`}
               title={`Previous: ${prev.fileName} (←)`}
-              className="tp-focus-ring absolute left-2 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-full bg-card/90 text-foreground shadow-soft ring-1 ring-border hover:bg-card"
+              className={`tp-focus-ring absolute ${kind === 'pdf' && fillsNow && railOpen ? 'left-2 sm:left-[9.5rem]' : 'left-2'} top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-full bg-card/90 text-foreground shadow-soft ring-1 ring-border hover:bg-card`}
             >
               <ChevronLeft className="h-5 w-5" aria-hidden="true" />
             </button>
@@ -365,7 +431,7 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose, 
               onClick={() => onNavigate(next)}
               aria-label={`Next: ${next.fileName}`}
               title={`Next: ${next.fileName} (→)`}
-              className="tp-focus-ring absolute right-2 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-full bg-card/90 text-foreground shadow-soft ring-1 ring-border hover:bg-card"
+              className={`tp-focus-ring absolute ${fillsNow ? 'right-5' : 'right-2'} top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-full bg-card/90 text-foreground shadow-soft ring-1 ring-border hover:bg-card`}
             >
               <ChevronRight className="h-5 w-5" aria-hidden="true" />
             </button>

@@ -105,9 +105,11 @@ describe('Settings → Macros', () => {
     expect(live).toEqual(['Pick a status…', 'Open', 'Closed']);
     // The stored Resolved is shown as no longer offered, not as a live choice.
     expect(within(status).getByText('Resolved (no longer offered here)')).toBeDisabled();
-    // The early hardcoded subject reads as empty = the workspace's usual reply subject.
-    expect(within(form).getByLabelText('Reply subject')).toHaveValue('');
-    expect(within(form).getByText(/Leave empty to use the workspace's usual reply subject \(keeps the thread together\)/)).toBeInTheDocument();
+    // QA 11-06 #1: a typed "[{{ticket.ref}}] {{ticket.subject}}" stays in the field
+    // (it used to vanish every time the macro was opened) and is explained as the
+    // usual reply subject.
+    expect(within(form).getByLabelText('Reply subject')).toHaveValue('[{{ticket.ref}}] {{ticket.subject}}');
+    expect(within(form).getByText(/This is the usual reply subject: the ticket number goes where this workspace puts it/)).toBeInTheDocument();
   });
 
   test('QA 11-05b #4: exact order — no "status runs last" hint; a reply after a close says it is still sent', async () => {
