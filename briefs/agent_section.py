@@ -24,7 +24,6 @@ from urllib.parse import urlencode
 
 BASE_TP = 'https://ticketpulse.bgcsaas.com/tickets'
 WS_ID = 1  # IT; ?ws= makes links open in this workspace whatever the browser last used (v4.1.28)
-BASE_FS = 'https://it.bgcengineering.ca/a/tickets/'
 BLUE, GREY, RED, TRACK = '#3b82f6', '#cbd5e1', '#ef4444', '#f1f5f9'
 INK, SUB, FAINT, LINE = '#0f172a', '#475569', '#94a3b8', '#e2e8f0'
 PRI = {4: ('Urgent', '#dc2626'), 3: ('High', '#d97706'), 2: ('Medium', '#64748b'), 1: ('Low', '#94a3b8')}
@@ -38,24 +37,40 @@ def tp_link(**q):
     return f'{BASE_TP}?{urlencode({**q, "ws": WS_ID})}'
 
 
+# Each link opens EXACTLY the list its number counts (Vahid, 5 Nov 2026). The
+# probe's agentStats SQL mirrors these filters one for one; change both together.
+# No ?segment= here: a segment brings its own scope (the Overdue card also counts
+# missed first-response targets) and drops the status list.
+PENDING = 'Pending,Pending Response'
+
+
 def person_links(tid, since):
-    return {'all': tp_link(assignee=tid, status='any'), 'open': tp_link(assignee=tid, status='Open'),
-            'pending': tp_link(assignee=tid, status='Pending'), 'overdue': tp_link(assignee=tid, segment='overdue'),
-            'oldest': tp_link(assignee=tid, segment='open', sort='createdAt', dir='asc'),
+    return {'all': tp_link(assignee=tid, status=f'Open,{PENDING}'),
+            'open': tp_link(assignee=tid, status='Open'),
+            'overdue': tp_link(assignee=tid, status='Open', due='overdue', sort='dueBy', dir='asc'),
+            'pending': tp_link(assignee=tid, status=PENDING),
+            'parked': tp_link(assignee=tid, status='parked', sort='parkedUntil', dir='asc'),
+            'oldest': tp_link(assignee=tid, status=f'Open,{PENDING}', sort='createdAt', dir='asc'),
             'new': tp_link(assignee=tid, status='any', createdFrom=since),
-            'resolved': tp_link(assignee=tid, segment='resolved')}
+            # resolvedFrom (v4.3.53): resolved_at >= since, the same count as "out".
+            'resolved': tp_link(assignee=tid, segment='resolved', resolvedFrom=since, sort='updatedAt', dir='desc')}
 
 
 def ticket_url(i):
-    if i.get('origin') == 'ticketpulse':
-        return f"{BASE_TP}/{i['tp_id']}?ws={WS_ID}"
-    return f"{BASE_FS}{i['fs']}"
+    # Always Ticket Pulse, FS-born included: we are moving off FreshService.
+    return f"{BASE_TP}/{i['tp_id']}?ws={WS_ID}"
+
+
+def ticket_label(i):
+    if i.get('origin') == 'ticketpulse' and i.get('tp_no'):
+        return f"TP-{i['tp_no']}"
+    return f"#{i['fs']}"
 
 
 def age(days):
     days = int(days or 0)
     if days < 60:
-        return f'{days} days'
+        return f'{days} day' if days == 1 else f'{days} days'
     months = round(days / 30.44)
     return f'{months} months' if months < 12 else f'{days / 365.25:.1f} years'
 
@@ -79,8 +94,10 @@ def why(i):
 
 
 def a_(href, text, color=INK, weight='600', size=None):
+    # Dotted underline so every number reads as clickable (plain grey text didn't).
     sz = f'font-size:{size};' if size else ''
-    return f'<a href="{href}" style="color:{color};font-weight:{weight};text-decoration:none;{sz}">{text}</a>'
+    return (f'<a href="{href}" style="color:{color};font-weight:{weight};text-decoration:underline;'
+            f'text-decoration-style:dotted;text-underline-offset:3px;{sz}">{text}</a>')
 
 
 def bar(segs, maxv, width=230, height=12):
@@ -108,7 +125,7 @@ def workload_table(stats, me, since):
     for s in stats:
         if not s['open_now'] or not s.get('active', True):
             continue  # nothing on their plate, or no longer on the team (Vahid, 23 Sep): no row
-        opn = s['open_now'] - s['pending_now'] - s.get('parked_now', 0)  # parked wait on purpose (v3.9.78)
+        opn = s['open_open']  # status Open, not parked (parked wait on purpose, v3.9.78)
         people.append(dict(s, open=opn, is_me=s['agent'] == me, L=person_links(s['tech_id'], since)))
     # alphabetical so order never reads as a ranking; Vahid's own queue last
     people.sort(key=lambda p: (p['is_me'], p['agent']))
@@ -121,10 +138,14 @@ def workload_table(stats, me, since):
         tag = ''
         on_time = max(0, p['open'] - p['overdue_now'])
         b = bar([(p['overdue_now'], RED), (on_time, BLUE), (p['pending_now'], GREY)], maxv)
-        caption = ((a_(p['L']['overdue'], f"{p['overdue_now']} overdue", RED, '700', '12.5px') + '&nbsp;&middot;&nbsp;')
-                   if p['overdue_now'] else '') + \
-            a_(p['L']['open'], f"{p['open']} open", '#1d4ed8', '600', '12.5px') + '&nbsp;&middot;&nbsp;' + \
-            a_(p['L']['pending'], f"{p['pending_now']} pending", SUB, '500', '12.5px') +             (f'<span style="color:{FAINT};font-size:12.5px;">&nbsp;&middot;&nbsp;{p["parked_now"]} parked</span>' if p.get('parked_now') else '')
+        # "open" includes the overdue ones, so overdue reads as part of it, not in addition.
+        caption = a_(p['L']['open'], f"{p['open']} open", '#1d4ed8', '600', '12.5px') + \
+            ((f'<span style="color:{SUB};font-size:12.5px;"> (</span>'
+              + a_(p['L']['overdue'], f"{p['overdue_now']} overdue", RED, '700', '12.5px')
+              + f'<span style="color:{SUB};font-size:12.5px;">)</span>') if p['overdue_now'] else '') + \
+            '&nbsp;&middot;&nbsp;' + a_(p['L']['pending'], f"{p['pending_now']} pending", SUB, '500', '12.5px') + \
+            (('&nbsp;&middot;&nbsp;' + a_(p['L']['parked'], f"{p['parked_now']} parked", FAINT, '500', '12.5px'))
+             if p.get('parked_now') else '')
         bg = ' bgcolor="#f8faff"' if p['is_me'] else ''
         c = f'padding:12px 10px;border-bottom:1px solid {LINE};vertical-align:middle;'
         rows.append(
@@ -169,7 +190,7 @@ def ticket_table(review, me, standup, exclude, asks, inactive=frozenset()):
             rows.append(
                 f'<tr><td style="{cell}font-size:13px;white-space:nowrap;">{who}</td>'
                 f'<td style="{cell}font-size:13px;color:{col};font-weight:700;">{lbl}</td>'
-                f'<td style="{cell}font-size:13px;color:#334155;"><a href="{ticket_url(i)}" style="color:#1d4ed8;text-decoration:none;">#{i["fs"]}</a> {i["subject"]}</td>'
+                f'<td style="{cell}font-size:13px;color:#334155;"><a href="{ticket_url(i)}" style="color:#1d4ed8;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px;">{ticket_label(i)}</a> {i["subject"]}</td>'
                 f'<td style="{cell}font-size:12.5px;color:#64748b;">{why(i)}</td>'
                 f'<td style="{cell}font-size:12.5px;color:#334155;font-weight:600;">{ask}</td></tr>')
         if hidden:
@@ -178,7 +199,7 @@ def ticket_table(review, me, standup, exclude, asks, inactive=frozenset()):
     foot = ''
     if excluded:
         names = ', '.join(f'#{r["fs"]} ({r["agent"].split()[0]})' for r in excluded)
-        foot = f'<div style="font-size:12px;color:{FAINT};margin-top:8px;">Left out because their own last note already explains them: {names}.</div>'
+        foot = f'<div style="font-size:12px;color:{FAINT};margin-top:8px;">Left out because their last note already explains them, or they are planned work less than a day old: {names}.</div>'
     return f'<table width="100%" cellpadding="0" cellspacing="0">{"".join(rows)}</table>{foot}'
 
 
@@ -193,7 +214,9 @@ def main():
     args = ap.parse_args()
     data = json.load(open(args.data, encoding='utf-8'))
     ws1 = next(w for w in data['workspaces'] if w['id'] == 1)
-    since = (datetime.date.today() - datetime.timedelta(days=7)).isoformat()
+    stats = ws1.get('agentStats') or []
+    # The probe's own 7-day boundary, so "in" and its link agree to the ticket.
+    since = (stats[0].get('since') if stats else None) or (datetime.date.today() - datetime.timedelta(days=7)).isoformat()
     exclude = {x.strip().lstrip('#') for x in args.exclude.split(',') if x.strip()}
     asks = json.load(open(args.asks, encoding='utf-8')) if args.asks else {}
     if args.workload_only:
@@ -207,8 +230,10 @@ def main():
             f'<div style="font-size:11px;font-weight:700;letter-spacing:.08em;color:#475569;margin:24px 0 6px;">TICKETS TO RAISE '
             f'<span style="font-weight:400;letter-spacing:0;color:{FAINT};">&nbsp;{label}</span></div>'
             f'{ticket_table(ws1.get("agentReview") or [], args.me, args.standup, exclude, asks, inactive)}'
-            f'<div style="font-size:12px;color:{FAINT};margin-top:10px;">Every name and number opens that exact list in Ticket Pulse, in the IT workspace. '
-            f'&ldquo;This week&rdquo; is the last 7 days; its &ldquo;out&rdquo; link opens all resolved tickets for that person.</div>')
+            f'<div style="font-size:12px;color:{FAINT};margin-top:10px;">Every underlined name and number opens that exact list in Ticket Pulse (IT workspace). '
+            f'Counts are as of when this brief was written; the lists are live, so anything closed or parked since then has already dropped off. '
+            f'&ldquo;Overdue&rdquo; means past its due date (open, not parked). &ldquo;Oldest&rdquo; opens open and pending work, oldest first. '
+            f'&ldquo;In&rdquo; and &ldquo;out&rdquo; count the last 7 days, and their links open the same 7 days.</div>')
     # Windows consoles default to cp1252, which mangles em dashes in subjects.
     sys.stdout.reconfigure(encoding='utf-8')
     sys.stdout.write(html)
