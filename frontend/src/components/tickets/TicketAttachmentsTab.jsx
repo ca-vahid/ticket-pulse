@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Download, FileText, Image as ImageIcon, Inbox, LayoutGrid, List, Loader2, MessageSquare, Paperclip, Send, StickyNote, Upload } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
 import { formatBytes, formatDayTime } from './ticketUi';
+import { DownloadAllButton, DownloadAllPanel } from './AttachmentsDownloadAll';
+import { useDownloadAll } from './useDownloadAll';
 
 /**
  * Attachments tab (30 Sep 2026): every file on the ticket in one place,
@@ -56,7 +58,7 @@ function Thumb({ a, url }) {
 }
 
 export default function TicketAttachmentsTab({
-  ticketId, attachments = [], signatureImages = [], entries = [], onPreview, onDownload, onJumpToEntry, canUpload = false, onUpload, uploading = false, nameForEmail = null,
+  ticketId, attachments = [], signatureImages = [], entries = [], onPreview, onDownload, onJumpToEntry, canUpload = false, onUpload, uploading = false, nameForEmail = null, ticketRef = '', subject = '',
 }) {
   const [filter, setFilter] = useState('all');
   const [view, setView] = useState(() => { try { return localStorage.getItem('tp_attach_view') || 'grid'; } catch { return 'grid'; } });
@@ -79,7 +81,11 @@ export default function TicketAttachmentsTab({
     for (const r of rows) c[r.kind] += 1;
     return c;
   }, [rows]);
-  const shown = filter === 'all' ? rows : rows.filter((r) => r.kind === filter);
+  const shown = useMemo(() => (filter === 'all' ? rows : rows.filter((r) => r.kind === filter)), [rows, filter]);
+  // "Download all" zips exactly what is listed under the current filter.
+  const shownFiles = useMemo(() => shown.map((r) => r.a), [shown]);
+  const zipState = useDownloadAll({ ticketId, attachments: shownFiles, ticketRef, subject });
+  const filterLabel = filter === 'all' ? null : FILTERS.find((f) => f.key === filter)?.label;
 
   // Thumbnails for images on screen (object URLs, revoked on change).
   useEffect(() => {
@@ -109,6 +115,7 @@ export default function TicketAttachmentsTab({
           <Paperclip className="h-4 w-4 text-blue-500" aria-hidden="true" /> Attachments
         </h2>
         <div className="ml-auto flex items-center gap-2">
+          <DownloadAllButton state={zipState} filterLabel={filterLabel} />
           <div className="inline-flex overflow-hidden rounded-md border border-input" role="radiogroup" aria-label="View">
             {[['grid', LayoutGrid, 'Grid'], ['list', List, 'List']].map(([k, Icon, label]) => (
               <button key={k} type="button" role="radio" aria-checked={view === k} aria-label={label} title={label} onClick={() => setViewSaved(k)}
@@ -126,6 +133,8 @@ export default function TicketAttachmentsTab({
           )}
         </div>
       </div>
+
+      <DownloadAllPanel state={zipState} />
 
       {/* Where from — only the sources this ticket has, plus All. */}
       <div className="mt-3 flex flex-wrap gap-1 border-b border-border" role="tablist" aria-label="Filter attachments">

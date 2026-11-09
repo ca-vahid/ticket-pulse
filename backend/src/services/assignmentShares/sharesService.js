@@ -3,9 +3,11 @@ import prisma from '../prisma.js';
 import settingsRepository from '../settingsRepository.js';
 import logger from '../../utils/logger.js';
 import { ticketDisplayRef } from '../../utils/ticketOrigin.js';
+import assigneeAway from '../assigneeAwayService.js';
 import {
   applyPatch, buildLedger, categoryMatches, decide, normalizeSettings, periodOf, previewSequence,
   promoteSuggestion, recordFor, summarizeReport, toStored, validateDraft, onLeaveAt, workingAt,
+  AWAY_AHEAD_DAYS, awayWindows, summarizeAway,
 } from './rules.js';
 
 /**
@@ -468,7 +470,61 @@ class AssignmentSharesService {
       };
     });
 
-    return { ...empty, ...summary, totals: summary.totals ? { ...summary.totals, selfPicked } : summary.totals, events };
+    // QA 11-06 #4: days away in the window and coming up, so an admin can see
+    // why someone's part sits below their share and adjust before a long leave.
+    const away = await this._away(ws, summary.rows, { pastDays: period, now });
+
+    return {
+      ...empty,
+      ...summary,
+      rows: away ? away.rows : summary.rows,
+      availability: away ? away.availability : null,
+      totals: summary.totals ? { ...summary.totals, selfPicked } : summary.totals,
+      events,
+    };
+  }
+
+  /**
+   * Days away per report row: approved leave the rule treats as out (the same
+   * technician_leaves rows as "Out now"; native Availability requests are
+   * projected there), on working days from Settings → Business Hours (Mon–Fri
+   * when none are set, holidays left out). A part day counts as half.
+   * @returns {null | { rows, availability }} null = could not be read; the report shows without it.
+   */
+  async _away(ws, rows, { pastDays, now = new Date(), aheadDays = AWAY_AHEAD_DAYS } = {}) {
+    const techIds = (rows || []).map((r) => Number(r.techId)).filter(positive);
+    if (!techIds.length) return null;
+    const cal = await soft(() => assigneeAway.workingCalendar(ws), null);
+    if (!cal?.isWorkingDay) return null;
+    const { today, past, ahead } = awayWindows(now, cal.timezone, { pastDays, aheadDays });
+    const leaves = await soft(() => prisma.technicianLeave.findMany({
+      where: {
+        workspaceId: ws,
+        technicianId: { in: techIds },
+        status: 'APPROVED',
+        leaveDate: { gte: new Date(`${past[0]}T00:00:00Z`), lte: new Date(`${ahead[ahead.length - 1]}T00:00:00Z`) },
+      },
+      select: { technicianId: true, leaveDate: true, category: true, status: true, isFullDay: true },
+      take: 5000,
+    }), null);
+    if (!Array.isArray(leaves)) return null;
+    const leavesByTech = new Map(techIds.map((id) => [id, []]));
+    for (const l of leaves) leavesByTech.get(l.technicianId)?.push(l);
+    const pastDates = past.filter((d) => cal.isWorkingDay(d));
+    const aheadDates = ahead.filter((d) => cal.isWorkingDay(d));
+    const out = summarizeAway({ rows, leavesByTech, pastDates, aheadDates });
+    return {
+      rows: out.rows,
+      availability: {
+        today,
+        unit: 'working days',
+        calendar: cal.fromBusinessHours ? 'business hours' : 'Monday to Friday',
+        past: { days: pastDays, from: past[0], to: past[past.length - 1], workingDays: pastDates.length },
+        ahead: { days: aheadDays, from: ahead[0], to: ahead[ahead.length - 1], workingDays: aheadDates.length },
+        belowShareWithAway: out.belowShareWithAway,
+        awaySoon: out.awaySoon,
+      },
+    };
   }
 }
 

@@ -61,11 +61,17 @@ const tidyStep = (s) => {
   return s;
 };
 
-/** The ordered step list behind any stored shape (array, v2 object, or the legacy keys). */
-export function macroSteps(actions) {
-  if (Array.isArray(actions)) return actions.filter(isObj).map(tidyStep);
+/**
+ * The ordered step list behind any stored shape (array, v2 object, or the legacy keys).
+ * `tidy` reads the old default reply subject as "no subject typed" — only where the
+ * macro RUNS. Saving and editing keep what the person typed (QA 11-06 #1: the editor
+ * emptied a typed "[{{ticket.ref}}] {{ticket.subject}}" every time it was opened).
+ */
+export function macroSteps(actions, { tidy = true } = {}) {
+  const shape = tidy ? tidyStep : (s) => s;
+  if (Array.isArray(actions)) return actions.filter(isObj).map(shape);
   if (!isObj(actions)) return [];
-  if (Array.isArray(actions.steps)) return actions.steps.filter(isObj).map(tidyStep);
+  if (Array.isArray(actions.steps)) return actions.steps.filter(isObj).map(shape);
   const steps = [];
   if (nonEmpty(actions.assignToTechnicianId)) steps.push({ type: 'assign', to: 'technician', technicianId: Number(actions.assignToTechnicianId) });
   if (nonEmpty(actions.setPriority)) steps.push({ type: 'priority', priority: Number(actions.setPriority) });
@@ -78,7 +84,7 @@ export function macroSteps(actions) {
 /** A macro row as the API hands it out: always the v2 shape. */
 export function presentMacro(macro) {
   if (!macro) return macro;
-  return { ...macro, actions: { version: 2, steps: macroSteps(macro.actions) } };
+  return { ...macro, actions: { version: 2, steps: macroSteps(macro.actions, { tidy: false }) } };
 }
 
 const textToHtml = (text) => String(text || '')
@@ -473,7 +479,7 @@ class TicketMacroService {
     if (!actions || typeof actions !== 'object') {
       throw new ValidationError('Macro actions must be a list of steps');
     }
-    const raw = macroSteps(actions);
+    const raw = macroSteps(actions, { tidy: false });
     if (raw.length === 0) throw new ValidationError('Macro needs at least one action');
     if (raw.length > MAX_STEPS) throw new ValidationError(`A macro can hold up to ${MAX_STEPS} actions`);
     const clean = [];

@@ -52,11 +52,19 @@ const tidyStep = (s) => {
   return rest;
 };
 
-/** The ordered steps behind any stored shape (array, v2 object, or the old keys). */
-export function macroSteps(actions) {
-  if (Array.isArray(actions)) return actions.filter(isObj).map(tidyStep);
+/** A typed subject that the macro reads as the workspace's usual reply subject. */
+export const isUsualSubject = (subject) => typeof subject === 'string' && OLD_DEFAULT_SUBJECT_RE.test(subject);
+
+/**
+ * The ordered steps behind any stored shape (array, v2 object, or the old keys).
+ * The editor keeps a typed subject as typed (QA 11-06 #1); `tidy` is only for
+ * reading what a macro will do.
+ */
+export function macroSteps(actions, { tidy = false } = {}) {
+  const shape = tidy ? tidyStep : (s) => s;
+  if (Array.isArray(actions)) return actions.filter(isObj).map(shape);
   if (!isObj(actions)) return [];
-  if (Array.isArray(actions.steps)) return actions.steps.filter(isObj).map(tidyStep);
+  if (Array.isArray(actions.steps)) return actions.steps.filter(isObj).map(shape);
   const steps = [];
   if (nonEmpty(actions.assignToTechnicianId)) steps.push({ type: 'assign', to: 'technician', technicianId: Number(actions.assignToTechnicianId) });
   if (nonEmpty(actions.setPriority)) steps.push({ type: 'priority', priority: Number(actions.setPriority) });

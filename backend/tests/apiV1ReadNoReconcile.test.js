@@ -67,6 +67,13 @@ describe('API v1 reads do not re-ask FreshService', () => {
     expect(ticketServiceMock.getTicket).toHaveBeenCalledWith(501, 5, { reconcile: false });
   });
 
+  test('QA 11-06: a CLOSED FreshService-born ticket is read with reconcile: false too (no on-open FS refresh)', async () => {
+    ticketServiceMock.getTicket.mockResolvedValue({ ...TICKET, status: 'Closed' });
+    const res = await request(buildApp()).get('/api/v1/tickets/501');
+    expect(res.status).toBe(200);
+    expect(ticketServiceMock.getTicket).toHaveBeenCalledWith(501, 5, { reconcile: false });
+  });
+
   test('GET /tickets/:id/conversations likewise', async () => {
     const res = await request(buildApp()).get('/api/v1/tickets/501/conversations');
     expect(res.status).toBe(200);
