@@ -710,9 +710,17 @@ class AvailabilityService {
   }
 
   async preview(user, input) {
-    const person = await this.ensurePerson(user);
+    let person = await this.ensurePerson(user);
+    // Changing a waiting request (Nov 2026): the dry run leaves that request
+    // out of balances and per-week counts, so it is not counted twice.
+    let excludeRequestId = null;
+    if (input?.requestId) {
+      const existing = await this._editableRequest(input.requestId, user);
+      excludeRequestId = existing.id;
+      if (lc(existing.email) !== lc(person.email)) person = await this.ensurePerson({ email: existing.email });
+    }
     const shaped = await this._shape(person, input);
-    const verdict = await this._decideFor(person, shaped);
+    const verdict = await this._decideFor(person, shaped, { excludeRequestId });
     return {
       outcome: verdict.outcome, reason: verdict.reason, fired: verdict.fired, warnings: verdict.warnings,
       days: shaped.days, hours: shaped.hours, dates: shaped.dates, remaining: verdict.remaining,
@@ -836,6 +844,113 @@ class AvailabilityService {
     return this.getRequest(r.id, user);
   }
 
+  /**
+   * A request its owner may still change: waiting for approval, booked in
+   * Ticket Pulse, and theirs (or booked by an admin who manages them).
+   */
+  async _editableRequest(id, user) {
+    const r = await prisma.avRequest.findUnique({ where: { id: Number(id) } });
+    if (!r) throw new NotFoundError('Request not found');
+    const mine = lc(r.email) === lc(user.email);
+    if (!mine && !(await this.canManagePerson(user, r.email))) throw new AuthorizationError('You can only change your own requests', 'availability_not_owner');
+    if (r.status !== 'pending') {
+      throw new ValidationError(r.status === 'approved'
+        ? 'This request is already approved. Cancel it and book again to change it.'
+        : `This request is already ${r.status}`);
+    }
+    if (r.source === 'vacation_tracker') throw new ValidationError('This came from Vacation Tracker. Change it there; Ticket Pulse follows within the hour.');
+    return r;
+  }
+
+  /**
+   * Change a request that is still waiting (Vahid, 9 Nov 2026: Gaby asked for
+   * Thu + Fri, then wanted only Fri, and had to cancel and book again). The
+   * rules run again on the new dates, exactly as for a new booking: it can
+   * now be approved automatically, still wait, or be refused, in which case
+   * nothing changes. Approvers are told what changed.
+   */
+  async updateRequest(id, user, input) {
+    const r = await this._editableRequest(id, user);
+    const person = await this.ensurePerson(lc(r.email) === lc(user.email) ? user : { email: r.email });
+    const shaped = await this._shape(person, input);
+    const overlap = await prisma.avRequest.findFirst({
+      where: {
+        email: person.email, status: { in: ACTIVE }, startDate: { lte: shaped.endDate }, endDate: { gte: shaped.startDate },
+        leaveTypeId: shaped.leaveType.id, id: { not: r.id },
+      },
+      select: { id: true },
+    });
+    if (overlap) throw new ValidationError('You already have another request of this type on those dates');
+    const verdict = await this._decideFor(person, shaped, { excludeRequestId: r.id });
+    if (verdict.outcome === 'refused') {
+      const err = new ValidationError(verdict.reason);
+      err.details = { fired: verdict.fired };
+      throw err;
+    }
+    const before = {
+      leaveTypeId: r.leaveTypeId, startDate: dayKey(r.startDate), endDate: dayKey(r.endDate), dayPart: r.dayPart,
+      startMinute: r.startMinute, endMinute: r.endMinute, days: num(r.days), hours: num(r.hours), note: r.note,
+    };
+    const after = {
+      leaveTypeId: shaped.leaveType.id, startDate: dayKey(shaped.startDate), endDate: dayKey(shaped.endDate), dayPart: shaped.dayPart,
+      startMinute: shaped.startMinute, endMinute: shaped.endMinute, days: shaped.days, hours: shaped.hours, note: shaped.note,
+    };
+    const changed = Object.keys(after).filter((k) => String(before[k] ?? '') !== String(after[k] ?? ''));
+    if (!changed.length) return this.getRequest(r.id, user);
+
+    const settings = await this.getSettings();
+    const approvers = verdict.outcome === 'pending' ? await this.approversFor(person.email) : [];
+    const status = verdict.outcome === 'approved' ? 'approved' : 'pending';
+    const now = new Date();
+    // Only while still waiting: an approver who decided a moment ago wins.
+    const res = await prisma.avRequest.updateMany({
+      where: { id: r.id, status: 'pending' },
+      data: {
+        leaveTypeId: shaped.leaveType.id,
+        startDate: shaped.startDate,
+        endDate: shaped.endDate,
+        dayPart: shaped.dayPart,
+        startMinute: shaped.startMinute,
+        endMinute: shaped.endMinute,
+        days: shaped.days,
+        hours: shaped.hours,
+        note: shaped.note,
+        status,
+        decision: { outcome: verdict.outcome, reason: verdict.reason, fired: verdict.fired, approvers },
+        decidedBy: status === 'approved' ? 'rules' : null,
+        decidedAt: status === 'approved' ? now : null,
+        ...(input.wantsOutlookEvent !== undefined ? { wantsOutlookEvent: Boolean(settings.outlookEventsEnabled && input.wantsOutlookEvent) } : {}),
+        ...(input.wantsAutoReply !== undefined ? { wantsAutoReply: Boolean(settings.autoRepliesEnabled && input.wantsAutoReply) } : {}),
+      },
+    });
+    if (!res.count) throw new ValidationError('This request was just decided, so it can no longer be changed');
+    await prisma.avRequestEvent.createMany({
+      data: [
+        { requestId: r.id, kind: 'edited', actor: lc(user.email), details: { before, after, changed } },
+        { requestId: r.id, kind: status === 'approved' ? 'auto_approved' : 'sent_for_approval', actor: 'rules', details: { reason: verdict.reason, fired: verdict.fired, approvers } },
+      ],
+    });
+    const updated = await prisma.avRequest.findUnique({ where: { id: r.id } });
+    if (status === 'approved') {
+      await this.project(updated).catch((err) => logger.warn(`Availability: projection failed for request ${r.id}: ${err.message}`));
+      vtWriteBack.pushApproved(updated.id); // never throws
+    } else {
+      const beforeType = before.leaveTypeId === shaped.leaveType.id ? shaped.leaveType : await prisma.avLeaveType.findUnique({ where: { id: before.leaveTypeId } });
+      const was = `${describeRange(before)}${beforeType && beforeType.id !== shaped.leaveType.id ? ` (${beforeType.name})` : ''}`;
+      this._notifyApprovers(updated, shaped.leaveType, person, approvers, { was }).catch((err) => logger.warn(`Availability: approver notice failed for changed request ${r.id}: ${err.message}`));
+    }
+    const editCount = await prisma.avRequestEvent.count({ where: { requestId: r.id, kind: 'edited' } }).catch(() => 1);
+    this._teamsSubmitted(updated, shaped.leaveType, person, user, approvers, { changedTag: `changed${editCount}` }).catch(() => {});
+    logger.info(`Availability: request ${r.id} changed by ${lc(user.email)} (${changed.join(', ')}) → ${status}`);
+    return this.getRequest(r.id, user);
+  }
+
+  /** How many requests wait for this person's decision (the nav badge). */
+  async pendingCountFor(user) {
+    const pending = await this.listPendingFor(user);
+    return pending.filter((r) => r.mine !== false).length;
+  }
+
   /** Is Vacation Tracker still syncing for a workspace this person works in? */
   async _vtSyncOnFor(email) {
     const techs = await prisma.technician.findMany({ where: { email: { equals: email, mode: 'insensitive' } }, select: { workspaceId: true }, take: 20 });
@@ -855,7 +970,19 @@ class AvailabilityService {
       orderBy: { startDate: 'desc' },
       take: 500,
     });
-    return rows.map(serializeRequest);
+    // A waiting request says who it waits for (names, not addresses).
+    const waitingEmails = [...new Set(rows.filter((r) => r.status === 'pending').flatMap((r) => (Array.isArray(r.decision?.approvers) ? r.decision.approvers : [])).map(lc))];
+    const names = waitingEmails.length
+      ? new Map((await prisma.avPerson.findMany({ where: { email: { in: waitingEmails } }, select: { email: true, name: true } }).catch(() => [])).map((p) => [lc(p.email), p.name]))
+      : new Map();
+    return rows.map((r) => {
+      const out = serializeRequest(r);
+      if (r.status === 'pending') {
+        out.waitingOn = (Array.isArray(r.decision?.approvers) ? r.decision.approvers : []).map((e) => ({ email: lc(e), name: names.get(lc(e)) || null }));
+        out.editable = r.source !== 'vacation_tracker';
+      }
+      return out;
+    });
   }
 
   /**
@@ -1151,18 +1278,23 @@ class AvailabilityService {
     return resolvePublicBaseUrl({ fallback: 'https://ticketpulse.bgcsaas.com' });
   }
 
-  async _notifyApprovers(request, leaveType, person, approvers) {
+  async _notifyApprovers(request, leaveType, person, approvers, { was = null } = {}) {
     if (!approvers.length) return;
     const { sendEmail } = await import('../sendgridNotificationService.js');
     const base = await this._baseUrl();
     const range = describeRange(request);
     const html = emailHtml({
-      title: `${person.name} asked for ${leaveType.name.toLowerCase()}`,
-      lines: [range, request.note ? `Note: ${request.note}` : null, request.decision?.reason ? `Why it needs you: ${request.decision.reason}` : null],
+      title: was ? `${person.name} changed their ${leaveType.name.toLowerCase()} request` : `${person.name} asked for ${leaveType.name.toLowerCase()}`,
+      lines: [
+        was ? `Now: ${range}` : range,
+        was ? `Was: ${was}` : null,
+        request.note ? `Note: ${request.note}` : null,
+        request.decision?.reason ? `Why it needs you: ${request.decision.reason}` : null,
+      ],
       button: { label: 'Review in Ticket Pulse', url: `${base}/availability/approvals` },
     });
     // One copy each: approvers do not see each other and Reply All goes nowhere.
-    const subject = `Availability: ${person.name} — ${leaveType.name}, ${range}`;
+    const subject = `Availability: ${person.name} — ${leaveType.name}, ${range}${was ? ' (changed)' : ''}`;
     const sent = await Promise.allSettled([...new Set(approvers.map(lc).filter(Boolean))].map((to) => sendEmail({ to: [to], subject, html, context: 'availability' })));
     const failed = sent.filter((r) => r.status === 'rejected');
     if (failed.length) logger.warn(`Availability: ${failed.length} of ${sent.length} approver notice(s) failed for request ${request.id}: ${failed[0].reason?.message}`);
@@ -1171,10 +1303,12 @@ class AvailabilityService {
   // Teams (QA 10-13 #6): the same moments, in the person's chat with the bot.
   // Each is a choice in their own Teams settings; none of these ever throws.
 
-  async _teamsSubmitted(request, leaveType, person, actor, approvers = []) {
+  async _teamsSubmitted(request, leaveType, person, actor, approvers = [], { changedTag = null } = {}) {
     const range = `${describeRange(request)} · ${describeAmount(request, leaveType)}`;
     const byOther = lc(actor?.email) !== lc(person.email);
     const approved = request.status === 'approved';
+    // A changed request is a new notice (its own refKey), worded as a change.
+    const suffix = changedTag ? `:${changedTag}` : '';
     let waiting = null;
     if (!approved && approvers.length) {
       const people = await prisma.avPerson.findMany({ where: { email: { in: approvers } }, select: { email: true, name: true } }).catch(() => []);
@@ -1182,18 +1316,20 @@ class AvailabilityService {
       waiting = `Waiting for ${approvers.map((e) => nameOf.get(e) || e).join(' or ')}.`;
     }
     await availabilityTeams.notify(person.email, 'av_submitted', {
-      title: `${approved ? 'Booked' : 'Sent for approval'}: ${leaveType.name}`,
-      lines: [range, byOther ? `Booked for you by ${actor?.name || actor?.email}.` : null, waiting, request.decision?.reason || null],
-      refKey: `av:${request.id}:submitted`,
+      title: changedTag
+        ? `${approved ? 'Changed and approved' : 'Changed, sent for approval'}: ${leaveType.name}`
+        : `${approved ? 'Booked' : 'Sent for approval'}: ${leaveType.name}`,
+      lines: [range, byOther ? `${changedTag ? 'Changed' : 'Booked'} for you by ${actor?.name || actor?.email}.` : null, waiting, request.decision?.reason || null],
+      refKey: `av:${request.id}:submitted${suffix}`,
       path: '/availability/my-time',
       icon: approved ? '✅' : '🕓',
     });
     if (!approved) {
       for (const to of [...new Set(approvers.map(lc).filter(Boolean))]) {
         await availabilityTeams.notify(to, 'av_approval_waiting', {
-          title: `${person.name} asked for ${leaveType.name.toLowerCase()}`,
+          title: changedTag ? `${person.name} changed their ${leaveType.name.toLowerCase()} request` : `${person.name} asked for ${leaveType.name.toLowerCase()}`,
           lines: [range, request.note ? `Note: ${request.note}` : null, request.decision?.reason ? `Why it needs you: ${request.decision.reason}` : null],
-          refKey: `av:${request.id}:approval`,
+          refKey: `av:${request.id}:approval${suffix}`,
           path: '/availability/approvals',
           button: 'Review the request',
           icon: '🙋',

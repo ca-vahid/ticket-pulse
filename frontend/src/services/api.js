@@ -2335,6 +2335,9 @@ export const availabilityAPI = {
   myRequests: (params = {}) => api.get('/availability/requests/mine', { params }),
   preview: (data) => api.post('/availability/requests/preview', data),
   createRequest: (data) => api.post('/availability/requests', data),
+  // Nov 2026: change a request that is still waiting; the rules run again.
+  updateRequest: (id, data) => api.patch(`/availability/requests/${id}`, data),
+  approvalCount: () => api.get('/availability/approvals/count'),
   getRequest: (id) => api.get(`/availability/requests/${id}`),
   cancelRequest: (id, reason) => api.post(`/availability/requests/${id}/cancel`, { reason }),
   calendar: (params = {}) => api.get('/availability/calendar', { params }),

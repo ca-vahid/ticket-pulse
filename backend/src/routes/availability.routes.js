@@ -94,6 +94,11 @@ router.get('/requests/:id', asyncHandler(async (req, res) => {
   ok(res, await availabilityService.getRequest(req.params.id, me(req)));
 }));
 
+// Change a request that is still waiting (Nov 2026); the rules run again.
+router.patch('/requests/:id', asyncHandler(async (req, res) => {
+  ok(res, await availabilityService.updateRequest(req.params.id, me(req), req.body || {}));
+}));
+
 router.post('/requests/:id/cancel', asyncHandler(async (req, res) => {
   ok(res, await availabilityService.cancelRequest(req.params.id, me(req), req.body?.reason || null));
 }));
@@ -120,6 +125,11 @@ router.get('/out-today', asyncHandler(async (req, res) => {
 
 router.get('/approvals', asyncHandler(async (req, res) => {
   ok(res, await availabilityService.listPendingFor(me(req)));
+}));
+
+// The side-rail badge: requests waiting for this person's decision.
+router.get('/approvals/count', asyncHandler(async (req, res) => {
+  ok(res, { count: await availabilityService.pendingCountFor(me(req)) });
 }));
 
 router.post('/requests/:id/decision', asyncHandler(async (req, res) => {

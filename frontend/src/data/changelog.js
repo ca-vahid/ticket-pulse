@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.3.61-preview';
+export const APP_VERSION = '4.3.62-preview';
 
 export const changelog = [
+  {
+    version: '4.3.62-preview',
+    date: 'November 9, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Change a time-away request while it waits</strong> &mdash; a request that is still waiting for approval now has a Change button on My time. Asked for Thursday and Friday and now only need Friday? Change it there, without cancelling and booking again. It stays the same request: the rules check it again (a change can now be approved on the spot, still wait, or be refused, in which case nothing changes), and your approvers get an e-mail with what it was and what it is now. Approved requests still need a cancel and a new booking.' },
+      { type: 'improved', html: '<strong>A clearer booking form</strong> &mdash; the leave types are a short list to tick instead of a dropdown; <em>Today</em>, <em>Tomorrow</em> and <em>Next week</em> fill in the dates; full day, morning or afternoon is one switch; and a strip of the days shows which ones count, with weekends and holidays struck through. A waiting request now says who it is waiting for.' },
+      { type: 'new', html: '<strong>A number on Availability when time away waits for you</strong> &mdash; like Approvals, the Availability entry in the side rail shows a red count of the time-away requests waiting for your decision. It updates when you decide one, when you come back to the tab, and every few minutes.' },
+    ],
+  },
   {
     version: '4.3.61-preview',
     date: 'November 9, 2026',
