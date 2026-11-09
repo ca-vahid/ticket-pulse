@@ -207,6 +207,33 @@ describe('sweep', () => {
     expect(sendTransactionalEmail).toHaveBeenCalledWith(expect.objectContaining({ to: 'andrii@bgcengineering.ca', label: 'park wake' }));
   });
 
+  test('9 Nov 2026: the shift is written to the activity log', async () => {
+    const parkedAt = new Date(Date.now() - 5 * 86400e3);
+    prismaMock.ticketPark.findMany
+      .mockResolvedValueOnce([{ id: 9, ticketId: 45000, workspaceId: 1, kind: 'until_date', until: new Date(), parkedAt, parkedBy: 'Andrii', reason: 'Waiting on a part', statusBefore: 'Open' }])
+      .mockResolvedValueOnce([]);
+    prismaMock.ticketPark.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...TP_TICKET, dueBySetBy: 'sla', status: 'Pending', parkedUntil: new Date() });
+    await parks.sweep();
+    const logged = activityCreate.mock.calls.map(([a]) => a).find((a) => a.activityType === 'due_changed');
+    expect(logged.details.changes.dueBy.from).toBe(TP_TICKET.dueBy.toISOString());
+    expect(new Date(logged.details.changes.dueBy.to).getTime() - TP_TICKET.dueBy.getTime()).toBeGreaterThanOrEqual(5 * 86400e3 - 1000);
+  });
+
+  test('9 Nov 2026: a fixed due date (set by a person or an HR notice) stays put on wake', async () => {
+    const parkedAt = new Date(Date.now() - 7 * 86400e3);
+    prismaMock.ticketPark.findMany
+      .mockResolvedValueOnce([{ id: 9, ticketId: 45000, workspaceId: 1, kind: 'until_date', until: new Date(), parkedAt, parkedBy: 'Ticket Pulse (HR notice)', reason: 'Transfer effective Nov 2', statusBefore: 'Open' }])
+      .mockResolvedValueOnce([]);
+    prismaMock.ticketPark.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...TP_TICKET, dueBySetBy: 'manual', status: 'Pending', parkedUntil: new Date() });
+    const out = await parks.sweep();
+    expect(out.woke).toBe(1);
+    expect(prismaMock.ticket.update.mock.calls.find(([arg]) => arg.data.dueBy)).toBeUndefined();
+    expect(activityCreate.mock.calls.map(([a]) => a.activityType)).not.toContain('due_changed');
+    expect(changeStatus).toHaveBeenCalledWith(45000, 1, 'Open', expect.objectContaining({ _parkChange: true }), {});
+  });
+
   test('a park lost to another instance is not woken twice', async () => {
     prismaMock.ticketPark.findMany.mockResolvedValueOnce([{ id: 9, ticketId: 45000, workspaceId: 1 }]).mockResolvedValueOnce([]);
     prismaMock.ticketPark.updateMany.mockResolvedValue({ count: 0 });
