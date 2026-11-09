@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import prisma from './prisma.js';
 import { fsOnlyAssigneeEmail } from '../utils/fsOnlyAssignee.js';
 import { isHelpdeskMailbox } from '../utils/mailboxProfile.js';
@@ -1098,6 +1099,22 @@ class MailboxIngestService {
     const from = String(email?.from || '').trim().toLowerCase();
     const sender = String(email?.sender || '').trim().toLowerCase();
     if (!from || !sender || from === sender) return email;
+    // A delegate writes from inside the same organisation. A Sender on another
+    // domain is a mailing service's relay or bounce address (9 Nov 2026: a hotel's
+    // invoice arrived with Sender "<name>=<hotel domain>@<relay>", which became the
+    // requester and failed as an invalid address): From stays the requester. So
+    // does any Sender that is not a usable address. The workspace's own company
+    // domains count as one organisation.
+    if (!z.string().email().safeParse(sender).success) return email;
+    const domainOf = (a) => a.slice(a.lastIndexOf('@') + 1);
+    if (domainOf(from) !== domainOf(sender)) {
+      const internal = await Promise.resolve()
+        .then(() => prisma.workspace.findUnique({ where: { id: connection.workspaceId }, select: { internalDomains: true } }))
+        .then((ws) => (Array.isArray(ws?.internalDomains) ? ws.internalDomains : []).map((d) => String(d).trim().toLowerCase()).filter(Boolean))
+        .catch(() => []);
+      const isInternal = (domain) => internal.some((d) => domain === d || domain.endsWith(`.${d}`));
+      if (!isInternal(domainOf(from)) || !isInternal(domainOf(sender))) return email;
+    }
     const local = (a) => a.replace(/\+[^@]*@/, '@');
     const mailbox = String(connection?.address || '').trim().toLowerCase();
     if (local(from) === mailbox || local(sender) === mailbox) return email;

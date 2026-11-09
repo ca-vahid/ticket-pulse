@@ -12,6 +12,7 @@ import { jest, describe, expect, test, beforeEach } from '@jest/globals';
  */
 
 const prismaMock = {
+  workspace: { findUnique: jest.fn() },
   mailboxConnection: { findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn() },
   requester: { findUnique: jest.fn() },
 };
@@ -65,6 +66,35 @@ describe('mail sent on someone\'s behalf', () => {
     expect(await svc._creditTheWriter(connection, same)).toBe(same);
     const none = { ...delegateMail, sender: '' };
     expect(await svc._creditTheWriter(connection, none)).toBe(none);
+  });
+
+  test("a mailing service's relay Sender on another domain: From stays the requester", async () => {
+    const relayed = {
+      id: 'AAMr', subject: 'Your group charges',
+      from: 'billing@examplehotel.com', fromName: 'billing@examplehotel.com',
+      sender: 'billing=examplehotel.com@relay.example.net', senderName: 'billing=examplehotel.com@relay.example.net',
+    };
+    expect(await svc._creditTheWriter(connection, relayed)).toBe(relayed);
+    expect(prismaMock.mailboxConnection.findFirst).not.toHaveBeenCalled();
+  });
+
+  test('a Sender that is not a usable address: From stays the requester', async () => {
+    const odd = { ...delegateMail, sender: 'adelegate=x@example.com' };
+    prismaMock.workspace.findUnique.mockResolvedValue({ internalDomains: ['example.com'] });
+    expect(await svc._creditTheWriter(connection, { ...odd, sender: 'not an address' })).toMatchObject({ from: 'pmanager@example.com' });
+    expect((await svc._creditTheWriter(connection, { ...odd, sender: 'a@b' })).from).toBe('pmanager@example.com');
+  });
+
+  test("a delegate on the company's second domain is still credited", async () => {
+    prismaMock.workspace.findUnique.mockResolvedValue({ internalDomains: ['example.com', 'example.org'] });
+    const crossDomain = { ...delegateMail, sender: 'adelegate@example.org' };
+    const email = await svc._creditTheWriter(connection, crossDomain);
+    expect(email.from).toBe('adelegate@example.org');
+    expect(email.onBehalfOf).toEqual({ email: 'pmanager@example.com', name: 'Pat Manager' });
+    prismaMock.workspace.findUnique.mockResolvedValue({ internalDomains: ['example.com'] });
+    expect(await svc._creditTheWriter(connection, crossDomain)).toBe(crossDomain);
+    prismaMock.workspace.findUnique.mockRejectedValue(new Error('db down'));
+    expect(await svc._creditTheWriter(connection, crossDomain)).toBe(crossDomain);
   });
 
   test('sent for one of our own mailboxes, or by an agent: left as it was', async () => {

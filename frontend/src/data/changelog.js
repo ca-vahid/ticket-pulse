@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.58-preview';
+export const APP_VERSION = '4.3.59-preview';
 
 export const changelog = [
+  {
+    version: '4.3.59-preview',
+    date: 'November 9, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Vendor mail sent through a mailing service becomes a ticket again</strong> &mdash; when a mail is sent by one person on behalf of another, Ticket Pulse treats the actual writer as the requester. It also did that when a company sends its mail through a mailing service, which stamps its own relay address on the message, so the relay address became the requester and the ticket could not be created (the mail waited in the hold queue instead). The writer is now only credited when both addresses belong to the same organisation; otherwise the address the mail is from stays the requester.' },
+    ],
+  },
   {
     version: '4.3.58-preview',
     date: 'November 7, 2026',
