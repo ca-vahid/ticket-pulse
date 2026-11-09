@@ -162,6 +162,7 @@ export const NAV_DESTINATIONS = [
     hover: 'hover:border-cyan-300 hover:bg-cyan-100',
     bar: 'bg-cyan-600',
     gate: 'signedIn',
+    badgeKey: 'availability', // time-away requests waiting for me (useAvailabilityApprovalCount)
   },
   {
     // On-call (plans/URGENT_RESPONSE_PLAN.md): who covers after-hours urgent

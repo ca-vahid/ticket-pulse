@@ -92,9 +92,9 @@ const renderAt = (path) => render(
   </MemoryRouter>,
 );
 
+// Nov 2026: the types are a short list to tick, not a dropdown.
 const pickType = async (name) => {
-  fireEvent.click(screen.getByRole('combobox', { name: 'Leave type' }));
-  fireEvent.click(await screen.findByRole('option', { name: new RegExp(name) }));
+  fireEvent.click(await screen.findByRole('radio', { name: new RegExp(name) }));
 };
 
 beforeEach(() => {
@@ -129,7 +129,6 @@ describe('My time', () => {
   test('verdict: approved automatically', async () => {
     previewKind = 'approved';
     renderAt('/availability/my-time');
-    await screen.findByRole('combobox', { name: 'Leave type' });
     await pickType('Working from home');
     await waitFor(() => expect(screen.getByTestId('availability-verdict')).toHaveTextContent('Will be approved automatically'), { timeout: 2000 });
   });

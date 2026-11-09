@@ -7,7 +7,8 @@ import LightTabBar from '../components/common/LightTabBar';
 import { availabilityAPI } from '../services/api';
 import { applyWidth, useLayoutWidth } from '../contexts/LayoutContext';
 import { ErrorNote, Loading, useToast } from '../components/availability/availabilityUi';
-import MyTimePanel from '../components/availability/MyTimePanel';
+import MyTimePanel, { BOOK_NEW_EVENT } from '../components/availability/MyTimePanel';
+import { notifyAvailabilityChanged } from '../hooks/useAvailabilityApprovalCount';
 import TeamCalendarPanel from '../components/availability/TeamCalendarPanel';
 import MonthCalendarPanel from '../components/availability/MonthCalendarPanel';
 import OverviewPanel from '../components/availability/OverviewPanel';
@@ -35,7 +36,7 @@ const TAB_IDS = ['overview', 'calendar', 'month', 'my-time', 'approvals', 'histo
 
 /** The booking form on My time, once it has rendered (it loads after the tab). */
 function focusBookingForm(tries = 12) {
-  const form = typeof document !== 'undefined' ? document.querySelector('form[aria-label="Book time away"]') : null;
+  const form = typeof document !== 'undefined' ? document.querySelector('form[data-booking-form]') : null;
   if (form) {
     form.scrollIntoView({ block: 'start', behavior: 'smooth' });
     form.querySelector('select, input, button, [tabindex]')?.focus?.({ preventScroll: true });
@@ -109,6 +110,8 @@ export default function Availability() {
 
   const nameByEmail = useMemo(() => (config?.people ? new Map(config.people.map((p) => [p.email, p.name])) : null), [config]);
   const bookTime = () => {
+    // A request being changed is left as it was: the button always books anew.
+    window.dispatchEvent(new Event(BOOK_NEW_EVENT));
     if (tab !== 'my-time') navigate('/availability/my-time');
     focusBookingForm();
   };
@@ -126,7 +129,7 @@ export default function Availability() {
         {tab === 'calendar' && <TeamCalendarPanel me={me} />}
         {tab === 'month' && <MonthCalendarPanel me={me} />}
         {tab === 'my-time' && <MyTimePanel me={me} onChanged={loadMe} toast={toast.show} />}
-        {tab === 'approvals' && <ApprovalsPanel me={me} nameByEmail={nameByEmail} toast={toast.show} onChanged={loadMe} />}
+        {tab === 'approvals' && <ApprovalsPanel me={me} nameByEmail={nameByEmail} toast={toast.show} onChanged={() => { loadMe(); notifyAvailabilityChanged(); }} />}
         {tab === 'history' && <RequestHistoryPanel me={me} config={config} />}
         {tab === 'settings' && <AdminSettingsPanel config={config} error={configError} reload={reloadAdmin} toast={toast.show} />}
       </section>

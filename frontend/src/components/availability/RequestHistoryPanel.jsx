@@ -22,6 +22,7 @@ const EVENT_WORDS = {
   cancelled: 'Cancelled',
   imported: 'Imported from Vacation Tracker',
   updated: 'Changed',
+  edited: 'Changed while waiting',
   vt_written: 'Added to Vacation Tracker',
   vt_write_skipped: 'Not added to Vacation Tracker',
   vt_write_failed: 'Vacation Tracker refused it',
@@ -63,6 +64,7 @@ function actorName(actor, nameOf) {
 
 function eventDetail(e) {
   const d = e.details || {};
+  if (e.kind === 'edited' && d.before?.startDate) return `Was ${fmtRange(d.before)}`;
   return d.reason || d.note || d.error || null;
 }
 

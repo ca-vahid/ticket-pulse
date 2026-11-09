@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Settings } from
 import { cn } from '../../lib/utils';
 import { NAV_DESTINATIONS, homePathFor, useCanAccessSettings, useNavDestinations, useWorkspaceRole } from './navDestinations';
 import { useApprovalCount } from '../../hooks/useApprovalCount';
+import { useAvailabilityApprovalCount } from '../../hooks/useAvailabilityApprovalCount';
 import { useAuth } from '../../contexts/AuthContext';
 
 // Fixed left navigation rail for desktop (hidden below md — phones use
@@ -45,6 +46,9 @@ export default function SideRail() {
   const activeId = NAV_DESTINATIONS.find((dest) => matchPath(dest.path))?.id
     || (matchPath('/settings') ? 'settings' : null);
   const destinations = useNavDestinations();
+  // Nov 2026: time-away requests waiting for me, on the Availability entry.
+  const availabilityCount = useAvailabilityApprovalCount({ enabled: destinations.some((d) => d.badgeKey === 'availability') });
+  const badgeFor = (dest) => (dest.badgeKey === 'approvals' ? approvalCount : dest.badgeKey === 'availability' ? availabilityCount : 0);
   const onTickets = matchPath('/tickets');
   const [railCollapsed, setRailCollapsed] = useState(() => {
     try { return localStorage.getItem(RAIL_COLLAPSED_KEY) === 'true'; } catch { return false; }
@@ -100,13 +104,15 @@ export default function SideRail() {
     const isActive = dest.id === activeId;
     const onSectionHome = isActive && location.pathname === dest.path;
     const { Icon } = dest;
+    const badge = badgeFor(dest);
+    const waitingWords = badge > 0 ? ` (${badge} waiting for you)` : '';
     return (
       <button
         key={dest.id}
         type="button"
         onClick={() => { if (!isActive) navigate(dest.path); else if (!onSectionHome) navigate(sectionHome(dest)); }}
         aria-current={isActive ? 'page' : undefined}
-        title={isActive && !onSectionHome ? `Back to ${dest.label}` : dest.hint ? `${dest.label} — ${dest.hint}` : dest.label}
+        title={`${isActive && !onSectionHome ? `Back to ${dest.label}` : dest.hint ? `${dest.label} — ${dest.hint}` : dest.label}${waitingWords}`}
         className={cn(
           'group/row relative mx-[9px] flex h-10 flex-none items-center gap-3 overflow-hidden whitespace-nowrap rounded-xl border px-[8px] text-left text-[13.5px] font-semibold transition-colors tp-focus-ring',
           isActive
@@ -118,13 +124,13 @@ export default function SideRail() {
             labels 13.5 px. */}
         <span className="relative inline-flex h-6 w-6 flex-none items-center justify-center">
           <Icon className="h-6 w-6" />
-          {dest.badgeKey === 'approvals' && approvalCount > 0 && (
-            <span className="absolute -top-1.5 -right-1.5 inline-flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-red-600 px-0.5 text-[8.5px] font-bold text-white shadow-sm ring-1 ring-card">
-              {approvalCount > 99 ? '99+' : approvalCount}
+          {badge > 0 && (
+            <span data-testid={`rail-badge-${dest.id}`} className="absolute -top-1.5 -right-1.5 inline-flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-red-600 px-0.5 text-[8.5px] font-bold text-white shadow-sm ring-1 ring-card">
+              {badge > 99 ? '99+' : badge}
             </span>
           )}
         </span>
-        <span className="tp-rail-label flex-1 truncate">{dest.label}</span>
+        <span className="tp-rail-label flex-1 truncate">{dest.label}{badge > 0 && <span className="sr-only">{waitingWords}</span>}</span>
       </button>
     );
   };

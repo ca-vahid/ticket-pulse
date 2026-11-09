@@ -17,12 +17,15 @@ vi.mock('../../contexts/WorkspaceContext', () => ({ useWorkspace: () => wsState 
 
 const approvalCount = vi.fn(() => 0);
 vi.mock('../../hooks/useApprovalCount', () => ({ useApprovalCount: () => approvalCount() }));
+const availabilityCount = vi.fn(() => 0);
+vi.mock('../../hooks/useAvailabilityApprovalCount', () => ({ useAvailabilityApprovalCount: () => availabilityCount() }));
 
 afterEach(() => {
   cleanup();
   authState.user = { email: 'me@x.com', role: 'admin' };
   wsState.availableWorkspaces = [{ id: 1, role: 'admin' }];
   approvalCount.mockReturnValue(0);
+  availabilityCount.mockReturnValue(0);
 });
 
 const asMember = (role) => {
@@ -208,6 +211,24 @@ describe('SideRail', () => {
     approvalCount.mockReturnValue(4);
     renderRail();
     expect(screen.getByText('4')).toBeInTheDocument();
+  });
+
+  // Vahid, 9 Nov 2026: a number on Availability when time away waits for me.
+  test('shows the time-away badge on Availability, and says it to screen readers', () => {
+    availabilityCount.mockReturnValue(2);
+    renderRail();
+    const badge = screen.getByTestId('rail-badge-availability');
+    expect(badge).toHaveTextContent('2');
+    expect(badge.className).toMatch(/bg-red-600/);
+    const row = screen.getByRole('button', { name: /Availability/ });
+    expect(row).toHaveAttribute('title', expect.stringContaining('2 waiting for you'));
+    expect(row).toHaveTextContent('2 waiting for you');
+    expect(screen.queryByTestId('rail-badge-approvals')).not.toBeInTheDocument();
+  });
+
+  test('no badge on Availability when nothing waits', () => {
+    renderRail();
+    expect(screen.queryByTestId('rail-badge-availability')).not.toBeInTheDocument();
   });
 });
 
