@@ -1098,6 +1098,12 @@ class MailboxIngestService {
     const from = String(email?.from || '').trim().toLowerCase();
     const sender = String(email?.sender || '').trim().toLowerCase();
     if (!from || !sender || from === sender) return email;
+    // A delegate writes from inside the same organisation. A Sender on another
+    // domain is a mailing service's relay or bounce address (9 Nov 2026: a hotel's
+    // invoice arrived with Sender "<name>=<hotel domain>@<relay>", which became the
+    // requester and failed as an invalid address): From stays the requester.
+    const domainOf = (a) => a.slice(a.lastIndexOf('@') + 1);
+    if (domainOf(from) !== domainOf(sender)) return email;
     const local = (a) => a.replace(/\+[^@]*@/, '@');
     const mailbox = String(connection?.address || '').trim().toLowerCase();
     if (local(from) === mailbox || local(sender) === mailbox) return email;

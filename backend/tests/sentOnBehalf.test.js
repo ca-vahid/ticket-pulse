@@ -67,6 +67,16 @@ describe('mail sent on someone\'s behalf', () => {
     expect(await svc._creditTheWriter(connection, none)).toBe(none);
   });
 
+  test("a mailing service's relay Sender on another domain: From stays the requester", async () => {
+    const relayed = {
+      id: 'AAMr', subject: 'Your group charges',
+      from: 'billing@examplehotel.com', fromName: 'billing@examplehotel.com',
+      sender: 'billing=examplehotel.com@relay.example.net', senderName: 'billing=examplehotel.com@relay.example.net',
+    };
+    expect(await svc._creditTheWriter(connection, relayed)).toBe(relayed);
+    expect(prismaMock.mailboxConnection.findFirst).not.toHaveBeenCalled();
+  });
+
   test('sent for one of our own mailboxes, or by an agent: left as it was', async () => {
     const forMailbox = { ...delegateMail, from: 'it+tp123@example.com' };
     expect(await svc._creditTheWriter(connection, forMailbox)).toBe(forMailbox);
