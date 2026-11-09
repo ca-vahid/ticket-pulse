@@ -401,12 +401,29 @@ class TicketParkService {
         logger.warn(`Park wake of ${ticketDisplayRef(ticket)}: status not reopened (${err.message})`);
       }
     }
-    // Ticket Pulse tickets: the time parked does not count against the due
-    // date (FreshService owns FS-born due dates — untouched).
-    if (ticket.origin === TICKET_ORIGIN.TICKETPULSE && ticket.dueBy) {
+    // Ticket Pulse tickets: the time parked does not count against a due date
+    // the SLA worked out (FreshService owns FS-born due dates — untouched). A
+    // date someone set, an HR notice's effective date included, is a real date
+    // and stays put (9 Nov 2026: TP-10469's Nov 2 transfer date moved to Nov 9
+    // on wake, unrecorded). A move is written to the activity log.
+    if (ticket.origin === TICKET_ORIGIN.TICKETPULSE && ticket.dueBy && ticket.dueBySetBy !== 'manual') {
       const parkedMs = Math.max(0, Date.now() - new Date(park.parkedAt).getTime());
-      const shifted = new Date(new Date(ticket.dueBy).getTime() + parkedMs);
-      await prisma.ticket.update({ where: { id: ticket.id }, data: { dueBy: shifted } }).catch(() => {});
+      const from = new Date(ticket.dueBy);
+      const shifted = new Date(from.getTime() + parkedMs);
+      const moved = await prisma.ticket.update({ where: { id: ticket.id }, data: { dueBy: shifted } }).then(() => true).catch(() => false);
+      if (moved && parkedMs > 0) {
+        await ticketActivityRepository.create({
+          ticketId: ticket.id,
+          activityType: 'due_changed',
+          performedBy: 'Ticket Pulse (park ended)',
+          performedAt: new Date(),
+          details: {
+            source: 'ticketpulse_native', actorKind: 'system',
+            changes: { dueBy: { from: from.toISOString(), to: shifted.toISOString() } },
+            note: 'Moved out by the time the ticket was parked',
+          },
+        }).catch(() => {});
+      }
     }
     await ticketActivityRepository.create({
       ticketId: ticket.id,

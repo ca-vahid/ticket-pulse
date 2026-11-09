@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.60-preview';
+export const APP_VERSION = '4.3.61-preview';
 
 export const changelog = [
+  {
+    version: '4.3.61-preview',
+    date: 'November 9, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>A parked ticket keeps a due date someone set</strong> &mdash; when a parked Ticket Pulse ticket woke up, its due date was moved later by the time it had been parked. That is right for a due date the SLA works out, but it also moved dates a person or an HR notice had set: a transfer due on 2 Nov showed as due on 9 Nov, and nothing in the history said so. A date someone set now stays put, and when an SLA date does move, the ticket&rsquo;s activity says by how much.' },
+    ],
+  },
   {
     version: '4.3.60-preview',
     date: 'November 9, 2026',
