@@ -51,7 +51,9 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
   default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
 
-const { default: svc, macroSteps, presentMacro, UNATTENDED_REPLY_REASON } = await import('../src/services/ticketMacroService.js');
+const {
+  default: svc, macroSteps, presentMacro, UNATTENDED_REPLY_REASON, summarizeBulkPlans, BULK_MACRO_MAX,
+} = await import('../src/services/ticketMacroService.js');
 const { clearMailSubjectCache } = await import('../src/services/mailSubjectService.js');
 
 const ACTOR = { email: 'sam@example.com', name: 'Sam Ortiz', technicianId: 42 };
@@ -399,5 +401,97 @@ describe('QA 11-05b #4: macros run in exactly the order the admin set', () => {
     expect(ticketServiceMock.assignTicket.mock.calls.map((c) => c[2])).toEqual([5]);
     expect(order(ticketServiceMock.addPrivateNote)).toBeLessThan(order(ticketServiceMock.assignTicket));
     expect(result.steps[0]).toEqual(expect.objectContaining({ skipped: true, reason: 'A later assign step in this macro wins' }));
+  });
+});
+
+// QA 11-09 #9: one macro on a bulk-bar selection, ticket by ticket.
+describe('bulk preview and apply (QA 11-09 #9)', () => {
+  const BULK_MACRO = {
+    id: 31, name: 'Thank and close', isActive: true,
+    actions: { version: 2, steps: [
+      { type: 'reply', subject: 'All sorted', html: '<p>Hi {{requester.firstName}}, all sorted.</p>' },
+      { type: 'status', status: 'Closed' },
+    ] },
+  };
+  const TICKETS = {
+    601: tpTicket({ id: 601, nativeNumber: 601, internalCategory: { name: 'Hardware' }, requester: { name: 'Alex Rivera', email: 'alex@example.com', unattended: false } }),
+    602: tpTicket({ id: 602, nativeNumber: 602, internalCategory: { name: 'Security' }, requester: { name: 'Blair Chen', email: 'blair@example.com', unattended: false } }),
+    603: tpTicket({ id: 603, origin: 'freshservice', nativeNumber: null, freshserviceTicketId: 230003, requester: { name: 'Casey Moss', email: 'casey@example.com', unattended: false } }),
+  };
+  beforeEach(() => {
+    prismaMock.ticketMacro.findFirst.mockResolvedValue(BULK_MACRO);
+    prismaMock.ticket.findFirst.mockImplementation(async ({ where }) => TICKETS[where.id] || null);
+  });
+
+  test('preview: a plan per ticket (no rendered bodies) and a grouped summary of skips and notices', async () => {
+    const out = await svc.previewMany([601, 602, 603, 604, 601, 'x'], 1, 31, ACTOR);
+    expect(out.macro).toEqual(expect.objectContaining({ id: 31, name: 'Thank and close' }));
+    expect(out.tickets.map((t) => [t.ticketId, t.ref, t.ok])).toEqual([
+      [601, 'TP-601', true], [602, 'TP-602', true], [603, '#230003', true], [604, null, false],
+    ]);
+    expect(out.tickets[3].error).toMatch(/not found/);
+    for (const t of out.tickets.filter((x) => x.ok)) {
+      for (const s of t.steps) expect(s).not.toHaveProperty('html');
+    }
+    expect(out.summary).toEqual(expect.objectContaining({ total: 4, willRun: 3, replies: 3, nothingToDo: [] }));
+    expect(out.summary.unavailable).toEqual([{ ticketId: 604, error: expect.stringMatching(/not found/) }]);
+    // The Security ticket cannot close without a reason; the others close.
+    expect(out.summary.skips).toEqual([expect.objectContaining({ type: 'status', count: 1, refs: ['TP-602'], reason: expect.stringMatching(/resolution reason/) })]);
+    // The FreshService ticket composes its own subject.
+    expect(out.summary.notices).toEqual([expect.objectContaining({ type: 'reply', count: 1, refs: ['#230003'], notice: expect.stringMatching(/FreshService composes the subject/) })]);
+    expect(ticketServiceMock.addReply).not.toHaveBeenCalled();
+  });
+
+  test('apply: each ticket runs on its own — its own reply to its own requester, its own history row', async () => {
+    const out = await svc.applyMany([601, 602, 603], 1, 31, ACTOR);
+    expect(out).toEqual(expect.objectContaining({ total: 3, applied: 3, failed: 0 }));
+    expect(out.results.map((r) => [r.ticketId, r.ref, r.ok])).toEqual([[601, 'TP-601', true], [602, 'TP-602', true], [603, '#230003', true]]);
+    // One reply per ticket, each addressed through its own ticket, each greeting its own requester.
+    expect(ticketServiceMock.addReply.mock.calls.map((c) => [c[0], c[2].bodyHtml])).toEqual([
+      [601, '<p>Hi Alex, all sorted.</p>'],
+      [602, '<p>Hi Blair, all sorted.</p>'],
+      [603, '<p>Hi Casey, all sorted.</p>'],
+    ]);
+    // The same rules as a single apply: the Security close is skipped, the FS-born one goes FS-first.
+    expect(ticketServiceMock.changeStatus.mock.calls.map((c) => c[0])).toEqual([601]);
+    expect(ticketServiceMock.updateFsTicket).toHaveBeenCalledWith(603, 1, { status: 'Closed' }, ACTOR, { allowAssignableOnly: true });
+    expect(out.results[1].skipped).toBe(1);
+    expect(ticketServiceMock._audit.mock.calls.map((c) => [c[0], c[1], c[3].source])).toEqual([
+      [601, 'macro_applied', 'bulk'], [602, 'macro_applied', 'bulk'], [603, 'macro_applied', 'bulk'],
+    ]);
+  });
+
+  test('one failure does not stop the rest: a missing ticket and a failing step are both reported', async () => {
+    ticketServiceMock.addReply.mockImplementation(async (id) => {
+      if (id === 602) throw new Error('mailbox offline');
+      return {};
+    });
+    const out = await svc.applyMany([601, 604, 602, 603], 1, 31, ACTOR);
+    expect(out).toEqual(expect.objectContaining({ total: 4, applied: 2, failed: 2 }));
+    expect(out.results.find((r) => r.ticketId === 604)).toEqual(expect.objectContaining({ ok: false, error: expect.stringMatching(/not found/) }));
+    expect(out.results.find((r) => r.ticketId === 602)).toEqual(expect.objectContaining({ ok: false, ref: 'TP-602', error: 'Reply to the requester: mailbox offline' }));
+    // 603 still ran after both failures.
+    expect(ticketServiceMock.addReply.mock.calls.map((c) => c[0])).toEqual([601, 602, 603]);
+  });
+
+  test('the cap, an empty selection and a missing macro are refused before anything runs', async () => {
+    const tooMany = Array.from({ length: BULK_MACRO_MAX + 1 }, (_, i) => i + 1);
+    await expect(svc.applyMany(tooMany, 1, 31, ACTOR)).rejects.toThrow(`up to ${BULK_MACRO_MAX} tickets`);
+    await expect(svc.previewMany(tooMany, 1, 31, ACTOR)).rejects.toThrow(`up to ${BULK_MACRO_MAX} tickets`);
+    await expect(svc.applyMany([], 1, 31, ACTOR)).rejects.toThrow(/at least one ticket/);
+    await expect(svc.applyMany([601], 1, undefined, ACTOR)).rejects.toThrow(/Pick a macro/);
+    prismaMock.ticketMacro.findFirst.mockResolvedValue(null);
+    await expect(svc.applyMany([601], 1, 31, ACTOR)).rejects.toThrow(/Macro not found/);
+    expect(ticketServiceMock.addReply).not.toHaveBeenCalled();
+    expect(ticketServiceMock._audit).not.toHaveBeenCalled();
+  });
+
+  test('summarizeBulkPlans counts tickets with nothing to do', () => {
+    const s = summarizeBulkPlans([
+      { ticketId: 1, ref: 'TP-1', ok: true, steps: [{ type: 'group', run: false, summary: 'Set group to Desk', reason: 'FreshService owns this field on FreshService tickets' }] },
+      { ticketId: 2, ref: 'TP-2', ok: true, steps: [{ type: 'note', run: true, summary: 'Add an internal note' }] },
+    ]);
+    expect(s).toEqual(expect.objectContaining({ total: 2, willRun: 1, nothingToDo: ['TP-1'], replies: 0 }));
+    expect(s.skips[0]).toEqual(expect.objectContaining({ type: 'group', count: 1 }));
   });
 });

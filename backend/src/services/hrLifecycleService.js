@@ -403,6 +403,181 @@ function fmtDay(iso) {
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
 }
 
+// ---------------------------------------------------------------- leave notices (QA 11-09 #1)
+//
+// HR re-sends "On Leave Notification: <person>" when a leave under way
+// changes: the body lists the NEW record (leave start, expected return) and
+// the REMOVED one. The leave start is then months in the past; IT's work is
+// the return. The planner below is pure (no reads, no writes) so the dry-run
+// script can replay old notices through it.
+
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const shortDay = (iso) => { const [, m, d] = String(iso).split('-').map(Number); return `${SHORT_MONTHS[m - 1]} ${d}`; };
+// A park holds six months (ticketParkService MAX_PARK_DAYS 184); a later
+// return holds as long as allowed and is parked again when it wakes.
+const LEAVE_PARK_HOLD_DAYS = 180;
+const LEAVE_WAKE_TIME = '08:00:00';
+const LEAVE_SUBJECT = /^on leave notification:\s*(.+?)(?:\s+will be going on leave\b.*|\s+expected (?:return|leave) date has changed\b.*)?$/i;
+
+/** `HH:MM:SS` local on `iso` in `timeZone`, as an ISO instant. */
+export function localInstant(iso, time, timeZone = 'America/Vancouver') {
+  if (!iso) return null;
+  let offset = 'Z';
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'longOffset' }).formatToParts(new Date(`${iso}T12:00:00Z`));
+    const name = parts.find((p) => p.type === 'timeZoneName')?.value || 'GMT';
+    const m = name.match(/GMT([+-]\d{2}):?(\d{2})?/);
+    if (m) offset = `${m[1]}:${m[2] || '00'}`;
+  } catch { /* UTC */ }
+  return new Date(`${iso}T${time}${offset}`).toISOString();
+}
+
+/** "On Leave Notification: Pat Example will be going On Leave" → "pat example" (null when not a leave subject). */
+export function leavePersonFromSubject(subject) {
+  const m = String(subject || '').replace(/\s+/g, ' ').trim().match(LEAVE_SUBJECT);
+  return m ? normalizePersonName(m[1]) || null : null;
+}
+
+/**
+ * Does this leave notice change a leave IT already holds? A "Removed Leave
+ * Records" section with dates, a leave start before the notice with a return
+ * date, or a "return date has changed" subject.
+ */
+export function isLeaveChange(c) {
+  if (!c) return false;
+  if (c.type === 'leave_change') return c.changed === 'return';
+  if (c.type !== 'leave') return false;
+  // A leave that has not begun keeps the rule IT works it by: its start.
+  if (c.leaveStart && c.noticeDate && c.leaveStart >= c.noticeDate) return false;
+  if (c.leaveChange) return true;
+  return Boolean(c.leaveStart && c.returnDate && c.noticeDate && c.leaveStart < c.noticeDate);
+}
+
+/** The return date a leave notice states (null when it states none). */
+export function leaveReturnDate(c) {
+  if (!c) return null;
+  if (c.type === 'leave_change') return c.changed === 'return' ? c.date || null : null;
+  return c.returnDate || null;
+}
+
+/** Park a leave ticket until 08:00 on `iso` (workspace time); null when that is not in the future. */
+export function leavePark(iso, { timeZone = 'America/Vancouver', now = new Date(), reason, source = 'suggested_hr' } = {}) {
+  if (!iso) return null;
+  const at = new Date(localInstant(iso, LEAVE_WAKE_TIME, timeZone));
+  const nowMs = new Date(now).getTime();
+  if (at.getTime() <= nowMs + 3600e3) return null;
+  const cap = nowMs + LEAVE_PARK_HOLD_DAYS * 86400e3;
+  const capped = at.getTime() > cap;
+  return { date: iso, until: (capped ? new Date(cap) : at).toISOString(), capped, reason, source };
+}
+
+/**
+ * What a leave notice does. Pure: everything it needs comes in.
+ *   c          the classification (classifyHrNotice)
+ *   side       Settings → leave { assigneeTechId, park }
+ *   noticeRef  the notice's display ref ("TP-12" / "#240001")
+ *   candidates the person's OPEN leave tickets from before this notice (only
+ *              read for a change notice): [{ ticketId, ref, origin, parked,
+ *              parkDate, parkSource, dueDate, returnDate }]
+ *   today      the local date the rules compare with ("never in the past")
+ *   now, timeZone  for the 08:00 park instant
+ * Returns a plan { decision, familyKind: 'leave', notice, …, warnings, summary }.
+ */
+export function planLeaveNotice({ c, side = {}, noticeTicketId = null, noticeRef = 'this notice', candidates = null, today, now = new Date(), timeZone = 'America/Vancouver' }) {
+  const person = c?.person || 'this person';
+  const what = c?.type === 'leave_change' ? `leave ${c.changed} date change` : 'leave';
+  const assigneeTechId = side?.assigneeTechId || null;
+  const parkOn = side?.park !== false;
+  const assigned = assigneeTechId ? ', assigned per settings' : '';
+  const warnings = [];
+  const change = isLeaveChange(c);
+  const newReturn = leaveReturnDate(c);
+  const future = (iso) => Boolean(iso && today && iso > today);
+  const returnPark = (reason) => (parkOn && future(newReturn) ? leavePark(newReturn, { timeZone, now, reason }) : null);
+  const base = { familyKind: 'leave', leaveChange: change, leaveStart: c?.leaveStart || null, returnDate: newReturn };
+
+  if (!change) {
+    // An ordinary notice: due (and parked by the lead time) on the leave start.
+    const date = c?.date || null;
+    if (date && !future(date) && date !== today) {
+      warnings.push(`The notice's date ${date} is already past and it states no later return: no due date, not parked`);
+      return {
+        ...base, decision: 'notice_is_ticket', warnings,
+        notice: { ticketId: noticeTicketId, assigneeTechId, dueDate: null, park: false },
+        summary: `${person}: ${what} — the notice is the ticket${assigned}; its date ${fmtDay(date)} is past, so no due date and not parked`,
+      };
+    }
+    return {
+      ...base, decision: 'notice_is_ticket', warnings,
+      notice: { ticketId: noticeTicketId, assigneeTechId, dueDate: date, park: parkOn },
+      summary: `${person}: ${what} — the notice is the ticket${date ? `, due ${fmtDay(date)}` : ''}${assigned}${parkOn && date ? ', parked until its lead time' : ''}`,
+    };
+  }
+
+  const open = Array.isArray(candidates) ? candidates : [];
+  const noticeOnly = (extra = '') => {
+    if (!future(newReturn)) {
+      warnings.push(newReturn
+        ? `The return date ${newReturn} is not in the future: no due date, not parked`
+        : `The leave started ${c?.leaveStart ? `on ${c.leaveStart}` : 'before the notice'} and the notice states no return date: no due date, not parked`);
+    }
+    const park = returnPark(`On leave until ${shortDay(newReturn)} (from the HR notice)`);
+    return {
+      ...base, decision: 'notice_is_ticket', warnings,
+      notice: { ticketId: noticeTicketId, assigneeTechId, dueDate: future(newReturn) ? newReturn : null, park: Boolean(park), returnPark: park },
+      summary: future(newReturn)
+        ? `${person}: ${what} — the leave is under way; the notice is the ticket, due on the return ${fmtDay(newReturn)}${assigned}${park ? `, parked until ${fmtDay(newReturn)}` : ''}${extra}`
+        : `${person}: ${what} — the notice is the ticket${assigned}; no future return date, so no due date and not parked${extra}`,
+    };
+  };
+
+  if (!open.length) return noticeOnly();
+  if (open.length > 1) {
+    warnings.push(`${open.length} open leave tickets for ${person} (${open.map((x) => x.ref).join(', ')}): nothing moved`);
+    return {
+      ...base, decision: 'leave_change_ambiguous', warnings,
+      candidates: open.map((x) => ({ ticketId: x.ticketId, ref: x.ref })),
+      notice: { ticketId: noticeTicketId, assigneeTechId, dueDate: null, park: false },
+      summary: `${person}: leave change — ${open.length} open leave tickets (${open.map((x) => x.ref).join(', ')}); left for a person`,
+    };
+  }
+
+  const m = open[0];
+  const fromReturn = c?.removedReturnDate || m.returnDate || m.parkDate || null;
+  const matched = { ticketId: m.ticketId, ref: m.ref, origin: m.origin || null };
+  if (!newReturn) {
+    warnings.push(`The change notice states no return date: ${m.ref} was not moved`);
+    return {
+      ...base, decision: 'no_date', warnings, matched, fromReturn,
+      candidates: [{ ticketId: m.ticketId, ref: m.ref }],
+      notice: { ticketId: noticeTicketId, assigneeTechId, dueDate: null, park: false },
+      summary: `${person}: leave change with no return date — ${m.ref} left as it is; left for a person`,
+    };
+  }
+  if (fromReturn && fromReturn === newReturn) {
+    return {
+      ...base, decision: 'leave_repeat', warnings, matched, fromReturn, toReturn: newReturn,
+      notice: { ticketId: noticeTicketId, close: true },
+      summary: `${person}: HR sent the leave again with the same return ${fmtDay(newReturn)} — merged into ${m.ref}, nothing moved`,
+    };
+  }
+  const later = !fromReturn || newReturn > fromReturn;
+  const repark = future(newReturn)
+    ? leavePark(newReturn, { timeZone, now, reason: `On leave until ${shortDay(newReturn)} (HR change notice ${noticeRef})`, source: m.parkSource || 'suggested_hr' })
+    : null;
+  // The due date follows only when it was the old return (a person's own date stays).
+  const moveDue = future(newReturn) && m.dueDate && fromReturn && m.dueDate === fromReturn ? newReturn : null;
+  const wake = !repark && Boolean(m.parked);
+  const act = repark
+    ? `re-parked until ${fmtDay(newReturn)}${repark.capped ? ' (held six months, parked again when it wakes)' : ''}`
+    : (wake ? 'woken: the return has come' : 'nothing to park (the return has come)');
+  return {
+    ...base, decision: later ? 'leave_extended' : 'leave_shortened', warnings, matched, fromReturn, toReturn: newReturn, repark, wake, moveDue,
+    notice: { ticketId: noticeTicketId, close: true },
+    summary: `${person}: return moved ${fromReturn ? `from ${fmtDay(fromReturn)} ` : ''}to ${fmtDay(newReturn)} — ${m.ref} ${act}; this notice merged into it`,
+  };
+}
+
 function slugKey(title) {
   return String(title || '').toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'task';
 }
@@ -1057,10 +1232,11 @@ class HrLifecycleService {
     }
   }
 
-  async _close(t, out) {
+  async _close(t, out, { resolutionReason = null, resolutionNote = null } = {}) {
     try {
       const svc = await this._ticketService();
-      if (this._isNative(t)) await svc.changeStatus(t.id, t.workspaceId, 'Closed', HR_LIFECYCLE_ACTOR);
+      // A resolution note rides on TP-born tickets (FreshService-born ones get the private note).
+      if (this._isNative(t)) await svc.changeStatus(t.id, t.workspaceId, 'Closed', HR_LIFECYCLE_ACTOR, ...(resolutionReason ? [{ resolutionReason, resolutionNote }] : []));
       else await svc.updateFsTicket(t.id, t.workspaceId, { status: 'Closed' }, HR_LIFECYCLE_ACTOR);
       t.status = 'Closed';
       return true;
@@ -1341,6 +1517,95 @@ class HrLifecycleService {
     return found;
   }
 
+  /**
+   * QA 11-09 #1 — the person's OPEN leave tickets from before this notice, in
+   * this workspace. Reads only. Found by the employee # of an earlier leave
+   * event (else the normalised name), by subject ("On Leave Notification:
+   * <person> …", FreshService-born ones included), and by an active HR park
+   * on a ticket about the person. Each: { ticketId, ref, origin, parked,
+   * parkDate, parkSource, dueDate, returnDate } — dates local to `tz`.
+   */
+  async findLeaveTickets(notice, c, tz) {
+    const ws = Number(notice.workspaceId);
+    const key = normalizePersonName(c?.person || '');
+    const emp = c?.employeeId ? String(c.employeeId) : null;
+    if (!key && !emp) return [];
+    const before = notice.createdAt ? new Date(notice.createdAt).getTime() : null;
+    const select = {
+      id: true, workspaceId: true, origin: true, nativeNumber: true, freshserviceTicketId: true, subject: true, descriptionText: true,
+      status: true, dueBy: true, createdAt: true, parkedUntil: true, requester: { select: { email: true } },
+    };
+
+    // 1. Earlier leave events: the employee # first, else the name.
+    const events = await soft(() => prisma.hrLifecycleEvent.findMany({
+      where: { workspaceId: ws, noticeType: { in: ['leave', 'leave_change'] } },
+      orderBy: { id: 'desc' },
+      take: 500,
+      select: { id: true, ticketId: true, person: true, decision: true, details: true },
+    }), []);
+    const others = (events || []).filter((e) => e.ticketId && e.ticketId !== notice.id);
+    const byEmp = emp ? others.filter((e) => String(e.details?.classification?.employeeId || '') === emp) : [];
+    const mine = byEmp.length ? byEmp : others.filter((e) => key && normalizePersonName(e.person || e.details?.classification?.person || '') === key);
+    const eventReturn = new Map(); // ticket id → the return its own notice stated
+    for (const e of mine) {
+      if (!eventReturn.has(e.ticketId) && leaveReturnDate(e.details?.classification)) eventReturn.set(e.ticketId, leaveReturnDate(e.details.classification));
+    }
+    // A ticket an earlier change notice already moved: its return is that move's.
+    const moved = new Map();
+    for (const e of others) {
+      const p = e.details?.plan;
+      if (['leave_extended', 'leave_shortened'].includes(e.decision) && p?.matched?.ticketId && p.toReturn && !moved.has(p.matched.ticketId)) moved.set(p.matched.ticketId, p.toReturn);
+    }
+
+    // 2. By subject, and 3. by an active HR park on a ticket about the person.
+    const bySubject = c?.person ? await soft(() => prisma.ticket.findMany({
+      where: { workspaceId: ws, id: { not: notice.id }, subject: { contains: String(c.person).trim(), mode: 'insensitive' } },
+      select, orderBy: { id: 'desc' }, take: 25,
+    }), []) : [];
+    const hrParks = await soft(() => prisma.ticketPark.findMany({
+      where: { workspaceId: ws, endedAt: null, source: 'suggested_hr' },
+      select: { ticketId: true, reason: true },
+      take: 500,
+    }), []);
+    const leaveParkIds = (hrParks || []).filter((p) => /leave/i.test(p.reason || '')).map((p) => p.ticketId);
+    const ids = [...new Set([...mine.map((e) => e.ticketId), ...leaveParkIds].filter((id) => id && id !== notice.id))];
+    const byId = ids.length ? await soft(() => prisma.ticket.findMany({ where: { workspaceId: ws, id: { in: ids } }, select, take: 200 }), []) : [];
+    const fromEvents = new Set(mine.map((e) => e.ticketId));
+    const parkIds = new Set(leaveParkIds);
+
+    const named = key ? new RegExp(`(^|\\s)${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`) : null;
+    const pool = new Map();
+    for (const t of [...(bySubject || []), ...(byId || [])]) {
+      if (!t || t.id === notice.id || pool.has(t.id)) continue;
+      const aboutPerson = Boolean(named && named.test(normalizePersonName(t.subject)));
+      const ok = fromEvents.has(t.id)
+        || (leavePersonFromSubject(t.subject) === key)
+        || (parkIds.has(t.id) && aboutPerson);
+      if (ok) pool.set(t.id, t);
+    }
+
+    const parks = await this._parkService().catch(() => null);
+    const out = [];
+    for (const t of pool.values()) {
+      if (before && t.createdAt && new Date(t.createdAt).getTime() >= before) continue;
+      if (await this._isTerminal(ws, t.status)) continue;
+      const park = parks?.activePark ? await soft(() => parks.activePark(t.id)) : null;
+      const until = park?.until || t.parkedUntil || null;
+      const own = this.classify(t, tz);
+      out.push({
+        ticketId: t.id,
+        ref: ticketDisplayRef(t),
+        origin: t.origin || null,
+        parked: Boolean(until),
+        parkDate: until ? localDate(until, tz) : null,
+        parkSource: park?.source || (until ? 'suggested_hr' : null),
+        dueDate: t.dueBy ? localDate(t.dueBy, tz) : null,
+        returnDate: moved.get(t.id) || eventReturn.get(t.id) || leaveReturnDate(own) || null,
+      });
+    }
+    return out;
+  }
+
   async findOpenFamily(workspaceId, kind, c) {
     const ws = Number(workspaceId);
     if (c?.employeeId) {
@@ -1530,11 +1795,22 @@ class HrLifecycleService {
   }
 
   /** What a notice would do. Reads only. */
-  async plan(ticket, c, settings, tz, { shadow = false, adopt = false, nhTickets = null } = {}) {
+  async plan(ticket, c, settings, tz, { shadow = false, adopt = false, nhTickets = null, asOf = null } = {}) {
     const ws = ticket.workspaceId;
     const fx = NOTICE_EFFECT[c.type];
     const person = c.person || c.username || 'this person';
     if (!fx) return { decision: 'ignored', summary: 'Not a lifecycle notice' };
+
+    // QA 11-09 #1: leave notices — a change to a leave under way extends the
+    // ticket IT already holds; nothing is ever due or parked in the past.
+    if (fx.family === 'leave') {
+      const now = asOf ? new Date(asOf) : new Date();
+      const candidates = isLeaveChange(c) ? await this.findLeaveTickets(ticket, c, tz) : null;
+      return planLeaveNotice({
+        c, side: settings.leave || {}, noticeTicketId: ticket.id, noticeRef: ticketDisplayRef(ticket),
+        candidates, today: localDate(now, tz), now, timeZone: tz,
+      });
+    }
 
     if (fx.effect === 'notice') {
       const side = fx.family === 'leave' ? settings.leave : settings.officeChange;
@@ -1808,6 +2084,15 @@ class HrLifecycleService {
       case 'notice_is_ticket':
         await this._handleNotice(ticket, c, plan, tz, out);
         break;
+      case 'leave_extended':
+      case 'leave_shortened':
+      case 'leave_repeat':
+        if (!(await this._mergeLeave(ticket, c, plan, tz, out))) outcome = 'skipped';
+        break;
+      case 'leave_change_ambiguous':
+        await this._note(ticket, `<p><strong>Leave:</strong> ${esc(plan.summary)}. Nothing was moved: pick the right ticket, move its park to the new return and close this notice.</p>`, out);
+        outcome = 'skipped';
+        break;
       case 'no_family':
       case 'no_date':
         await this._note(ticket, `<p><strong>Onboarding / Offboarding:</strong> ${esc(plan.summary)}.</p>`, out);
@@ -1821,10 +2106,16 @@ class HrLifecycleService {
       out.warnings.push(err.message);
       logger.warn(`HR lifecycle: ${plan.decision} for ticket ${ticket.id} failed: ${err.message}`);
     }
+    // The planner's own warnings (a date in the past, several matches) go on the event too.
+    for (const w of plan.warnings || []) if (!out.warnings.includes(w)) out.warnings.push(w);
     return this._record(ws, {
       ticket, c, plan, mode: 'live', outcome, familyId,
       summary: plan.summary + (out.warnings.length ? ` — ${out.warnings.length} warning(s)` : ''),
-      details: { warnings: out.warnings, created: out.created, ...(out.adopted.length || plan.adopt ? { adopted: out.adopted, organisedBy: actor?.email || actor?.name || null } : {}) },
+      details: {
+        warnings: out.warnings, created: out.created,
+        ...(out.adopted.length || plan.adopt ? { adopted: out.adopted, organisedBy: actor?.email || actor?.name || null } : {}),
+        ...(out.leave ? { leave: out.leave } : {}),
+      },
       actor: actor?.email || actor?.name || null,
     });
   }
@@ -2243,19 +2534,92 @@ class HrLifecycleService {
     await this._assign(ticket, n.assigneeTechId, out);
     if (n.dueDate && n.dueDate >= (c.noticeDate || '')) await this._setDue(ticket, n.dueDate, tz, out);
     let parked = null;
+    let notParked = null;
     if (n.park && n.dueDate && !ticket.parkedUntil) {
       try {
         const parks = await this._parkService();
-        const s = await parks.hrSuggestion(ticket.id, ticket.workspaceId);
-        if (s?.usable) {
-          await parks.park(ticket.id, ticket.workspaceId, { kind: 'until_date', until: s.until, reason: s.reason }, { name: 'Ticket Pulse (HR notice)', role: 'automation' }, { source: 'suggested_hr' });
-          parked = s.wakeDate;
+        if (n.returnPark) {
+          // QA 11-09 #1: a leave under way waits for the return, 08:00 workspace time.
+          await parks.park(ticket.id, ticket.workspaceId, { kind: 'until_date', until: n.returnPark.until, reason: n.returnPark.reason }, PARK_ACTOR, { source: n.returnPark.source || 'suggested_hr' });
+          parked = localDate(n.returnPark.until, tz);
+        } else {
+          const s = await parks.hrSuggestion(ticket.id, ticket.workspaceId);
+          if (s?.usable) {
+            await parks.park(ticket.id, ticket.workspaceId, { kind: 'until_date', until: s.until, reason: s.reason }, PARK_ACTOR, { source: 'suggested_hr' });
+            parked = s.wakeDate;
+          } else {
+            notParked = s ? `its lead time (${fmtDay(s.wakeDate)}) is past or more than six months away` : 'the notice has no clear date';
+          }
         }
       } catch (err) {
+        notParked = err.message;
         out.warnings.push(`Park skipped: ${err.message}`);
       }
     }
-    await this._note(ticket, `<p><strong>Onboarding / Offboarding:</strong> ${esc(plan.summary)}${parked ? ` — parked until ${esc(fmtDay(parked))}` : ''}.</p>`, out);
+    // The summary never claims a park that did not happen.
+    if (notParked) {
+      plan.summary = `${String(plan.summary).replace(/, parked until .*$/, '')} (not parked: ${notParked})`;
+      if (!out.warnings.some((w) => w.startsWith('Park skipped'))) out.warnings.push(`Not parked: ${notParked}`);
+    }
+    const tail = parked && !/parked until/.test(plan.summary) ? ` — parked until ${esc(fmtDay(parked))}` : '';
+    await this._note(ticket, `<p><strong>Onboarding / Offboarding:</strong> ${esc(plan.summary)}${tail}.</p>`, out);
+  }
+
+  /**
+   * QA 11-09 #1 — HR changed the return of a leave IT already holds: the
+   * held ticket follows the new return (re-parked 08:00 that day, workspace
+   * time, same park source; woken when the return has come), both tickets get
+   * a note, and this notice is closed as merged into it. Returns false when
+   * nothing could be done (the notice then stays open for a person).
+   */
+  async _mergeLeave(notice, c, plan, tz, out) {
+    const ws = notice.workspaceId;
+    const m = await this._loadTicket(plan.matched?.ticketId, ws);
+    const person = c?.person || 'this person';
+    const nref = ticketDisplayRef(notice);
+    if (!m || await this._isTerminal(ws, m.status)) {
+      out.warnings.push(`The leave ticket ${plan.matched?.ref || ''} is gone or closed: nothing merged`);
+      plan.summary = `${person}: leave change — the matched ticket ${plan.matched?.ref || ''} is gone or closed; left for a person`;
+      await this._note(notice, `<p><strong>Leave:</strong> ${esc(plan.summary)}.</p>`, out);
+      return false;
+    }
+    const ref = ticketDisplayRef(m);
+    const parks = await this._parkService();
+    let action = '';
+    if (plan.decision !== 'leave_repeat') {
+      if (plan.repark) {
+        try {
+          await parks.park(m.id, ws, { kind: 'until_date', until: plan.repark.until, reason: plan.repark.reason }, PARK_ACTOR, { source: plan.repark.source || 'suggested_hr' });
+          m.parkedUntil = new Date(plan.repark.until);
+          action = plan.repark.capped
+            ? ` Parked until ${fmtDay(localDate(plan.repark.until, tz))} (as long as a park holds); it is parked again when it wakes.`
+            : ` Parked until ${fmtDay(plan.toReturn)}.`;
+        } catch (err) {
+          out.warnings.push(`Re-park of ${ref} failed: ${err.message}`);
+          plan.summary = `${person}: return moved to ${fmtDay(plan.toReturn)} — re-parking ${ref} failed (${err.message}); left for a person`;
+          await this._note(notice, `<p><strong>Leave:</strong> ${esc(plan.summary)}. ${esc(ref)} still waits for the old return${plan.fromReturn ? ` (${esc(fmtDay(plan.fromReturn))})` : ''}.</p>`, out);
+          return false;
+        }
+      } else if (plan.wake && m.parkedUntil) {
+        await parks.unpark(m.id, ws, { reason: 'unparked', reopen: true, note: `HR moved the return to ${fmtDay(plan.toReturn)}` }, PARK_ACTOR)
+          .then(() => { m.parkedUntil = null; action = ' Woken: the return has come.'; })
+          .catch((err) => out.warnings.push(`Waking ${ref} failed: ${err.message}`));
+      }
+      if (plan.moveDue) await this._setDue(m, plan.moveDue, tz, out);
+    }
+    const change = plan.decision === 'leave_repeat'
+      ? `HR sent ${person}'s leave again with the same return date (${fmtDay(plan.toReturn)}).`
+      : `HR changed ${person}'s return date${plan.fromReturn ? ` from ${fmtDay(plan.fromReturn)}` : ''} to ${fmtDay(plan.toReturn)}.`;
+    await this._note(m, `<p><strong>Leave:</strong> ${esc(change)}${esc(action)}${plan.moveDue ? ` Due date now ${esc(fmtDay(plan.moveDue))}.` : ''} Change notice ${esc(nref)}: “${esc(noticeQuote(notice))}”</p>`, out);
+    await this._link(m, notice, out);
+    await this._note(notice, `<p><strong>Leave:</strong> ${esc(change)} Merged into ${esc(ref)}, which holds this leave; closed by Ticket Pulse.</p>`, out);
+    if (notice.parkedUntil) {
+      await parks.unpark(notice.id, ws, { reason: 'closed', reopen: false, note: `Merged into ${ref}` }, PARK_ACTOR)
+        .catch((err) => out.warnings.push(`Unpark of ${nref} skipped: ${err.message}`));
+    }
+    await this._close(notice, out, { resolutionReason: 'duplicate', resolutionNote: `Merged into ${ref} (HR leave change: return ${fmtDay(plan.toReturn)})` });
+    out.leave = { matchedTicketId: m.id, matchedRef: ref, fromReturn: plan.fromReturn || null, toReturn: plan.toReturn || null, reparkedUntil: plan.decision !== 'leave_repeat' && plan.repark ? plan.repark.until : null, woken: Boolean(plan.wake && !m.parkedUntil) };
+    return true;
   }
 
   // ------------------------------------------------------------ reassign by office

@@ -67,7 +67,7 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
 
 const {
   default: mailboxIngestService, looksLikeLoopMail, referencedMessageIds, emailRecipients,
-  plusAddressTicketNumbers, plusAddressFsTicketNumbers, mergeInboundCc, MAX_CC_EMAILS,
+  plusAddressTicketNumbers, plusAddressFsTicketNumbers, mergeInboundCc, MAX_CC_EMAILS, senderBurstKeys,
 } = await import('../src/services/mailboxIngestService.js');
 
 const connection = { id: 1, workspaceId: 1, address: 'helpdesk-pilot@example.com' };
@@ -374,7 +374,7 @@ describe('matching ladder', () => {
   });
 
   test('per-sender create cap prevents runaway loops', async () => {
-    const senderCreates = new Map([['rita@example.com', 3]]);
+    const senderCreates = new Map([[senderBurstKeys(baseEmail).subjectKey, 3]]);
     const outcome = await mailboxIngestService.processEmail(connection, baseEmail, senderCreates);
     expect(outcome).toBe('skipped');
     expect(ticketServiceMock.createTicket).not.toHaveBeenCalled();
@@ -1285,7 +1285,7 @@ describe('helpdesk mailbox profile', () => {
   });
 
   test('a burst from one sender is held, not dropped', async () => {
-    const senderCreates = new Map([['rita@example.com', 3]]);
+    const senderCreates = new Map([[senderBurstKeys(baseEmail).subjectKey, 3]]);
     const outcome = await mailboxIngestService.processEmail(front, baseEmail, senderCreates);
     expect(outcome).toBe('held');
     expect(holdMock.holdMessage).toHaveBeenCalledWith(front, expect.anything(), expect.objectContaining({ reason: 'sender_burst' }));

@@ -86,6 +86,22 @@ describe('classifyHrNotice — leave and transfer', () => {
     expect(c).toMatchObject({ type: 'leave', person: 'Vic Camp', date: '2026-10-21', leaveStart: '2026-10-21', returnDate: '2027-10-12', employeeId: '583' });
   });
 
+  test('QA 11-09 #1: a change notice also gives the removed record (old start and return)', () => {
+    const c = classifyHrNotice({
+      subject: 'On Leave Notification: Rowan Example',
+      text: 'New Leave Records Employee Number Location Leave Type Expected Leave Date Expected Return Date 4417 Vancouver Maternity / Parental Leave 2026-01-12 2026-11-30 Removed Leave Records Employee Number Location Leave Type Expected Leave Date Expected Return Date 4417 Vancouver Maternity / Parental Leave 2026-01-12 2026-11-16',
+      requesterEmail: HR,
+      createdAt: '2026-11-09T18:00:00Z',
+    });
+    expect(c).toMatchObject({
+      type: 'leave', person: 'Rowan Example', leaveStart: '2026-01-12', returnDate: '2026-11-30', noticeDate: '2026-11-09',
+      employeeId: '4417', leaveChange: true, removedLeaveStart: '2026-01-12', removedReturnDate: '2026-11-16',
+    });
+    // An empty "Removed Leave Records" section is not a change.
+    const first = classify('On Leave Notification: Rowan Example', 'New Leave Records Employee Number Location Leave Type Expected Leave Date Expected Return Date 4417 Vancouver Parental Leave 2026-10-21 2027-10-12 Removed Leave Records');
+    expect(first.leaveChange).toBeUndefined();
+  });
+
   test('old leave formats and the date-changed subjects', () => {
     expect(classify('On Leave Notification: Jas Singh will be going On Leave', 'Leave Type: Maternity / Parental Leave Expected Leave Date: 2026-11-23 Expected Return Date: 2027-02-08'))
       .toMatchObject({ type: 'leave', person: 'Jas Singh', date: '2026-11-23', returnDate: '2027-02-08', leaveType: 'Maternity / Parental Leave' });

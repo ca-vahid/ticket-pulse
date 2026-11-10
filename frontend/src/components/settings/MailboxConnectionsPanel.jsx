@@ -10,8 +10,8 @@ import HeldRepliesPanel from '../tickets/HeldRepliesPanel';
 export const NEW_TICKET_POLICY_OPTIONS = [
   {
     value: 'hold_unmatched',
-    label: 'Hold unmatched replies (recommended)',
-    help: 'Fresh emails become tickets. Emails that look like replies to a conversation Ticket Pulse does not know are held in "Unmatched replies" for a person to attach, create or discard — a reply can never become a duplicate ticket.',
+    label: 'Hold replies it cannot match (recommended)',
+    help: 'Fresh emails become tickets. Emails that look like replies to a conversation Ticket Pulse does not know are held in "Held e-mail" for a person to attach, create or discard — a reply can never become a duplicate ticket.',
   },
   {
     value: 'create',
@@ -697,7 +697,7 @@ export default function MailboxConnectionsPanel() {
       <div className="pt-2 border-t border-border/60" id="unmatched-replies">
         <HeldRepliesPanel onCountChange={setHeldCount} />
         {heldCount > 0 && (
-          <p className="sr-only" data-testid="mailbox-held-count">{heldCount} unmatched replies waiting</p>
+          <p className="sr-only" data-testid="mailbox-held-count">{heldCount} held {heldCount === 1 ? 'e-mail' : 'e-mails'} waiting</p>
         )}
       </div>
 

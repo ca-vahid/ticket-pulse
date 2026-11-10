@@ -39,10 +39,18 @@ describe('readHrNoticeDate', () => {
 
   test('on leave, current table format (no colons): the leave START, not the return', () => {
     const text = 'Hello, New Leave Records Employee Number Location Leave Type Expected Leave Date Expected Return Date 583 Vancouver Maternity / Parental Leave 2026-09-21 2027-10-12 Removed Leave Records Employee Number 583 2026-10-05 2027-10-12';
-    expect(readHrNoticeDate({ subject: 'On Leave Notification: Vic Camp', text }))
+    expect(readHrNoticeDate({ subject: 'On Leave Notification: Vic Camp', text, createdAt: '2026-09-01T17:00:00Z' }))
       .toMatchObject({ kind: 'leave', date: '2026-09-21', reason: 'Leave starts Sep 21 (back Oct 12) (from the HR notice)' });
     // Old labelled format with both labels: the start wins.
     expect(readHrNoticeDate({ subject: 'On Leave Notification: Jas Singh will be going On Leave', text: 'Leave Type: Maternity / Parental Leave Expected Leave Date: 2026-11-23 Expected Return Date: 2027-02-08' }).date).toBe('2026-11-23');
+  });
+
+  test('QA 11-09 #1: a leave that began before the notice waits for the return, never the past start', () => {
+    const text = 'New Leave Records Employee Number Location Leave Type Expected Leave Date Expected Return Date 4417 Vancouver Maternity / Parental Leave 2026-01-12 2026-11-30 Removed Leave Records Employee Number Location Leave Type Expected Leave Date Expected Return Date 4417 Vancouver Maternity / Parental Leave 2026-01-12 2026-11-16';
+    expect(readHrNoticeDate({ subject: 'On Leave Notification: Rowan Example', text, createdAt: '2026-11-09T17:00:00Z' }))
+      .toMatchObject({ kind: 'leave', date: '2026-11-30', reason: 'On leave until Nov 30 (from the HR notice)' });
+    // No return in the new record: the (past) start is all there is, and the park service finds it unusable.
+    expect(readHrNoticeDate({ subject: 'On Leave Notification: Rowan Example', text: 'New Leave Records Employee Number 4417 Vancouver Parental Leave 2026-01-12 Removed Leave Records', createdAt: '2026-11-09T17:00:00Z' }).date).toBe('2026-01-12');
   });
 
   test('old start-date-change order ("to Y from X") and the new-hire office change', () => {

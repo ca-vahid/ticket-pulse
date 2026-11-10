@@ -27,11 +27,13 @@ describe('describeCondition', () => {
 describe('MyRequestsList', () => {
   const types = [{ id: 1, name: 'Vacation', color: 'emerald', unit: 'day' }];
   const base = { leaveTypeId: 1, startDate: '2099-03-02', endDate: '2099-03-06', dayPart: 'full', days: 5, hours: 40, status: 'approved', decision: null };
-  test('leave from Vacation Tracker is labelled and cannot be cancelled here', () => {
+  // QA 11-09 #2: approved upcoming leave from Vacation Tracker can now be
+  // cancelled here too (it used to be "change it there" only).
+  test('leave from Vacation Tracker is labelled and, once approved and upcoming, can be cancelled here', () => {
     render(<MyRequestsList requests={[{ ...base, id: 1, source: 'vacation_tracker' }, { ...base, id: 2, source: 'app', startDate: '2099-04-06', endDate: '2099-04-06' }]} typeById={new Map(types.map((t) => [t.id, t]))} onCancel={vi.fn()} />);
     const vt = screen.getByTestId('my-request-1');
     expect(vt).toHaveTextContent('Vacation Tracker');
-    expect(vt.querySelector('button')?.textContent || '').not.toMatch(/Cancel/);
+    expect(vt).toHaveTextContent('Cancel');
     expect(screen.getByTestId('my-request-2')).toHaveTextContent('Cancel');
   });
 });

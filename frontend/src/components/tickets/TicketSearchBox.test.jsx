@@ -87,7 +87,8 @@ describe('TicketSearchBox', () => {
     fireEvent.change(box, { target: { value: 'sabina' } });
     expect(screen.getByLabelText('Searching')).toBeInTheDocument();
     expect(apiMock.searchAPI.global).not.toHaveBeenCalled();
-    await waitFor(() => expect(apiMock.searchAPI.global).toHaveBeenCalledWith('sabina', undefined, { scope: undefined }), { timeout: SEARCH_IDLE_MS + 1500 });
+    // QA 11-09 #6: conversations are searched by default.
+    await waitFor(() => expect(apiMock.searchAPI.global).toHaveBeenCalledWith('sabina', 'tickets,tasks,agents,requesters,departments,conversations', { scope: undefined }), { timeout: SEARCH_IDLE_MS + 1500 });
     const panel = await screen.findByRole('listbox', { name: 'Search results' }, { timeout: 2000 });
     expect(within(panel).getByText('Tickets')).toBeInTheDocument();
     expect(within(panel).getByText('196')).toBeInTheDocument();
@@ -165,7 +166,7 @@ describe('TicketSearchBox', () => {
     expect(within(panel).queryByText('stale')).not.toBeInTheDocument();
   });
 
-  test('Search v3: "Include conversations" adds the section, "All my workspaces" tags rows and a cross-workspace hit switches there', async () => {
+  test('Search v3: "Include conversations" (on by default) adds the section, "All my workspaces" tags rows and a cross-workspace hit switches there', async () => {
     localStorage.clear();
     apiMock.searchAPI.global.mockResolvedValue({ data: { sections: {
       tickets: [{ id: 5, displayRef: 'TP-5', subject: 'VPN in AP', status: 'Open', workspaceId: 2, workspaceName: 'Accounting' }],
@@ -176,10 +177,9 @@ describe('TicketSearchBox', () => {
     const box = screen.getByRole('combobox', { name: 'Search tickets' });
     fireEvent.change(box, { target: { value: 'jabra' } });
     await screen.findByRole('listbox', { name: 'Search results' }, { timeout: 2000 });
-    fireEvent.click(screen.getByLabelText('Include conversations'));
+    expect(screen.getByLabelText('Include conversations')).toBeChecked();
     fireEvent.click(screen.getByLabelText('All my workspaces'));
     await waitFor(() => expect(apiMock.searchAPI.global).toHaveBeenLastCalledWith('jabra', 'tickets,tasks,agents,requesters,departments,conversations', { scope: 'all' }), { timeout: 2000 });
-    expect(localStorage.getItem('tp_search_conversations')).toBe('1');
     expect(localStorage.getItem('tp_search_scope')).toBe('1');
     const panel = await screen.findByRole('listbox', { name: 'Search results' });
     expect(within(panel).getByText('In conversations')).toBeInTheDocument();
@@ -208,6 +208,42 @@ describe('TicketSearchBox', () => {
     expect(onViewAll).toHaveBeenCalledWith('Slope/W License');
     expect(onApply).not.toHaveBeenCalled();
     expect(JSON.parse(localStorage.getItem(RECENT_SEARCHES_KEY))).toEqual(['Slope/W License']);
+  });
+
+  // QA 11-09 #6: on for everyone; an explicit off is remembered.
+  test('"Include conversations" is on with nothing stored; an explicit off is remembered', async () => {
+    apiMock.searchAPI.global.mockResolvedValue({ data: { sections: {}, totals: {} } });
+    const { unmount } = render(<Harness />);
+    const box = screen.getByRole('combobox', { name: 'Search tickets' });
+    fireEvent.change(box, { target: { value: 'printer' } });
+    await screen.findByRole('listbox', { name: 'Search results' }, { timeout: 2000 });
+    const toggle = screen.getByLabelText('Include conversations');
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+    expect(localStorage.getItem('tp_search_conversations')).toBe('0');
+    await waitFor(() => expect(apiMock.searchAPI.global).toHaveBeenLastCalledWith('printer', undefined, { scope: undefined }), { timeout: 2000 });
+    unmount();
+
+    render(<Harness initial="printer" />);
+    fireEvent.focus(screen.getByRole('combobox', { name: 'Search tickets' }));
+    expect(await screen.findByLabelText('Include conversations')).not.toBeChecked();
+  });
+
+  // QA 11-09 #5: a ticket closed into another is found by its number and says where it went.
+  test('a combined ticket shows "Combined into TP-…" and the link opens the surviving ticket', async () => {
+    apiMock.searchAPI.global.mockResolvedValue({ data: { sections: { tickets: [
+      { id: 119898, displayRef: 'TP-11639', subject: 'Second monitor flickers', status: 'Closed', combinedInto: { id: 119897, displayRef: 'TP-11638', kind: 'combined' } },
+    ] }, totals: { tickets: 1 } } });
+    const onOpenTicket = vi.fn();
+    render(<Harness onOpenTicket={onOpenTicket} />);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Search tickets' }), { target: { value: 'TP-11639' } });
+    const panel = await screen.findByRole('listbox', { name: 'Search results' }, { timeout: 2000 });
+    await within(panel).findAllByText(/Second monitor flickers/, {}, { timeout: 2000 });
+    expect(within(panel).getAllByRole('option')[0]).toHaveTextContent(/Open TP-11639 — Second monitor flickers/);
+    const marks = within(panel).getAllByTestId('combined-into');
+    expect(marks[0]).toHaveTextContent('Combined into TP-11638');
+    fireEvent.click(within(marks[0]).getByRole('link', { name: 'Combined into TP-11638: open TP-11638' }));
+    expect(onOpenTicket).toHaveBeenCalledWith(119897, { newTab: false });
   });
 
   test('viewAllSearch keeps the text and opens every status, nothing else', () => {

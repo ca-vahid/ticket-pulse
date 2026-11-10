@@ -38,6 +38,17 @@ function renderPanel(props = {}) {
 describe('HeldRepliesPanel (Phase RL, RL-4)', () => {
   afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
+  test('QA 11-09: the queue is called "Held e-mail" and a held meeting invitation reads "Meeting invite"', async () => {
+    ticketsAPI.listHeldMessages.mockResolvedValue({ data: [{ ...rows[0], id: 503, reason: 'meeting_invite', subject: 'Invitation: Weekly sync' }], meta: { heldCount: 1 } });
+    renderPanel();
+    await waitFor(() => expect(screen.getByTestId('held-row-503')).toBeInTheDocument());
+    expect(screen.getByRole('heading', { name: 'Held e-mail' })).toBeInTheDocument();
+    expect(screen.queryByText(/unmatched replies/i)).not.toBeInTheDocument();
+    const chip = screen.getByTestId('held-reason-chip');
+    expect(chip).toHaveTextContent('Meeting invite');
+    expect(chip.getAttribute('title')).toMatch(/meeting invitation/i);
+  });
+
   test('renders held rows with reason chips, From/To/Cc, subject, snippet, best-guess link and the agent guidance', async () => {
     ticketsAPI.listHeldMessages.mockResolvedValue({ data: rows, meta: { heldCount: 2 } });
     const onCountChange = vi.fn();

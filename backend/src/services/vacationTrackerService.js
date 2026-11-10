@@ -190,6 +190,11 @@ class VacationTrackerService {
       try {
         const { default: vtWriteBack } = await import('./availability/vtWriteBack.js');
         ownedByAvailability = await vtWriteBack.ownedLeaveIds();
+        // QA 11-09 #2: imported leaves a person cancelled in Ticket Pulse stay
+        // off the dashboard even while Vacation Tracker still lists them.
+        for (const externalId of await vtWriteBack.cancelledHereExternalIds()) {
+          ownedByAvailability.add(String(externalId).slice('vt:'.length));
+        }
       } catch (err) {
         logger.warn(`VT leave sync: could not read Availability's own leaves (${err.message})`);
       }

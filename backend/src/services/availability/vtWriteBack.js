@@ -6,7 +6,7 @@
  * it is cancelled here. Ticket Pulse stays the owner of these requests:
  *
  * - the request keeps source 'app' and gets externalId 'vt:<leaveId>';
- * - the hourly Vacation Tracker import skips those leaves (no duplicate
+ * - the 15-minute Vacation Tracker import skips those leaves (no duplicate
  *   request), and the hourly leave sync skips them too (the request's own
  *   projection already wrote the dashboard rows);
  * - a failed write never blocks the approval. Every attempt is an event on
@@ -21,6 +21,7 @@ import prisma from '../prisma.js';
 import logger from '../../utils/logger.js';
 import VacationTrackerV2Client, { describeV2Error, looksLikeV2Key } from '../../integrations/vacationTrackerV2.js';
 import { dayKey, toDay } from './availabilityRules.js';
+import { cancelledInTicketPulse } from './vtImportPolicy.js';
 
 const lc = (s) => String(s || '').trim().toLowerCase();
 const CACHE_MS = 10 * 60 * 1000;
@@ -29,6 +30,7 @@ const HALF_DAY = { am: [8, 12], pm: [13, 17] };
 
 export const VT_EXTERNAL_PREFIX = 'vt:';
 export const isVtExternalId = (id) => String(id || '').startsWith(VT_EXTERNAL_PREFIX);
+export { cancelledInTicketPulse };
 
 /** The Availability leave type a Vacation Tracker type name imports as (same three steps as the import). */
 export function avTypeForVtName(vtName, types) {
@@ -231,18 +233,35 @@ class VtWriteBack {
     }
   }
 
-  /** Cancel in Vacation Tracker the leave this request wrote there. Never throws. */
+  /**
+   * Cancel in Vacation Tracker the leave this request wrote there, or (QA
+   * 11-09 #2) the leave it was imported from, when a person cancelled it in
+   * Ticket Pulse. Never throws.
+   */
   async pushCancelled(requestId, reason = null) {
     let request = null;
     try {
-      request = await prisma.avRequest.findUnique({ where: { id: Number(requestId) }, include: { events: { where: { kind: 'vt_written' }, orderBy: { id: 'desc' }, take: 1 } } });
-      if (!request || request.status !== 'cancelled' || request.source !== 'app' || !isVtExternalId(request.externalId)) return { skipped: 'not_applicable' };
+      request = await prisma.avRequest.findUnique({ where: { id: Number(requestId) }, include: { events: { where: { kind: { in: ['vt_written', 'cancelled'] } }, orderBy: { id: 'desc' }, take: 20 } } });
+      if (!request || request.status !== 'cancelled' || !isVtExternalId(request.externalId)) return { skipped: 'not_applicable' };
+      const imported = request.source === 'vacation_tracker';
+      if (!imported && request.source !== 'app') return { skipped: 'not_applicable' };
+      const events = request.events || [];
+      // An imported leave the sync cancelled is already gone from Vacation Tracker.
+      if (imported && !cancelledInTicketPulse(events)) return { skipped: 'not_applicable' };
       if (!(await this.enabled())) return { skipped: 'off' };
       const leaveId = request.externalId.slice(VT_EXTERNAL_PREFIX.length);
-      const workspaceId = request.events[0]?.details?.workspaceId || null;
-      const accounts = (await this._accounts()).filter((a) => !workspaceId || a.workspaceId === workspaceId);
-      if (!accounts.length) return { skipped: 'no_key' };
-      const client = this._client(accounts[0].key);
+      let client;
+      if (imported) {
+        // The account this person is a user of (the import does not record one).
+        const found = await this._locate(request.email);
+        if (found.reason) return { skipped: found.reason };
+        client = found.client;
+      } else {
+        const workspaceId = events.find((e) => e.kind === 'vt_written')?.details?.workspaceId || null;
+        const accounts = (await this._accounts()).filter((a) => !workspaceId || a.workspaceId === workspaceId);
+        if (!accounts.length) return { skipped: 'no_key' };
+        client = this._client(accounts[0].key);
+      }
       try {
         await client.cancelLeave(leaveId, { reason: reason ? String(reason).replace(/[<>]/g, '').slice(0, 500) : 'Cancelled in Ticket Pulse', idempotencyKey: `tp-av-${request.id}-cancel` });
       } catch (err) {
@@ -262,7 +281,7 @@ class VtWriteBack {
   }
 
   /**
-   * Hourly, after the Vacation Tracker import: write what is still owed.
+   * Hourly, after the Vacation Tracker leave sync: write what is still owed.
    * Covers approvals made while Vacation Tracker was unreachable and upcoming
    * leave approved before the write-back existed. One sweep at a time.
    */
@@ -315,6 +334,28 @@ class VtWriteBack {
       select: { externalId: true }, take: 50000,
     });
     return new Set(rows.map((r) => r.externalId.slice(VT_EXTERNAL_PREFIX.length)));
+  }
+
+  /**
+   * QA 11-09 #2: externalIds ('vt:<leaveId>') of imported leaves a person
+   * cancelled in Ticket Pulse, ending on or after `since`. The import keeps
+   * them cancelled and the leave sync writes no dashboard rows for them, even
+   * while Vacation Tracker still lists them as approved. Never throws, unless
+   * `strict` (the import: better to skip a run than bring a cancel back).
+   */
+  async cancelledHereExternalIds({ since = new Date(Date.now() - 60 * 86400000), strict = false } = {}) {
+    const rows = await Promise.resolve()
+      .then(() => prisma.avRequest.findMany({
+        where: { source: 'vacation_tracker', status: 'cancelled', externalId: { startsWith: VT_EXTERNAL_PREFIX }, endDate: { gte: toDay(since) } },
+        select: { externalId: true, events: { where: { kind: 'cancelled' }, select: { id: true, kind: true, details: true } } },
+        take: 5000,
+      }))
+      .catch((err) => {
+        if (strict) throw err;
+        logger.warn(`Availability: could not read leaves cancelled in Ticket Pulse (${err.message})`);
+        return [];
+      });
+    return new Set((rows || []).filter((r) => cancelledInTicketPulse(r.events)).map((r) => r.externalId));
   }
 }
 

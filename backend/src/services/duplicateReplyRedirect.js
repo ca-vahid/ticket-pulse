@@ -94,6 +94,26 @@ export async function redirectReplyOnClosedDuplicate(ticket, { statusBase, extra
       return { targetId: target.id, hops: hops + 1, duplicateEvent: true, extra: {}, dedupeStamp: `${stamp}:via:${ticket.id}` };
     }
 
+    // QA 11-09 #5: the files that came with the reply go with it, attached to
+    // the note on the surviving ticket (copies; the closed ticket keeps its own).
+    let filesCarried = 0;
+    if (entry?.id) {
+      try {
+        const { carryAttachments } = await import('./attachmentCarryService.js');
+        const carried = await carryAttachments({
+          workspaceId: ticket.workspaceId,
+          fromTicketId: ticket.id,
+          toTicketId: target.id,
+          attachments: await prisma.ticketAttachment.findMany({ where: { ticketId: ticket.id, threadEntryId: entry.id }, orderBy: { id: 'asc' } }),
+          threadEntryId: note.id,
+          uploadedBy: 'Ticket Pulse',
+        });
+        filesCarried = carried.copied.length;
+      } catch (err) {
+        logger.warn(`Redirected reply files from ${fromRef} to ${toRef} not copied (non-fatal): ${err.message}`);
+      }
+    }
+
     const { default: ticketActivityRepository } = await import('./ticketActivityRepository.js');
     await Promise.all([
       ticketActivityRepository.create({
@@ -102,7 +122,7 @@ export async function redirectReplyOnClosedDuplicate(ticket, { statusBase, extra
       }).catch(() => null),
       ticketActivityRepository.create({
         ticketId: target.id, activityType: 'reply_redirected', performedBy: 'Ticket Pulse',
-        details: { fromTicketId: ticket.id, fromRef, kind, entryId: note.id, note: `Reply on ${fromRef} added here as a note.` },
+        details: { fromTicketId: ticket.id, fromRef, kind, entryId: note.id, filesCarried, note: `Reply on ${fromRef} added here as a note${filesCarried ? ` with its ${filesCarried === 1 ? 'file' : `${filesCarried} files`}` : ''}.` },
       }).catch(() => null),
     ]);
     if (target.origin === 'ticketpulse') {

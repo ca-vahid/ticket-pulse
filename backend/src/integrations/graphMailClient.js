@@ -772,6 +772,12 @@ export function mapGraphMessageForIngest(e) {
     // forwarding/relay hops keep the original in these instead.
     deliveredTo: headers['delivered-to'] || null,
     xOriginalTo: headers['x-original-to'] || null,
+    // Meeting invites (QA 11-09 #8): Graph marks a calendar item in a message
+    // list with its derived type (#microsoft.graph.eventMessageRequest …);
+    // meetingMessageType only arrives when a caller selects it.
+    graphType: e['@odata.type'] || null,
+    meetingMessageType: e.meetingMessageType || null,
+    contentClass: headers['content-class'] || null,
   };
 }
 

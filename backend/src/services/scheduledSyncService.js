@@ -9,6 +9,7 @@ import workspaceRepository from './workspaceRepository.js';
 import assignmentRepository from './assignmentRepository.js';
 import assignmentDailyReviewService from './assignmentDailyReviewService.js';
 import logger from '../utils/logger.js';
+import { AVAILABILITY_VT_IMPORT_CRON, scheduledVtImportEnabled } from './availability/vtImportPolicy.js';
 
 /**
  * Multi-workspace scheduled sync service.
@@ -62,6 +63,7 @@ class ScheduledSyncService {
       // booted from app.js. Nothing to start here.
 
       this.startHolidayAutoload();
+      this.startAvailabilityVtImport();
       this.startGraphSubscriptionMaintenance();
       this.startMailboxHoldDigest();
       this.startNoiseCloseDigest();
@@ -229,16 +231,16 @@ class ScheduledSyncService {
         techniciansSynced: result.leavesProcessed || 0,
       });
       logger.info(`Scheduled VT sync completed for workspace "${wsName}": ${result.leaveDaysCreated} leave-days`);
-      // Availability keeps a copy of Vacation Tracker leave while people
-      // can use either (3 Oct 2026). Never fails the VT sync.
+      // The Vacation Tracker → Availability copy no longer runs here (QA 11-09
+      // #1): it has its own 15-minute job (startAvailabilityVtImport), so it
+      // neither waits for this hourly sync nor depends on it succeeding.
+      // The other direction stays hourly: approved requests still owed to
+      // Vacation Tracker. Never fails the VT sync.
       try {
-        const { default: availabilityService } = await import('./availability/availabilityService.js');
-        await availabilityService.syncFromVacationTracker(wsId);
-        // Then the other direction: approved requests still owed to Vacation Tracker.
         const { default: vtWriteBack } = await import('./availability/vtWriteBack.js');
         await vtWriteBack.sweep();
       } catch (avErr) {
-        logger.warn(`Availability: Vacation Tracker sync failed for workspace "${wsName}" (non-fatal): ${avErr.message}`);
+        logger.warn(`Availability: Vacation Tracker write-back sweep failed for workspace "${wsName}" (non-fatal): ${avErr.message}`);
       }
       return result;
     } catch (error) {
@@ -444,6 +446,38 @@ class ScheduledSyncService {
     }
   }
 
+  /**
+   * Vacation Tracker → Availability import (QA 11-09 #1): every 15 minutes,
+   * off the quarter hours the leave (:00) and calendar (:15) syncs use. One
+   * global job: availabilityService.runScheduledVtImport reads every active
+   * workspace with a VT key each tick (so a key added later is picked up),
+   * one at a time, and never throws. Off outside production unless
+   * AVAILABILITY_VT_IMPORT=true; AVAILABILITY_VT_IMPORT=false is the kill
+   * switch. Plain minute list: node-cron 3.0.3 mishandles stepped ranges.
+   */
+  startAvailabilityVtImport() {
+    this.stopAvailabilityVtImport();
+    if (!scheduledVtImportEnabled()) return;
+    this.availabilityVtImportJob = cron.schedule(AVAILABILITY_VT_IMPORT_CRON, () => this.runAvailabilityVtImport(), { scheduled: true, timezone: 'America/Vancouver' });
+  }
+
+  async runAvailabilityVtImport() {
+    try {
+      const { default: availabilityService } = await import('./availability/availabilityService.js');
+      return await availabilityService.runScheduledVtImport();
+    } catch (error) {
+      logger.warn(`Availability: automatic Vacation Tracker import tick failed (non-fatal): ${error.message}`);
+      return { error: error.message };
+    }
+  }
+
+  stopAvailabilityVtImport() {
+    if (this.availabilityVtImportJob) {
+      this.availabilityVtImportJob.stop();
+      this.availabilityVtImportJob = null;
+    }
+  }
+
   stopForWorkspace(wsId) {
     const entry = this.cronJobs.get(wsId);
     if (entry) {
@@ -583,6 +617,7 @@ class ScheduledSyncService {
 
   stopAll() {
     this.stopHolidayAutoload();
+    this.stopAvailabilityVtImport();
     this.stopGraphSubscriptionMaintenance();
     this.stopMailboxHoldDigest();
     this.stopNoiseCloseDigest();

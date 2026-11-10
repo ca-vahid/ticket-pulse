@@ -15,7 +15,8 @@ import GroupedTicketsPanel from '../components/tickets/GroupedTicketsPanel';
 import TicketFilterRail, { ActiveFilterBar } from '../components/tickets/TicketFilterRail';
 import CreatedWindowControl from '../components/tickets/CreatedWindowControl';
 import { WINDOW_PREF_KEY, isWindowKey, readStoredWindow, resolveCreatedWindow, storeWindow, windowChoice } from '../components/tickets/createdWindow';
-import TicketSearchBox, { viewAllSearch } from '../components/tickets/TicketSearchBox';
+import TicketSearchBox, { directRef, viewAllSearch } from '../components/tickets/TicketSearchBox';
+import CombinedIntoMark from '../components/tickets/CombinedIntoMark';
 import StickyScrollbar from '../components/tickets/StickyScrollbar';
 import QueueSideScroll from '../components/tickets/QueueSideScroll';
 import TicketBoard from '../components/tickets/TicketBoard';
@@ -780,6 +781,10 @@ export default function Tickets() {
     // and show closed cards under "My open"); its Closed column explains
     // itself when the scope excludes terminal statuses.
     if (segment !== 'all') params.segment = segment;
+    // QA 11-09 #5: a typed ticket number is looked up in every status — the
+    // workspace's DEFAULT status filter stands aside (a status in the URL, the
+    // person's own pick, still applies).
+    else if (!statusesRaw && directRef(debouncedSearch)) { /* every status */ }
     // Parked is a status option of its own (+1); picked statuses then mean "not parked".
     else if (statuses.length > 0 && statuses.length < statusFilterNames.length + 1) {
       params.status = statuses.join(',');
@@ -818,7 +823,7 @@ export default function Tickets() {
     for (const [k, v] of JSON.parse(cfSerialized)) params[k] = v;
     if (debouncedSearch) params.q = debouncedSearch;
     return params;
-  }, [page, boardMode, effectivePageSize, statuses, statusFilterNames, assignee, priority, origin, segment, sort, dir, debouncedSearch,
+  }, [page, boardMode, effectivePageSize, statuses, statusesRaw, statusFilterNames, assignee, priority, origin, segment, sort, dir, debouncedSearch,
     type, category, subcategory, group, source, createdFrom, createdTo, resolvedFrom, resolvedTo, createdWin.applied, createdWin.key, due, noise, solution, parkedFilter, parkKindFilter, reopenedFilter, mentionedFilter, tag, tagMode, impactFilter, urgencyFilter, aiState, approval, approvalCategory, requesterId, cfSerialized]);
 
   // Serialized VALUE of queryParams. Effects that RESET live row state (the
@@ -1687,7 +1692,7 @@ export default function Tickets() {
   const statusInScope = useCallback((status) => {
     const base = baseStatusOf(statusDefs, status);
     if (segment === 'all') return statuses.length === 0 || statuses.includes(status);
-    if (['open', 'unassigned', 'awaiting'].includes(segment)) return ['Open', 'Pending'].includes(base);
+    if (['open', 'unassigned', 'awaiting', 'unresolved'].includes(segment)) return ['Open', 'Pending'].includes(base);
     if (['due_today', 'overdue'].includes(segment)) return base === 'Open';
     if (segment === 'resolved') return ['Resolved', 'Closed'].includes(base);
     if (segment === 'closed') return base === 'Closed';
@@ -2365,12 +2370,12 @@ export default function Tickets() {
                           type="button"
                           onClick={() => setShowHeld(true)}
                           aria-haspopup="dialog"
-                          title="Emails Ticket Pulse could not file on its own — review them"
+                          title="E-mails Ticket Pulse held for a person to file: replies it could not match, bursts from one sender, and mail it could not file"
                           className="tp-focus-ring inline-flex h-9 items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 text-xs font-semibold text-amber-800 hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200 dark:hover:bg-amber-500/20"
                           data-testid="held-replies-pill"
                         >
                           <MailQuestion className="h-4 w-4" aria-hidden="true" />
-                          {heldCount} unmatched {heldCount === 1 ? 'reply' : 'replies'}
+                          {heldCount} held {heldCount === 1 ? 'e-mail' : 'e-mails'}
                         </button>
                       )}
                       {(stats?.awaitingApproval || 0) > 0 && (
@@ -2646,6 +2651,8 @@ export default function Tickets() {
                                     {ticket.parkedUntil && <ParkedMark until={ticket.parkedUntil} kind={ticket.parkKind} />}
                                     <OccurrenceMark ticket={ticket} />
                                     <StateChip state={ticket.stateChip} />
+                                    {/* QA 11-09 #5: closed into another ticket — where the conversation went. */}
+                                    <CombinedIntoMark into={ticket.combinedInto} onOpen={(id) => onRowClick(id)} />
                                     {ticket.hasProposedReply && (
                                       <span
                                         className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-500/15 border border-indigo-200 dark:border-indigo-500/30 text-[9px] font-bold text-indigo-600 dark:text-indigo-300 uppercase tracking-wide"
@@ -2912,6 +2919,7 @@ export default function Tickets() {
                                         >
                                           {ticket.subject || '(no subject)'}
                                         </Link>
+                                        {ticket.combinedInto && <CombinedIntoMark into={ticket.combinedInto} onOpen={(id) => rowTap(id)} className="mt-0.5" />}
                                         {(() => {
                                           const { category: catLabel, subcategory: subLabel } = ticketCategoryLabels(ticket);
                                           const label = subLabel || catLabel;
@@ -3154,6 +3162,8 @@ export default function Tickets() {
           onCancel={() => setBulkAction(null)}
           bulkResult={bulkResult}
           onDismissResult={() => setBulkResult(null)}
+          macroTicketIds={ticketingOn ? [...selectedIds] : null}
+          onMacrosApplied={(result) => { setBulkResult(result); setSelectedIds(new Set(result.failedIds || [])); setBulkPanelOpen(false); refreshAfterEdit(); }}
         />
       )}
       <HandBackReasonDialog

@@ -47,7 +47,7 @@ export const DETECTION_RULES = Object.freeze([
   { type: 'nh_automation', label: 'NH Laptop / NH Workstation (automation)', sender: 'any', subject: '^NH\\s+(laptop|workstation)\\s*-\\s*(.+?)\\s*-\\s*([a-z]{2})\\s*-\\s*(\\S+)\\s*-\\s*(20\\d{2}-\\d{2}-\\d{2})', example: 'NH Laptop - <Office> - <CC> - <username> - <start>', action: 'Linked to the open onboarding family as related + a note (never a new child)' },
   { type: 'transfer', label: 'Transfer', sender: 'humanresources@', subject: '^transfer notification:\\s*(.+?)(?:\\s+will be transferring from\\s+(.+?)\\s+office to\\s+(.+?)\\s+office|\\s+transfer date has changed.*)?$', example: 'Transfer Notification: <Name>', action: 'The notice is the ticket: assign per settings, due + park on the move date' },
   { type: 'leave_change', label: 'Leave dates changed', sender: 'humanresources@', subject: '^on leave notification:\\s*(.+?)\\s+expected (return|leave) date has changed to\\s+(20\\d{2}-\\d{2}-\\d{2})(?:\\s+in\\s+(.+))?$', example: 'On Leave Notification: <Name> expected return date has changed to <date> in <Office>', action: 'The notice is the ticket: assign per settings, due + park on the new date' },
-  { type: 'leave', label: 'On leave', sender: 'humanresources@', subject: '^on leave notification:\\s*(.+?)(?:\\s+will be going on leave)?$', example: 'On Leave Notification: <Name>', action: 'The notice is the ticket: assign per settings, due + park on the leave start' },
+  { type: 'leave', label: 'On leave', sender: 'humanresources@', subject: '^on leave notification:\\s*(.+?)(?:\\s+will be going on leave)?$', example: 'On Leave Notification: <Name>', action: 'The notice is the ticket: assign per settings, due + park on the leave start. A leave already under way waits for the return; when HR changes it, the leave ticket IT holds moves to the new return and the notice is merged into it' },
 ]);
 
 const COMPILED = DETECTION_RULES.map((r) => ({ ...r, re: new RegExp(r.subject, 'i') }));
@@ -267,16 +267,26 @@ export function classifyHrNotice({ subject = '', text = '', requesterEmail = nul
     let leaveStart = null;
     let returnDate = null;
     let employeeId = null;
+    let removedLeaveStart = null;
+    let removedReturnDate = null;
     if (/new leave records/i.test(body)) {
       const section = (body.split(/new leave records/i)[1] || '').split(/removed leave records/i)[0];
       const dates = [...section.matchAll(/\b(20\d{2}-\d{2}-\d{2})\b/g)].map((x) => fromIso(x[1])).filter(Boolean);
       [leaveStart = null, returnDate = null] = dates;
       employeeId = after(section, /Expected Return Date\s+(\d+)\s/i);
+      // QA 11-09 #1: a change notice also lists the record it replaces (the
+      // old leave start and expected return) under "Removed Leave Records".
+      const removed = body.split(/removed leave records/i)[1] || '';
+      [removedLeaveStart = null, removedReturnDate = null] = [...removed.matchAll(/\b(20\d{2}-\d{2}-\d{2})\b/g)].map((x) => fromIso(x[1])).filter(Boolean);
+      if (!employeeId) employeeId = after(removed, /Expected Return Date\s+(\d+)\s/i);
     } else {
       leaveStart = fromIso(after(body, /Expected Leave Date:\s*(20\d{2}-\d{2}-\d{2})/i));
       returnDate = fromIso(after(body, /Expected Return Date:\s*(20\d{2}-\d{2}-\d{2})/i));
     }
-    return { ...base, person: clean(m[1]), date: leaveStart || returnDate, leaveStart, returnDate, employeeId, leaveType: after(body, /Leave Type:\s*(.+?)\s+Expected/i) };
+    return {
+      ...base, person: clean(m[1]), date: leaveStart || returnDate, leaveStart, returnDate, employeeId, leaveType: after(body, /Leave Type:\s*(.+?)\s+Expected/i),
+      ...(removedLeaveStart || removedReturnDate ? { leaveChange: true, removedLeaveStart, removedReturnDate } : {}),
+    };
   }
   default:
     return null;

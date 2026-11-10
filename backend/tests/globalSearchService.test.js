@@ -98,12 +98,22 @@ describe('globalSearchService.search', () => {
       }],
     });
     const result = await globalSearchService.search(3, { q: 'vpn', types: 'tickets' });
-    expect(listTicketsMock).toHaveBeenCalledWith(3, { q: 'vpn', pageSize: 7 });
+    // QA 11-09 #5: the header search lets a bare ticket number past the noise/grouping defaults.
+    expect(listTicketsMock).toHaveBeenCalledWith(3, { q: 'vpn', pageSize: 7, exactRefAnyState: true });
     expect(result.sections.tickets).toEqual([
-      { id: 7, displayRef: 'TP-7', subject: 'VPN broken', status: 'Open', requesterName: 'Ana', priority: 3, assigneeName: 'Reza', createdAt: '2026-09-01T00:00:00.000Z', origin: 'ticketpulse' },
+      { id: 7, displayRef: 'TP-7', subject: 'VPN broken', status: 'Open', requesterName: 'Ana', priority: 3, assigneeName: 'Reza', createdAt: '2026-09-01T00:00:00.000Z', origin: 'ticketpulse', combinedInto: null },
     ]);
     // Search v2: the match total feeds "View all (N)".
     expect(result.totals.tickets).toBe(42);
+  });
+
+  test('QA 11-09 #5: a ticket closed into another carries the "Combined into" target', async () => {
+    listTicketsMock.mockResolvedValue({
+      total: 1,
+      items: [{ id: 119898, displayRef: 'TP-11639', subject: 'Screen issue', status: 'Closed', combinedInto: { id: 119897, displayRef: 'TP-11638', kind: 'combined' } }],
+    });
+    const result = await globalSearchService.search(3, { q: 'TP-11639', types: 'tickets' });
+    expect(result.sections.tickets[0].combinedInto).toEqual({ id: 119897, displayRef: 'TP-11638', kind: 'combined' });
   });
 
   test('WORKSPACE ISOLATION: a ws2 task never appears in a ws1 search', async () => {

@@ -182,6 +182,8 @@ router.get('/admin/requests', asyncHandler(async (req, res) => ok(res, await ava
 router.get('/admin/balances', asyncHandler(async (req, res) => ok(res, await availabilityService.balanceReport(me(req), { year: req.query.year ? Number(req.query.year) : null, workspaceId: wsOf(req) }))));
 router.post('/admin/balances/adjust', asyncHandler(async (req, res) => ok(res, await availabilityService.adjustBalance(req.body || {}, me(req)))));
 router.post('/admin/balances/import', asyncHandler(async (req, res) => ok(res, await availabilityService.importBalancesCsv(me(req), req.body || {}))));
+// QA 11-09 #1: when the automatic (15-minute) and the last manual import ran.
+router.get('/admin/import/vacation-tracker/status', asyncHandler(async (req, res) => ok(res, await availabilityService.vtImportStatus(me(req)))));
 router.post('/admin/import/vacation-tracker', asyncHandler(async (req, res) => ok(res, await availabilityService.importFromVacationTracker(me(req), req.body || {}))));
 router.post('/admin/reproject', asyncHandler(async (req, res) => ok(res, await availabilityService.reprojectAll(me(req), req.body || {}))));
 

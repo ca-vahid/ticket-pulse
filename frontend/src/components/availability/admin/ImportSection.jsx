@@ -1,7 +1,34 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { availabilityAPI } from '../../../services/api';
 import { BTN_PRIMARY, BTN_QUIET, ErrorNote, Field, INPUT, SectionTitle, addDaysKey, todayKey } from '../availabilityUi';
+
+const fmtWhen = (iso) => {
+  const d = iso ? new Date(iso) : null;
+  if (!d || Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString('en-CA', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'America/Vancouver' });
+};
+
+/**
+ * QA 11-09 #1: the import also runs by itself every 15 minutes. One line
+ * says when it last did, for the workspace in the field.
+ */
+export function AutoImportLine({ status, workspaceId }) {
+  if (!status) return null;
+  if (!status.automatic) {
+    return <p className="mb-3 text-xs text-muted-foreground" data-testid="vt-auto-import">The automatic import is off on this server. Use Import below.</p>;
+  }
+  const auto = status.workspaces?.[String(workspaceId)]?.auto || null;
+  const when = fmtWhen(auto?.at);
+  let text = `Runs by itself every ${status.everyMinutes || 15} minutes. It has not run for this workspace yet.`;
+  if (when && auto.ok) {
+    const changes = (auto.created || 0) + (auto.updated || 0) + (auto.cancelled || 0);
+    text = `Last imported automatically ${when}${changes ? ` (${auto.created || 0} new, ${auto.updated || 0} changed, ${auto.cancelled || 0} cancelled)` : ', nothing new'}. Runs every ${status.everyMinutes || 15} minutes.`;
+  } else if (when) {
+    text = `The automatic import could not run ${when}: ${auto.error || 'unknown error'}. It tries again every ${status.everyMinutes || 15} minutes.`;
+  }
+  return <p className={`mb-3 text-xs ${when && !auto.ok ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground'}`} data-testid="vt-auto-import">{text}</p>;
+}
 
 /**
  * Import from Vacation Tracker (the leaves Ticket Pulse already syncs for a
@@ -15,6 +42,15 @@ export default function ImportSection({ toast }) {
   const [result, setResult] = useState(null);
   const [rebuilt, setRebuilt] = useState(null);
   const [error, setError] = useState(null);
+  const [status, setStatus] = useState(null);
+
+  const loadStatus = useCallback(() => {
+    Promise.resolve()
+      .then(() => availabilityAPI.vtImportStatus?.())
+      .then((res) => setStatus(res?.data || null))
+      .catch(() => setStatus(null));
+  }, []);
+  useEffect(() => { loadStatus(); }, [loadStatus]);
 
   const runImport = async () => {
     setBusy('import');
@@ -28,6 +64,7 @@ export default function ImportSection({ toast }) {
       setError(err?.message || 'Import failed');
     } finally {
       setBusy(null);
+      loadStatus();
     }
   };
 
@@ -55,6 +92,7 @@ export default function ImportSection({ toast }) {
         <SectionTitle hint="Reads approved leaves from Vacation Tracker (using that workspace's Vacation Tracker key) and adds them as approved requests, matched by e-mail. Already-imported leaves are skipped, so it is safe to run again.">
           Import from Vacation Tracker
         </SectionTitle>
+        <AutoImportLine status={status} workspaceId={workspaceId} />
         <div className="grid max-w-2xl gap-3 sm:grid-cols-[8rem_1fr_1fr_auto] sm:items-end">
           <Field label="Workspace id"><input type="number" min={1} className={INPUT} value={workspaceId} onChange={(e) => setWorkspaceId(e.target.value)} aria-label="Workspace id" /></Field>
           <Field label="From"><input type="date" className={INPUT} value={from} onChange={(e) => setFrom(e.target.value)} aria-label="Import from" /></Field>

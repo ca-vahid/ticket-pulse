@@ -101,6 +101,13 @@ export function readHrNoticeDate({ subject = '', text = '', createdAt = new Date
       const section = (body.split(/new leave records/i)[1] || '').split(/removed leave records/i)[0];
       const dates = [...section.matchAll(/\b(20\d{2}-\d{2}-\d{2})\b/g)].map((x) => fromIso(x[1])).filter(Boolean);
       if (!dates.length) return null;
+      // QA 11-09 #1: a leave that began before the notice (HR changing the
+      // return of a leave under way) waits for the return, never a past start.
+      const at = new Date(createdAt);
+      const noticeDay = Number.isNaN(at.getTime()) ? null : at.toISOString().slice(0, 10);
+      if (dates[1] && noticeDay && dates[0] < noticeDay) {
+        return { kind: 'leave', date: dates[1], reason: `On leave until ${label(dates[1])} (from the HR notice)`, source: 'hr_notice' };
+      }
       const back = dates[1] ? ` (back ${label(dates[1])})` : '';
       return { kind: 'leave', date: dates[0], reason: `Leave starts ${label(dates[0])}${back} (from the HR notice)`, source: 'hr_notice' };
     }
