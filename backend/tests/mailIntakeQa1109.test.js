@@ -263,10 +263,10 @@ describe('B: burst hold only for look-alike mail', () => {
     expect(senderCreates.get(subjectKey)).toBe(1);
   });
 
-  test('a side mailbox still skips look-alike mail over the cap (loop guard)', async () => {
+  test('a side mailbox holds look-alike mail over the cap too, never drops it (loop guard)', async () => {
     const email = mail({ to: ['projects@example.com'] });
     const senderCreates = new Map([[senderBurstKeys(email).subjectKey, 3]]);
-    expect(await ingest.processEmail(side, email, senderCreates)).toBe('skipped');
+    expect(await ingest.processEmail(side, email, senderCreates)).toBe('held');
     expect(ticketServiceMock.createTicket).not.toHaveBeenCalled();
   });
 });

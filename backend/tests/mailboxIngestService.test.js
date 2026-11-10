@@ -376,7 +376,7 @@ describe('matching ladder', () => {
   test('per-sender create cap prevents runaway loops', async () => {
     const senderCreates = new Map([[senderBurstKeys(baseEmail).subjectKey, 3]]);
     const outcome = await mailboxIngestService.processEmail(connection, baseEmail, senderCreates);
-    expect(outcome).toBe('skipped');
+    expect(outcome).toBe('held');
     expect(ticketServiceMock.createTicket).not.toHaveBeenCalled();
   });
 });

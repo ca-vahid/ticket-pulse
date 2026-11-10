@@ -760,16 +760,14 @@ class MailboxIngestService {
       : total >= MAX_CREATES_PER_SENDER_PER_CYCLE ? { kind: 'sender_total', cap: MAX_CREATES_PER_SENDER_PER_CYCLE } : null;
     if (over) {
       const what = over.kind === 'same_subject' ? 'look-alike' : 'per-sender';
-      if (isHelpdeskMailbox(connection)) {
-        // Never dropped on the team's front door: a person decides (30 days of IT had two such bursts).
-        logger.warn(`Mailbox ingest: sender ${senderKey} exceeded the ${what} create cap (${over.cap}) this cycle — holding "${email.subject}"`);
-        return this._holdOrFallback(connection, email, {
-          ...intake,
-          decision: { rule: 'sender_burst', details: { cap: over.cap, kind: over.kind, sender: senderKey, ...(over.kind === 'same_subject' ? { subjectKey: burstSubjectKey(email.subject) } : {}) } },
-        }, 'sender_burst', new Map());
-      }
-      logger.warn(`Mailbox ingest: sender ${senderKey} exceeded the ${what} create cap (${over.cap}) this cycle — skipping "${email.subject}"`);
-      return 'skipped';
+      // Never dropped, on any mailbox: a person decides (30 days of IT had two such bursts).
+      // Until 9 Nov 2026 a standard mailbox skipped this mail silently, so an alert storm
+      // to patickets@ / fetickets@ could vanish (API Dev review).
+      logger.warn(`Mailbox ingest: sender ${senderKey} exceeded the ${what} create cap (${over.cap}) this cycle — holding "${email.subject}"`);
+      return this._holdOrFallback(connection, email, {
+        ...intake,
+        decision: { rule: 'sender_burst', details: { cap: over.cap, kind: over.kind, sender: senderKey, ...(over.kind === 'same_subject' ? { subjectKey: burstSubjectKey(email.subject) } : {}) } },
+      }, 'sender_burst', new Map());
     }
     senderCreates.set(subjectKey, sameSubject + 1);
     senderCreates.set(senderKey, total + 1);
