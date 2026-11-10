@@ -1004,6 +1004,10 @@ export const ticketsAPI = {
   applyMacro: async (id, macroId) => await api.post(`/tickets/${id}/macros/${macroId}/apply`),
   // QA 11-05 #2: what a macro will do on this ticket, for the confirm.
   previewMacro: async (id, macroId) => await api.get(`/tickets/${id}/macros/${macroId}/preview`),
+  // QA 11-09 #9: one macro on a bulk-bar selection (up to 50 ticket ids per call).
+  // Apply runs ticket by ticket on the server, so it gets the long timeout.
+  previewMacroBulk: async (macroId, ticketIds) => await api.post('/tickets/bulk-macros/preview', { macroId, ticketIds }),
+  applyMacroBulk: async (macroId, ticketIds) => await apiLongTimeout.post('/tickets/bulk-macros/apply', { macroId, ticketIds }),
 
   // Tags (gap plan P1) — TP-side layer, both origins, never written to FS
   listTags: async () => await api.get('/tickets/tags'),
@@ -2363,5 +2367,6 @@ export const availabilityAPI = {
   adjustBalance: (data) => api.post('/availability/admin/balances/adjust', data),
   importBalances: (data) => apiLongTimeout.post('/availability/admin/balances/import', data),
   importVacationTracker: (data) => apiLongTimeout.post('/availability/admin/import/vacation-tracker', data),
+  vtImportStatus: () => api.get('/availability/admin/import/vacation-tracker/status'),
   reproject: (data = {}) => apiLongTimeout.post('/availability/admin/reproject', data),
 };

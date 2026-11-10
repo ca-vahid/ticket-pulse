@@ -15,6 +15,9 @@ import logger from '../../utils/logger.js';
 import settingsRepository from '../settingsRepository.js';
 import vtWriteBack, { isVtExternalId } from './vtWriteBack.js';
 import availabilityTeams from './availabilityTeams.js';
+import {
+  cancelledInTicketPulse, scheduledVtImportEnabled, VT_IMPORT_EVERY_MINUTES, VT_IMPORT_DAYS_BACK, VT_IMPORT_DAYS_AHEAD, VT_IMPORT_STATUS_KEY,
+} from './vtImportPolicy.js';
 import { currentViewAs } from '../viewAsContext.js';
 import { ValidationError, NotFoundError, AuthorizationError } from '../../utils/errors.js';
 import {
@@ -33,6 +36,11 @@ const roleView = (user) => {
   return v?.mode === 'role' ? v : null;
 };
 const AVAILABILITY_TO_CATEGORY = { OFF: 'OFF', WFH: 'WFH', ONSITE: 'OTHER', PARTIAL: 'OTHER' };
+
+/** Today in BC (YYYY-MM-DD): "over" means over where the people are. */
+export function pacificTodayKey(now = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Vancouver', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+}
 
 // Defaults seeded on first use. Numbers are placeholders an admin edits under
 // Availability → Settings (Vahid to confirm BGC's real entitlements).
@@ -828,20 +836,46 @@ class AvailabilityService {
     const mine = lc(r.email) === lc(user.email);
     if (!mine && !(await this.canDecide(user, r)) && !(await this.canManagePerson(user, r.email))) throw new AuthorizationError('You can only cancel your own requests', 'availability_not_owner');
     if (!ACTIVE.includes(r.status)) throw new ValidationError(`This request is already ${r.status}`);
-    if (r.source === 'vacation_tracker' && await this._vtSyncOnFor(r.email)) {
-      throw new ValidationError('This came from Vacation Tracker. Change or cancel it there; Ticket Pulse follows within the hour.');
-    }
+    // QA 11-09 #2: leave imported from Vacation Tracker can be cancelled here
+    // too (it used to say "cancel it there"), while it has not ended yet.
+    const fromVt = r.source === 'vacation_tracker';
+    if (fromVt && dayKey(r.endDate) < pacificTodayKey()) throw new ValidationError('This time away is already over, so it can no longer be cancelled');
+    const details = fromVt ? { ...(reason ? { reason } : {}), cancelledIn: 'ticket_pulse' } : (reason ? { reason } : null);
     const updated = await prisma.avRequest.update({
       where: { id: r.id },
-      data: { status: 'cancelled', events: { create: { kind: 'cancelled', actor: lc(user.email), details: reason ? { reason } : null } } },
+      data: { status: 'cancelled', events: { create: { kind: 'cancelled', actor: lc(user.email), details } } },
     });
     await this.unproject(updated).catch((err) => logger.warn(`Availability: unprojection failed for request ${r.id}: ${err.message}`));
-    if (r.status === 'approved') vtWriteBack.pushCancelled(updated.id, reason); // never throws
+    let vacationTracker = null;
+    if (fromVt) vacationTracker = await this._cancelImportedLeave(updated, reason);
+    else if (r.status === 'approved') vtWriteBack.pushCancelled(updated.id, reason); // never throws
     if (!mine) {
       this._notifyRequester(updated, user).catch(() => {});
       this._teamsDecided(updated, user).catch(() => {});
     }
-    return this.getRequest(r.id, user);
+    const out = await this.getRequest(r.id, user);
+    return vacationTracker ? { ...out, vacationTracker } : out;
+  }
+
+  /**
+   * An imported leave cancelled in Ticket Pulse (QA 11-09 #2), the same end
+   * state as a cancel that comes from Vacation Tracker: the leave sync's
+   * dashboard rows go (the request's own were removed by unproject), and the
+   * cancel is written to Vacation Tracker when the write-back can do it. The
+   * import and the leave sync then leave it cancelled whatever Vacation
+   * Tracker still says (vtWriteBack.cancelledHereExternalIds).
+   */
+  async _cancelImportedLeave(request, reason = null) {
+    const leaveId = isVtExternalId(request.externalId) ? request.externalId.slice(3) : null;
+    if (leaveId) {
+      await Promise.resolve()
+        .then(() => prisma.technicianLeave.deleteMany({ where: { vtLeaveId: leaveId } }))
+        .catch((err) => logger.warn(`Availability: could not clear Vacation Tracker rows for request ${request.id}: ${err.message}`));
+    }
+    const res = leaveId ? await vtWriteBack.pushCancelled(request.id, reason) : { skipped: 'not_applicable' };
+    if (res?.ok) return { updated: true, message: 'Cancelled in Ticket Pulse and in Vacation Tracker.' };
+    logger.info(`Availability: imported request ${request.id} cancelled in Ticket Pulse only (${res?.skipped || res?.failed || 'not written'})`);
+    return { updated: false, message: 'Cancelled in Ticket Pulse. Cancel it in Vacation Tracker too.' };
   }
 
   /**
@@ -858,7 +892,7 @@ class AvailabilityService {
         ? 'This request is already approved. Cancel it and book again to change it.'
         : `This request is already ${r.status}`);
     }
-    if (r.source === 'vacation_tracker') throw new ValidationError('This came from Vacation Tracker. Change it there; Ticket Pulse follows within the hour.');
+    if (r.source === 'vacation_tracker') throw new ValidationError('This came from Vacation Tracker. Change it there, or cancel it here and book again.');
     return r;
   }
 
@@ -975,11 +1009,23 @@ class AvailabilityService {
     const names = waitingEmails.length
       ? new Map((await prisma.avPerson.findMany({ where: { email: { in: waitingEmails } }, select: { email: true, name: true } }).catch(() => [])).map((p) => [lc(p.email), p.name]))
       : new Map();
+    // QA 11-09 #2: an imported leave cancelled here that Vacation Tracker could
+    // not be told about says so on its row.
+    const cancelledVt = rows.filter((r) => r.source === 'vacation_tracker' && r.status === 'cancelled').map((r) => r.id);
+    const vtEvents = cancelledVt.length
+      ? await Promise.resolve()
+        .then(() => prisma.avRequestEvent.findMany({ where: { requestId: { in: cancelledVt }, kind: { in: ['cancelled', 'vt_cancelled'] } }, select: { id: true, requestId: true, kind: true, details: true } }))
+        .catch(() => [])
+      : [];
     return rows.map((r) => {
       const out = serializeRequest(r);
       if (r.status === 'pending') {
         out.waitingOn = (Array.isArray(r.decision?.approvers) ? r.decision.approvers : []).map((e) => ({ email: lc(e), name: names.get(lc(e)) || null }));
         out.editable = r.source !== 'vacation_tracker';
+      }
+      if (cancelledVt.includes(r.id)) {
+        const mineEv = (vtEvents || []).filter((e) => e.requestId === r.id);
+        out.stillInVacationTracker = cancelledInTicketPulse(mineEv) && !mineEv.some((e) => e.kind === 'vt_cancelled');
       }
       return out;
     });
@@ -1377,21 +1423,134 @@ class AvailabilityService {
    */
   async importFromVacationTracker(actor, { workspaceId, from, to }, { client = null } = {}) {
     await this.assertAdmin(actor);
-    return this.syncFromVacationTracker(Number(workspaceId), { from, to, client, actorEmail: lc(actor.email) });
+    const ws = Number(workspaceId);
+    try {
+      const summary = await this.syncFromVacationTracker(ws, { from, to, client, actorEmail: lc(actor.email) });
+      await this._recordVtImport([ws], 'manual', { ok: true, ...summary });
+      return summary;
+    } catch (err) {
+      await this._recordVtImport([ws], 'manual', { ok: false, error: String(err.message || err).slice(0, 300) });
+      throw err;
+    }
+  }
+
+  /** Is a Vacation Tracker import running now (any workspace)? */
+  vtImportBusy() {
+    return (this._vtImportRuns || 0) > 0;
+  }
+
+  /**
+   * QA 11-09 #1: the automatic import, every 15 minutes (scheduledSyncService).
+   * The same syncFromVacationTracker the Settings → Import button runs, for
+   * each active workspace with a Vacation Tracker key, from 30 days back to a
+   * year ahead. Workspaces sharing one key are read once. Runs one after the
+   * other with a short gap, skips a tick while another import is running, and
+   * never throws: a failure is a warning and the time is kept for Settings.
+   */
+  async runScheduledVtImport({ now = new Date(), gapMs = 10000, sleep = (ms) => new Promise((r) => { setTimeout(r, ms).unref?.(); }) } = {}) {
+    if (!scheduledVtImportEnabled()) return { skipped: 'off' };
+    if (this._scheduledVtImport) return { skipped: 'running' };
+    this._scheduledVtImport = true;
+    const results = [];
+    try {
+      const configs = await Promise.resolve()
+        .then(() => prisma.vacationTrackerConfig.findMany({ where: { workspace: { isActive: true } }, select: { workspaceId: true, apiKey: true }, orderBy: { workspaceId: 'asc' } }))
+        .catch((err) => { logger.warn(`Availability: automatic Vacation Tracker import could not read the keys: ${err.message}`); return []; });
+      const from = dayKey(addDays(toDay(now), -VT_IMPORT_DAYS_BACK));
+      const to = dayKey(addDays(toDay(now), VT_IMPORT_DAYS_AHEAD));
+      const byKey = new Map(); // key -> workspace ids sharing it
+      for (const c of configs || []) {
+        const key = String(c.apiKey || '').trim();
+        if (!key) { results.push({ workspaceId: c.workspaceId, skipped: 'no_key' }); continue; }
+        if (!byKey.has(key)) byKey.set(key, []);
+        byKey.get(key).push(c.workspaceId);
+      }
+      let ran = 0;
+      for (const workspaceIds of byKey.values()) {
+        const [workspaceId, ...sharing] = workspaceIds;
+        if (this.vtImportBusy()) { results.push({ workspaceId, skipped: 'busy' }); continue; }
+        if (ran > 0 && gapMs > 0) await sleep(gapMs);
+        ran += 1;
+        try {
+          const summary = await this.syncFromVacationTracker(workspaceId, { from, to, actorEmail: 'vacation_tracker' });
+          await this._recordVtImport(workspaceIds, 'auto', { ok: true, ...summary });
+          results.push({ workspaceId, sharing, ...summary });
+        } catch (err) {
+          logger.warn(`Availability: automatic Vacation Tracker import failed for workspace ${workspaceId} (will try again in ${VT_IMPORT_EVERY_MINUTES} min): ${err.message}`);
+          await this._recordVtImport(workspaceIds, 'auto', { ok: false, error: String(err.message || err).slice(0, 300) });
+          results.push({ workspaceId, sharing, error: err.message });
+        }
+      }
+      return { results };
+    } finally {
+      this._scheduledVtImport = false;
+    }
+  }
+
+  /** Last manual and automatic import per workspace, kept in app settings. Never throws. */
+  async _vtImportStatusAll() {
+    try {
+      const raw = await settingsRepository.get(VT_IMPORT_STATUS_KEY);
+      if (!raw) return {};
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  async _recordVtImport(workspaceIds, trigger, entry) {
+    try {
+      const all = await this._vtImportStatusAll();
+      const at = new Date().toISOString();
+      for (const ws of workspaceIds) {
+        if (!Number.isInteger(ws)) continue;
+        all[ws] = { ...(all[ws] || {}), [trigger]: { at, ...entry } };
+      }
+      await settingsRepository.set(VT_IMPORT_STATUS_KEY, JSON.stringify(all));
+    } catch (err) {
+      logger.warn(`Availability: could not keep the Vacation Tracker import time: ${err.message}`);
+    }
+  }
+
+  /** For Settings → Import: is the automatic import on, and when did each run last. */
+  async vtImportStatus(actor) {
+    await this.assertAdmin(actor);
+    return { automatic: scheduledVtImportEnabled(), everyMinutes: VT_IMPORT_EVERY_MINUTES, workspaces: await this._vtImportStatusAll() };
   }
 
   /**
    * One-way Vacation Tracker -> Availability sync (Vahid, 3 Oct 2026: people
    * may keep using VT until Availability is ready; like FreshService, either
-   * works). Runs after every hourly VT sync for workspaces with VT on, and
-   * from Settings -> Import. Idempotent on externalId 'vt:<leaveId>':
+   * works). Runs every 15 minutes for every workspace with a VT key
+   * (runScheduledVtImport, QA 11-09 #1; it used to follow the hourly leave
+   * sync, so it waited up to an hour, never ran where that sync was off, and
+   * was skipped whenever the leave sync failed), and from Settings -> Import.
+   * Idempotent on externalId 'vt:<leaveId>':
    *   - new approved VT leave       -> approved request (source vacation_tracker)
    *   - changed dates / type / part -> request updated, projection rebuilt
    *   - no longer approved, or gone from VT within the window -> cancelled
+   *   - cancelled by a person in Ticket Pulse -> stays cancelled (QA 11-09 #2)
    * Unknown VT leave types become new types so nothing is lost; people are
    * matched by e-mail.
    */
-  async syncFromVacationTracker(workspaceId, { from = null, to = null, client = null, actorEmail = 'vacation_tracker' } = {}) {
+  async syncFromVacationTracker(workspaceId, options = {}) {
+    // QA 11-09 #1: one import at a time, across workspaces (two keys can read
+    // the same Vacation Tracker account, and externalId is not unique). The
+    // Import button waits its turn; the 15-minute run skips a busy tick.
+    this._vtImportRuns = (this._vtImportRuns || 0) + 1;
+    const prev = this._vtImportChain || Promise.resolve();
+    const run = prev.catch(() => {}).then(() => this._syncFromVacationTracker(workspaceId, options));
+    this._vtImportChain = run;
+    try {
+      return await run;
+    } finally {
+      this._vtImportRuns -= 1;
+      if (this._vtImportChain === run) this._vtImportChain = null;
+    }
+  }
+
+  async _syncFromVacationTracker(workspaceId, { from = null, to = null, client = null, actorEmail = 'vacation_tracker' } = {}) {
     if (!client) {
       const config = await prisma.vacationTrackerConfig.findUnique({ where: { workspaceId: Number(workspaceId) } });
       if (!config?.apiKey) throw new ValidationError('Vacation Tracker is not set up for that workspace');
@@ -1438,6 +1597,9 @@ class AvailabilityService {
       select: { id: true, externalId: true, status: true, startDate: true, updatedAt: true },
       take: 50000,
     })).map((r) => [r.externalId, r]));
+    // Imported leaves a person cancelled in Ticket Pulse: never brought back,
+    // even while Vacation Tracker still lists them as approved.
+    const cancelledHere = await vtWriteBack.cancelledHereExternalIds({ since: toDay(start), strict: true });
 
     let created = 0;
     let updated = 0;
@@ -1447,7 +1609,7 @@ class AvailabilityService {
     const seen = new Set();
     for (const leave of vtLeaves || []) {
       const externalId = `vt:${leave.id}`;
-      if (written.has(externalId)) { seen.add(externalId); skipped += 1; continue; }
+      if (written.has(externalId) || cancelledHere.has(externalId)) { seen.add(externalId); skipped += 1; continue; }
       const approved = !leave.status || String(leave.status).toUpperCase() === 'APPROVED';
       const mine = existing.get(externalId);
       seen.add(externalId); // handled here; never cancelled again below as "gone"
@@ -1614,7 +1776,15 @@ function guessAvailability(name) {
  * imported from it, written to it, or why not.
  */
 export function vacationTrackerState(r) {
-  if (r.source === 'vacation_tracker') return { state: 'imported', label: 'Came from Vacation Tracker' };
+  if (r.source === 'vacation_tracker') {
+    // QA 11-09 #2: cancelled in Ticket Pulse — and was Vacation Tracker told?
+    if (r.status === 'cancelled' && r.events && cancelledInTicketPulse(r.events)) {
+      return r.events.some((e) => e.kind === 'vt_cancelled')
+        ? { state: 'cancelled', label: 'Came from Vacation Tracker; cancelled here and there' }
+        : { state: 'skipped', label: 'Came from Vacation Tracker; cancelled here only, still in Vacation Tracker' };
+    }
+    return { state: 'imported', label: 'Came from Vacation Tracker' };
+  }
   const vt = (r.events || []).filter((e) => String(e.kind || '').startsWith('vt_'));
   const last = vt[vt.length - 1] || null;
   if (last?.kind === 'vt_cancelled') return { state: 'cancelled', label: 'Cancelled in Vacation Tracker too' };

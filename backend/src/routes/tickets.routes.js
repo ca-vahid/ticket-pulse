@@ -288,6 +288,8 @@ router.get('/', asyncHandler(async (req, res) => {
   const query = { ...(req.query || {}) };
   delete query.mentionedTechnicianId;
   if (query.mentioned === 'me') query.mentionedTechnicianId = req.ticketActor?.technicianId || -1;
+  // QA 11-09 #5: a typed ticket number finds that ticket whatever its noise flag, grouping or status.
+  query.exactRefAnyState = true;
   const result = await ticketService.listTickets(req.workspaceId, query, { actor: req.ticketActor, maxPageSize: 200 });
   res.json({ success: true, data: result });
 }));
@@ -1771,6 +1773,24 @@ router.get('/macros', asyncHandler(async (req, res) => {
   const { default: ticketMacroService } = await import('../services/ticketMacroService.js');
   const macros = await ticketMacroService.list(req.workspaceId);
   res.json({ success: true, data: macros });
+}));
+
+// One macro on a bulk-bar selection (QA 11-09 #9): { macroId, ticketIds } (up
+// to 50). The preview returns each ticket's plan plus a grouped summary; apply
+// runs the single-ticket apply on each ticket in turn and returns per-ticket
+// results. Same people as the single apply (any ticket actor; readonly is
+// refused app-wide), and — like the ticket page's Macros menu, which only
+// shows with native ticketing on — behind the native-ticketing switch.
+router.post('/bulk-macros/preview', requireNativeTicketing, asyncHandler(async (req, res) => {
+  const { default: ticketMacroService } = await import('../services/ticketMacroService.js');
+  const result = await ticketMacroService.previewMany(req.body?.ticketIds, req.workspaceId, req.body?.macroId, req.ticketActor);
+  res.json({ success: true, data: result });
+}));
+
+router.post('/bulk-macros/apply', requireNativeTicketing, asyncHandler(async (req, res) => {
+  const { default: ticketMacroService } = await import('../services/ticketMacroService.js');
+  const result = await ticketMacroService.applyMany(req.body?.ticketIds, req.workspaceId, req.body?.macroId, req.ticketActor);
+  res.json({ success: true, data: result });
 }));
 
 router.get('/custom-fields/definitions', asyncHandler(async (req, res) => {

@@ -123,14 +123,16 @@ class GlobalSearchService {
                  ts_headline('english', left(coalesce(t.description_text, ''), 4000), plainto_tsquery('english', ${q}),
                              'MaxWords=18, MinWords=8, StartSel=[[, StopSel=]], MaxFragments=1') AS snippet
           FROM tickets t
-          WHERE t.workspace_id = ${workspaceId} AND t.is_noise = false
+          WHERE t.workspace_id = ${workspaceId} AND (t.is_noise = false OR t.noise_rule_matched LIKE 'Grouped: same request%')
             AND to_tsvector('english', coalesce(t.subject, '') || ' ' || coalesce(t.description_text, '')) @@ plainto_tsquery('english', ${q})
         )
         SELECT h.entry_id, h.ticket_id, h.actor_name, h.occurred_at, h.event_type, h.rank, h.snippet,
                t.subject, t.status, t.origin, t.native_number, t.freshservice_ticket_id,
                count(*) OVER () AS total
         FROM hits h JOIN tickets t ON t.id = h.ticket_id
-        WHERE t.is_noise = false
+        -- A person's request that grouping combined into another ticket stays
+        -- findable by its words (QA 11-09 #5); alert repeats and noise do not.
+        WHERE (t.is_noise = false OR t.noise_rule_matched LIKE 'Grouped: same request%')
         ORDER BY h.rank DESC, h.occurred_at DESC
         LIMIT ${SECTION_TAKE}`;
       const total = rows.length ? Number(rows[0].total) : 0;
@@ -182,7 +184,10 @@ class GlobalSearchService {
    * for the richer dropdown, and `total` feeds "View all (N)".
    */
   async _tickets(workspaceId, q) {
-    const { items, total } = await ticketService.listTickets(workspaceId, { q, pageSize: SECTION_TAKE });
+    // QA 11-09 #5: "TP-11639" must find TP-11639 even when grouping closed it
+    // into another ticket (a grouped copy carries is_noise) — exactRefAnyState
+    // lets a bare ticket number past the noise / Deleted / window defaults.
+    const { items, total } = await ticketService.listTickets(workspaceId, { q, pageSize: SECTION_TAKE, exactRefAnyState: true });
     const rows = items.map((t) => ({
       id: t.id,
       displayRef: t.displayRef,
@@ -193,6 +198,8 @@ class GlobalSearchService {
       assigneeName: t.assignedTech?.name || null,
       createdAt: t.createdAt || null,
       origin: t.origin || null,
+      // The ticket this one was closed into (grouping or a merge), for the "Combined into TP-…" hint.
+      combinedInto: t.combinedInto || null,
     }));
     return { rows, total: Number.isFinite(Number(total)) ? Number(total) : rows.length };
   }

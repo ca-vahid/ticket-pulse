@@ -48,6 +48,12 @@ export const HOLD_REASON_META = {
     tone: 'slate',
     help: 'Creating the ticket or adding the reply failed. Nothing was lost; a person decides.',
   },
+  // QA 11-09: meeting invitations sent to a ticket mailbox are held, not ticketed.
+  meeting_invite: {
+    label: 'Meeting invite',
+    tone: 'sky',
+    help: 'A meeting invitation or calendar reply sent to the mailbox. It was held so it does not open a ticket; attach it, create a ticket, or discard it.',
+  },
 };
 
 const TONE = {
@@ -121,7 +127,7 @@ function BurstModeControl({ mode, onChange, busy }) {
 }
 
 /**
- * The hold queue ("Unmatched replies") — Phase RL, RL-4. Rendered on
+ * The hold queue ("Held e-mail"; "Unmatched replies" until QA 11-09) — Phase RL, RL-4. Rendered on
  * Settings → Ticket Mailboxes and behind the pill on the Tickets queue.
  * Each row: reason chip, From/To/Cc, subject, snippet, best-guess ticket
  * link, and the three actions (Attach to ticket / Create ticket / Discard).
@@ -238,7 +244,7 @@ export default function HeldRepliesPanel({ onCountChange = null, compact = false
             <MailQuestion className="w-5 h-5 text-amber-600 dark:text-amber-300" aria-hidden="true" />
           </div>
           <div>
-            <h3 className="text-base font-semibold text-foreground">Unmatched replies</h3>
+            <h3 className="text-base font-semibold text-foreground">Held e-mail</h3>
             <p className="text-sm text-muted-foreground">
               Emails Ticket Pulse could not file on its own: replies to a conversation it does not know, agent mail with no
               identifiable requester, and alert bursts from one device (grouped by device below). Decide what each one is.

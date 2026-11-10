@@ -212,7 +212,8 @@ export function useToast() {
   const show = useCallback((message, tone = 'emerald') => {
     if (timer.current) clearTimeout(timer.current);
     setToast({ message, tone });
-    timer.current = setTimeout(() => setToast(null), tone === 'red' ? 6000 : 3500);
+    // amber (QA 11-09): done, but something is left for the person to do.
+    timer.current = setTimeout(() => setToast(null), tone === 'red' || tone === 'amber' ? 6000 : 3500);
   }, []);
   useEffect(() => () => timer.current && clearTimeout(timer.current), []);
   const node = toast ? (
@@ -220,7 +221,7 @@ export function useToast() {
       role={toast.tone === 'red' ? 'alert' : 'status'}
       data-testid="availability-toast"
       className={`fixed bottom-20 right-5 z-[70] flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium text-white shadow-soft animate-slideInLeft md:bottom-5 ${
-        toast.tone === 'red' ? 'bg-red-600' : 'bg-emerald-600'
+        toast.tone === 'red' ? 'bg-red-600' : toast.tone === 'amber' ? 'bg-amber-700' : 'bg-emerald-600'
       }`}
     >
       {toast.message}

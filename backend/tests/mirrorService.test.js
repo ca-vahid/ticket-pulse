@@ -740,6 +740,17 @@ describe('the FreshService copy of front-door mail', () => {
     expect(body).not.toContain('already e-mailed to the requester');
   });
 
+  test('QA 11-09 #3: a reply that keeps its closed ticket closed is written to FreshService as a note, not an incoming reply', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, freshserviceTicketId: BigInt(90001), requester: { id: 40, email: 'rita@example.com', freshserviceId: BigInt(555001) } });
+    prismaMock.ticketThreadEntry.findUnique.mockResolvedValue({ id: 9005, isPrivate: false, incoming: true, actorName: 'Pat Manager', bodyHtml: '<p>thanks, noted</p>', mirrorState: 'pending', rawPayload: { keepClosed: true } });
+    prismaMock.ticketThreadEntry.update.mockResolvedValue({});
+    await mirrorService._processJob({ id: 7, ticketId: 501, workspaceId: 1, kind: 'thread_entry', threadEntryId: 9005, attempts: 0 });
+    const [, , opts] = clientMock.addNote.mock.calls[0];
+    expect(opts.incoming).toBeUndefined();
+    expect(opts.userId).toBeUndefined();
+    expect(opts.isPrivate).toBe(false);
+  });
+
   // The four Coreshack people work IT tickets in FreshService only; FreshService used to tell them itself.
   test('an assignee who works in FreshService only is notified by FreshService when the requester answers', async () => {
     prismaMock.technician = { findUnique: jest.fn().mockResolvedValue({ email: 'RLaird@example.com', assignableOnly: true }) };

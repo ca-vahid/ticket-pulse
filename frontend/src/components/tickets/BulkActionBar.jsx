@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertCircle, Check, ChevronUp, FolderTree, GitMerge, Loader2, PanelRight, PauseCircle, Play, Search, Tag as TagIcon, Trash2, UserRound, Workflow, X,
+  AlertCircle, Check, ChevronUp, FolderTree, GitMerge, Loader2, PanelRight, PauseCircle, Play, Search, Tag as TagIcon, Trash2, UserRound, Wand2, Workflow, X,
 } from 'lucide-react';
+import { ticketsAPI } from '../../services/api';
+import BulkMacroPanel from './BulkMacroPanel';
 
 /**
  * The floating bulk bar for the queue (QA 09-18 #3). Replaces two native
@@ -144,7 +146,24 @@ export default function BulkActionBar({
   onCancel,
   bulkResult = null,
   onDismissResult,
+  // QA 11-09 #9: Macros for a hand-picked selection. The page passes the ids
+  // (null hides the control) and gets a { kind: 'macro', … } result back.
+  macroTicketIds = null,
+  onMacrosApplied = null,
 }) {
+  const macrosEnabled = Boolean(onMacrosApplied) && Array.isArray(macroTicketIds) && macroTicketIds.length > 0 && !queryScope;
+  const [macros, setMacros] = useState(null);
+  const [macroPick, setMacroPick] = useState(null);
+  useEffect(() => {
+    if (!macrosEnabled || macros) return undefined;
+    let cancelled = false;
+    Promise.resolve()
+      .then(() => ticketsAPI.macros())
+      .then((res) => { if (!cancelled) setMacros(res?.data?.data ?? res?.data ?? []); })
+      .catch(() => { if (!cancelled) setMacros([]); });
+    return () => { cancelled = true; };
+  }, [macrosEnabled, macros]);
+  const macroOptions = useMemo(() => (macros || []).map((m) => ({ value: String(m.id), label: m.name, macro: m })), [macros]);
   const scopeCount = queryScope ? queryScope.editable : editableCount;
   const scopeSkipped = queryScope ? queryScope.skippedFsBorn : skipCount;
 
@@ -174,7 +193,38 @@ export default function BulkActionBar({
       data-testid="bulk-action-bar"
       className="fixed bottom-6 max-md:bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] left-1/2 z-40 w-max max-w-[94vw] -translate-x-1/2 animate-fadeIn rounded-2xl border border-border bg-card/95 shadow-soft backdrop-blur supports-[backdrop-filter]:bg-card/85"
     >
-      {bulkResult ? (
+      {bulkResult?.kind === 'macro' ? (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5" role="status" data-testid="bulk-macro-result">
+          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-foreground">
+            {bulkResult.failed.length === 0
+              ? <Check className="h-4 w-4 text-emerald-600 dark:text-emerald-300" aria-hidden="true" />
+              : <AlertCircle className="h-4 w-4 text-amber-500" aria-hidden="true" />}
+            Applied “{bulkResult.macroName}” to {bulkResult.ok} of {bulkResult.total}.
+          </span>
+          {bulkResult.failed.length > 0 && (
+            <span
+              className="max-w-md truncate text-xs text-red-600 dark:text-red-300"
+              title={bulkResult.failed.map((f) => `${f.ref} — ${f.message}`).join('\n')}
+            >
+              {bulkResult.failed.length} failed: {bulkResult.failed[0].ref} — {bulkResult.failed[0].message}
+              {bulkResult.failed.length > 1 ? ` (and ${bulkResult.failed.length - 1} more)` : ''}
+            </span>
+          )}
+          {bulkResult.leftAlone > 0 && (
+            <span className="text-xs text-muted-foreground">{bulkResult.leftAlone} left alone — nothing to do</span>
+          )}
+          <button onClick={onDismissResult} aria-label="Dismiss result" className="tp-focus-ring rounded-lg p-1 text-muted-foreground/75 hover:bg-muted hover:text-muted-foreground">
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+      ) : macroPick ? (
+        <BulkMacroPanel
+          macro={macroPick}
+          ticketIds={macroTicketIds || []}
+          onCancel={() => setMacroPick(null)}
+          onDone={(result) => { setMacroPick(null); onMacrosApplied?.(result); }}
+        />
+      ) : bulkResult ? (
         <div className="flex flex-wrap items-center gap-3 px-4 py-2.5">
           <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-foreground">
             {bulkResult.failed.length === 0
@@ -280,6 +330,20 @@ export default function BulkActionBar({
               searchable={categories.length > 8}
               testId="bulk-category"
               onPick={(o) => onAction({ type: 'set_category', value: o.value === 'none' ? null : Number(o.value), label: `category → ${o.label}` })}
+            />
+          )}
+          {/* QA 11-09 #9: a macro on every selected ticket, previewed first. */}
+          {macrosEnabled && (
+            <MenuButton
+              label="Macros"
+              ariaLabel="Bulk macros"
+              icon={Wand2}
+              options={macroOptions}
+              searchable={macroOptions.length > 8}
+              disabled={!macros || macros.length === 0}
+              title={macros === null ? 'Loading macros…' : macros.length === 0 ? 'No macros yet — admins create them in Settings → Macros' : 'Run a macro on every selected ticket — you see what it will do first'}
+              testId="bulk-macros"
+              onPick={(o) => setMacroPick(o.macro)}
             />
           )}
           {canEdit && !queryScope && (

@@ -1,6 +1,24 @@
-export const APP_VERSION = '4.3.62-preview';
+export const APP_VERSION = '4.3.63-preview';
 
 export const changelog = [
+  {
+    version: '4.3.63-preview',
+    date: 'November 9, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Vacation Tracker changes reach Availability within 15 minutes</strong> &mdash; the copy from Vacation Tracker into Availability ran only after the hourly leave sync, and was skipped whenever that sync was busy, so a work-from-home day or a cancellation could wait until someone pressed Import. It now runs on its own every 15 minutes, one run at a time, and Settings &rarr; Import shows when it last ran.' },
+      { type: 'new', html: '<strong>Cancel a Vacation Tracker leave from Availability</strong> &mdash; an approved, upcoming leave that came from Vacation Tracker now has Cancel too. Ticket Pulse cancels it in Vacation Tracker as well where it can, and says so plainly when it can&rsquo;t; a leave cancelled here is never brought back by the next import.' },
+      { type: 'fix', html: '<strong>Replies to workflow e-mails land on their ticket, and a closed ticket stays closed</strong> &mdash; a project manager answering a BST completion e-mail was held as &ldquo;answers mail Ticket Pulse never saw&rdquo;. Ticket Pulse now recognises answers to the e-mails its workflows send, records them in the conversation, and leaves a closed ticket closed (its FreshService copy gets the answer as a note, so it doesn&rsquo;t reopen either).' },
+      { type: 'improved', html: '<strong>&ldquo;Recently resolved&rdquo; is now &ldquo;Recently closed&rdquo;</strong> &mdash; the view always counted closed tickets too; the name now says so, in every workspace. Old links still work.' },
+      { type: 'fix', html: '<strong>Combined tickets stay findable and keep their files</strong> &mdash; when Ticket Pulse combines a duplicate into another ticket, the duplicate&rsquo;s files are now copied onto the ticket that stays open, and typing its number (TP-11639, say) always finds it, with &ldquo;Combined into TP-11638&rdquo; and a link. A manual merge and a reply redirected from a closed copy bring their files along the same way.' },
+      { type: 'improved', html: '<strong>Search includes conversations by default</strong> &mdash; the &ldquo;Include conversations&rdquo; box is now ticked unless you turned it off yourself.' },
+      { type: 'new', html: '<strong>An &ldquo;All unresolved&rdquo; view</strong> &mdash; every ticket that is not resolved or closed, for everyone and for no one, right under All tickets.' },
+      { type: 'new', html: '<strong>Meeting invites don&rsquo;t become tickets</strong> &mdash; a plain meeting invitation or reply sent to a Ticket Pulse mailbox is set aside in Held e-mail instead of becoming a ticket, where a person can still turn it into one. A forwarded invite with a question in it still becomes a ticket, without the invite&rsquo;s attendee list on Cc; any new ticket carries at most 10 Cc addresses. (Health &amp; Safety&rsquo;s mail still arrives through FreshService, so this covers it once that mailbox moves to Ticket Pulse.)' },
+      { type: 'new', html: '<strong>Macros from the bulk-select bar</strong> &mdash; select several tickets, pick a macro, see what it will do on each, and apply it to all of them. Every ticket gets its own reply and its own history line.' },
+      { type: 'fix', html: '<strong>A burst of different e-mails from one sender is no longer held</strong> &mdash; Ticket Pulse held the fourth new e-mail from one sender in a few minutes, which stopped nine Corporate Traveller invoices on 9 Nov. It now holds only look-alike mail (the same subject over and over, like a looping alert), with a high safety limit for anything else.' },
+      { type: 'improved', html: '<strong>&ldquo;Unmatched replies&rdquo; is now &ldquo;Held e-mail&rdquo;</strong> &mdash; the list holds more than replies (bursts, meeting invites, mail that could not be filed), so the button and its window now say &ldquo;Held e-mail&rdquo;.' },
+      { type: 'fix', html: '<strong>An HR leave change moves the existing leave ticket</strong> &mdash; when HR changed a return date, Ticket Pulse treated the notice as a new leave and dated it to the leave&rsquo;s start, months in the past, so nothing was parked and the original leave ticket kept the old return date. A change notice now re-parks the person&rsquo;s leave ticket to the new return date, notes it on both, and closes the notice into it.' },
+    ],
+  },
   {
     version: '4.3.62-preview',
     date: 'November 9, 2026',

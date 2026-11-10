@@ -10,7 +10,7 @@ import { TicketPicker } from './HeldTicketPicker';
 import HeldDeviceGroup from './HeldDeviceGroup';
 
 /**
- * Unmatched replies, as a popup (Vahid, 17 Oct 2026). The pill used to unfold
+ * Held e-mail (named "Unmatched replies" until QA 11-09), as a popup (Vahid, 17 Oct 2026). The pill used to unfold
  * a long card above the list with too little to decide on. Now: the waiting
  * emails on the left; on the right the selected one — why it is waiting in
  * plain words, the suggested ticket with the one-click choice, the other
@@ -232,7 +232,7 @@ export default function HeldRepliesDialog({ open, onClose, onCountChange = null 
           </span>
           <div className="min-w-0 flex-1">
             <h2 id="held-title" className="text-base font-bold text-foreground">
-              Unmatched replies{rows ? ` · ${count} waiting` : ''}
+              Held e-mail{rows ? ` · ${count} waiting` : ''}
             </h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
               Emails Ticket Pulse could not file on its own. For each one: add it to a ticket, open a new ticket, or discard it.

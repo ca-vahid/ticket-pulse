@@ -93,11 +93,11 @@ describe('MailboxConnectionsPanel — Phase RL (policy, send lane, capability ch
     expect(capabilityChecks({}, 'send').find((c) => c.key === 'canSend').required).toBe(true);
   });
 
-  test('the Unmatched replies section renders under the mailbox list', async () => {
+  test('the Held e-mail section renders under the mailbox list', async () => {
     ticketsAPI.listMailboxes.mockResolvedValue({ data: [mailbox], meta: { sendLane: null } });
     renderPanel();
     await screen.findByTestId('held-replies-panel');
-    expect(screen.getByText('Unmatched replies')).toBeInTheDocument();
+    expect(screen.getByText('Held e-mail')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId('held-empty')).toBeInTheDocument());
     expect(ticketsAPI.listHeldMessages).toHaveBeenCalledWith('held');
   });

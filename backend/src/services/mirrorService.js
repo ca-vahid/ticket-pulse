@@ -1077,7 +1077,11 @@ class MirrorService {
     // Ticket Pulse already emailed them). Internal notes mirror privately.
     // The requester's e-mailed answer is written as an INCOMING message from them, so an agent
     // working in FreshService sees a reply and not a note (the FreshService-born lane already does this).
-    const received = entry.incoming === true && entry.isPrivate !== true;
+    // QA 11-09 #3: a reply that must keep its closed ticket closed (an answer to a
+    // workflow mail) is written as a note: FreshService reopens on an incoming reply,
+    // and the reconcile would carry that reopen back to Ticket Pulse.
+    const keepClosed = entry.rawPayload?.keepClosed === true;
+    const received = !keepClosed && entry.incoming === true && entry.isPrivate !== true;
     const requesterFsId = received && ticket.requester?.freshserviceId ? Number(ticket.requester.freshserviceId) : null;
     // An assignee who works in FreshService only is told by FreshService that the requester answered.
     const notify = received ? await fsOnlyAssigneeEmail(ticket) : null;

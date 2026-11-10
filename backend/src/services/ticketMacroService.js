@@ -44,6 +44,52 @@ const DUE_UNITS = { hours: 60 * 60 * 1000, days: 24 * 60 * 60 * 1000 };
 const FS_OWNS = 'FreshService owns this field on FreshService tickets';
 export const UNATTENDED_REPLY_REASON = 'The requester is an unattended mailbox (an alert or integration sender) — replies to it are not e-mailed';
 
+// Bulk apply from the queue's bulk bar (QA 11-09 #9): tickets per call.
+export const BULK_MACRO_MAX = 50;
+
+/**
+ * What a bulk confirm needs to say, from the per-ticket plans: how many tickets
+ * the macro will do something on, and — grouped — which steps are skipped on
+ * which tickets and why, and which notices apply (e.g. FreshService composes
+ * the subject). Grouped by step type + reason so "on 3 tickets the close is
+ * skipped" reads as one line, not three.
+ */
+export function summarizeBulkPlans(tickets) {
+  const list = Array.isArray(tickets) ? tickets : [];
+  const planned = list.filter((t) => t.ok);
+  const unavailable = list.filter((t) => !t.ok).map((t) => ({ ticketId: t.ticketId, error: t.error }));
+  const nothing = [];
+  const skips = new Map();
+  const notices = new Map();
+  let replies = 0;
+  for (const t of planned) {
+    const steps = t.steps || [];
+    if (!steps.some((s) => s.run)) nothing.push(t.ref);
+    if (steps.some((s) => s.run && s.type === 'reply')) replies += 1;
+    for (const s of steps) {
+      if (!s.run) {
+        const key = `${s.type}|${s.reason || ''}`;
+        if (!skips.has(key)) skips.set(key, { type: s.type, summary: s.summary, reason: s.reason || null, refs: [] });
+        if (!skips.get(key).refs.includes(t.ref)) skips.get(key).refs.push(t.ref);
+      }
+      if (s.notice) {
+        if (!notices.has(s.notice)) notices.set(s.notice, { type: s.type, notice: s.notice, refs: [] });
+        if (!notices.get(s.notice).refs.includes(t.ref)) notices.get(s.notice).refs.push(t.ref);
+      }
+    }
+  }
+  const withCount = (g) => ({ ...g, count: g.refs.length });
+  return {
+    total: list.length,
+    willRun: planned.length - nothing.length,
+    nothingToDo: nothing,
+    unavailable,
+    replies,
+    skips: [...skips.values()].map(withCount).sort((a, b) => b.count - a.count),
+    notices: [...notices.values()].map(withCount).sort((a, b) => b.count - a.count),
+  };
+}
+
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
 const nonEmpty = (v) => v !== undefined && v !== null && v !== '';
 
@@ -363,8 +409,86 @@ class TicketMacroService {
     };
   }
 
+  // ------------------------------------------------------------- bulk (QA 11-09 #9)
+  //
+  // The queue's bulk bar runs ONE macro on a hand-picked selection. Both calls
+  // reuse the single-ticket preview and apply as they are, ticket by ticket:
+  // each ticket gets its own plan (its own requester, origin and category), its
+  // own reply (to its own requester — nothing is batched into one e-mail) and
+  // its own 'macro_applied' history row. One ticket failing never stops the rest.
+
+  _bulkIds(ticketIds) {
+    const raw = Array.isArray(ticketIds) ? ticketIds : [];
+    const ids = [...new Set(raw.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+    if (!ids.length) throw new ValidationError('Choose at least one ticket');
+    if (ids.length > BULK_MACRO_MAX) throw new ValidationError(`Apply a macro to up to ${BULK_MACRO_MAX} tickets at a time`);
+    return ids;
+  }
+
+  _bulkMacroId(macroId) {
+    const id = Number(macroId);
+    if (!Number.isInteger(id) || id <= 0) throw new ValidationError('Pick a macro');
+    return id;
+  }
+
+  /** The per-ticket plans for the bulk confirm, plus a summary of what differs between tickets. */
+  async previewMany(ticketIds, workspaceId, macroId, actor) {
+    const ids = this._bulkIds(ticketIds);
+    const macro = await this._loadMacro(workspaceId, this._bulkMacroId(macroId));
+    const tickets = [];
+    for (const id of ids) {
+      try {
+        const ticket = await this._loadTicket(id, workspaceId);
+        const plan = await this._plan(ticket, macro, actor);
+        tickets.push({
+          ticketId: ticket.id,
+          ref: ticketDisplayRef(ticket),
+          origin: ticket.origin,
+          ok: true,
+          // No rendered bodies here: a reply with pasted pictures can be megabytes, times 50.
+          steps: plan.steps.map(({ field: _f, html: _h, ...rest }) => rest),
+        });
+      } catch (error) {
+        tickets.push({ ticketId: id, ref: null, ok: false, error: error.message });
+      }
+    }
+    return {
+      macro: { id: macro.id, name: macro.name, description: macro.description || null },
+      tickets,
+      summary: summarizeBulkPlans(tickets),
+    };
+  }
+
+  /** Apply one macro to each ticket in turn. Per-ticket results; a failure is reported, the rest still run. */
+  async applyMany(ticketIds, workspaceId, macroId, actor) {
+    const ids = this._bulkIds(ticketIds);
+    const macro = await this._loadMacro(workspaceId, this._bulkMacroId(macroId));
+    const results = [];
+    // Sequential on purpose: FreshService-born tickets write through the shared
+    // FS budget, and each ticket's events/mail go out in a predictable order.
+    for (const id of ids) {
+      try {
+        const r = await this.apply(id, workspaceId, macro.id, actor, { source: 'bulk' });
+        const failedSteps = (r.steps || []).filter((s) => !s.ok);
+        results.push({
+          ticketId: id,
+          ref: r.ticket?.ref || null,
+          ok: failedSteps.length === 0,
+          ran: (r.steps || []).filter((s) => s.ok && !s.skipped).length,
+          skipped: (r.steps || []).filter((s) => s.skipped).length,
+          ...(failedSteps.length ? { error: failedSteps.map((s) => `${s.summary}: ${s.error}`).join('; ') } : {}),
+        });
+      } catch (error) {
+        results.push({ ticketId: id, ref: null, ok: false, ran: 0, skipped: 0, error: error.message });
+      }
+    }
+    const applied = results.filter((r) => r.ok).length;
+    logger.info(`Macro "${macro.name}" bulk-applied by ${actor?.email || 'unknown'}: ${applied} of ${results.length} ticket(s) ok`);
+    return { macro: { id: macro.id, name: macro.name }, total: results.length, applied, failed: results.length - applied, results };
+  }
+
   /** Apply a macro to one ticket. Returns per-step results (partial success is visible, never silent). */
-  async apply(ticketId, workspaceId, macroId, actor) {
+  async apply(ticketId, workspaceId, macroId, actor, { source = null } = {}) {
     const macro = await this._loadMacro(workspaceId, macroId);
     const ticket = await this._loadTicket(ticketId, workspaceId);
     const { default: ticketService } = await import('./ticketService.js');
@@ -466,11 +590,12 @@ class TicketMacroService {
         macroId: macro.id,
         macroName: macro.name,
         note,
+        ...(source ? { source } : {}),
         steps: results.map(({ type, summary, ok, skipped, reason, error }) => ({ type, summary, ok, ...(skipped ? { skipped, reason } : {}), ...(error ? { error } : {}) })),
       });
     }
     logger.info(`Macro "${macro.name}" applied to ticket ${ticketId}: ${ran.length} ran, ${results.length - ran.length - failed.length} skipped, ${failed.length} failed`);
-    return { macro: { id: macro.id, name: macro.name }, steps: results, ok: failed.length === 0 };
+    return { macro: { id: macro.id, name: macro.name }, ticket: { id: ticket.id, ref: ticketDisplayRef(ticket) }, steps: results, ok: failed.length === 0 };
   }
 
   // ------------------------------------------------------------- validation

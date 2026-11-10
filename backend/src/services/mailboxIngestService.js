@@ -16,6 +16,7 @@ import agentIntake from './agentIntakeService.js';
 import { PARSER_VERSION, textToHtml } from '../utils/forwardedMailParser.js';
 import { fsConversationEntryId } from '../utils/fsEntryId.js';
 import { freshserviceWillIngest } from './fsHelpdeskAddressService.js';
+import { judgeMeetingMail } from '../utils/meetingInvite.js';
 
 // In-memory memory of messages handed to the hold queue (RL-4) so the delta
 // poller does not re-fetch them every catch-up round; bounded, process-local
@@ -24,7 +25,15 @@ const HELD_CACHE_MAX = 5000;
 
 const TICK_MS = Number(process.env.MAILBOX_INGEST_TICK_MS || 30 * 1000);
 const FIRST_LOOKBACK_MS = 15 * 60 * 1000; // fresh connections look back 15 minutes
-const MAX_CREATES_PER_SENDER_PER_CYCLE = 3;
+// Burst hold (9 Nov 2026): look-alike mail only. Nine "Corporate Traveller
+// Invoice: CAFS-I#### | <traveller>" mails to AP in one cycle were held by the
+// old flat 3-per-sender cap. Now: at most 3 new tickets per sender for one
+// normalised subject (a repeating alert), and 25 per sender for anything else.
+export const MAX_SAME_SUBJECT_CREATES_PER_CYCLE = 3;
+export const MAX_CREATES_PER_SENDER_PER_CYCLE = 25;
+// Cc carried from a mail onto a NEW ticket (QA 11-09 #8): a side mailbox kept the
+// whole Cc line; an invite to 400 people would have Cc'd them all on every update.
+export const MAX_CARRIED_CC = 10; // the Cc editor's own limit, so a carried list stays editable
 const INBOX_PAGE = 25;
 const INBOX_BACKLOG = 250;
 // A description longer than the ticket schema stores (100,000) used to fail the whole message.
@@ -72,6 +81,34 @@ export function normalizeSubjectForMatch(subject) {
     .trim()
     .toLowerCase();
 }
+/**
+ * Burst key for a subject (9 Nov 2026): lowercase, leading Re:/Fw:/Fwd: gone,
+ * every run of digits one '#', whitespace collapsed. "BGC-EDM-HV2 - Error:
+ * Volume transfer has failed for BGC-EDM-FILE1" repeats on the same key;
+ * invoices for different travellers do not.
+ */
+export function burstSubjectKey(subject) {
+  return String(subject || '')
+    .toLowerCase()
+    .replace(/^\s*(?:(?:re|fw|fwd)\s*:\s*)+/i, '')
+    .replace(/\d+/g, '#')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** The two counters a new ticket from this mail counts against, in the per-cycle Map. */
+export function senderBurstKeys(email) {
+  const senderKey = String(email?.from || '').toLowerCase();
+  return { senderKey, subjectKey: `${senderKey}\u0000${burstSubjectKey(email?.subject)}` };
+}
+
+/** Workflow mail sent through SendGrid comes back as `<x-message-id@geopod-ismtpd-N>`: the local parts of the refs. */
+export function referenceLocalParts(refs) {
+  return [...new Set((refs || [])
+    .map((r) => String(r || '').replace(/^<|>$/g, '').split('@')[0].trim())
+    .filter((p) => p.length >= 10))];
+}
+
 // Poller demotion (MB-2d): a mailbox with a live Graph subscription gets its
 // mail pushed within seconds, so the poller only runs as a delta/catch-up
 // reconciliation every 5 min by default (clamped 1–15 min). Connections
@@ -249,6 +286,8 @@ export function mergeInboundCc(existing, email, { mailboxAddress = null, exclude
  *
  * Matching ladder (per inbound message):
  *  1. In-Reply-To / References ↔ stored thread-entry emailMessageIds
+ *  1b/1c ↔ notification_deliveries (exact ids; then a ref's local part =
+ *     SendGrid's x-message-id → via 'workflow_mail_ref', never reopens)
  *  1.5 `<mailbox>+tp<n>@` plus-address tag on To/Cc/Delivered-To (our Reply-To)
  *  2. "TP-1042" ticket ref in the subject (TP-born tickets)
  *  3. "#12345" FreshService ref in the subject → SKIPPED here (FreshService
@@ -573,6 +612,21 @@ class MailboxIngestService {
       else logger.info(`Approval reply rung declined "${email.subject}" from ${email.from}: ${err.message}`);
     }
 
+    // QA 11-09 #8: a meeting invite (or a reply to one) is not a ticket. Recorded
+    // as skipped so a person can still file it; a forwarded invite with the
+    // forwarder's own question goes on, without the invite's attendees.
+    const meeting = judgeMeetingMail(email);
+    if (meeting?.action === 'skip') {
+      recordIngestSkip(connection.workspaceId, 'meeting_invite');
+      logger.info(`Mailbox ingest decision: skip (meeting_invite, ${meeting.kind}, ${meeting.reason}, via ${meeting.via}) for "${email.subject}" from ${email.from}`);
+      await this._recordSkipped(connection, email, 'meeting_invite');
+      return 'skipped';
+    }
+    if (meeting) {
+      email = { ...email, meetingInvite: { kind: meeting.kind, via: meeting.via, forwarded: meeting.forwarded, attendees: meeting.attendees } };
+      logger.info(`Mailbox ingest: "${email.subject}" from ${email.from} is a forwarded invite with a question — filed without its ${meeting.attendees.length} attendee(s)`);
+    }
+
     // Agent sender? Parse the body ONCE (forward header block / quoted From)
     // BEFORE the ladder so rung 4 never runs against the agent (FW-2).
     const agent = await agentIntake.resolveAgentSender(connection.workspaceId, email.from);
@@ -692,22 +746,31 @@ class MailboxIngestService {
     }
   }
 
-  /** Per-sender create cap (loops the header checks didn't catch), then create. */
+  /**
+   * Per-cycle create caps (loops the header checks didn't catch), then create.
+   * Look-alike mail (same sender + normalised subject) is held from the 4th;
+   * different subjects from one sender only from the 26th (9 Nov 2026).
+   */
   async _createWithCap(connection, email, intake, senderCreates) {
-    const senderKey = String(email.from).toLowerCase();
-    const count = senderCreates.get(senderKey) || 0;
-    if (count >= MAX_CREATES_PER_SENDER_PER_CYCLE) {
-      if (isHelpdeskMailbox(connection)) {
-        // Never dropped on the team's front door: a person decides (30 days of IT had two such bursts).
-        logger.warn(`Mailbox ingest: sender ${senderKey} exceeded per-cycle create cap — holding "${email.subject}"`);
-        return this._holdOrFallback(connection, email, {
-          ...intake, decision: { rule: 'sender_burst', details: { cap: MAX_CREATES_PER_SENDER_PER_CYCLE, sender: senderKey } },
-        }, 'sender_burst', new Map());
-      }
-      logger.warn(`Mailbox ingest: sender ${senderKey} exceeded per-cycle create cap — skipping "${email.subject}"`);
-      return 'skipped';
+    const { senderKey, subjectKey } = senderBurstKeys(email);
+    const sameSubject = senderCreates.get(subjectKey) || 0;
+    const total = senderCreates.get(senderKey) || 0;
+    const over = sameSubject >= MAX_SAME_SUBJECT_CREATES_PER_CYCLE
+      ? { kind: 'same_subject', cap: MAX_SAME_SUBJECT_CREATES_PER_CYCLE }
+      : total >= MAX_CREATES_PER_SENDER_PER_CYCLE ? { kind: 'sender_total', cap: MAX_CREATES_PER_SENDER_PER_CYCLE } : null;
+    if (over) {
+      const what = over.kind === 'same_subject' ? 'look-alike' : 'per-sender';
+      // Never dropped, on any mailbox: a person decides (30 days of IT had two such bursts).
+      // Until 9 Nov 2026 a standard mailbox skipped this mail silently, so an alert storm
+      // to patickets@ / fetickets@ could vanish (API Dev review).
+      logger.warn(`Mailbox ingest: sender ${senderKey} exceeded the ${what} create cap (${over.cap}) this cycle — holding "${email.subject}"`);
+      return this._holdOrFallback(connection, email, {
+        ...intake,
+        decision: { rule: 'sender_burst', details: { cap: over.cap, kind: over.kind, sender: senderKey, ...(over.kind === 'same_subject' ? { subjectKey: burstSubjectKey(email.subject) } : {}) } },
+      }, 'sender_burst', new Map());
     }
-    senderCreates.set(senderKey, count + 1);
+    senderCreates.set(subjectKey, sameSubject + 1);
+    senderCreates.set(senderKey, total + 1);
 
     await this.createTicketFromEmail(connection, email, intake);
     return 'created';
@@ -796,6 +859,24 @@ class MailboxIngestService {
       if (delivery?.ticketId) {
         const ticket = await prisma.ticket.findUnique({ where: { id: delivery.ticketId } });
         if (ticket) return { ticket, via: 'notification_delivery' };
+      }
+      // 1c. A workflow mail sent through SendGrid (QA 11-09 #3): the reply's
+      // In-Reply-To is SendGrid's own `<x-message-id@geopod-ismtpd-N>`, and the
+      // delivery stores only the x-message-id. Match on the local part. A reply
+      // matched here is recorded on the ticket but never reopens it.
+      const locals = referenceLocalParts(refs);
+      if (locals.length) {
+        const sent = await Promise.resolve()
+          .then(() => prisma.notificationDelivery.findFirst({
+            where: { workspaceId, providerMessageId: { in: locals } },
+            select: { ticketId: true },
+            orderBy: { id: 'desc' },
+          }))
+          .catch((err) => { logger.warn(`rung 1c lookup failed (non-fatal): ${err.message}`); return null; });
+        if (sent?.ticketId) {
+          const ticket = await Promise.resolve().then(() => prisma.ticket.findUnique({ where: { id: sent.ticketId } })).catch(() => null);
+          if (ticket && Number(ticket.workspaceId) === Number(workspaceId)) return { ticket, via: 'workflow_mail_ref' };
+        }
       }
     }
 
@@ -965,6 +1046,8 @@ class MailboxIngestService {
         const helpdesk = isHelpdeskMailbox(connection);
         const loopReason = looksLikeLoopMail(email, connection.address, { helpdesk });
         if (loopReason) { results.push({ ...base, outcome: 'skipped', reason: loopReason }); continue; }
+        const meeting = judgeMeetingMail(email);
+        if (meeting?.action === 'skip') { results.push({ ...base, outcome: 'skipped', reason: 'meeting_invite', meeting: meeting.reason }); continue; }
         const agent = await agentIntake.resolveAgentSender(connection.workspaceId, email.from);
         const ctx = agent ? await agentIntake.prepareAgentContext(connection, email, agent) : null;
         const match = await this.matchEmailToTicket(connection.workspaceId, email, connection.address, {
@@ -1169,7 +1252,13 @@ class MailboxIngestService {
   async ingestReply(connection, ticket, email, via, { agent: resolvedAgent = null, ctx = null } = {}) {
     const now = new Date();
     const recipients = emailRecipients(email);
-    const isForward = Boolean(resolvedAgent && ctx?.parsed?.isForward && ctx?.originalOk);
+    // QA 11-09 #3: an answer to a workflow mail (a project manager replying to
+    // "BST completion") goes into the conversation as an incoming reply. It is
+    // not an Outlook copy of an agent's reply to the requester, and on a
+    // closed or resolved ticket it never reopens it.
+    const workflowRef = via === 'workflow_mail_ref';
+    const keepClosed = workflowRef && await this._isClosedOrResolved(ticket);
+    const isForward = !workflowRef && Boolean(resolvedAgent && ctx?.parsed?.isForward && ctx?.originalOk);
     // FR 09-11 #1: identity is per TICKET, not per workspace. Someone who is an
     // agent elsewhere can be the REQUESTER on this ticket — QA's own tester is
     // both, which is exactly how this surfaced — and their reply is a requester
@@ -1181,7 +1270,9 @@ class MailboxIngestService {
       && (await this._senderIsTicketRequester(ticket, email.from)
         || (email.onBehalfOf?.email ? await this._senderIsTicketRequester(ticket, email.onBehalfOf.email) : false));
     const agent = senderIsRequester ? null : resolvedAgent;
-    const isAgentReply = Boolean(agent && !isForward);
+    const isAgentReply = Boolean(agent && !isForward && !workflowRef);
+    // "Requester replied" (and its reopen workflow) is for the requester side only.
+    const requesterSide = !isAgentReply && !(workflowRef && agent);
     const forwardedMeta = isForward ? this._forwardedMeta(agent, email, ctx.parsed, { sliced: false }) : null;
     // Helpdesk mailbox: pictures pasted into the reply, resolved on what the person wrote (not on the quoted thread).
     const writtenHtml = stripQuotedHtml(email.bodyHtml);
@@ -1191,6 +1282,9 @@ class MailboxIngestService {
       ...(isAgentReply ? { deliveryState: 'external', agentIntake: { kind: 'agent_reply_email', technicianId: agent.id, via } } : {}),
       ...(forwardedMeta ? { forwarded: forwardedMeta } : {}),
       ...(email.onBehalfOf ? { onBehalfOf: email.onBehalfOf } : {}),
+      // The FreshService copy gets this as a note, not an incoming reply, so
+      // FreshService cannot reopen the copy (and the reconcile carry it back).
+      ...(keepClosed ? { keepClosed: true } : {}),
     };
     const entry = await prisma.ticketThreadEntry.create({
       data: {
@@ -1263,6 +1357,7 @@ class MailboxIngestService {
         emailMessageId: email.internetMessageId,
         source: 'email_inbound',
         entryId: entry.id,
+        ...(keepClosed ? { keptClosed: true } : {}),
         ...(isAgentReply ? { deliveryState: 'external', technicianId: agent.id, actorEmail: agent.email } : {}),
         ...(isForward ? {
           forwardedBy: agent.email, forwardedByTechnicianId: agent.id, originalFrom: forwardedMeta.originalFrom, originalDate: forwardedMeta.originalDate,
@@ -1303,21 +1398,28 @@ class MailboxIngestService {
       // FS-born (17 Sep 2026): this mail answered something Ticket Pulse sent, so
       // FreshService has not seen it — write it onto the FS ticket as an incoming
       // note by the requester; the later FS conversation sync lands on this row.
-      await this._writeReplyToFreshService(ticket, entry, email, { isAgentReply, agent });
+      await this._writeReplyToFreshService(ticket, entry, email, { isAgentReply, agent, keepClosed });
     }
 
     // Workflow trigger: "Requester replied" (drives the seeded reopen
     // workflow). An agent's own Outlook reply is not a requester reply.
-    if (!isAgentReply) {
-      try {
-        const { default: lifecycle } = await import('./ticketLifecycleNotificationService.js');
-        await lifecycle.emitTicketEvent('ticket.reply_received', ticket.id, {
-          source: 'email_inbound',
-          dedupeStamp: `reply:${entry.id}`,
-          extra: { entryId: entry.id, from: isForward ? forwardedMeta.originalFrom : email.from, via, ...(isForward ? { forwardedBy: agent.email } : {}) },
-        });
-      } catch (err) {
-        logger.warn(`reply_received workflow dispatch failed (non-fatal): ${err.message}`);
+    // A reply to a workflow mail on a closed ticket fires nothing that reopens
+    // it (QA 11-09 #3): no reply_received, so no reopen workflow, no Ticket Ops
+    // reopen and no "new request" follow-up.
+    if (requesterSide) {
+      if (keepClosed) {
+        logger.info(`${ticketDisplayRef(ticket)}: reply from ${email.from} to a workflow mail recorded; the ${ticket.status} ticket stays ${ticket.status}`);
+      } else {
+        try {
+          const { default: lifecycle } = await import('./ticketLifecycleNotificationService.js');
+          await lifecycle.emitTicketEvent('ticket.reply_received', ticket.id, {
+            source: 'email_inbound',
+            dedupeStamp: `reply:${entry.id}`,
+            extra: { entryId: entry.id, from: isForward ? forwardedMeta.originalFrom : email.from, via, ...(isForward ? { forwardedBy: agent.email } : {}) },
+          });
+        } catch (err) {
+          logger.warn(`reply_received workflow dispatch failed (non-fatal): ${err.message}`);
+        }
       }
 
       // Category/group watchers who opted into requester replies (fire-and-forget).
@@ -1338,7 +1440,7 @@ class MailboxIngestService {
           await copyAgentsOnRequesterReply(ticket, entry, { fromEmail: email.from, fromName: email.fromName || null });
         } catch { /* non-fatal */ }
       }
-    } else {
+    } else if (isAgentReply) {
       // QA 11-05b #3 (product decision): an agent's Outlook reply is "Agent replied to
       // requester", like an in-app reply — once per entry, marked as already
       // delivered by Outlook so nothing sends the reply itself again.
@@ -1452,6 +1554,15 @@ class MailboxIngestService {
     }
   }
 
+  /** Closed or Resolved (the workspace's own status names, by base). Never throws. */
+  async _isClosedOrResolved(ticket) {
+    const base = await Promise.resolve()
+      .then(() => statusService.resolveBaseStatus(ticket.workspaceId, ticket.status))
+      .catch(() => null);
+    if (base) return base === 'Closed' || base === 'Resolved';
+    return /^(closed|resolved)$/i.test(String(ticket?.status || '').trim());
+  }
+
   /**
    * FS-born write-back of an inbound reply (17 Sep 2026). Requester replies go
    * in as `incoming` notes attributed to the requester's FreshService user (so
@@ -1460,13 +1571,15 @@ class MailboxIngestService {
    * Never throws — the reply is already on the ticket here; a failed write-back
    * leaves the row `failed` for the next reconcile and a warning in the log.
    */
-  async _writeReplyToFreshService(ticket, entry, email, { isAgentReply = false, agent = null } = {}) {
+  async _writeReplyToFreshService(ticket, entry, email, { isAgentReply = false, agent = null, keepClosed = false } = {}) {
     const esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     try {
       const client = await mirrorService.getInteractiveClient(ticket.workspaceId);
       if (typeof client?.addNote !== 'function') throw new Error('FreshService is not configured for this workspace');
       const requesterFsId = ticket.requesterFreshserviceId === null || ticket.requesterFreshserviceId === undefined ? null : Number(ticket.requesterFreshserviceId);
-      const asRequester = !isAgentReply && Number.isFinite(requesterFsId) && requesterFsId > 0;
+      // A reply kept off a closed ticket (QA 11-09 #3) goes in as a marked public note,
+      // not an incoming requester note, so FreshService's own "requester replied" rules leave it closed.
+      const asRequester = !isAgentReply && !keepClosed && Number.isFinite(requesterFsId) && requesterFsId > 0;
       const who = agent ? `${agent.name || agent.email} <${agent.email}>` : `${email.fromName || email.from} <${email.from}>`;
       const marker = asRequester
         ? ''
@@ -1481,7 +1594,7 @@ class MailboxIngestService {
       const notify = isAgentReply ? null : await fsOnlyAssigneeEmail(ticket);
       const result = await client.addNote(Number(ticket.freshserviceTicketId), body, {
         isPrivate: false,
-        incoming: !isAgentReply,
+        incoming: !isAgentReply && !keepClosed,
         attachments,
         ...(asRequester ? { userId: requesterFsId } : {}),
         ...(notify ? { notifyEmails: [notify] } : {}),
@@ -1533,7 +1646,11 @@ class MailboxIngestService {
     const probe = mergeInboundCc(ticket.ccEmails, email, { mailboxAddress: connection.address });
     if (probe.added.length === 0 && probe.dropped.length === 0) return null;
 
-    const exclude = [];
+    // A meeting invite's attendees never join the ticket's Cc (QA 11-09 #8): a plain
+    // invite a person attached from the skipped list adds nobody; a forward, not its attendees.
+    const meeting = email.meetingInvite || judgeMeetingMail(email);
+    if (meeting && !meeting.forwarded) return null;
+    const exclude = [...(meeting?.attendees || [])];
     let requesterEmail = ticket.requester?.email || null;
     if (!requesterEmail && ticket.requesterId) {
       const requester = await prisma.requester.findUnique({ where: { id: ticket.requesterId }, select: { email: true } });
@@ -1574,6 +1691,37 @@ class MailboxIngestService {
       ...(connection.defaultInternalGroupId ? { internalGroupId: connection.defaultInternalGroupId } : {}),
       ...(connection.defaultTicketType ? { ticketType: connection.defaultTicketType } : {}),
     };
+  }
+
+  /**
+   * Recipients of a meeting invite, attendees removed (QA 11-09 #8). A plain
+   * invite (filed by a person from the skipped list) keeps only the mailbox on
+   * To and no Cc — its To/Cc are the attendees. A forwarded invite keeps what
+   * the forwarder addressed, minus anyone on the quoted invite.
+   */
+  _withoutAttendees(recipients, email, connection) {
+    if (!recipients) return recipients;
+    const meeting = email?.meetingInvite || judgeMeetingMail(email);
+    if (!meeting) return recipients;
+    const to = recipients.to_emails || [];
+    const cc = recipients.cc_emails || [];
+    const next = meeting.forwarded
+      ? (() => {
+        const drop = new Set((meeting.attendees || []).map((a) => String(a).toLowerCase()));
+        return { to_emails: to.filter((a) => !drop.has(a)), cc_emails: cc.filter((a) => !drop.has(a)) };
+      })()
+      : { to_emails: to.filter((a) => agentIntake.isMailboxAddress(a, connection?.address)), cc_emails: [] };
+    const removed = (to.length + cc.length) - (next.to_emails.length + next.cc_emails.length);
+    if (removed > 0) logger.info(`Mailbox ingest: ${removed} meeting attendee(s) of "${email.subject}" left off the ticket's recipients`);
+    return next;
+  }
+
+  /** At most MAX_CARRIED_CC addresses carried from a mail onto a new ticket's Cc; logged when cut. */
+  _capCarriedCc(list, label = '') {
+    const all = Array.isArray(list) ? list : [];
+    if (all.length <= MAX_CARRIED_CC) return all;
+    logger.warn(`Mailbox ingest: ${all.length} Cc addresses on ${label || 'a new ticket'} — kept the first ${MAX_CARRIED_CC}`);
+    return all.slice(0, MAX_CARRIED_CC);
   }
 
   _subjectFor(raw) {
@@ -1652,11 +1800,12 @@ class MailboxIngestService {
     // Persist who the email was addressed to (QA 08-05 #3): graphMailClient
     // already fetched to/cc — store them on the ticket row (same columns FS
     // sync fills) instead of discarding them. Non-fatal on failure.
-    const recipients = emailRecipients(email);
+    // A meeting invite (QA 11-09 #8) never carries its attendees into the ticket.
+    const recipients = this._withoutAttendees(emailRecipients(email), email, connection);
     if (recipients) {
       // A8 (helpdesk): the people copied, without the mailbox itself, the sender or the agents, ten at most.
-      // A side mailbox keeps storing the Cc line as it arrived.
-      let ccEmails = recipients.cc_emails;
+      // A side mailbox keeps storing the Cc line as it arrived, up to MAX_CARRIED_CC.
+      let ccEmails = this._capCarriedCc(recipients.cc_emails, `"${subject}" (${ticket.displayRef || ticket.id})`);
       if (helpdesk) {
         const agents = await prisma.technician.findMany({ where: { workspaceId: connection.workspaceId, isActive: true, email: { not: null } }, select: { email: true } })
           .then((rows) => rows.map((r) => String(r.email || '').toLowerCase())).catch(() => []);
@@ -1793,7 +1942,7 @@ class MailboxIngestService {
       ...this._routingDefaults(connection),
     }, SYSTEM_ACTOR, { sourceChannel: TICKET_SOURCE.EMAIL, createdVia: 'forward' });
 
-    const recipients = emailRecipients(email);
+    const recipients = this._withoutAttendees(emailRecipients(email), email, connection);
     if (recipients?.to_emails?.length) {
       await prisma.ticket.update({
         where: { id: ticket.id },
@@ -1804,6 +1953,13 @@ class MailboxIngestService {
     }
 
     const forwarded = this._forwardedMeta(agent, email, parsed, { sliced });
+    if (email.meetingInvite) {
+      // A forwarded invite (QA 11-09 #8): its attendee list is not the ticket's business.
+      forwarded.meetingInvite = true;
+      forwarded.attendeesLeftOff = forwarded.originalTo.length + forwarded.originalCc.length;
+      forwarded.originalTo = [];
+      forwarded.originalCc = [];
+    }
     const originalRecipients = {
       ...(forwarded.originalTo.length ? { to_emails: forwarded.originalTo } : {}),
       ...(forwarded.originalCc.length ? { cc_emails: forwarded.originalCc } : {}),
@@ -1923,7 +2079,8 @@ class MailboxIngestService {
       ? (parsed.noteText || null)
       : (email.bodyText || email.bodyPreview || null);
     const assign = agentIntake.agentCcIntakeEnabled(connection);
-    const otherExternals = (intake.externals || []).filter((e) => e !== requester.email).slice(0, MAX_CC_EMAILS);
+    const attendees = new Set(email.meetingInvite?.attendees || []);
+    const otherExternals = (intake.externals || []).filter((e) => e !== requester.email && !attendees.has(e)).slice(0, MAX_CC_EMAILS);
 
     const ticket = await ticketService.createTicket(connection.workspaceId, {
       subject,

@@ -838,6 +838,9 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
 
   const CANNED_VIEWS = [
     { key: 'all', label: 'All tickets', params: { status: 'any' } },
+    // QA 11-09 #7: everything still being worked, by anyone or nobody —
+    // Open/Pending bases, parked included (the server's `unresolved` segment).
+    { key: 'unresolved', label: 'All unresolved', params: { segment: 'unresolved' } },
     // "My open" is explicit about its status scope — an assignee-only filter
     // left board mode (which once fetched every status) showing closed cards
     // under an "open" label (QA 08-04 #15). Scope = Open/Pending-BASE names
@@ -859,7 +862,10 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
     { key: 'reopened', label: 'Re-opened', params: { reopened: '1' }, icon: RotateCcw },
     { key: 'noise', label: 'Noise & spam', params: { noise: 'only', status: 'any' }, icon: VolumeX },
     { key: 'deleted', label: 'Deleted', params: { segment: 'deleted', status: 'any' }, icon: Trash2 },
-    { key: 'resolved', label: 'Recently resolved', params: { segment: 'resolved' } },
+    // QA 11-09 #4: "Recently closed" (was "Recently resolved"; several
+    // workspaces retired Resolved). Still the `resolved` segment, which counts
+    // Resolved and Closed, so old links and saved views keep working.
+    { key: 'resolved', label: 'Recently closed', params: { segment: 'resolved' } },
     { key: 'solutions', label: 'Verified solutions', params: { solution: 'verified', status: 'any' }, icon: BadgeCheck },
     { key: 'scheduled', label: 'Scheduled', params: { view: 'scheduled' }, icon: CalendarClock },
     // Grouped (plans/TICKET_GROUPING_PLAN.md): repeats closed into an open ticket, tickets combined, suggestions to decide.
@@ -1054,7 +1060,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
             <div className="space-y-0.5">
               {CANNED_VIEWS.filter((v) => sf.match(v.label)).map((v) => {
                 const count = {
-                  all: stats?.all, unassigned: stats?.unassigned, awaiting: stats?.awaiting,
+                  all: stats?.all, unresolved: stats?.unresolved, unassigned: stats?.unassigned, awaiting: stats?.awaiting,
                   // QA 10-16 #5: each "my" view counts exactly what its list shows.
                   mine: myCount(stats?.byTechnicianOpenOnly),
                   my_tickets: myCount(stats?.byTechnicianActive),
@@ -1873,7 +1879,11 @@ export function ActiveFilterBar({ meta }) {
   const groupName = (fsId) => (meta?.groups || []).find((g) => String(g.freshserviceId) === fsId)?.name || `Group ${fsId}`;
   const sourceName = (v) => (meta?.sources || []).find((s) => String(s.value) === v)?.label || `Source ${v}`;
   const PRIOS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
-  const SEGMENT_LABELS = { open: 'Open', unassigned: 'Unassigned', awaiting: 'Awaiting reply', due_today: 'Due today', overdue: 'Overdue', resolved: 'Resolved' };
+  const SEGMENT_LABELS = {
+    open: 'Open', unresolved: 'All unresolved', unassigned: 'Unassigned', awaiting: 'Awaiting reply', due_today: 'Due today', overdue: 'Overdue',
+    // QA 11-09 #4: the `resolved` segment holds Resolved and Closed tickets.
+    resolved: 'Recently closed', closed: 'Closed', parked: 'Parked', deleted: 'Deleted & spam', noise: 'Noise',
+  };
   const DUE_LABELS = { overdue: 'Overdue', today: 'Due today', week: 'Due in 7 days', none: 'No due date' };
 
   const chips = [];

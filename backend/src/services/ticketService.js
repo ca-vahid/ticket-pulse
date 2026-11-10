@@ -73,6 +73,26 @@ export const NOT_GROUPED_COPY = Object.freeze({
   OR: [{ noiseRuleMatched: null }, { NOT: { noiseRuleMatched: { startsWith: 'Grouped:' } } }],
 });
 
+/**
+ * The ticket-number clauses a search text stands for: "TP-1042" / "tp1042" →
+ * the TP number; "1042", "#232558" → the TP number or the FreshService id (the
+ * leading '#' people copy from FreshService must not defeat the match). [] when
+ * the text is not a bare ticket number.
+ */
+export function ticketRefClauses(text) {
+  const q = String(text ?? '').trim();
+  // native_number is a 32-bit int: a longer number can only be a FreshService id.
+  const INT_MAX = 2147483647;
+  const tp = q.match(/^tp-?(\d{1,10})$/i);
+  if (tp) return Number(tp[1]) <= INT_MAX ? [{ nativeNumber: Number(tp[1]) }] : [];
+  const numeric = q.replace(/^#/, '');
+  if (!/^\d{1,18}$/.test(numeric)) return [];
+  return [
+    ...(Number(numeric) <= INT_MAX ? [{ nativeNumber: Number(numeric) }] : []),
+    { freshserviceTicketId: BigInt(numeric) },
+  ];
+}
+
 // Lifecycle order for sort=status (QA 08-04 #14a): alphabetical is meaningless
 // to operators — asc walks the ticket lifecycle Open-first (matching
 // FreshService), desc reverses it. Since 8c the rank is BASE rank first, then
@@ -1487,6 +1507,14 @@ class TicketService {
 
   async buildListWhere(workspaceId, query = {}) {
     const where = { workspaceId };
+    // QA 11-09 #5: a bare ticket number typed into the in-app search finds that
+    // ticket whatever the list hides by default: noise, a grouped copy closed
+    // into another ticket (is_noise), Deleted/Spam, or the date window. Filters
+    // the person picked (status, assignee, a segment…) still apply. Only the
+    // web list and header search opt in (`exactRefAnyState: true`, a boolean
+    // a query string can never carry); the public API keeps its meaning.
+    const refClauses = query.exactRefAnyState === true ? ticketRefClauses(query.q) : [];
+    const refOr = refClauses.length ? { OR: refClauses } : null;
 
     const asList = (v) => (Array.isArray(v) ? v : String(v ?? '').split(',')).map((s) => String(s).trim()).filter(Boolean);
     // Status filter (1 Oct 2026): "parked" is its own option. A parked ticket
@@ -1662,6 +1690,7 @@ class TicketService {
         OR: [
           { createdAt: { gte: windowStart } },
           { status: { in: await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']) } },
+          ...(refOr ? [refOr] : []),
         ],
       }];
     }
@@ -1710,7 +1739,10 @@ class TicketService {
       // QA 10-28 #4: a grouped copy is kept out of totals with is_noise, but it
       // is not noise. The Noise & spam view leaves it to Tickets -> Grouped.
       where.AND = [...(where.AND || []), NOT_GROUPED_COPY];
-    } else if (query.excludeNoise !== 'false') where.isNoise = false;
+    } else if (query.excludeNoise !== 'false') {
+      if (refOr) where.AND = [...(where.AND || []), { OR: [{ isNoise: false }, refOr] }];
+      else where.isNoise = false;
+    }
 
     // Approval filter (16 Sep 2026): `approval` = any | pending | approved |
     // rejected | none, optionally narrowed to `approvalCategory` ids. "pending"
@@ -1780,7 +1812,15 @@ class TicketService {
           { ...FIRST_RESPONSE_TRACKED, frDueBy: { lt: now }, firstPublicAgentReplyAt: null },
         ],
       }];
+    } else if (query.segment === 'unresolved') {
+      // QA 11-09 #7 "All unresolved": everything still being worked by anyone,
+      // assigned or not — every Open/Pending-base status, parked included
+      // (waiting on purpose is still unresolved). Same count as stats.unresolved.
+      where.status = { in: await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']) };
     } else if (query.segment === 'resolved') {
+      // The "Recently closed" view (QA 11-09 #4; was "Recently resolved"): every
+      // Resolved- AND Closed-base status, so workspaces that retired Resolved
+      // see their closed tickets. The segment key stays 'resolved' for old links.
       where.status = { in: await statusService.statusNamesForBase(workspaceId, ['Resolved', 'Closed']) };
     } else if (query.segment === 'closed') {
       // QA 11-02 #1: Closed alone (IT and Project Accounting retired Resolved).
@@ -1832,7 +1872,8 @@ class TicketService {
     // view — they must not pad the main list or its counts. The 'noise' card
     // keeps its any-status scope (its count includes noise in any status).
     if (query.segment !== 'deleted' && query.segment !== 'noise' && where.status === undefined) {
-      where.status = { notIn: ['Deleted', 'Spam'] };
+      if (refOr) where.AND = [...(where.AND || []), { OR: [{ status: { notIn: ['Deleted', 'Spam'] } }, refOr] }];
+      else where.status = { notIn: ['Deleted', 'Spam'] };
     }
 
     // Custom-field filters (Custom Fields Activation Phase 2): cf_<key>=<value>
@@ -1851,15 +1892,8 @@ class TicketService {
         // often as a name; assignment-audit search already matched on it.
         { requester: { is: { email: { contains: q, mode: 'insensitive' } } } },
       ];
-      // Ticket refs: "TP-1042", "1042", "#232558", "232558" — the leading '#'
-      // people copy from FreshService must not defeat the numeric match.
-      const tpMatch = q.match(/^tp-?(\d+)$/i);
-      const numeric = q.replace(/^#/, '');
-      if (tpMatch) or.push({ nativeNumber: Number(tpMatch[1]) });
-      else if (/^\d+$/.test(numeric)) {
-        or.push({ nativeNumber: Number(numeric) });
-        or.push({ freshserviceTicketId: BigInt(numeric) });
-      }
+      // Ticket refs: "TP-1042", "1042", "#232558", "232558" (ticketRefClauses).
+      or.push(...ticketRefClauses(q));
       // AND-composed so it can't collide with segment OR clauses
       where.AND = [...(where.AND || []), { OR: or }];
     }
@@ -1987,12 +2021,13 @@ class TicketService {
     // always what clicking it shows.
     const facets = await this._listFacets(workspaceId, query);
 
-    const [incomingByTicket, aiByTicket, bypassByTicket, proposedTicketIds, approvalByTicket] = await Promise.all([
+    const [incomingByTicket, aiByTicket, bypassByTicket, proposedTicketIds, approvalByTicket, combinedByTicket] = await Promise.all([
       this._lastPublicEntryIncoming(items.map((t) => t.id)),
       this._aiRunStateByTicket(items.map((t) => t.id)),
       this._aiBypassByTicket(items),
       this._openProposalTicketIds(items.map((t) => t.id)),
       this._approvalStateByTicket(items.map((t) => t.id)),
+      this._combinedIntoByTicket(items.map((t) => t.id), workspaceId),
     ]);
 
     return {
@@ -2014,6 +2049,8 @@ class TicketService {
         hasProposedReply: proposedTicketIds.has(t.id),
         // QA 10-28 #2: the row's approval mark (waiting / on hold / approved / not approved / closed).
         approvalState: approvalByTicket.get(t.id) || null,
+        // QA 11-09 #5: a ticket closed into another reads "Combined into TP-…".
+        combinedInto: combinedByTicket.get(t.id) || null,
       })),
       total,
       page,
@@ -2087,6 +2124,34 @@ class TicketService {
       take: s.take,
     })));
     return { total, items: rows.flat() };
+  }
+
+  /**
+   * QA 11-09 #5: per list row, the ticket it was closed into — a grouping
+   * `duplicate_of` link or a manual `merged_into` — as { id, displayRef, kind }
+   * with kind 'combined' | 'merged'. One indexed read per page. Never throws.
+   */
+  async _combinedIntoByTicket(ticketIds, workspaceId) {
+    const out = new Map();
+    if (!ticketIds?.length) return out;
+    const links = await Promise.resolve()
+      .then(() => prisma.ticketLink.findMany({
+        where: { ticketId: { in: ticketIds }, kind: { in: ['duplicate_of', 'merged_into'] } },
+        select: {
+          id: true, ticketId: true, kind: true,
+          relatedTicket: { select: { id: true, workspaceId: true, origin: true, nativeNumber: true, freshserviceTicketId: true } },
+        },
+        orderBy: { id: 'desc' },
+      }))
+      .catch(() => []);
+    for (const l of links || []) {
+      const to = l?.relatedTicket;
+      if (!to || out.has(l.ticketId) || to.id === l.ticketId) continue;
+      if (workspaceId !== null && workspaceId !== undefined && to.workspaceId !== null && to.workspaceId !== undefined
+        && Number(to.workspaceId) !== Number(workspaceId)) continue;
+      out.set(l.ticketId, { id: to.id, displayRef: ticketDisplayRef(to), kind: l.kind === 'merged_into' ? 'merged' : 'combined' });
+    }
+    return out;
   }
 
   /** The ticket a grouped copy was closed into: { id, displayRef, kind } or null. Never throws. */
@@ -2578,7 +2643,7 @@ class TicketService {
     ]);
     const {
       all, openCount, unassigned, dueToday, overdue, resolved, closed = 0, deleted, noise,
-      createdThisWeek, createdThisMonth, createdThisYear, parked, parkedWakingWeek,
+      createdThisWeek, createdThisMonth, createdThisYear, parked, parkedWakingWeek, unresolved = 0,
     } = counts;
 
     const byTechnician = {};
@@ -2619,6 +2684,8 @@ class TicketService {
     return {
       all,
       open: openCount,
+      // "All unresolved" view (QA 11-09 #7): open work of everyone, parked included.
+      unresolved,
       unassigned,
       awaiting: awaitingIds.length,
       awaitingApproval,
@@ -2651,6 +2718,7 @@ class TicketService {
       SELECT
         count(*) FILTER (WHERE NOT is_noise AND status NOT IN ('Deleted', 'Spam') AND ${win})::int AS "all",
         count(*) FILTER (WHERE NOT is_noise AND status = ANY(${openNames}) AND parked_until IS NULL)::int AS "openCount",
+        count(*) FILTER (WHERE NOT is_noise AND status = ANY(${openNames}))::int AS "unresolved",
         count(*) FILTER (WHERE NOT is_noise AND status = ANY(${openNames}) AND parked_until IS NULL AND assigned_tech_id IS NULL)::int AS "unassigned",
         count(*) FILTER (WHERE NOT is_noise AND status = ANY(${openNames}) AND parked_until IS NULL AND status = ANY(${openBaseNames})
           AND ((due_by >= ${now} AND due_by <= ${endOfDay})
@@ -2677,7 +2745,7 @@ class TicketService {
   async _queueCountsSeparate(workspaceId, { open, visible, openNames = [], openBaseNames, resolvedNames, closedNames = [], now, endOfDay, weekStart, monthStart, yearStart, weekAhead, windowStart = null }) {
     const win = windowStart ? { OR: [{ createdAt: { gte: windowStart } }, { status: { in: openNames } }] } : {};
     const [all, openCount, unassigned, dueToday, overdue, resolved, closed, deleted, noise,
-      createdThisWeek, createdThisMonth, createdThisYear, parked, parkedWakingWeek] = await Promise.all([
+      createdThisWeek, createdThisMonth, createdThisYear, parked, parkedWakingWeek, unresolved] = await Promise.all([
       prisma.ticket.count({ where: { workspaceId, isNoise: false, status: { notIn: ['Deleted', 'Spam'] }, ...(windowStart ? { AND: [win] } : {}) } }),
       prisma.ticket.count({ where: open }),
       prisma.ticket.count({ where: { ...open, assignedTechId: null } }),
@@ -2712,10 +2780,12 @@ class TicketService {
       prisma.ticket.count({ where: { ...visible, createdAt: { gte: yearStart } } }),
       prisma.ticket.count({ where: { workspaceId, isNoise: false, parkedUntil: { not: null } } }).catch(() => 0),
       prisma.ticket.count({ where: { workspaceId, isNoise: false, parkedUntil: { not: null, lte: weekAhead } } }).catch(() => 0),
+      // "All unresolved" (QA 11-09 #7): Open/Pending bases, parked included.
+      prisma.ticket.count({ where: { workspaceId, isNoise: false, status: { in: openNames } } }).catch(() => 0),
     ]);
     return {
       all, openCount, unassigned, dueToday, overdue, resolved, closed, deleted, noise,
-      createdThisWeek, createdThisMonth, createdThisYear, parked, parkedWakingWeek,
+      createdThisWeek, createdThisMonth, createdThisYear, parked, parkedWakingWeek, unresolved,
     };
   }
 

@@ -186,12 +186,56 @@ describe('pushCancelled', () => {
     expect(await wb.pushCancelled(140)).toEqual({ ok: true });
   });
 
-  test('never touches a leave that came from Vacation Tracker or was never written', async () => {
+  test('never touches a leave the sync cancelled (it came from Vacation Tracker) or one never written', async () => {
     prismaMock.avRequest.findUnique.mockResolvedValue(cancelled({ source: 'vacation_tracker' }));
+    expect(await wb.pushCancelled(140)).toEqual({ skipped: 'not_applicable' });
+    prismaMock.avRequest.findUnique.mockResolvedValue(cancelled({ source: 'vacation_tracker', events: [{ id: 3, kind: 'cancelled', details: { reason: 'No longer in Vacation Tracker', source: 'vacation_tracker' } }] }));
     expect(await wb.pushCancelled(140)).toEqual({ skipped: 'not_applicable' });
     prismaMock.avRequest.findUnique.mockResolvedValue(cancelled({ externalId: null }));
     expect(await wb.pushCancelled(140)).toEqual({ skipped: 'not_applicable' });
     expect(client.cancelLeave).not.toHaveBeenCalled();
+  });
+
+  // QA 11-09 #2: an imported leave the person cancelled in Ticket Pulse.
+  const cancelledHere = (over = {}) => cancelled({
+    source: 'vacation_tracker', externalId: 'vt:leave-55', email: 'casey.lee@example.com',
+    events: [{ id: 8, kind: 'cancelled', details: { cancelledIn: 'ticket_pulse' } }], ...over,
+  });
+
+  test('cancels in Vacation Tracker an imported leave the person cancelled here, through the account they are a user of', async () => {
+    client.listUsers.mockResolvedValue([{ id: 'u-casey', email: 'casey.lee@example.com', status: 'ACTIVE' }]);
+    prismaMock.avRequest.findUnique.mockResolvedValue(cancelledHere());
+    expect(await wb.pushCancelled(140, 'Plans changed')).toEqual({ ok: true });
+    expect(client.cancelLeave).toHaveBeenCalledWith('leave-55', { reason: 'Plans changed', idempotencyKey: 'tp-av-140-cancel' });
+    expect(lastEvent().events.create).toMatchObject({ kind: 'vt_cancelled', details: { vtLeaveId: 'leave-55' } });
+  });
+
+  test('an imported leave whose person is not a Vacation Tracker user, or with the write-back off, is not sent', async () => {
+    prismaMock.avRequest.findUnique.mockResolvedValue(cancelledHere());
+    expect(await wb.pushCancelled(140)).toEqual({ skipped: 'no_user' });
+    prismaMock.avSettings.findUnique.mockResolvedValue({ id: 1, vtWriteBackEnabled: false });
+    expect(await wb.pushCancelled(140)).toEqual({ skipped: 'off' });
+    expect(client.cancelLeave).not.toHaveBeenCalled();
+  });
+});
+
+describe('cancelledHereExternalIds', () => {
+  test('only imported leaves whose last cancel was made in Ticket Pulse', async () => {
+    prismaMock.avRequest.findMany.mockResolvedValue([
+      { externalId: 'vt:a', events: [{ id: 1, kind: 'cancelled', details: { cancelledIn: 'ticket_pulse' } }] },
+      { externalId: 'vt:b', events: [{ id: 2, kind: 'cancelled', details: { source: 'vacation_tracker' } }] },
+      { externalId: 'vt:c', events: [{ id: 3, kind: 'cancelled', details: { mergedInto: 9, reason: 'Same leave' } }] },
+      { externalId: 'vt:d', events: [{ id: 4, kind: 'cancelled', details: null }] },
+    ]);
+    expect([...(await wb.cancelledHereExternalIds())].sort()).toEqual(['vt:a', 'vt:d']);
+    expect(prismaMock.avRequest.findMany.mock.calls[0][0].where).toMatchObject({ source: 'vacation_tracker', status: 'cancelled' });
+  });
+
+  test('a failed read is an empty set, never a throw', async () => {
+    prismaMock.avRequest.findMany.mockRejectedValue(new Error('db down'));
+    expect((await wb.cancelledHereExternalIds()).size).toBe(0);
+    // the import asks strictly: it would rather skip a run than bring a cancel back
+    await expect(wb.cancelledHereExternalIds({ strict: true })).rejects.toThrow('db down');
   });
 });
 

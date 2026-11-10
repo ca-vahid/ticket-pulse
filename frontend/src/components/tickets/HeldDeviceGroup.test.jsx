@@ -84,7 +84,7 @@ describe('grouped queue in the popup and on Settings', () => {
   test('the popup lists the device first, opens it, and one click files the whole burst', async () => {
     const onCountChange = vi.fn();
     render(<MemoryRouter><HeldRepliesDialog open onClose={vi.fn()} onCountChange={onCountChange} /></MemoryRouter>);
-    expect(await screen.findByText('Unmatched replies · 5 waiting')).toBeInTheDocument();
+    expect(await screen.findByText('Held e-mail · 5 waiting')).toBeInTheDocument();
     expect(onCountChange).toHaveBeenCalledWith(5);
     const entry = screen.getByTestId('held-dialog-group');
     expect(entry).toHaveTextContent('Alert burst · 4');

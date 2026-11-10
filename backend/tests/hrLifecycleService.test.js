@@ -12,7 +12,7 @@ import { jest } from '@jest/globals';
 const db = {};
 let seq = 1000;
 const reset = () => {
-  for (const k of ['settings', 'changes', 'families', 'members', 'events', 'tickets', 'leaves', 'categories', 'activities']) db[k] = [];
+  for (const k of ['settings', 'changes', 'families', 'members', 'events', 'tickets', 'leaves', 'categories', 'activities', 'parks']) db[k] = [];
   db.technicians = [
     { id: 1, name: 'Vahid Haeri', email: 'vahid@x.ca', photoUrl: null, workspaceId: 1, isActive: true },
     { id: 2, name: 'Muhammad Shahidullah', email: 'ms@x.ca', photoUrl: null, workspaceId: 1, isActive: true },
@@ -75,6 +75,7 @@ const prismaMock = {
   hrLifecycleFamilyMember: table('members'),
   hrLifecycleEvent: table('events'),
   ticketActivity: table('activities'),
+  ticketPark: table('parks'),
   ticket: {
     findFirst: jest.fn(async ({ where }) => {
       const t = db.tickets.find((r) => r.id === where.id && r.workspaceId === where.workspaceId);
@@ -125,7 +126,8 @@ const linkSvc = { setParent: jest.fn(async () => ({})), link: jest.fn(async () =
 const parkSvc = {
   hrSuggestion: jest.fn(async () => ({ usable: true, until: '2026-10-19T15:00:00.000Z', wakeDate: '2026-10-19', reason: 'Leave starts Oct 21 (from the HR notice)' })),
   park: jest.fn(async (id, _ws, input) => { ticketById(id).parkedUntil = new Date(input.until); return {}; }),
-  unpark: jest.fn(async (id) => { ticketById(id).parkedUntil = null; return { unparked: true }; }),
+  unpark: jest.fn(async (id) => { ticketById(id).parkedUntil = null; for (const p of db.parks) if (p.ticketId === id) p.endedAt = new Date(); return { unparked: true }; }),
+  activePark: jest.fn(async (id) => db.parks.find((p) => p.ticketId === id && p.endedAt === null) || null),
   // The real lead-time rule on a Monday–Friday calendar.
   hrWakeFor: jest.fn(async (_ws, kind, iso) => {
     const wakeDate = hrWakeDate(kind, iso);
@@ -149,7 +151,7 @@ jest.unstable_mockModule('../src/services/statusService.js', () => ({
   default: { baseStatusOf: jest.fn(async (_ws, s) => ({ Open: 'Open', Pending: 'Pending', Resolved: 'Resolved', Closed: 'Closed' }[s] ?? null)) },
 }));
 
-const { default: hr, dueInstant, addDays, familyDueDate } = await import('../src/services/hrLifecycleService.js');
+const { default: hr, dueInstant, addDays, familyDueDate, localInstant, planLeaveNotice, isLeaveChange } = await import('../src/services/hrLifecycleService.js');
 const { default: cal } = await import('../src/services/businessCalendarService.js');
 const { hrWakeDate } = await import('../src/utils/hrNoticeDates.js');
 
@@ -690,6 +692,213 @@ describe('live: the notice is the ticket (leave / transfer)', () => {
     expect(parkSvc.park).toHaveBeenCalledWith(t.id, 1, expect.objectContaining({ kind: 'until_date' }), expect.anything(), { source: 'suggested_hr' });
     expect(ticketSvc.createTicket).not.toHaveBeenCalled();
     expect(db.families).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------- QA 11-09 #1: leave changes
+
+describe('QA 11-09 #1: an HR change to a leave under way extends the leave IT holds', () => {
+  const PERSON = 'Rowan Example';
+  const tableBody = ({ start, back, oldStart = null, oldBack = null, emp = 4417 }) => [
+    'New Leave Records Employee Number Location Leave Type Expected Leave Date Expected Return Date',
+    `${emp} Vancouver Maternity / Parental Leave ${start}${back ? ` ${back}` : ''}`,
+    'Removed Leave Records Employee Number Location Leave Type Expected Leave Date Expected Return Date',
+    oldStart ? `${emp} Vancouver Maternity / Parental Leave ${oldStart} ${oldBack}` : '',
+  ].join(' ');
+  // The earlier FreshService-born notice, parked by the HR park until the old return.
+  const heldLeave = ({ back, person = PERSON, ageDays = 300 }) => {
+    const t = fsNotice({
+      subject: `On Leave Notification: ${person} will be going On Leave`,
+      text: `Leave Type: Parental Leave Expected Leave Date: ${day(-ageDays + 30)} Expected Return Date: ${back}`,
+      createdAt: new Date(Date.now() - ageDays * 86400e3),
+    });
+    t.status = 'Pending';
+    t.parkedUntil = new Date(`${back}T15:00:00.000Z`);
+    db.parks.push({ id: seq++, ticketId: t.id, workspaceId: 1, kind: 'until_date', until: t.parkedUntil, source: 'suggested_hr', reason: 'On leave until (from the HR notice)', endedAt: null });
+    return t;
+  };
+  const notes = (id) => ticketSvc.addPrivateNote.mock.calls.filter(([tid]) => tid === id).map(([, , b]) => b.bodyHtml).join('\n');
+
+  test('the 9 Nov case: start ten months past, return moved later → the held ticket is re-parked to the new return, the notice merged and closed', async () => {
+    await setMode('live', { leave: { assigneeTechId: 4, park: true } });
+    const start = day(-300);
+    const oldBack = day(7);
+    const newBack = day(21);
+    const held = heldLeave({ back: oldBack });
+    const notice = fsNotice({ subject: `On Leave Notification: ${PERSON}`, text: tableBody({ start, back: newBack, oldStart: start, oldBack }) });
+
+    const ev = await hr.onTicketCreated(notice.id, 1);
+    expect(ev).toMatchObject({ decision: 'leave_extended', outcome: 'done' });
+    expect(ev.details.leave).toMatchObject({ matchedTicketId: held.id, fromReturn: oldBack, toReturn: newBack });
+    expect(ev.details.plan.matched.ticketId).toBe(held.id);
+    // Re-parked: 08:00 workspace time on the new return, same source, the reason names the change notice.
+    expect(parkSvc.park).toHaveBeenCalledTimes(1);
+    expect(parkSvc.park).toHaveBeenCalledWith(held.id, 1, {
+      kind: 'until_date', until: localInstant(newBack, '08:00:00', 'America/Vancouver'), reason: expect.stringMatching(/^On leave until \w{3} \d{1,2} \(HR change notice #\d+\)$/),
+    }, expect.anything(), { source: 'suggested_hr' });
+    // The notice: no due date in the past, never parked, closed as merged.
+    expect(ticketSvc.updateFsTicket).not.toHaveBeenCalledWith(notice.id, 1, expect.objectContaining({ dueBy: expect.anything() }), expect.anything());
+    expect(ticketSvc.updateFsTicket).toHaveBeenCalledWith(notice.id, 1, { status: 'Closed' }, expect.anything());
+    expect(notice.status).toBe('Closed');
+    expect(held.status).toBe('Pending');
+    expect(notes(held.id)).toMatch(/changed Rowan Example's return date from .+ to .+Parked until/);
+    expect(notes(notice.id)).toMatch(/Merged into #\d+/);
+    expect(linkSvc.link).toHaveBeenCalledWith(held.id, 1, { relatedTicketId: notice.id, kind: 'related_to' }, expect.anything());
+    expect(ev.summary).not.toMatch(/lead time/);
+  });
+
+  test('no leave ticket held for the person → the notice is the ticket, due and parked on the return', async () => {
+    await setMode('live', { leave: { assigneeTechId: 4, park: true } });
+    const newBack = day(21);
+    const notice = fsNotice({ subject: `On Leave Notification: ${PERSON}`, text: tableBody({ start: day(-300), back: newBack, oldStart: day(-300), oldBack: day(7) }) });
+    const ev = await hr.onTicketCreated(notice.id, 1);
+    expect(ev).toMatchObject({ decision: 'notice_is_ticket', outcome: 'done' });
+    expect(ticketSvc.updateFsTicket).toHaveBeenCalledWith(notice.id, 1, { dueBy: dueInstant(newBack) }, expect.anything());
+    expect(parkSvc.hrSuggestion).not.toHaveBeenCalled();
+    expect(parkSvc.park).toHaveBeenCalledWith(notice.id, 1, {
+      kind: 'until_date', until: localInstant(newBack, '08:00:00', 'America/Vancouver'), reason: expect.stringMatching(/^On leave until .+ \(from the HR notice\)$/),
+    }, expect.anything(), { source: 'suggested_hr' });
+    expect(notice.status).toBe('Open');
+    expect(ev.summary).toMatch(/due on the return/);
+  });
+
+  test('the return moved EARLIER (still ahead) → the held ticket is re-parked to the earlier date', async () => {
+    await setMode('live', { leave: { park: true } });
+    const oldBack = day(40);
+    const newBack = day(14);
+    const held = heldLeave({ back: oldBack });
+    const notice = fsNotice({ subject: `On Leave Notification: ${PERSON}`, text: tableBody({ start: day(-200), back: newBack, oldStart: day(-200), oldBack }) });
+    const ev = await hr.onTicketCreated(notice.id, 1);
+    expect(ev).toMatchObject({ decision: 'leave_shortened', outcome: 'done' });
+    expect(parkSvc.park).toHaveBeenCalledWith(held.id, 1, expect.objectContaining({ until: localInstant(newBack, '08:00:00', 'America/Vancouver') }), expect.anything(), { source: 'suggested_hr' });
+    expect(notice.status).toBe('Closed');
+  });
+
+  test('a leave start already past and no return date → not parked, no due date, a warning, and the summary claims no park', async () => {
+    await setMode('live', { leave: { assigneeTechId: 4, park: true } });
+    const notice = fsNotice({ subject: `On Leave Notification: ${PERSON}`, text: tableBody({ start: day(-30), back: null }) });
+    const ev = await hr.onTicketCreated(notice.id, 1);
+    expect(ev).toMatchObject({ decision: 'notice_is_ticket', outcome: 'done' });
+    expect(parkSvc.park).not.toHaveBeenCalled();
+    expect(ticketSvc.updateFsTicket).not.toHaveBeenCalledWith(notice.id, 1, expect.objectContaining({ dueBy: expect.anything() }), expect.anything());
+    expect(ev.details.warnings.join(' ')).toMatch(/already past.+no due date, not parked/);
+    expect(ev.summary).not.toMatch(/parked until/);
+    expect(notes(notice.id)).not.toMatch(/parked until/);
+  });
+
+  test('an ordinary leave that has not begun is unchanged: due on the start, parked by its lead time (even when HR changed its dates)', async () => {
+    await setMode('live', { leave: { park: true } });
+    const start = day(20);
+    const notice = fsNotice({ subject: `On Leave Notification: ${PERSON}`, text: tableBody({ start, back: day(200), oldStart: day(10), oldBack: day(190) }) });
+    heldLeave({ back: day(190), ageDays: 20 });
+    const ev = await hr.onTicketCreated(notice.id, 1);
+    expect(ev).toMatchObject({ decision: 'notice_is_ticket', outcome: 'done' });
+    expect(ticketSvc.updateFsTicket).toHaveBeenCalledWith(notice.id, 1, { dueBy: dueInstant(start) }, expect.anything());
+    expect(parkSvc.hrSuggestion).toHaveBeenCalledWith(notice.id, 1);
+    expect(parkSvc.park).toHaveBeenCalledWith(notice.id, 1, expect.objectContaining({ until: '2026-10-19T15:00:00.000Z' }), expect.anything(), { source: 'suggested_hr' });
+    expect(ev.summary).toMatch(/parked until its lead time/);
+  });
+
+  test('a lead-time park that is not usable is not claimed in the summary', async () => {
+    await setMode('live', { leave: { park: true } });
+    parkSvc.hrSuggestion.mockResolvedValueOnce({ usable: false, until: '2027-09-01T15:00:00.000Z', wakeDate: '2027-09-01', reason: 'x' });
+    const notice = fsNotice({ subject: `On Leave Notification: ${PERSON}`, text: tableBody({ start: day(300), back: day(400) }) });
+    const ev = await hr.onTicketCreated(notice.id, 1);
+    expect(parkSvc.park).not.toHaveBeenCalled();
+    expect(ev.summary).toMatch(/not parked: its lead time/);
+    expect(ev.summary).not.toMatch(/parked until its lead time/);
+  });
+
+  test('several open leave tickets for the person → nothing moved, a warning, the notice stays open', async () => {
+    await setMode('live', { leave: { park: true } });
+    heldLeave({ back: day(7) });
+    heldLeave({ back: day(9), ageDays: 200 });
+    const notice = fsNotice({ subject: `On Leave Notification: ${PERSON}`, text: tableBody({ start: day(-300), back: day(21), oldStart: day(-300), oldBack: day(7) }) });
+    const ev = await hr.onTicketCreated(notice.id, 1);
+    expect(ev).toMatchObject({ decision: 'leave_change_ambiguous', outcome: 'skipped' });
+    expect(ev.details.warnings.join(' ')).toMatch(/2 open leave tickets/);
+    expect(parkSvc.park).not.toHaveBeenCalled();
+    expect(notice.status).toBe('Open');
+  });
+
+  test('a leave ticket of somebody else, or one already closed, is never matched', async () => {
+    await setMode('live', { leave: { park: true } });
+    heldLeave({ back: day(7), person: 'Rowan Exampleton' });
+    const closed = heldLeave({ back: day(7) });
+    closed.status = 'Closed';
+    const notice = fsNotice({ subject: `On Leave Notification: ${PERSON}`, text: tableBody({ start: day(-300), back: day(21), oldStart: day(-300), oldBack: day(7) }) });
+    const ev = await hr.onTicketCreated(notice.id, 1);
+    expect(ev.decision).toBe('notice_is_ticket');
+    expect(parkSvc.park).toHaveBeenCalledWith(notice.id, 1, expect.anything(), expect.anything(), { source: 'suggested_hr' });
+  });
+
+  test('Shadow records what Live would do and touches nothing', async () => {
+    await setMode('observe');
+    const held = heldLeave({ back: day(7) });
+    const notice = fsNotice({ subject: `On Leave Notification: ${PERSON}`, text: tableBody({ start: day(-300), back: day(21), oldStart: day(-300), oldBack: day(7) }) });
+    const ev = await hr.onTicketCreated(notice.id, 1);
+    expect(ev).toMatchObject({ decision: 'leave_extended', outcome: 'recorded' });
+    expect(ev.details.plan.matched.ticketId).toBe(held.id);
+    expect(parkSvc.park).not.toHaveBeenCalled();
+    expect(ticketSvc.updateFsTicket).not.toHaveBeenCalled();
+  });
+
+  test('the dry-run script replays a recorded notice through the new planner and writes nothing', async () => {
+    await setMode('live', { leave: { park: true } });
+    const held = heldLeave({ back: day(7) });
+    const notice = fsNotice({ subject: `On Leave Notification: ${PERSON}`, text: tableBody({ start: day(-300), back: day(21), oldStart: day(-300), oldBack: day(7) }) });
+    db.events.push({ id: seq++, workspaceId: 1, ticketId: notice.id, mode: 'live', noticeType: 'leave', decision: 'notice_is_ticket', outcome: 'done', summary: 'Rowan Example: leave — the notice is the ticket, due Mon, Jan 12, 2026, parked until its lead time', person: PERSON, details: {}, createdAt: new Date() });
+    jest.clearAllMocks();
+    const { replayLeaveNotices } = await import('../scripts/hr-leave-change-dryrun.mjs');
+    const rows = await replayLeaveNotices(prismaMock, hr, { workspaceId: 1, days: 90 });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ ticketId: notice.id, old: { decision: 'notice_is_ticket' }, next: { decision: 'leave_extended', matched: { ticketId: held.id }, toReturn: day(21) } });
+    expect(parkSvc.park).not.toHaveBeenCalled();
+    expect(ticketSvc.updateFsTicket).not.toHaveBeenCalled();
+    expect(ticketSvc.addPrivateNote).not.toHaveBeenCalled();
+    expect(prismaMock.hrLifecycleEvent.create).not.toHaveBeenCalled();
+  });
+
+  describe('the planner (pure)', () => {
+    const c = (over = {}) => ({ type: 'leave', person: PERSON, noticeDate: '2026-11-09', leaveStart: '2026-01-12', returnDate: '2026-11-30', leaveChange: true, removedLeaveStart: '2026-01-12', removedReturnDate: '2026-11-16', ...over });
+    const held = { ticketId: 7, ref: '#240100', origin: 'freshservice', parked: true, parkDate: '2026-11-16', parkSource: 'suggested_hr', dueDate: null, returnDate: '2026-11-16' };
+    const now = new Date('2026-11-09T18:00:00Z');
+
+    test('the 9 Nov fixture: leave_extended from Nov 16 to Nov 30, re-parked at 08:00', () => {
+      const p = planLeaveNotice({ c: c(), side: { park: true }, noticeTicketId: 9, noticeRef: '#240200', candidates: [held], today: '2026-11-09', now, timeZone: 'America/Vancouver' });
+      expect(p).toMatchObject({ decision: 'leave_extended', fromReturn: '2026-11-16', toReturn: '2026-11-30', matched: { ticketId: 7 }, notice: { close: true } });
+      expect(p.repark).toMatchObject({ until: localInstant('2026-11-30', '08:00:00', 'America/Vancouver'), reason: 'On leave until Nov 30 (HR change notice #240200)', source: 'suggested_hr', capped: false });
+    });
+
+    test('a return moved into the past wakes the held ticket instead of parking it', () => {
+      const p = planLeaveNotice({ c: c({ returnDate: '2026-11-05' }), side: { park: true }, candidates: [held], today: '2026-11-09', now });
+      expect(p).toMatchObject({ decision: 'leave_shortened', repark: null, wake: true });
+    });
+
+    test('the same return again is a repeat: merged, nothing moved', () => {
+      const p = planLeaveNotice({ c: c({ returnDate: '2026-11-16' }), side: { park: true }, candidates: [held], today: '2026-11-09', now });
+      expect(p.decision).toBe('leave_repeat');
+    });
+
+    test('a due date that was the old return follows it; a person\'s own due date stays', () => {
+      expect(planLeaveNotice({ c: c(), candidates: [{ ...held, dueDate: '2026-11-16' }], today: '2026-11-09', now }).moveDue).toBe('2026-11-30');
+      expect(planLeaveNotice({ c: c(), candidates: [{ ...held, dueDate: '2026-12-01' }], today: '2026-11-09', now }).moveDue).toBeNull();
+    });
+
+    test('a return more than six months out holds as long as a park can', () => {
+      const p = planLeaveNotice({ c: c({ returnDate: '2027-09-30' }), candidates: [], today: '2026-11-09', now, side: { park: true } });
+      expect(p.notice.returnPark).toMatchObject({ capped: true });
+      expect(new Date(p.notice.returnPark.until).getTime()).toBeLessThan(now.getTime() + 184 * 86400e3);
+    });
+
+    test('what counts as a change to a leave under way', () => {
+      expect(isLeaveChange(c())).toBe(true);
+      expect(isLeaveChange(c({ leaveChange: undefined }))).toBe(true); // start past + return
+      expect(isLeaveChange(c({ leaveStart: '2026-12-01' }))).toBe(false); // not begun: the start rule
+      expect(isLeaveChange(c({ leaveChange: undefined, returnDate: null }))).toBe(false);
+      expect(isLeaveChange({ type: 'leave_change', changed: 'return', date: '2026-12-01' })).toBe(true);
+      expect(isLeaveChange({ type: 'leave_change', changed: 'leave', date: '2026-12-01' })).toBe(false);
+    });
   });
 });
 

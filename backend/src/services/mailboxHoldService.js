@@ -44,6 +44,7 @@ export const HOLD_REASONS = Object.freeze([
   'ambiguous_ticket', // two or more FreshService tickets match the sender + subject (23 Sep 2026)
   'sender_burst', // helpdesk mailbox: more new mail from one sender in a cycle than the cap; never dropped
   'ingest_error', // helpdesk mailbox: creating the ticket or the reply failed; a person decides, nothing is lost
+  'meeting_invite', // QA 11-09 #8: a plain meeting invite or response; not a ticket unless a person makes it one
 ]);
 
 export const HOLD_STATUSES = Object.freeze(['held', 'attached', 'created', 'discarded']);
@@ -750,6 +751,7 @@ const REASON_WORDS = {
   ambiguous_ticket: 'two tickets match',
   sender_burst: 'burst from one sender',
   ingest_error: 'could not be filed',
+  meeting_invite: 'meeting invite',
 };
 
 const FONT = "font-family:Calibri,'Segoe UI',Arial,sans-serif;";

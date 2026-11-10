@@ -27,7 +27,9 @@
  *      the spot. Anything less is a suggestion for a person.
  *
  * Everything is a `duplicate_of` link plus a close, so every action has a
- * one-click undo (`undo`). No true merge: nothing is moved or deleted.
+ * one-click undo (`undo`). No true merge: nothing is moved or deleted. A
+ * combined ticket's files are COPIED to the kept ticket (QA 11-09 #5), so the
+ * copy stays whole and undo has nothing to put back.
  *
  * Never: trusted-intake tickets, tickets with an externalRef (API alerts have
  * their own occurrence path), a ticket a person already worked, a ticket
@@ -128,6 +130,7 @@ class TicketGroupingService {
   async _links() { return (await import('../ticketLinkService.js')).default; }
   async _gateway() { return (await import('../aiProviders/providerGateway.js')).default; }
   async _embeddings() { return (await import('../ticketEmbeddingService.js')).default; }
+  async _carry() { return (await import('../attachmentCarryService.js')).default; }
 
   // ---- settings ------------------------------------------------------------
 
@@ -398,6 +401,28 @@ class TicketGroupingService {
     });
     await this._markGrouped(ticket, `Grouped: same request as ${keeperRef}`, keeper);
     await this._supersedeQueuedRuns(ticket.id, `Combined into ${keeperRef}`);
+    await this._carryFiles(ticket, keeper);
+  }
+
+  /**
+   * QA 11-09 #5: the requester's files travel to the ticket that is kept, in a
+   * note that says where they came from. Idempotent (a file the keeper holds is
+   * skipped). Repeats of an alert (`_fold`) do not carry: a monitoring mail's
+   * picture is the same chart again, and the root would fill up with copies.
+   */
+  async _carryFiles(ticket, keeper) {
+    await soft(async () => {
+      const carry = await this._carry();
+      return carry.carryAttachmentsWithNote({
+        workspaceId: ticket.workspaceId,
+        fromTicketId: ticket.id,
+        toTicketId: keeper.id,
+        fromRef: ticketDisplayRef(ticket),
+        how: 'combined',
+        uploadedBy: ACTOR.email,
+        writeNote: async (text) => (await this._tickets()).addPrivateNote(keeper.id, keeper.workspaceId, { bodyText: text }, ACTOR),
+      });
+    });
   }
 
   // ---- shared steps (each one soft: a failed step never undoes the others) ----
@@ -661,6 +686,7 @@ class TicketGroupingService {
       await soft(async () => (await this._links()).link(ticket.id, ticket.workspaceId, { relatedTicketId: keeper.id, kind: 'related_to' }, actor));
     } else if (isTerminal(ticket.status)) {
       await this._link(ticket, keeper);
+      await this._carryFiles(ticket, keeper);
     } else {
       await this._combine(ticket, keeper, { reason: event.reason || '', relation: event.kind === 'update' ? 'update' : 'same_request', retraction: event.retraction });
     }

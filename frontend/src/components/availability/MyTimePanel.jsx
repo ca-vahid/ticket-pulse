@@ -39,8 +39,11 @@ export default function MyTimePanel({ me, onChanged, toast }) {
 
   const cancel = async (r) => {
     try {
-      await availabilityAPI.cancelRequest(r.id);
-      toast?.('Request cancelled');
+      const res = await availabilityAPI.cancelRequest(r.id);
+      // QA 11-09 #2: leave from Vacation Tracker — was it cancelled there too?
+      const vt = res?.data?.vacationTracker;
+      if (vt && vt.updated === false) toast?.(vt.message || 'Cancelled in Ticket Pulse. Cancel it in Vacation Tracker too.', 'amber');
+      else toast?.(vt?.updated ? 'Cancelled here and in Vacation Tracker' : 'Request cancelled');
       if (editing?.id === r.id) setEditing(null);
       refresh();
     } catch (err) {

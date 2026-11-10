@@ -15,9 +15,10 @@ import ticketActivityRepository from './ticketActivityRepository.js';
  *    original authors/timestamps so they interleave naturally. Copy (not move)
  *    keeps the source's own history intact and makes re-merge idempotent via
  *    the (ticketId, externalEntryId) unique constraint.
- *  - Tags union onto the target. Attachments stay on the source (a system note
- *    on the target says where they live) — duplicating rows that point at one
- *    stored blob would make deletes destructive across tickets.
+ *  - Tags union onto the target. Attachments are COPIED to the target (QA
+ *    11-09 #5), each one onto the copy of the message it came with — a new row
+ *    and a new blob, never a shared one, so a delete stays on one ticket. A file
+ *    the target already holds is skipped, so a re-merge never doubles it.
  *  - The source gets a `merged_into` link + closing note; TP-born sources are
  *    Closed through the normal status path (mirror + events). FS-born sources
  *    keep their FreshService status (FS owns it) — note + link only.
@@ -37,7 +38,7 @@ function escapeHtml(value) {
  * from where, in a few short lines with a link back. The merged content is
  * NOT quoted here — it arrives as full messages in the conversation.
  */
-export function mergeNoteContent({ srcRef, sourceId, subject, copied = 0, descriptionCopied = false, sweptBits = [], approvals = 0, attachmentCount = 0, actorLabel = 'an agent' }) {
+export function mergeNoteContent({ srcRef, sourceId, subject, copied = 0, descriptionCopied = false, sweptBits = [], approvals = 0, attachmentCount = 0, attachmentsCopied = 0, actorLabel = 'an agent' }) {
   const what = [
     descriptionCopied ? 'its opening e-mail' : null,
     copied ? `${copied} message${copied === 1 ? '' : 's'}` : null,
@@ -49,6 +50,7 @@ export function mergeNoteContent({ srcRef, sourceId, subject, copied = 0, descri
   const extras = [
     sweptBits.length ? `${sweptBits.join(' and ')} moved over.` : null,
     approvals ? `${approvals} pending approval${approvals === 1 ? '' : 's'} on ${srcRef} cancelled.` : null,
+    attachmentsCopied > 0 ? `${attachmentsCopied} attachment${attachmentsCopied === 1 ? '' : 's'} copied to this ticket.` : null,
     attachmentCount > 0 ? `${attachmentCount} attachment${attachmentCount === 1 ? ' stays' : 's stay'} on ${srcRef}.` : null,
   ].filter(Boolean);
   const subjectText = subject ? ` "${subject}"` : '';
@@ -291,8 +293,42 @@ class TicketMergeService {
       logger.warn(`Merge approval reconciliation failed (non-fatal): ${err.message}`);
     }
 
+    // 3c. Files follow the conversation (QA 11-09 #5): each one lands on the
+    //     copy of the message it came with; files of the opening e-mail on the
+    //     copied opening e-mail; anything else on the ticket itself.
+    let attachmentsCopied = 0;
+    let carryRan = false;
+    let carryFailed = 0;
+    try {
+      const { carryAttachments } = await import('./attachmentCarryService.js');
+      const copies = await prisma.ticketThreadEntry.findMany({
+        where: { ticketId: targetId, externalEntryId: { startsWith: `merged:${sourceId}:` } },
+        select: { id: true, externalEntryId: true },
+      });
+      const entryByKey = new Map((copies || []).map((c) => [c.externalEntryId, c.id]));
+      const openingId = entries.find((e) => e.eventType === 'original_email')?.id;
+      const descriptionEntry = entryByKey.get(`merged:${sourceId}:description`)
+        ?? (openingId ? entryByKey.get(`merged:${sourceId}:${openingId}`) : undefined)
+        ?? null;
+      const carried = await carryAttachments({
+        workspaceId,
+        fromTicketId: sourceId,
+        toTicketId: targetId,
+        entryFor: (a) => (a.threadEntryId ? (entryByKey.get(`merged:${sourceId}:${a.threadEntryId}`) ?? null) : descriptionEntry),
+        uploadedBy: actor?.email || null,
+      });
+      attachmentsCopied = carried.copied.length;
+      carryRan = carried.ran;
+      carryFailed = carried.failed;
+    } catch (err) {
+      logger.warn(`Merge attachment copy failed for ${srcRef} (non-fatal): ${err.message}`);
+    }
+
     // 4. System note on the target describing what arrived.
-    const attachmentCount = await prisma.ticketAttachment.count({ where: { ticketId: sourceId } });
+    const attachmentTotal = await prisma.ticketAttachment.count({ where: { ticketId: sourceId } });
+    // What stays only on the source: everything when no copy could be tried,
+    // else the files that failed to copy.
+    const attachmentCount = carryRan ? carryFailed : attachmentTotal;
     const { default: ticketService } = await import('./ticketService.js');
     const sweptBits = [
       swept.tasks ? `${swept.tasks} open task${swept.tasks === 1 ? '' : 's'}` : null,
@@ -309,6 +345,7 @@ class TicketMergeService {
       sweptBits,
       approvals: swept.approvals,
       attachmentCount,
+      attachmentsCopied,
       actorLabel,
     });
     await ticketService.addPrivateNote(targetId, workspaceId, note, actor)
@@ -373,6 +410,7 @@ class TicketMergeService {
       copied,
       descriptionCopied,
       attachmentsLeft: attachmentCount,
+      attachmentsCopied,
       sourceClosed,
       requesterNotified,
       swept,

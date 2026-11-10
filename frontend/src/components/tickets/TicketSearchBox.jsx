@@ -5,6 +5,7 @@ import {
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { searchAPI } from '../../services/api';
 import { PersonAvatar, StatusPill, timeAgoShort } from './ticketUi';
+import CombinedIntoMark from './CombinedIntoMark';
 import { useRequesterPhoto } from '../../hooks/useRequesterPhoto';
 import {
   clearRecentSearches, forgetSearch, getRecentSearches, getRecentTickets, rememberSearch, syncRecentSearches,
@@ -130,8 +131,10 @@ export default function TicketSearchBox({
   const [results, setResults] = useState(null); // { sections, totals, query }
   const [searching, setSearching] = useState(false);
   const [active, setActive] = useState(-1);
-  // Search v3: opt-in full-text over conversation bodies, and a workspace scope.
-  const [withConversations, setWithConversations] = useState(() => readFlag(CONVERSATIONS_KEY, false));
+  // Search v3: full-text over conversation bodies, and a workspace scope.
+  // QA 11-09 #6: conversations are ON unless this person turned them off
+  // (an explicit off is remembered; nothing stored means on).
+  const [withConversations, setWithConversations] = useState(() => readFlag(CONVERSATIONS_KEY, true));
   const [allWorkspaces, setAllWorkspaces] = useState(() => readFlag(SCOPE_KEY, false));
   const { currentWorkspace, availableWorkspaces, switchWorkspace } = useWorkspace();
   const canSwitchScope = (availableWorkspaces || []).length > 1;
@@ -200,6 +203,13 @@ export default function TicketSearchBox({
   }, [currentWorkspace?.id, switchWorkspace]);
 
   useEffect(() => { setActive(-1); }, [q, results, open]);
+
+  // "Combined into TP-…" (QA 11-09 #5): open the ticket the conversation went to.
+  const openSurvivor = useCallback((id, e) => {
+    if (q) setRecent(rememberSearch(q));
+    onOpenTicket?.(id, { newTab: Boolean(e?.metaKey || e?.ctrlKey) });
+    setOpen(false);
+  }, [q, onOpenTicket]);
 
   const apply = useCallback((query) => {
     const text = String(query || '').trim();
@@ -340,13 +350,16 @@ export default function TicketSearchBox({
               {rows.map((row, i) => {
                 if (row.kind === 'direct') {
                   return (
-                    <button key={row.key} type="button" role="option" aria-selected={i === active} onMouseEnter={() => setActive(i)} onClick={(e) => row.run(e)} className={`${rowClass(i)} border-b border-border/60 mb-1 pb-2`}>
-                      <CornerDownLeft className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
-                      <span className="min-w-0 flex-1 truncate">
-                        <span className="font-semibold text-foreground">Open {row.ref.label}</span>
-                        {row.ticket ? <span className="text-muted-foreground"> — {row.ticket.subject || '(no subject)'}</span> : <span className="text-muted-foreground"> — press Enter to look it up</span>}
-                      </span>
-                    </button>
+                    <div key={row.key} className="flex items-center border-b border-border/60 mb-1 pb-1">
+                      <button type="button" role="option" aria-selected={i === active} onMouseEnter={() => setActive(i)} onClick={(e) => row.run(e)} className={`${rowClass(i)} min-w-0 flex-1 pb-1`}>
+                        <CornerDownLeft className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+                        <span className="min-w-0 flex-1 truncate">
+                          <span className="font-semibold text-foreground">Open {row.ref.label}</span>
+                          {row.ticket ? <span className="text-muted-foreground"> — {row.ticket.subject || '(no subject)'}</span> : <span className="text-muted-foreground"> — press Enter to look it up</span>}
+                        </span>
+                      </button>
+                      <CombinedIntoMark into={row.ticket?.combinedInto} onOpen={openSurvivor} className="pr-3" />
+                    </div>
                   );
                 }
                 const first = rows.findIndex((r) => r.kind === row.kind) === i;
@@ -357,16 +370,20 @@ export default function TicketSearchBox({
                       <SectionHeading icon={meta.Icon} right={row.kind === 'ticket' && Number.isFinite(results?.totals?.tickets) ? <span className="text-[11px] tabular-nums text-muted-foreground">{results.totals.tickets}</span> : null}>{meta.label}</SectionHeading>
                     )}
                     {row.kind === 'ticket' && (
-                      <button type="button" role="option" aria-selected={i === active} onMouseEnter={() => setActive(i)} onClick={(e) => row.run(e)} className={rowClass(i)} title="Open in the peek panel · Ctrl-click for the full page">
-                        <span className="shrink-0 font-mono text-[11px] font-bold text-muted-foreground">{row.ticket.displayRef}</span>
-                        {row.ticket.workspaceName && <span className="shrink-0 rounded border border-border bg-muted/60 px-1 py-px text-[10px] font-semibold text-muted-foreground">{row.ticket.workspaceName}</span>}
-                        <span className="min-w-0 flex-1 truncate text-foreground"><Highlight text={row.ticket.subject || '(no subject)'} q={q} /></span>
-                        <span className="hidden shrink-0 items-center gap-2 text-[11px] text-muted-foreground sm:inline-flex">
-                          {row.ticket.requesterName && <span className="max-w-[140px] truncate"><Highlight text={row.ticket.requesterName} q={q} /></span>}
-                          {row.ticket.assigneeName && <span className="max-w-[120px] truncate">→ {row.ticket.assigneeName}</span>}
-                          {row.ticket.status && <StatusPill status={row.ticket.status} size="sm" />}
-                        </span>
-                      </button>
+                      <div className="flex items-center">
+                        <button type="button" role="option" aria-selected={i === active} onMouseEnter={() => setActive(i)} onClick={(e) => row.run(e)} className={`${rowClass(i)} min-w-0 flex-1`} title="Open in the peek panel · Ctrl-click for the full page">
+                          <span className="shrink-0 font-mono text-[11px] font-bold text-muted-foreground">{row.ticket.displayRef}</span>
+                          {row.ticket.workspaceName && <span className="shrink-0 rounded border border-border bg-muted/60 px-1 py-px text-[10px] font-semibold text-muted-foreground">{row.ticket.workspaceName}</span>}
+                          <span className="min-w-0 flex-1 truncate text-foreground"><Highlight text={row.ticket.subject || '(no subject)'} q={q} /></span>
+                          <span className="hidden shrink-0 items-center gap-2 text-[11px] text-muted-foreground sm:inline-flex">
+                            {row.ticket.requesterName && <span className="max-w-[140px] truncate"><Highlight text={row.ticket.requesterName} q={q} /></span>}
+                            {row.ticket.assigneeName && <span className="max-w-[120px] truncate">→ {row.ticket.assigneeName}</span>}
+                            {row.ticket.status && <StatusPill status={row.ticket.status} size="sm" />}
+                          </span>
+                        </button>
+                        {/* QA 11-09 #5: a ticket closed into another says where it went. */}
+                        {!row.ticket.workspaceName && <CombinedIntoMark into={row.ticket.combinedInto} onOpen={openSurvivor} className="pr-3" />}
+                      </div>
                     )}
                     {row.kind === 'view-all' && (
                       <button type="button" role="option" aria-selected={i === active} onMouseEnter={() => setActive(i)} onClick={() => row.run()} className={`${rowClass(i)} text-[13px] font-semibold text-primary`}>

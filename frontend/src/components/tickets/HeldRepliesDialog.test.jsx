@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-// Unmatched replies as a popup (17 Oct 2026): list on the left, the selected
+// Held e-mail (was Unmatched replies) as a popup (17 Oct 2026): list on the left, the selected
 // email on the right with why it is waiting in plain words, the suggested
 // ticket's one-click choice, the other choices and the email itself; a
 // decision opens the next one.
@@ -43,7 +43,7 @@ describe('HeldRepliesDialog', () => {
   test('lists the waiting emails and opens the first with why, the suggestion and the email', async () => {
     const onCountChange = vi.fn();
     mount({ onCountChange });
-    expect(await screen.findByText('Unmatched replies · 2 waiting')).toBeInTheDocument();
+    expect(await screen.findByText('Held e-mail · 2 waiting')).toBeInTheDocument();
     expect(onCountChange).toHaveBeenCalledWith(2);
     const list = screen.getByTestId('held-dialog-list');
     expect(within(list).getByText('Burst from one sender')).toBeInTheDocument();
