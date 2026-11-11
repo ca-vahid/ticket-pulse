@@ -742,7 +742,12 @@ router.get('/mailboxes/held', requireTicketingStaff, asyncHandler(async (req, re
   const status = String(req.query?.status || 'held');
   const rows = await mailboxHoldService.list(req.workspaceId, { status });
   const heldCount = status === 'held' ? rows.length : await mailboxHoldService.count(req.workspaceId, 'held');
-  res.json({ success: true, data: rows, meta: { heldCount } });
+  // Mail review (11 Nov 2026): the Tickets button shows whenever Mail triage is not Off.
+  const triageMode = await import('../services/mailTriageService.js')
+    .then((m) => m.default.getSettings(req.workspaceId))
+    .then((s) => s.mode)
+    .catch(() => 'off');
+  res.json({ success: true, data: rows, meta: { heldCount, triageMode } });
 }));
 
 // The queue grouped by device (QA 10-26 #3): one group per sender with three
@@ -803,6 +808,63 @@ router.post('/mailboxes/held/:heldId/discard', requireTicketingStaff, asyncHandl
   const { default: mailboxHoldService } = await import('../services/mailboxHoldService.js');
   const held = await mailboxHoldService.discard(Number(req.params.heldId), req.ticketActor, { workspaceId: req.workspaceId });
   res.json({ success: true, data: held });
+}));
+
+// ---------------------------------------------------------------- mail review
+// Mail triage (plans/MAIL_TRIAGE_PLAN.md, 11 Nov 2026): the held-mail queue as a
+// page, with the AI's suggestion on every row. Staff-gated like the hold queue;
+// running a judgement again is for admins. Specific paths come before /:heldId.
+
+const mailTriage = async () => (await import('../services/mailTriageService.js')).default;
+function heldIdParam(req) {
+  const id = Number(req.params.heldId);
+  if (!Number.isInteger(id) || id <= 0) throw new ValidationError('heldId must be a number');
+  return id;
+}
+
+router.get('/mail-review', requireTicketingStaff, asyncHandler(async (req, res) => {
+  const tab = ['waiting', 'done', 'log'].includes(String(req.query?.tab)) ? String(req.query.tab) : 'waiting';
+  const result = await (await mailTriage()).list(req.workspaceId, {
+    tab,
+    limit: req.query?.limit,
+    before: req.query?.before,
+    outcome: req.query?.outcome || null,
+    confidence: req.query?.confidence || null,
+    action: req.query?.action || null,
+  });
+  res.json({ success: true, data: result.data, meta: result.meta });
+}));
+
+router.get('/mail-review/ticket-search', requireTicketingStaff, asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await (await mailTriage()).ticketSearch(req.workspaceId, req.query?.q) });
+}));
+
+router.post('/mail-review/bulk-accept', requireTicketingStaff, asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await (await mailTriage()).bulkAccept(req.workspaceId, req.body?.heldIds, req.ticketActor) });
+}));
+
+router.get('/mail-review/:heldId', requireTicketingStaff, asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await (await mailTriage()).detail(req.workspaceId, heldIdParam(req)) });
+}));
+
+router.post('/mail-review/:heldId/resolve', requireTicketingStaff, asyncHandler(async (req, res) => {
+  const body = req.body || {};
+  const data = await (await mailTriage()).resolve(req.workspaceId, heldIdParam(req), {
+    action: body.action,
+    ticketId: body.ticketId,
+    ...(typeof body.reopen === 'boolean' ? { reopen: body.reopen } : {}),
+    ...(body.requesterEmail !== undefined ? { requesterEmail: body.requesterEmail } : {}),
+    decisionId: body.decisionId || null,
+  }, req.ticketActor);
+  res.json({ success: true, data });
+}));
+
+router.post('/mail-review/:heldId/undo', requireTicketingStaff, asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await (await mailTriage()).undo(req.workspaceId, heldIdParam(req), req.ticketActor) });
+}));
+
+router.post('/mail-review/:heldId/rejudge', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await (await mailTriage()).rejudge(req.workspaceId, heldIdParam(req)) });
 }));
 
 /** Validates the optional mailbox→group/type routing fields (T3.1). */

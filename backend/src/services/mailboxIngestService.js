@@ -1390,7 +1390,7 @@ class MailboxIngestService {
    *    never re-sent), no reply_received event; it fires
    *    ticket.public_reply_added marked alreadyDelivered (4.3.49).
    */
-  async ingestReply(connection, ticket, email, via, { agent: resolvedAgent = null, ctx = null } = {}) {
+  async ingestReply(connection, ticket, email, via, { agent: resolvedAgent = null, ctx = null, keepClosed: addQuietly = false } = {}) {
     connection = await this._withAliases(connection);
     const now = new Date();
     const recipients = emailRecipients(email);
@@ -1399,7 +1399,8 @@ class MailboxIngestService {
     // not an Outlook copy of an agent's reply to the requester, and on a
     // closed or resolved ticket it never reopens it.
     const workflowRef = via === 'workflow_mail_ref';
-    const keepClosed = workflowRef && await this._isClosedOrResolved(ticket);
+    // Mail review (11 Nov 2026): "add without reopening" asks for the same quiet path.
+    const keepClosed = (workflowRef || addQuietly === true) && await this._isClosedOrResolved(ticket);
     const isForward = !workflowRef && Boolean(resolvedAgent && ctx?.parsed?.isForward && ctx?.originalOk);
     // FR 09-11 #1: identity is per TICKET, not per workspace. Someone who is an
     // agent elsewhere can be the REQUESTER on this ticket — QA's own tester is

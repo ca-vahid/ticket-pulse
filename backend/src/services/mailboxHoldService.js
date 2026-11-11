@@ -637,7 +637,7 @@ class MailboxHoldService {
    * `ticket.reply_received`). `ticket.created` never fires here — attach is
    * a reply, not a create.
    */
-  async attach(id, ticketId, actor, { workspaceId = null } = {}) {
+  async attach(id, ticketId, actor, { workspaceId = null, reopen = null } = {}) {
     const held = await this._requireHeld(id, workspaceId);
     const ticket = await prisma.ticket.findFirst({
       where: { id: Number(ticketId), workspaceId: held.workspaceId },
@@ -648,7 +648,8 @@ class MailboxHoldService {
 
     const { default: mailboxIngestService } = await import('./mailboxIngestService.js');
     const email = rehydrateEmail(held);
-    const entry = await mailboxIngestService.ingestReply(held.connection, ticket, email, 'held_reply_attach');
+    // Mail review (11 Nov 2026): reopen === false adds the mail to a closed ticket without reopening it.
+    const entry = await mailboxIngestService.ingestReply(held.connection, ticket, email, 'held_reply_attach', reopen === false ? { keepClosed: true } : {});
     const updated = await this._resolve(held.id, { status: 'attached', actor, ticketId: ticket.id });
     logger.info(`Held message #${held.id} attached to ${ticketDisplayRef(ticket)} by ${actorLabel(actor)}`);
     return { held: presentHeld(updated), entry, ticket: { id: ticket.id, displayRef: ticketDisplayRef(ticket) } };
