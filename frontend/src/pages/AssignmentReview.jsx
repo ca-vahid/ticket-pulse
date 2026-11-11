@@ -4382,6 +4382,8 @@ const AI_OPERATION_OPTIONS = [
   { value: 'knowledge_confluence_import', label: 'Confluence Import' },
   // Settings -> Teams -> Ask Ticket Pulse: plain-words questions to the Teams bot (5 Nov 2026).
   { value: 'teams_assistant', label: 'Teams Assistant' },
+  // Tickets -> Mail review: what a held e-mail is (add to a ticket, new ticket, no ticket) (11 Nov 2026).
+  { value: 'mail_triage', label: 'Mail Triage' },
 ];
 
 export function AiProviderSettingsPanel({ onAssignmentModelChange }) {

@@ -41,6 +41,14 @@ async function sweep() {
     } catch (err) {
       logger.debug(`Teams assistant prune failed (non-fatal): ${err.message}`);
     }
+    // Mail triage decisions: 180 days too (plans/MAIL_TRIAGE_PLAN.md). Its own try, same reason.
+    try {
+      const { default: mailTriageService } = await import('./mailTriageService.js');
+      const removed = await mailTriageService.prune(now);
+      if (removed) logger.info(`Mail triage: ${removed} decision row(s) older than 180 days removed`);
+    } catch (err) {
+      logger.debug(`Mail triage prune failed (non-fatal): ${err.message}`);
+    }
   }
 }
 

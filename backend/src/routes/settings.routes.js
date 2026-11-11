@@ -1499,6 +1499,41 @@ router.delete(
 
 
 /**
+ * GET / PUT /api/settings/mail-triage
+ * Mail triage for this workspace (plans/MAIL_TRIAGE_PLAN.md): mode off | shadow | on,
+ * the team's guidance text and the monthly AI limit. `stats` is read-only.
+ * Workspace admins only. Declared before PUT /:key, which would otherwise take it.
+ */
+router.get(
+  '/mail-triage',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: mailTriageService } = await import('../services/mailTriageService.js');
+    res.json({ success: true, data: await mailTriageService.settingsWithStats(req.workspaceId) });
+  }),
+);
+
+router.put(
+  '/mail-triage',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: mailTriageService } = await import('../services/mailTriageService.js');
+    const body = req.body || {};
+    await mailTriageService.saveSettings(req.workspaceId, {
+      ...(body.mode !== undefined ? { mode: body.mode } : {}),
+      ...(body.guidance !== undefined ? { guidance: body.guidance } : {}),
+      ...(body.monthlyCapUsd !== undefined ? { monthlyCapUsd: body.monthlyCapUsd } : {}),
+    });
+    logger.info(`Mail triage settings for workspace ${req.workspaceId} changed by ${requestActor(req)?.email || 'unknown'}${body.mode !== undefined ? ` (mode ${body.mode})` : ''}`);
+    res.json({ success: true, data: await mailTriageService.settingsWithStats(req.workspaceId) });
+  }),
+);
+
+/**
  * PUT /api/settings/:key
  * Update a single setting
  */

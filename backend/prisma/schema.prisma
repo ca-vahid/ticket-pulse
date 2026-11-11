@@ -4599,6 +4599,49 @@ model TeamsAssistantPerson {
   @@map("teams_assistant_people")
 }
 
+// Mail triage (plans/MAIL_TRIAGE_PLAN.md, 11 Nov 2026): one row per judgement of a held
+// e-mail, and one per decision a person made with no AI suggestion (outcome manual) so it
+// can be undone. No relations on purpose (ids are hints, like the held row's ticket ids).
+// E-mail bodies are never copied here. Kept 180 days (apiMaintenanceService).
+model MailTriageDecision {
+  id               Int       @id @default(autoincrement())
+  workspaceId      Int       @map("workspace_id")
+  heldMessageId    Int       @map("held_message_id")
+  subject          String?   @db.VarChar(300)
+  fromEmail        String?   @map("from_email") @db.VarChar(255)
+  mode             String    @db.VarChar(10) // off | shadow | on (the workspace mode when it was written)
+  action           String?   @db.VarChar(12) // attach | create | no_ticket | unsure; null = no judgement (failed, manual)
+  ticketId         Int?      @map("ticket_id")
+  reopen           Boolean   @default(false)
+  requesterEmail   String?   @map("requester_email") @db.VarChar(255)
+  relatedTicketIds Json?     @map("related_ticket_ids")
+  confidence       String?   @db.VarChar(10) // sure | likely | unsure
+  reason           String?   @db.Text
+  evidence         Json?
+  candidates       Json? // [{ id, score, why[], hard, aiNote }]
+  candidateKey     String?   @map("candidate_key") @db.VarChar(64)
+  guards           Json? // what the code changed or refused, in plain words
+  provider         String?   @db.VarChar(30)
+  model            String?   @db.VarChar(100)
+  inputTokens      Int?      @map("input_tokens")
+  outputTokens     Int?      @map("output_tokens")
+  costUsd          Decimal?  @map("cost_usd") @db.Decimal(10, 6)
+  latencyMs        Int?      @map("latency_ms")
+  raw              Json? // the model's structured answer, as returned
+  outcome          String    @db.VarChar(12) // suggested | applied | accepted | changed | undone | failed | superseded | manual
+  finalAction      String?   @map("final_action") @db.VarChar(12)
+  finalTicketId    Int?      @map("final_ticket_id")
+  decidedBy        String?   @map("decided_by") @db.VarChar(255)
+  decidedAt        DateTime? @map("decided_at") @db.Timestamptz(6)
+  undo             Json? // { kind, ticketId, entryId, previousStatus, reopened, at }
+  error            String?   @db.VarChar(300)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, createdAt])
+  @@index([heldMessageId])
+  @@map("mail_triage_decisions")
+}
+
 /// One row per message the assistant handled (audit, memory, "My Teams
 /// questions"). Kept 180 days. Tool calls are names, inputs, counts and
 /// timings only; tool output is never stored.
