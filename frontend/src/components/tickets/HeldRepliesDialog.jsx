@@ -7,7 +7,7 @@ import {
 import { ticketsAPI } from '../../services/api';
 import { HOLD_REASON_META, ReasonChip, loadHeldQueue } from './HeldRepliesPanel';
 import { TicketPicker } from './HeldTicketPicker';
-import HeldDeviceGroup from './HeldDeviceGroup';
+import HeldDeviceGroup, { senderWords } from './HeldDeviceGroup';
 
 /**
  * Held e-mail (named "Unmatched replies" until QA 11-09), as a popup (Vahid, 17 Oct 2026). The pill used to unfold
@@ -92,7 +92,7 @@ export default function HeldRepliesDialog({ open, onClose, onCountChange = null 
   const [choosing, setChoosing] = useState(false);
   const [chosen, setChosen] = useState('');
   const dialogRef = useRef(null);
-  // Alert bursts grouped by device (QA 10-26 #3): listed first, one entry per device.
+  // Bursts grouped by sender (QA 10-26 #3): listed first, one entry per sender.
   const [groups, setGroups] = useState([]);
   const [groupKey, setGroupKey] = useState(null);
   const [mode, setMode] = useState(null);
@@ -266,7 +266,7 @@ export default function HeldRepliesDialog({ open, onClose, onCountChange = null 
                     data-testid="held-dialog-group"
                   >
                     <span className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                      <span className="font-semibold text-amber-700 dark:text-amber-300">Alert burst · {g.count}</span>
+                      <span className="font-semibold text-amber-700 dark:text-amber-300">{senderWords(g).burst} · {g.count}</span>
                       <span className="whitespace-nowrap">{relative(g.lastAt)}</span>
                     </span>
                     <span className="mt-1 block truncate text-sm font-semibold text-foreground">{g.device}</span>

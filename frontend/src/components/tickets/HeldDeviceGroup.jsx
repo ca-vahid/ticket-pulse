@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, HardDrive, Link2, Loader2, Search, Sparkles, Trash2 } from 'lucide-react';
+import { AlertTriangle, HardDrive, Link2, Loader2, Search, Sparkles, Trash2, UserRound } from 'lucide-react';
 import { TicketPicker } from './HeldTicketPicker';
 
 /**
@@ -17,7 +17,7 @@ import { TicketPicker } from './HeldTicketPicker';
 export const BURST_MODE_META = {
   off: { label: 'Hold each one', help: 'Every extra alert in a burst waits here on its own.' },
   shadow: { label: 'Shadow', help: 'Every extra alert still waits here, marked with the ticket it would have been counted on. Nothing is filed automatically.' },
-  on: { label: 'Count on the device’s ticket', help: 'An alert whose kind already has a ticket from the same device in the last 24 hours is counted on that ticket instead of waiting here. New kinds, and broken-sounding kinds whose ticket is closed, still wait here.' },
+  on: { label: 'Count on the sender’s ticket', help: 'An alert whose kind already has a ticket from the same sender in the last 24 hours is counted on that ticket instead of waiting here. New kinds, and broken-sounding kinds whose ticket is closed, still wait here.' },
 };
 
 function fmtShort(iso) {
@@ -43,6 +43,18 @@ function spanText(group) {
 const btn = 'tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold disabled:opacity-50';
 const textBtn = 'tp-focus-ring rounded px-1 text-xs font-medium disabled:opacity-50';
 
+/**
+ * Words for a burst's sender (11 Nov 2026). The groups endpoint says whether
+ * it is a person or an automated system; only an automated one is a "device".
+ * Two people sending many invoices are people, and their mail is not "alerts".
+ */
+export function senderWords(group) {
+  const kind = group?.senderKind;
+  if (kind === 'person') return { person: true, noun: 'person', many: 'e-mails', burst: 'Burst', failure: 'Something from this person reads like a failure.' };
+  if (kind === 'automated') return { person: false, noun: 'device', many: 'alerts', burst: 'Alert burst', failure: 'Something on this device reads like a failure.' };
+  return { person: false, noun: 'sender', many: 'alerts', burst: 'Alert burst', failure: 'Something from this sender reads like a failure.' };
+}
+
 export default function HeldDeviceGroup({ group, mode = 'shadow', busy = false, onBulk }) {
   const [picking, setPicking] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -57,23 +69,25 @@ export default function HeldDeviceGroup({ group, mode = 'shadow', busy = false, 
     return onBulk?.(ids, action, ticket);
   };
 
+  const words = senderWords(group);
+
   return (
-    <section className="space-y-3" aria-label={`${group.device}: ${group.count} held alerts`} data-testid={`held-group-${group.sender}`}>
+    <section className="space-y-3" aria-label={`${group.device}: ${group.count} held ${words.many}`} data-testid={`held-group-${group.sender}`}>
       <div className="flex items-start gap-3">
         <span className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-          <HardDrive className="h-4 w-4" aria-hidden="true" />
+          {words.person ? <UserRound className="h-4 w-4" aria-hidden="true" /> : <HardDrive className="h-4 w-4" aria-hidden="true" />}
         </span>
         <div className="min-w-0 flex-1">
           <h3 className="text-base font-semibold text-foreground [overflow-wrap:anywhere]">
             {group.device}
-            <span className="font-normal text-muted-foreground"> · {group.count} alerts · {kinds.length} {kinds.length === 1 ? 'kind' : 'kinds'}</span>
+            <span className="font-normal text-muted-foreground"> · {group.count} {words.many} · {kinds.length} {kinds.length === 1 ? 'kind' : 'kinds'}</span>
           </h3>
           <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
             {group.sender} · {spanText(group)}
           </p>
           {group.attention && (
             <p className="mt-1 flex items-center gap-1 text-xs font-semibold text-red-700 dark:text-red-300" data-testid="held-group-attention">
-              <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" /> Something on this device reads like a failure. Look at the marked kinds first.
+              <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" /> {words.failure} Look at the marked kinds first.
             </p>
           )}
         </div>

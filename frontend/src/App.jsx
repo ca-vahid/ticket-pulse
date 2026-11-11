@@ -29,6 +29,7 @@ import Notifications from './pages/Notifications';
 import ProfilePage from './pages/ProfilePage';
 import Tickets from './pages/Tickets';
 import TicketCreate from './pages/TicketCreate';
+import MailReview from './pages/MailReview';
 import TicketDetail from './pages/TicketDetail';
 import TicketShortLink from './pages/TicketShortLink';
 import { looksLikeTicketRef, RESERVED_FIRST_SEGMENTS } from './utils/ticketShortLink';
@@ -294,6 +295,15 @@ function App() {
                         element={
                           <TicketsRoute>
                             <ApprovalsInbox />
+                          </TicketsRoute>
+                        }
+                      />
+                      {/* Held e-mail with the AI's suggestion (Tickets -> Mail review). */}
+                      <Route
+                        path="/tickets/mail-review"
+                        element={
+                          <TicketsRoute>
+                            <MailReview />
                           </TicketsRoute>
                         }
                       />
