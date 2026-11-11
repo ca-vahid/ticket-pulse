@@ -336,7 +336,8 @@ describe('Mail review: Waiting', () => {
   test('keyboard: J/K move a roving focus, A accepts, D needs no ticket, N opens New ticket', async () => {
     mount();
     await waitFor(() => expect(rows()).toHaveLength(6));
-    expect(rows()[0]).toHaveAttribute('tabindex', '0');
+    // The roving focus settles in an effect after the rows render (it raced in a loaded full run).
+    await waitFor(() => expect(rows()[0]).toHaveAttribute('tabindex', '0'));
     expect(rows()[1]).toHaveAttribute('tabindex', '-1');
     key('j');
     await waitFor(() => expect(rows()[1]).toHaveAttribute('tabindex', '0'));
