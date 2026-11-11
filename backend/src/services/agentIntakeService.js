@@ -127,7 +127,8 @@ export function looksLikeReply(email) {
   const tp = [...new Set([...head.matchAll(/\bTP-(\d{3,})\b/gi)].map((m) => Number(m[1])))];
   // 12 Oct 2026: also the bracketed shapes FreshService mail carries ([INC-n], [#SR-n], [#n]).
   const fs = [...new Set([
-    ...[...head.matchAll(/(?<![\w-])#(\d{5,})\b/g)].map((m) => Number(m[1])),
+    // Not after '&': "&#128522;" is an emoji left encoded, not ticket #128522 (10 Nov 2026).
+    ...[...head.matchAll(/(?<![\w&-])#(\d{5,})\b/g)].map((m) => Number(m[1])),
     ...freshserviceTicketNumbers(head),
   ])];
   // A forward prefix ALONE is weak evidence: a requester forwarding a vendor
@@ -150,7 +151,16 @@ function stripTags(html) {
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(p|div|tr|li)>/gi, '\n')
     .replace(/<[^>]+>/g, '')
-    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ');
+    // Numeric entities first (Outlook writes an emoji as "&#128522;"), then &amp; last so
+    // "&amp;#123;" stays the literal text "&#123;".
+    .replace(/&#(\d+);/g, (m, n) => codePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (m, n) => codePoint(parseInt(n, 16)))
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
+}
+
+// An out-of-range code point is dropped to a space, never left as digits.
+function codePoint(n) {
+  try { return String.fromCodePoint(n); } catch { return ' '; }
 }
 
 /**

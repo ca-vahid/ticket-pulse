@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.3.63-preview';
+export const APP_VERSION = '4.3.64-preview';
 
 export const changelog = [
+  {
+    version: '4.3.64-preview',
+    date: 'November 10, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Someone switched off in FreshService is switched off here too</strong> &mdash; when an agent was deactivated in FreshService, Ticket Pulse kept them active, so the assignment AI could still suggest them and they still showed in pickers and load counts. The agent sync now switches them off as well, and names each one in the log. It only ever switches people off: turning someone back on in FreshService never re-enables them here.' },
+      { type: 'fix', html: '<strong>An emoji no longer sends a new e-mail to an old ticket</strong> &mdash; Outlook writes a smiley as a number code (&ldquo;&amp;#128522;&rdquo;), and Ticket Pulse read that as FreshService ticket #128522, so a new request for a monitor landed on a 2022 ticket and reopened it. Emoji codes are now read as emoji. And a new e-mail that only mentions a ticket closed long ago becomes a new ticket linked to the old one, also when the number is in the body and also for tickets brought in by the history import.' },
+    ],
+  },
   {
     version: '4.3.63-preview',
     date: 'November 9, 2026',

@@ -2126,6 +2126,32 @@ class SyncService {
         }
       }
 
+      // An agent deactivated in FreshService stays in /agents with active:false,
+      // so the step above never sees it. Disable it here too (never re-enable).
+      const fsDeactivatedIds = transformedAgents
+        .filter(agent => agent.isActive === false)
+        .map(agent => agent.freshserviceId);
+      if (workspaceId && fsDeactivatedIds.length > 0) {
+        try {
+          const disabled = await technicianRepository.deactivateFsDeactivated(workspaceId, fsDeactivatedIds);
+          for (const t of disabled || []) {
+            logger.info(`Technician ${t.name} (${t.id}) disabled: deactivated in FreshService (workspace ${workspaceId})`);
+            const ends = await Promise.resolve()
+              .then(() => technicianRepository.looseEnds(t, workspaceId))
+              .catch(() => null);
+            const held = ends ? [
+              ends.openTickets && `${ends.openTickets} open ticket${ends.openTickets === 1 ? '' : 's'} still assigned`,
+              ends.categoryManager && `manager on ${ends.categoryManager} approval categor${ends.categoryManager === 1 ? 'y' : 'ies'}`,
+              ends.availabilityApprover && `approver in ${ends.availabilityApprover} Availability approval group${ends.availabilityApprover === 1 ? '' : 's'}`,
+              ends.pendingApprovals && `${ends.pendingApprovals} pending ticket approval${ends.pendingApprovals === 1 ? '' : 's'} waiting on them`,
+            ].filter(Boolean) : [];
+            if (held.length) logger.warn(`Technician ${t.name} (${t.id}) is switched off but still has: ${held.join('; ')}. Reassign these.`);
+          }
+        } catch (error) {
+          logger.error('Failed to disable FreshService-deactivated technicians:', error);
+        }
+      }
+
       // Auto-enrich photo + location for technicians missing them — new
       // agents used to render as initials until an admin remembered the
       // manual "Sync Photos & Locations" button (QA 07-12, Alexa). Keys off

@@ -491,6 +491,54 @@ class TechnicianRepository {
   }
 
   /**
+   * Disable technicians that FreshService reports as deactivated (`active: false`).
+   * FreshService keeps deactivated agents in /agents, so deactivateNotInList never
+   * sees them, and upsert never writes isActive (it is also an admin switch here).
+   * One way only: a FreshService re-activation never re-enables anyone, so a
+   * person disabled in Ticket Pulse on purpose stays disabled. Returns the
+   * technicians it disabled ({ id, name }).
+   */
+  async deactivateFsDeactivated(workspaceId, deactivatedFreshserviceIds) {
+    if (!workspaceId || !deactivatedFreshserviceIds?.length) return [];
+    try {
+      const where = {
+        workspaceId,
+        isActive: true,
+        origin: 'freshservice',
+        freshserviceId: { in: deactivatedFreshserviceIds.map(id => BigInt(id)) },
+      };
+      const rows = await prisma.technician.findMany({ where, select: { id: true, name: true, email: true } });
+      if (!rows.length) return [];
+      await prisma.technician.updateMany({
+        where: { ...where, id: { in: rows.map(r => r.id) } },
+        data: { isActive: false, updatedAt: new Date() },
+      });
+      return rows;
+    } catch (error) {
+      logger.error(`Error disabling FreshService-deactivated technicians in workspace ${workspaceId}:`, error);
+      throw new DatabaseError('Failed to disable FreshService-deactivated technicians', error);
+    }
+  }
+
+  /**
+   * What a switched-off technician still holds, for the log line an admin acts
+   * on: open tickets still assigned, approval-category manager seats, Availability
+   * approval-group seats and pending ticket approvals waiting on them. Each read
+   * is best-effort (a failed read counts as 0), so this never blocks the sync.
+   */
+  async looseEnds(tech, workspaceId) {
+    const email = String(tech?.email || '').trim().toLowerCase();
+    const count = (fn) => Promise.resolve().then(fn).then((n) => Number(n) || 0).catch(() => 0);
+    const [openTickets, categoryManager, availabilityApprover, pendingApprovals] = await Promise.all([
+      count(() => prisma.ticket.count({ where: { assignedTechId: tech.id, status: { notIn: ['Closed', 'Resolved', 'Deleted'] } } })),
+      email ? count(() => prisma.approvalCategory.count({ where: { workspaceId, isActive: true, managerEmails: { has: email } } })) : 0,
+      email ? count(() => prisma.avApprovalGroupApprover.count({ where: { email: { equals: email, mode: 'insensitive' } } })) : 0,
+      email ? count(() => prisma.ticketApproval.count({ where: { approverEmail: { equals: email, mode: 'insensitive' }, status: 'pending' } })) : 0,
+    ]);
+    return { openTickets, categoryManager, availabilityApprover, pendingApprovals };
+  }
+
+  /**
    * Deactivate technicians in a workspace that are NOT in the given set of FreshService IDs.
    * Used during sync to mark agents that were removed from the FreshService workspace.
    */
