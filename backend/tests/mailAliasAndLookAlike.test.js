@@ -252,12 +252,91 @@ describe('1. the fourteen held shapes, with the alias set', () => {
     expect(entry).toMatchObject({ ticketId: 880, authorType: 'agent', incoming: false });
     expect(entry.rawPayload.agentIntake).toMatchObject({ kind: 'agent_reply_email', via: 'fs_subject_sender' });
   });
+});
 
-  test('known gap, pinned: a CLOSED ticket with the same subject is not found, so the reply becomes a new ticket', async () => {
-    // Rung 5 reads Open and Pending tickets only; the closed one is never a candidate.
-    prismaMock.ticket.findMany.mockImplementation(async ({ where }) => (where?.status?.in?.includes('Closed') ? [{ id: 1 }] : []));
+// ---------------------------------------------------------------------------
+describe('1b. a follow-up to an existing ticket is held, not made a new ticket', () => {
+  const closed = (id, subject, over = {}) => ({ id, workspaceId: 2, subject, status: 'Closed', createdAt: new Date(Date.now() - 15 * 86400000), category: null, internalCategory: null, ...over });
+  // Rung 5 asks for Open/Pending tickets only; the follow-up search asks for everything but deleted and spam.
+  const tickets = (rows) => prismaMock.ticket.findMany.mockImplementation(async ({ where }) => (where?.status?.notIn ? rows : rows.filter((r) => where?.status?.in?.includes(r.status))));
+  const heldWith = () => holdMock.holdMessage.mock.calls[0][2];
+
+  test('an agent\u2019s reply with a CLOSED same-subject ticket: held as possible_follow_up with the candidates and the best guess', async () => {
+    tickets([closed(880, 'Reminder: 85 Days Outstanding Invoice - 4053377 - Adatum')]);
+    expect(await ingest.processEmail(front, reply({ subject: 'RE: Reminder: 85 Days Outstanding Invoice - 4053377 - Adatum' }), new Map())).toBe('held');
+    expect(ticketServiceMock.createTicket).not.toHaveBeenCalled();
+    expect(heldWith()).toMatchObject({
+      reason: 'possible_follow_up',
+      bestGuessTicketId: 880,
+      candidates: [{ ticketId: 880, why: 'same subject; same reference number 4053377' }],
+      decision: { rule: 'possible_follow_up', details: { matched: ['same_subject', 'shared_number'], candidateCount: 1, bestGuessOpen: false, insteadOf: 'agent_cc_intake', requester: COLLEAGUE } },
+    });
+  });
+
+  test('the day count moved on ("105 Days" then "175 Days", same invoice): still the same matter', async () => {
+    tickets([closed(881, 'Reminder: 105 Days Outstanding Invoice - 4051188 - Wingtip')]);
+    expect(await ingest.processEmail(front, reply({ subject: 'RE: Reminder: 175 Days Outstanding Invoice - 4051188 - Wingtip', to: [CLIENT] }), new Map())).toBe('held');
+    expect(heldWith().candidates).toEqual([{ ticketId: 881, why: 'same subject; same reference number 4051188' }]);
+  });
+
+  test('a shared invoice number under different words is enough, also for a NEW mail (no reply headers)', async () => {
+    tickets([closed(882, 'Invoice 4054060 dispute - Northwind')]);
+    expect(await ingest.processEmail(front, mail({ subject: 'Reminder: 78 Days Outstanding Invoice - 4054060 - Northwind' }), new Map())).toBe('held');
+    expect(heldWith()).toMatchObject({ reason: 'possible_follow_up', candidates: [{ ticketId: 882, why: 'same reference number 4054060' }], decision: { details: { matched: ['shared_number'] } } });
+  });
+
+  test('several candidates: newest first, the open one is the best guess', async () => {
+    const subject = 'Corrections to invoice for overhead';
+    tickets([closed(893, subject, { createdAt: new Date(Date.now() - 2 * 86400000) }), closed(892, subject, { status: 'Open', createdAt: new Date(Date.now() - 9 * 86400000) }), closed(891, subject, { createdAt: new Date(Date.now() - 40 * 86400000) })]);
+    // Not reply-shaped, so rung 5 does not thread it onto the open one.
+    expect(await ingest.processEmail(front, mail({ subject }), new Map())).toBe('held');
+    expect(heldWith().candidates.map((c) => c.ticketId)).toEqual([893, 892, 891]);
+    expect(heldWith()).toMatchObject({ bestGuessTicketId: 892, decision: { details: { bestGuessOpen: true, candidateCount: 3 } } });
+  });
+
+  test('no candidate: the ticket is created as before', async () => {
+    tickets([closed(884, 'Reminder: 85 Days Outstanding Invoice - 4059999 - Somebody else')]);
     expect(await ingest.processEmail(front, reply({ subject: 'RE: Reminder: 85 Days Outstanding Invoice - 4053377 - Adatum' }), new Map())).toBe('created');
-    expect(created()[0]).toMatchObject({ requesterEmail: COLLEAGUE, createdVia: 'agent_cc', subject: 'Reminder: 85 Days Outstanding Invoice - 4053377 - Adatum' });
+    expect(created()[0]).toMatchObject({ requesterEmail: COLLEAGUE, createdVia: 'agent_cc' });
+    expect(holdMock.holdMessage).not.toHaveBeenCalled();
+  });
+
+  test('a Security ticket or an onboarding ticket is never a candidate: the mail is created, not held against it', async () => {
+    const subject = 'Laptop for the new project accountant';
+    tickets([
+      closed(885, subject, { internalCategory: { name: 'Phishing', parent: { name: 'Security' } } }),
+      closed(886, 'Child ticket - Laptop for the new project accountant'),
+      closed(887, subject, { status: 'Deleted' }),
+    ]);
+    expect(await ingest.processEmail(front, reply({ subject: 'RE: ' + subject }), new Map())).toBe('created');
+    expect(holdMock.holdMessage).not.toHaveBeenCalled();
+  });
+
+  test('ONE open ticket with a header match threads as today; the follow-up search is never reached', async () => {
+    const open = { id: 888, workspaceId: 2, origin: 'ticketpulse', nativeNumber: 2040, subject: 'Statement for October', status: 'Open', ccEmails: [], requesterId: 5 };
+    prismaMock.ticketThreadEntry.findFirst.mockImplementation(async ({ where }) => (where?.emailMessageId?.in ? { ticketId: 888 } : null));
+    prismaMock.ticket.findUnique.mockResolvedValue(open);
+    tickets([closed(889, 'Statement for October')]);
+    expect(await ingest.processEmail(front, reply({ subject: 'RE: Statement for October' }), new Map())).toBe('reply');
+    expect(prismaMock.ticketThreadEntry.create.mock.calls[0][0].data).toMatchObject({ ticketId: 888, authorType: 'agent', incoming: false });
+    expect(holdMock.holdMessage).not.toHaveBeenCalled();
+    expect(prismaMock.ticket.findMany.mock.calls.some(([arg]) => arg?.where?.status?.notIn)).toBe(false);
+  });
+
+  test('a requester\u2019s reply that this mailbox would make a ticket (policy = create) gets the same check; their fresh mail does not', async () => {
+    tickets([closed(890, 'Statement for October')]);
+    const fromClient = { from: CLIENT, fromName: 'Jo Park', to: [ALIAS], cc: [] };
+    expect(await ingest.processEmail(front, reply({ ...fromClient, subject: 'RE: Statement for October' }), new Map())).toBe('held');
+    expect(heldWith()).toMatchObject({ reason: 'possible_follow_up', bestGuessTicketId: 890, decision: { details: { insteadOf: 'external_reply_unknown' } } });
+    holdMock.holdMessage.mockClear();
+    // No reply evidence: a new request, even with a familiar subject (ticket grouping judges those).
+    expect(await ingest.processEmail(front, mail({ ...fromClient, subject: 'Statement for October' }), new Map())).toBe('created');
+    expect(holdMock.holdMessage).not.toHaveBeenCalled();
+  });
+
+  test('a failed follow-up lookup never loses the mail: it is created as before', async () => {
+    prismaMock.ticket.findMany.mockImplementation(async ({ where }) => { if (where?.status?.notIn) throw new Error('db down'); return []; });
+    expect(await ingest.processEmail(front, reply({ subject: 'RE: Statement for October' }), new Map())).toBe('created');
   });
 });
 

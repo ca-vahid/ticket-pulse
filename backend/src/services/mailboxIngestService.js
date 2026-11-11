@@ -782,6 +782,35 @@ class MailboxIngestService {
       workspaceId: connection.workspaceId, connectionId: connection.id, internetMessageId: email.internetMessageId, policy, ...intake.decision.details,
     });
 
+    // Following up on an existing case belongs on that case's ticket (11 Nov 2026).
+    // Before an agent's copied mail, or a reply this mailbox would turn into a ticket
+    // anyway (policy = create), becomes a NEW ticket: does a ticket about the same
+    // matter exist, open or closed? Then a person (or Mail triage) decides.
+    // Fresh mail from a requester is left alone: a repeating alert or a common
+    // subject would hold in bulk, and ticket grouping already judges those.
+    const mayBeFollowUp = intake.kind === 'agent_cc' || (intake.kind === 'external_reply_unknown' && policy === 'create');
+    if (mayBeFollowUp) {
+      const found = await this._followUpCandidates(connection, email, ctx);
+      if (found) {
+        logger.info(`Mailbox ingest: "${email.subject}" from ${email.from} looks like a follow-up (${found.rules.join(' + ')}; ${found.total} ticket(s)) — held instead of a new ticket`);
+        return this._holdOrFallback(connection, email, {
+          ...intake,
+          bestGuessTicketId: found.bestGuessTicketId,
+          candidates: found.candidates,
+          decision: {
+            rule: 'possible_follow_up',
+            details: {
+              ...intake.decision.details,
+              matched: found.rules, // same_subject | shared_number
+              candidateCount: found.total,
+              bestGuessOpen: found.bestGuessOpen,
+              insteadOf: intake.decision.rule,
+            },
+          },
+        }, 'possible_follow_up', senderCreates);
+      }
+    }
+
     switch (intake.kind) {
     case 'forward':
     case 'agent_cc':
@@ -802,6 +831,21 @@ class MailboxIngestService {
     }
 
     return this._createWithCap(connection, email, relatedTicketId ? { ...intake, relatedTicketId } : intake, senderCreates);
+  }
+
+  /** Tickets this mail may be following up on (followUpCandidateService), or null. Never throws. */
+  async _followUpCandidates(connection, email, ctx = null) {
+    try {
+      const { findFollowUpCandidates } = await import('./followUpCandidateService.js');
+      return await findFollowUpCandidates(connection.workspaceId, {
+        subject: ctx?.subjectForMatch || email.subject,
+        normalize: normalizeSubjectForMatch,
+        isOpen: async (status) => ['Open', 'Pending'].includes(await statusService.resolveBaseStatus(connection.workspaceId, status)),
+      });
+    } catch (err) {
+      logger.warn(`Mailbox ingest: follow-up check failed for "${email.subject}" (${err.message}) — continuing`);
+      return null;
+    }
   }
 
   /** FreshService closes a merged ticket with a link to the one that survives; the reply belongs there. */

@@ -34,6 +34,7 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: { info: jes
 
 const {
   default: holdService, buildHoldDigest, formatWhen, formatSpan, burstFoldKey, DEFAULT_BURST_FOLD_MODE,
+  HOLD_REASONS, HOLD_REASON_LABELS, REASON_WORDS,
 } = await import('../src/services/mailboxHoldService.js');
 
 const NAS = 'nas-one@x.io';
@@ -289,5 +290,45 @@ describe('the daily digest: people are listed as people', () => {
     expect(params.html).toContain('<strong>Alex Rivera</strong>: 3 e-mails');
     expect(params.html).toContain('RE: Reminder: 71 Days Outstanding Invoice - 4053801 - Northwind');
     expect(params.html).not.toMatch(/device|alert burst/i);
+  });
+});
+
+// 11 Nov 2026: "Looks like a follow-up to an existing ticket".
+describe('possible_follow_up is a registered hold reason', () => {
+  test('in HOLD_REASONS, with a label and plain words; every reason has both', () => {
+    expect(HOLD_REASONS).toContain('possible_follow_up');
+    expect(HOLD_REASON_LABELS.possible_follow_up).toBe('Looks like a follow-up to an existing ticket');
+    expect(REASON_WORDS.possible_follow_up).toBe('it looks like a follow-up to an existing ticket');
+    for (const reason of HOLD_REASONS) {
+      expect(HOLD_REASON_LABELS[reason]).toBeTruthy();
+      expect(REASON_WORDS[reason]).toBeTruthy();
+    }
+  });
+
+  test('the row keeps the reason, the best guess and the ticket candidates exactly as { ticketId, why }', async () => {
+    await holdService.holdMessage(connection, mail('RE: Statement for October', 9), {
+      reason: 'possible_follow_up',
+      bestGuessTicketId: 880,
+      candidates: [{ ticketId: 880, why: 'same subject', extra: 'dropped' }, { ticketId: '879', why: 'same reference number 4053377' }],
+      decision: { rule: 'possible_follow_up', details: { matched: ['same_subject'] } },
+    });
+    const { data } = prismaMock.mailboxHeldMessage.create.mock.calls[0][0];
+    expect(data.reason).toBe('possible_follow_up');
+    expect(data.bestGuessTicketId).toBe(880);
+    expect(data.candidates).toEqual([{ ticketId: 880, why: 'same subject' }, { ticketId: 879, why: 'same reference number 4053377' }]);
+    // The fold is for bursts only.
+    expect(prismaMock.ticket.findMany).not.toHaveBeenCalled();
+  });
+
+  test('a list of addresses is still stored as addresses', async () => {
+    await holdService.holdMessage(connection, mail('RE: hello', 10), { reason: 'agent_reply_no_requester', candidates: ['Jo.Park@Client.example.org', 'not-an-address'] });
+    expect(prismaMock.mailboxHeldMessage.create.mock.calls[0][0].data.candidates).toEqual(['jo.park@client.example.org']);
+  });
+
+  test('the digest says it in plain words', () => {
+    const row = { id: 1, subject: 'RE: Statement for October', fromEmail: 'alex.rivera@example.com', fromName: 'Alex Rivera', reason: 'possible_follow_up', receivedAt: '2026-11-10T18:00:00Z', bestGuessTicket: { displayRef: '#249132' } };
+    const { html } = buildHoldDigest({ workspaceName: 'Accounting', count: 1, singles: [row], link: 'Settings', linkIsUrl: false });
+    expect(html).toContain('Alex Rivera (alex.rivera@example.com) · it looks like a follow-up to an existing ticket · best guess #249132');
+    expect(html).not.toContain('possible_follow_up');
   });
 });

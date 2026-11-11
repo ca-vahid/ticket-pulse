@@ -45,7 +45,23 @@ export const HOLD_REASONS = Object.freeze([
   'sender_burst', // helpdesk mailbox: more new mail from one sender in a cycle than the cap; never dropped
   'ingest_error', // helpdesk mailbox: creating the ticket or the reply failed; a person decides, nothing is lost
   'meeting_invite', // QA 11-09 #8: a plain meeting invite or response; not a ticket unless a person makes it one
+  // 11 Nov 2026: it would have become a new ticket, but a ticket about the same matter exists
+  // (same subject, or a shared invoice / PO number), open or closed. candidates = [{ ticketId, why }].
+  'possible_follow_up',
 ]);
+
+/** Short labels for the review screens. */
+export const HOLD_REASON_LABELS = Object.freeze({
+  unknown_reference: 'Reply to a conversation with no ticket here',
+  agent_reply_no_requester: 'A team member\u2019s own e-mail, requester unclear',
+  ambiguous_sender: 'Sender unclear',
+  policy_replies_only: 'Mailbox takes replies only',
+  ambiguous_ticket: 'More than one ticket matches',
+  sender_burst: 'Many look-alike e-mails at once',
+  ingest_error: 'Could not be filed',
+  meeting_invite: 'Meeting invite',
+  possible_follow_up: 'Looks like a follow-up to an existing ticket',
+});
 
 export const HOLD_STATUSES = Object.freeze(['held', 'attached', 'created', 'discarded']);
 
@@ -88,6 +104,17 @@ function stripHtml(html) {
     .replace(/&gt;/gi, '>')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/**
+ * What is stored as the row's candidates: ticket candidates ([{ ticketId, why }],
+ * possible_follow_up) as given, a list of addresses normalised, any other shape as it is.
+ */
+function normalizeCandidates(candidates) {
+  if (!Array.isArray(candidates)) return candidates ?? null;
+  const tickets = candidates.filter((c) => c && typeof c === 'object' && Number.isInteger(Number(c.ticketId)) && Number(c.ticketId) > 0);
+  if (tickets.length) return tickets.map((c) => ({ ticketId: Number(c.ticketId), why: String(c.why || '').slice(0, 300) }));
+  return normalizeAddressList(candidates);
 }
 
 /** ≤500-char preview for the review card. */
@@ -253,7 +280,7 @@ class MailboxHoldService {
       receivedAt: email?.receivedAt ? new Date(email.receivedAt) : new Date(),
       reason: holdReason,
       bestGuessTicketId: Number.isInteger(Number(bestGuessTicketId)) && Number(bestGuessTicketId) > 0 ? Number(bestGuessTicketId) : null,
-      candidates: Array.isArray(candidates) ? normalizeAddressList(candidates) : (candidates ?? null),
+      candidates: normalizeCandidates(candidates),
       decision: decision ?? null,
       status: 'held',
     };
@@ -766,6 +793,7 @@ export const REASON_WORDS = {
   sender_burst: 'many look-alike e-mails arrived at once, so the extra ones wait',
   ingest_error: 'it could not be filed',
   meeting_invite: 'a meeting invite',
+  possible_follow_up: 'it looks like a follow-up to an existing ticket',
 };
 
 const FONT = "font-family:Calibri,'Segoe UI',Arial,sans-serif;";

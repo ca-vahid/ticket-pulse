@@ -59,7 +59,7 @@ export function alertKindKey(subject) {
 }
 
 // Hold reasons only a person's mail gets (an agent's own e-mail, an unclear sender).
-const PERSON_REASONS = ['agent_reply_no_requester', 'ambiguous_sender', 'meeting_invite'];
+const PERSON_REASONS = ['agent_reply_no_requester', 'ambiguous_sender', 'meeting_invite', 'possible_follow_up'];
 
 /**
  * Who sent a group of held e-mails: a 'person' or an 'automated' sender.
