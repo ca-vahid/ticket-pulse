@@ -5,7 +5,7 @@ import { prepareEmailHtml } from '../tickets/attachmentPreview/prepareEmailHtml'
 import { formatPacificWhen } from '../../utils/ticketDates';
 import { SuggestionLine } from './WaitingRow';
 import {
-  MODE_WORD, OUTCOME_WORD, closedNote, finalSentence, fmtRef, money, seconds, suggestionSentence,
+  MODE_WORD, OUTCOME_WORD, closedNote, finalSentence, fmtRef, money, needsPerson, seconds, suggestionSentence,
 } from './mailReviewText';
 
 /**
@@ -88,6 +88,11 @@ export default function MailDetailsPanel({
     seconds(latest.latencyMs),
   ].filter(Boolean).join(' · ') : '';
 
+  const scores = candidates
+    .filter((c) => c.score !== null && c.score !== undefined)
+    .map((c) => `${fmtRef(c.ticket)} ${Number(c.score).toFixed(2)}`)
+    .join(' · ');
+
   return (
     <div className="fixed inset-0 z-[60]" data-testid="mr-details-layer">
       <div className="absolute inset-0 bg-slate-900/30" onClick={onClose} aria-hidden="true" />
@@ -125,6 +130,12 @@ export default function MailDetailsPanel({
             {s?.reason && <p className="mt-1.5 text-sm text-foreground/85">Why: {s.reason}</p>}
             {(s?.evidence || []).length > 0 && (
               <p className="mt-1 text-sm text-muted-foreground">It used: {s.evidence.join(' · ')}</p>
+            )}
+            {needsPerson(s || latest).length > 0 && (
+              <p className="mt-1 text-sm text-muted-foreground" data-testid="mr-details-needs-person">Needs a person: {needsPerson(s || latest).join(' · ')}</p>
+            )}
+            {(latest?.guards || []).length > 0 && (
+              <p className="mt-1 text-sm text-muted-foreground" data-testid="mr-guards">Checks applied: {latest.guards.join(' · ')}</p>
             )}
             {s?.judgedAt && <p className="mt-1 text-xs tabular-nums text-muted-foreground">Judged {formatPacificWhen(s.judgedAt)}</p>}
             {isAdmin && (
@@ -174,7 +185,6 @@ export default function MailDetailsPanel({
                       </p>
                       <p className="mt-0.5 text-xs text-muted-foreground">
                         Considered because: {(c.why || []).join(' · ') || 'not recorded'}
-                        {c.score !== null && c.score !== undefined ? ` · match ${Number(c.score).toFixed(2)}` : ''}
                       </p>
                       {c.aiNote && <p className="mt-0.5 text-xs text-foreground/85">AI: {c.aiNote}</p>}
                     </li>
@@ -190,9 +200,9 @@ export default function MailDetailsPanel({
                 {earlier.map((d) => (
                   <li key={d.id} className="text-sm text-foreground/85">
                     <span className="tabular-nums text-muted-foreground">{formatPacificWhen(d.createdAt)}</span>
-                    {' · '}{suggestionSentence(d)}{d.confidence ? ` · ${d.confidence}` : ''}
+                    {suggestionSentence(d) ? ` · ${suggestionSentence(d)}` : ''}{d.confidence ? ` · ${d.confidence}` : ''}
                     <span className="text-muted-foreground">
-                      {' · '}{OUTCOME_WORD[d.outcome] || d.outcome}{d.outcome === 'changed' && finalSentence(d) ? ` to “${finalSentence(d)}”` : ''}
+                      {' · '}{OUTCOME_WORD[d.outcome] || d.outcome}{(d.outcome === 'changed' || d.outcome === 'manual') && finalSentence(d) ? `: “${finalSentence(d)}”` : ''}
                       {d.mode ? ` · ${MODE_WORD[d.mode] || d.mode}` : ''}
                     </span>
                     {d.reason && <span className="block text-xs text-muted-foreground">Why: {d.reason}</span>}
@@ -203,9 +213,10 @@ export default function MailDetailsPanel({
           )}
         </div>
 
-        {isAdmin && usage && (
+        {isAdmin && (usage || scores) && (
           <footer className="border-t border-border/60 px-5 py-2 text-xs tabular-nums text-muted-foreground sm:px-6" data-testid="mr-usage">
-            {usage}
+            {usage && <p>{usage}</p>}
+            {scores && <p data-testid="mr-scores">Match scores: {scores}</p>}
           </footer>
         )}
       </aside>

@@ -17,6 +17,8 @@ export const OUTCOME_WORD = {
   undone: 'Undone',
   failed: 'Failed',
   superseded: 'Judged again',
+  // A person decided a mail the AI had not judged: action, confidence and provider are null.
+  manual: 'Decided by a person (no AI suggestion)',
 };
 
 /** "249132" → "#249132"; "TP-11340" stays as it is. */
@@ -69,8 +71,14 @@ export const isAcceptable = (s) => Boolean(s) && (
   (s.action === 'attach' && Boolean(s.ticket)) || s.action === 'create' || s.action === 'no_ticket'
 );
 
-/** Bulk accept takes only what the server takes: attach/create the AI is sure about. */
-export const isSureBulk = (s) => Boolean(s) && s.confidence === 'sure'
+/** Plain sentences saying why the AI will not apply this one itself ([] when it would). */
+export const needsPerson = (s) => (Array.isArray(s?.needsPerson) ? s.needsPerson.filter(Boolean).map(String) : []);
+
+/**
+ * Bulk accept takes only what the server takes: attach/create the AI is sure
+ * about, and nothing it flagged as needing a person. Never a discard.
+ */
+export const isSureBulk = (s) => Boolean(s) && s.confidence === 'sure' && needsPerson(s).length === 0
   && ((s.action === 'attach' && Boolean(s.ticket)) || s.action === 'create');
 
 /**
@@ -92,8 +100,9 @@ export function describeSuggestion(s) {
   return { ...base, kind: 'unsure', verb: who ? `Not sure: best guess is a new ticket for ${who}` : 'Not sure', effects: [] };
 }
 
-/** The same suggestion as one plain sentence (Log, earlier judgements, screen readers). */
+/** The same suggestion as one plain sentence (Log, earlier judgements, screen readers). '' when the AI said nothing. */
 export function suggestionSentence(s) {
+  if (!s || !s.action) return '';
   const d = describeSuggestion(s);
   const ticket = d.ticket ? ` ${fmtRef(d.ticket)}` : '';
   const effects = d.effects.length ? `, ${d.effects.join(' and ')}` : '';

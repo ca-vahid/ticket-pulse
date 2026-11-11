@@ -38,6 +38,21 @@ beforeEach(() => vi.clearAllMocks());
 describe('HeldDeviceGroup', () => {
   const mount = (props = {}) => render(<MemoryRouter><HeldDeviceGroup group={group()} mode="shadow" onBulk={vi.fn()} {...props} /></MemoryRouter>);
 
+  // 11 Nov 2026: only an automated sender is a "device"; people are people and their mail is not "alerts".
+  test('wording follows senderKind: a person, an automated sender, or unknown', () => {
+    const { unmount } = render(<MemoryRouter><HeldDeviceGroup group={{ ...group(), device: 'Alex Rivera', senderKind: 'person', attention: true }} mode="shadow" onBulk={vi.fn()} /></MemoryRouter>);
+    expect(screen.getByRole('heading', { level: 3 })).toHaveTextContent('Alex Rivera · 4 e-mails · 2 kinds');
+    expect(screen.getByTestId('held-group-attention')).toHaveTextContent('Something from this person reads like a failure.');
+    expect(document.body.textContent).not.toMatch(/device/i);
+    unmount();
+    const auto = render(<MemoryRouter><HeldDeviceGroup group={{ ...group(), senderKind: 'automated', attention: true }} mode="shadow" onBulk={vi.fn()} /></MemoryRouter>);
+    expect(screen.getByTestId('held-group-attention')).toHaveTextContent('Something on this device reads like a failure.');
+    auto.unmount();
+    render(<MemoryRouter><HeldDeviceGroup group={{ ...group(), attention: true }} mode="shadow" onBulk={vi.fn()} /></MemoryRouter>);
+    expect(screen.getByTestId('held-group-attention')).toHaveTextContent('Something from this sender reads like a failure.');
+    cleanup();
+  });
+
   test('the device, its count and kinds; the crash is first and marked; the new kind says it has no ticket', () => {
     mount();
     expect(screen.getByRole('heading', { level: 3 })).toHaveTextContent('NAS-ONE · 4 alerts · 2 kinds');

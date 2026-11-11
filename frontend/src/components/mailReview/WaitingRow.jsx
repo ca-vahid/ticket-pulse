@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, ChevronDown, MoreHorizontal } from 'lucide-react';
 import { agoWords, formatPacificWhen } from '../../utils/ticketDates';
-import { defaultRequester, describeSuggestion, fmtRef, isAcceptable, suggestionSentence } from './mailReviewText';
+import { defaultRequester, describeSuggestion, fmtRef, isAcceptable, needsPerson, suggestionSentence } from './mailReviewText';
 import TicketPickPopover from './TicketPickPopover';
 
 /**
@@ -16,17 +16,26 @@ import TicketPickPopover from './TicketPickPopover';
  */
 
 const PRIMARY = 'tp-focus-ring inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-3.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 sm:flex-none';
-const QUIET = 'tp-focus-ring hidden h-8 items-center gap-1 rounded-lg px-2.5 text-sm font-medium text-foreground/85 hover:bg-muted disabled:opacity-50 sm:inline-flex';
+const QUIET_BASE = 'tp-focus-ring h-8 items-center gap-1 rounded-lg px-2.5 text-sm font-medium text-foreground/85 hover:bg-muted disabled:opacity-50';
+// On a phone only the first button of the row shows; the rest are in More.
+const QUIET = `${QUIET_BASE} hidden sm:inline-flex`;
+const QUIET_LEAD = `${QUIET_BASE} inline-flex`;
 
 const LABEL = { accept: 'Accept', pick: 'Pick another ticket', new: 'New ticket', none: 'No ticket needed', details: 'Details' };
 
-/** Which action leads: Accept when the AI is sure or likely, otherwise the choice a person has to make. */
+/**
+ * Which action leads: Accept when the AI is sure or likely, otherwise the
+ * choice a person has to make. Discarding is the one exception: "No ticket
+ * needed" gets a blue Accept only when the AI is sure; at likely or unsure
+ * the row has no primary button at all, so nobody discards mail by reflex.
+ */
 export function planActions(s) {
-  if (!s) return { primary: 'new', secondary: 'pick' };
+  if (!s) return { primary: 'new', quiet: ['pick'] };
   const acceptable = isAcceptable(s);
-  if (!acceptable) return { primary: 'pick', secondary: 'new' };
-  if (s.confidence === 'unsure') return { primary: 'pick', secondary: 'accept' };
-  return { primary: 'accept', secondary: 'pick' };
+  if (!acceptable) return { primary: 'pick', quiet: ['new'] };
+  if (s.action === 'no_ticket' && s.confidence !== 'sure') return { primary: null, quiet: ['accept', 'pick'] };
+  if (s.confidence === 'unsure') return { primary: 'pick', quiet: ['accept'] };
+  return { primary: 'accept', quiet: ['pick'] };
 }
 
 /** The ticket number as a real link: the Tickets peek, in a new tab, so the review list stays put. */
@@ -47,7 +56,7 @@ export function TicketRefLink({ ticket, className = '' }) {
 }
 
 /** "AI suggests: Add to #249132 · Monitor arm (Closed 27 Oct) → reopens it · sure". */
-export function SuggestionLine({ suggestion, mode }) {
+export function SuggestionLine({ suggestion, mode, compactOnPhone = false }) {
   const d = describeSuggestion(suggestion);
   const shadow = (suggestion?.mode || mode) === 'shadow';
   if (!suggestion && mode === 'off') {
@@ -64,7 +73,7 @@ export function SuggestionLine({ suggestion, mode }) {
       {d.ticket && (
         <>
           {' '}<TicketRefLink ticket={d.ticket} />
-          {d.ticket.subject && <span className="text-foreground/85"> · {d.ticket.subject}</span>}
+          {d.ticket.subject && <span className={`text-foreground/85 ${compactOnPhone ? 'hidden sm:inline' : ''}`} data-testid="mr-suggestion-subject"> · {d.ticket.subject}</span>}
           {d.closed && <span className="text-muted-foreground"> {d.closed}</span>}
         </>
       )}
@@ -182,9 +191,12 @@ export default function WaitingRow({
     else if (key === 'none') onNoTicket?.(item);
     else if (key === 'details') onDetails?.(item);
   };
+  // On a phone the first button of the row stays; every other quiet one is in More.
+  const lead = plan.primary || plan.quiet[0];
   const more = ['accept', 'pick', 'new', 'none', 'details']
-    .filter((k) => k !== plan.primary && (k !== 'accept' || plan.secondary === 'accept'))
-    .map((k) => ({ key: k, phoneOnly: k === plan.secondary }));
+    .filter((k) => k !== lead && (k !== 'accept' || plan.quiet.includes('accept')))
+    .map((k) => ({ key: k, phoneOnly: plan.quiet.includes(k) }));
+  const expanded = (key) => (key === 'pick' || key === 'new' ? openForm === key : undefined);
   const acceptLabel = s && isAcceptable(s) ? `Accept: ${suggestionSentence(s)}` : undefined;
   const label = (key) => (key === 'accept' ? acceptLabel : undefined);
 
@@ -222,32 +234,41 @@ export default function WaitingRow({
       {item.snippet && <p className="mt-0.5 truncate text-sm text-muted-foreground">{item.snippet}</p>}
 
       <div className="mt-1.5">
-        <SuggestionLine suggestion={s} mode={mode} />
+        <SuggestionLine suggestion={s} mode={mode} compactOnPhone />
         {s?.reason && <p className="mt-0.5 line-clamp-1 text-sm text-muted-foreground" data-testid="mr-why">Why: {s.reason}</p>}
+        {needsPerson(s).length > 0 && (
+          <p className="mt-0.5 text-sm text-muted-foreground [overflow-wrap:anywhere]" data-testid="mr-needs-person">Needs a person: {needsPerson(s).join(' · ')}</p>
+        )}
       </div>
 
       {error && <p role="alert" className="mt-1.5 text-sm text-red-700 dark:text-red-300">{error}</p>}
 
       <div className="relative mt-2 flex items-center gap-1.5" data-testid="mr-actions">
-        <button type="button" onClick={() => run(plan.primary)} aria-label={label(plan.primary)} aria-expanded={plan.primary === 'pick' || plan.primary === 'new' ? openForm === plan.primary : undefined} className={PRIMARY} data-testid="mr-primary" data-action={plan.primary}>
-          {LABEL[plan.primary]}
-          {plan.primary === 'pick' && <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />}
-        </button>
-        <button type="button" onClick={() => run(plan.secondary)} aria-label={label(plan.secondary)} aria-expanded={plan.secondary === 'pick' || plan.secondary === 'new' ? openForm === plan.secondary : undefined} className={QUIET} data-testid="mr-secondary" data-action={plan.secondary}>
-          {LABEL[plan.secondary]}
-          {plan.secondary === 'pick' && <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />}
-        </button>
+        {plan.primary && (
+          <button type="button" onClick={() => run(plan.primary)} aria-label={label(plan.primary)} aria-expanded={expanded(plan.primary)} className={PRIMARY} data-testid="mr-primary" data-action={plan.primary}>
+            {LABEL[plan.primary]}
+            {plan.primary === 'pick' && <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />}
+          </button>
+        )}
+        {plan.quiet.map((k) => (
+          <button key={k} type="button" onClick={() => run(k)} aria-label={label(k)} aria-expanded={expanded(k)} className={k === lead ? QUIET_LEAD : QUIET} data-testid="mr-secondary" data-action={k}>
+            {LABEL[k]}
+            {k === 'pick' && <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />}
+          </button>
+        ))}
         <MoreMenu items={more} onChoose={run} />
       </div>
 
       {openForm === 'pick' && (
-        <TicketPickPopover
-          suggested={s?.ticket || null}
-          candidates={detail ? detail.candidates || [] : null}
-          error={detailError}
-          onPick={(ticket, reopen) => onPick?.(item, ticket, reopen)}
-          onClose={() => onOpenForm?.(item, null)}
-        />
+        <div className="sm:relative">
+          <TicketPickPopover
+            suggested={s?.ticket || null}
+            candidates={detail ? detail.candidates || [] : null}
+            error={detailError}
+            onPick={(ticket, reopen) => onPick?.(item, ticket, reopen)}
+            onClose={() => onOpenForm?.(item, null)}
+          />
+        </div>
       )}
       {openForm === 'new' && (
         <NewTicketForm

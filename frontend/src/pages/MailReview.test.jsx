@@ -68,13 +68,14 @@ beforeEach(() => {
   });
   api.mailReviewGet.mockImplementation((heldId) => Promise.resolve({ data: {
     ...(waiting.find((w) => w.heldId === heldId) || mail(heldId, sug())),
+    suggestion: { ...((waiting.find((w) => w.heldId === heldId) || {}).suggestion || sug()), needsPerson: ['The ticket is closed'] },
     bodyHtml: '<p>Do you have any updates on this invoice?</p><img src="https://tracker.example.com/p.gif">',
     candidates: [
       { ticket: { ...CLOSED, createdAt: '2026-10-01T10:00:00Z' }, why: ['same invoice number 4053377', 'same thread'], score: 0.91, aiNote: 'Same matter.' },
       { ticket: { ...OPEN, createdAt: '2026-11-01T10:00:00Z' }, why: ['same sender in the last 90 days'], score: 0.4, aiNote: null },
     ],
     decisions: [
-      { id: 700, heldId, action: 'attach', ticket: CLOSED, reopen: true, confidence: 'sure', reason: 'now', model: 'economy-model', inputTokens: 2140, outputTokens: 96, costUsd: 0.0021, latencyMs: 1800, outcome: 'suggested', mode: 'on', createdAt: '2026-11-10T20:37:00Z' },
+      { id: 700, heldId, action: 'attach', ticket: CLOSED, reopen: true, confidence: 'sure', reason: 'now', guards: ['ticket is in this workspace', 'ticket was a candidate'], needsPerson: ['The ticket is closed'], model: 'economy-model', inputTokens: 2140, outputTokens: 96, costUsd: 0.0021, latencyMs: 1800, outcome: 'suggested', mode: 'on', createdAt: '2026-11-10T20:37:00Z' },
       { id: 650, heldId, action: 'unsure', ticket: null, reopen: false, confidence: 'unsure', reason: 'No candidates yet.', model: 'economy-model', outcome: 'superseded', mode: 'on', createdAt: '2026-11-10T20:07:00Z' },
     ],
   } }));
@@ -105,7 +106,8 @@ describe('Mail review: Waiting', () => {
     expect(screen.getByTestId('mr-stats')).toHaveTextContent('Done today 11');
     expect(screen.getByTestId('mr-stats')).toHaveTextContent('AI: On');
     expect(screen.getByRole('tab', { name: /Waiting/ })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('tab', { name: /Waiting/ })).toHaveTextContent('Waiting6');
+    // The header carries the count; the tab label does not repeat it.
+    expect(screen.getByRole('tab', { name: /Waiting/ }).textContent).toBe('Waiting');
     // Sender by name with the address on hover, the time in Pacific.
     expect(within(rows()[0]).getByText('Robin Vale')).toHaveAttribute('title', 'robin.vale@example.com');
     expect(within(rows()[0]).getByText('Tue 10 Nov, 12:36 PM')).toBeInTheDocument();
@@ -155,6 +157,48 @@ describe('Mail review: Waiting', () => {
     expect(secondary(4)).toHaveTextContent('Accept');
     expect(primary(5)).toHaveTextContent('New ticket'); // nothing suggested
     expect(secondary(5)).toHaveTextContent('Pick another ticket');
+  });
+
+  test('a discard suggestion is primary only when the AI is sure; otherwise the row has no primary', async () => {
+    waiting.push(mail(7, sug({ decisionId: 705, action: 'no_ticket', ticket: null, reopen: false, confidence: 'sure' })));
+    mount();
+    await waitFor(() => expect(rows()).toHaveLength(7));
+    // Row 4: "No ticket needed · likely" — Accept, Pick another ticket and More, all quiet.
+    const likely = rows()[3];
+    expect(within(likely).queryByTestId('mr-primary')).not.toBeInTheDocument();
+    expect(within(likely).getAllByTestId('mr-secondary').map((b) => b.textContent)).toEqual(['Accept', 'Pick another ticket']);
+    expect(within(likely).getByTestId('mr-more')).toBeInTheDocument();
+    // On a phone the first one stays in the row and the other is in More.
+    expect(within(likely).getAllByTestId('mr-secondary')[0].className).not.toMatch(/\bhidden\b/);
+    expect(within(likely).getAllByTestId('mr-secondary')[1].className).toMatch(/\bhidden\b.*sm:inline-flex/);
+    fireEvent.click(within(likely).getAllByTestId('mr-secondary')[0]);
+    expect(api.mailReviewResolve).toHaveBeenCalledWith(4, { action: 'no_ticket', decisionId: 703 });
+    // Sure: a blue Accept.
+    const sure = screen.getAllByTestId('mr-row').find((r) => r.getAttribute('data-held-id') === '7');
+    expect(within(sure).getByTestId('mr-primary')).toHaveTextContent('Accept');
+  });
+
+  test('"Needs a person" shows under Why and keeps the row out of the bulk accept', async () => {
+    waiting[2].suggestion.needsPerson = ['The sender is an automated system', 'The requester is new'];
+    mount();
+    await waitFor(() => expect(rows()).toHaveLength(6));
+    expect(within(rows()[2]).getByTestId('mr-needs-person')).toHaveTextContent('Needs a person: The sender is an automated system · The requester is new');
+    expect(within(rows()[0]).queryByTestId('mr-needs-person')).not.toBeInTheDocument();
+    // Still acceptable by a person, one at a time.
+    expect(within(rows()[2]).getByTestId('mr-primary')).toHaveTextContent('Accept');
+    const bulk = screen.getByTestId('mr-bulk');
+    expect(bulk).toHaveTextContent('Accept all sure suggestions (1)');
+    fireEvent.click(bulk);
+    expect(within(screen.getByTestId('mr-bulk-summary')).getAllByRole('listitem')).toHaveLength(1);
+    expect(screen.getByTestId('mr-bulk-summary')).not.toHaveTextContent('New ticket for Dana Whitlock');
+    fireEvent.click(screen.getByTestId('mr-bulk-confirm'));
+    expect(api.mailReviewBulkAccept).toHaveBeenCalledWith([1]);
+  });
+
+  test('on a phone the suggestion line drops the ticket subject', async () => {
+    mount();
+    await waitFor(() => expect(rows()).toHaveLength(6));
+    expect(within(rows()[0]).getByTestId('mr-suggestion-subject').className).toMatch(/\bhidden\b.*sm:inline/);
   });
 
   test('phone layout: the primary button fills the row and the second one moves into More', async () => {
@@ -214,6 +258,28 @@ describe('Mail review: Waiting', () => {
     expect(api.mailReviewResolve).toHaveBeenCalledWith(2, { action: 'attach', ticketId: 9001, reopen: false, decisionId: 701 });
   });
 
+  test('the picker is a capped, scrolling layer; a bottom sheet with a scrim on a phone; it opens upward near the bottom', async () => {
+    mount();
+    await waitFor(() => expect(rows()).toHaveLength(6));
+    fireEvent.click(within(rows()[0]).getByTestId('mr-secondary'));
+    const pop = await screen.findByTestId('mr-pick');
+    expect(pop.className).toMatch(/sm:max-h-96/);
+    expect(pop.className).toMatch(/overflow-y-auto/);
+    expect(pop.className).toMatch(/sm:z-40/);
+    expect(pop.className).toMatch(/\bbg-card\b/);
+    expect(pop.className).toMatch(/max-sm:fixed.*max-sm:bottom-0/);
+    expect(screen.getByTestId('mr-pick-scrim').className).toMatch(/sm:hidden/);
+    expect(pop).toHaveAttribute('data-flip', 'down');
+    fireEvent.click(screen.getByTestId('mr-pick-scrim'));
+    await waitFor(() => expect(screen.queryByTestId('mr-pick')).not.toBeInTheDocument());
+    // Near the bottom of the window, with room above, it opens upward.
+    const rect = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ top: 600, bottom: 900, height: 300, left: 0, right: 500, width: 500, x: 0, y: 600, toJSON: () => ({}) });
+    fireEvent.click(within(rows()[0]).getByTestId('mr-secondary'));
+    await waitFor(() => expect(screen.getByTestId('mr-pick')).toHaveAttribute('data-flip', 'up'));
+    expect(screen.getByTestId('mr-pick').className).toMatch(/sm:bottom-11/);
+    rect.mockRestore();
+  });
+
   test('the search box asks ticket-search and an open ticket is added straight away', async () => {
     mount();
     await waitFor(() => expect(rows()).toHaveLength(6));
@@ -238,16 +304,31 @@ describe('Mail review: Waiting', () => {
     await waitFor(() => expect(screen.getByTestId('mr-toast')).toHaveTextContent('New ticket TP-12001 made.'));
   });
 
-  test('bulk accept: no confirm, only the sure attach/create rows, Undo in the toast', async () => {
+  test('bulk accept: an inline summary first, never a discard, then one toast with Undo for the batch', async () => {
+    // A sure discard is never part of the batch and is not counted.
+    waiting.push(mail(7, sug({ decisionId: 705, action: 'no_ticket', ticket: null, reopen: false, confidence: 'sure' })));
     mount();
-    await waitFor(() => expect(rows()).toHaveLength(6));
+    await waitFor(() => expect(rows()).toHaveLength(7));
     const bulk = screen.getByTestId('mr-bulk');
     expect(bulk).toHaveTextContent('Accept all sure suggestions (2)');
     fireEvent.click(bulk);
+    expect(api.mailReviewBulkAccept).not.toHaveBeenCalled();
+    const summary = screen.getByTestId('mr-bulk-summary');
+    expect(within(summary).getAllByRole('listitem')).toHaveLength(2);
+    expect(summary).toHaveTextContent('Add to #249132, reopens it');
+    expect(summary).toHaveTextContent('New ticket for Dana Whitlock');
+    expect(summary).not.toHaveTextContent('No ticket needed');
+    // Cancel closes it and sends nothing.
+    fireEvent.click(within(summary).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByTestId('mr-bulk-summary')).not.toBeInTheDocument();
+    expect(api.mailReviewBulkAccept).not.toHaveBeenCalled();
+    fireEvent.click(bulk);
+    fireEvent.click(within(screen.getByTestId('mr-bulk-summary')).getByRole('button', { name: 'Accept these 2' }));
     expect(api.mailReviewBulkAccept).toHaveBeenCalledWith([1, 3]);
-    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('mr-bulk-summary')).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId('mr-toast')).toHaveTextContent('Accepted 2 suggestions.'));
-    await waitFor(() => expect(rows()).toHaveLength(4));
+    expect(screen.getAllByTestId('mr-toast')).toHaveLength(1);
+    await waitFor(() => expect(rows()).toHaveLength(5));
     fireEvent.click(screen.getByTestId('mr-toast-undo'));
     await waitFor(() => expect(api.mailReviewUndo).toHaveBeenCalledTimes(2));
   });
@@ -285,6 +366,9 @@ describe('Mail review: Waiting', () => {
     expect(screen.queryByTestId('mr-keys')).not.toBeInTheDocument();
     key('?');
     expect(screen.getByTestId('mr-keys')).toHaveTextContent('J / K');
+    // Neither the list nor its button shows below sm (no keyboard on a phone).
+    expect(screen.getByTestId('mr-keys').className).toMatch(/\bhidden\b.*sm:flex/);
+    expect(screen.getByTestId('mr-keys-toggle').className).toMatch(/\bhidden\b.*sm:inline-flex/);
     fireEvent.click(screen.getByTestId('mr-keys-toggle'));
     expect(screen.queryByTestId('mr-keys')).not.toBeInTheDocument();
   });
@@ -301,6 +385,7 @@ describe('Mail review: Waiting', () => {
     let finish;
     api.mailReviewList.mockImplementationOnce(() => new Promise((resolve, reject) => { finish = reject; }));
     fireEvent.click(screen.getByTestId('mr-bulk'));
+    fireEvent.click(screen.getByTestId('mr-bulk-confirm'));
     await waitFor(() => expect(finish).toBeTypeOf('function'));
     expect(screen.getByTestId('mr-panel').className).not.toMatch(/opacity-60/);
     await waitFor(() => expect(screen.getByTestId('mr-panel').className).toMatch(/opacity-60/));
@@ -346,7 +431,12 @@ describe('Mail review: Details panel', () => {
     expect(within(well).getByRole('button', { name: 'Show pictures' })).toBeInTheDocument();
     expect(within(panel).getByTestId('mr-candidates')).toHaveTextContent('Considered because: same invoice number 4053377 · same thread');
     expect(within(panel).getByTestId('mr-candidates')).toHaveTextContent('AI: Same matter.');
+    // No bare match number beside a candidate; admins get it in the muted footer.
+    expect(within(panel).getByTestId('mr-candidates').textContent).not.toMatch(/0\.91|match/);
+    expect(within(panel).getByTestId('mr-scores')).toHaveTextContent('Match scores: #249132 0.91 · TP-11340 0.40');
     expect(within(panel).getByTestId('mr-earlier')).toHaveTextContent('Not sure · unsure · Judged again');
+    expect(within(panel).getByTestId('mr-guards')).toHaveTextContent('Checks applied: ticket is in this workspace · ticket was a candidate');
+    expect(within(panel).getByTestId('mr-details-needs-person')).toHaveTextContent('Needs a person: The ticket is closed');
     expect(within(panel).getByTestId('mr-usage')).toHaveTextContent('economy-model · 2,140 tokens in, 96 out · $0.0021 · 1.8 s');
   });
 
@@ -414,6 +504,32 @@ describe('Mail review: Done and Log', () => {
     fireEvent.change(screen.getByLabelText('Confidence'), { target: { value: 'sure' } });
     await waitFor(() => expect(api.mailReviewList).toHaveBeenLastCalledWith({ tab: 'log', limit: 50, outcome: 'changed', confidence: 'sure' }));
     expect(screen.queryByTestId('mr-log-more')).not.toBeInTheDocument(); // fewer than a page
+  });
+
+  test('Log: a person deciding a mail the AI never judged ("manual") renders with its nulls', async () => {
+    api.mailReviewList.mockImplementation(({ tab }) => Promise.resolve(tab === 'log'
+      ? { data: [
+        { id: 820, heldId: 40, subject: 'Lease renewal', fromEmail: 'lee@example.com', mode: 'off', action: null, ticket: null, reopen: false, confidence: null, reason: null, evidence: null, candidateIds: [], provider: null, model: null, inputTokens: null, outputTokens: null, costUsd: null, latencyMs: null, outcome: 'manual', finalAction: 'attach', finalTicket: { id: 9002, ref: 'TP-11340' }, decidedBy: 'Robin Vale', decidedAt: '2026-11-11T17:00:00Z', createdAt: '2026-11-11T17:00:00Z', error: null, guards: null, needsPerson: null },
+        { id: 819, heldId: 41, subject: 'Automatic notice', fromEmail: 'bot@example.com', mode: 'on', action: 'attach', ticket: { id: 9002, ref: 'TP-11340' }, reopen: false, confidence: 'sure', reason: 'Same thread.', evidence: ['thread'], outcome: 'suggested', needsPerson: ['The sender is an automated system'], guards: ['never attaches to a security ticket'], createdAt: '2026-11-11T16:00:00Z' },
+      ], meta: { nextBefore: 777 } }
+      : { data: [], meta: { waiting: 0, doneToday: 0, mode: 'on' } }));
+    mount('/tickets/mail-review?tab=log');
+    const log = await screen.findAllByTestId('mr-log-row');
+    expect(log[0]).toHaveTextContent('Decided by a person (no AI suggestion)');
+    expect(within(log[0]).getByTestId('mr-log-manual')).toHaveTextContent('Robin Vale: Add to TP-11340');
+    expect(log[0].textContent).not.toMatch(/null|undefined|Not sure/);
+    // The row opens: why, what needed a person, the checks that ran.
+    expect(screen.queryByTestId('mr-log-more-row')).not.toBeInTheDocument();
+    fireEvent.click(within(log[1]).getByTestId('mr-log-toggle'));
+    const more = screen.getByTestId('mr-log-more-row');
+    expect(more).toHaveTextContent('Why: Same thread.');
+    expect(more).toHaveTextContent('Needs a person: The sender is an automated system');
+    expect(more).toHaveTextContent('Checks applied: never attaches to a security ticket');
+    fireEvent.click(within(log[0]).getByTestId('mr-log-toggle'));
+    expect(screen.getAllByTestId('mr-log-more-row')).toHaveLength(2);
+    // The server's cursor is used for Load more, even on a short page.
+    fireEvent.click(screen.getByTestId('mr-log-more'));
+    await waitFor(() => expect(api.mailReviewList).toHaveBeenLastCalledWith({ tab: 'log', limit: 50, before: 777 }));
   });
 
   test('Log "Load more" asks for the rows before the last one', async () => {

@@ -42,7 +42,7 @@ export default function MailReview() {
   const [meta, setMeta] = useState({});
   const [fetching, setFetching] = useState(0);
   const [logFilters, setLogFilters] = useState({});
-  const [logInfo, setLogInfo] = useState({ stats: null, hasMore: false, loadingMore: false });
+  const [logInfo, setLogInfo] = useState({ stats: null, hasMore: false, nextBefore: null, loadingMore: false });
   const [focusedId, setFocusedId] = useState(null);
   const [openForm, setOpenForm] = useState(null); // { heldId, kind: 'pick' | 'new' }
   const [detailsItem, setDetailsItem] = useState(null);
@@ -53,6 +53,7 @@ export default function MailReview() {
   const [doneErrors, setDoneErrors] = useState({});
   const [undoBusyId, setUndoBusyId] = useState(null);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [announce, setAnnounce] = useState('');
   const [showKeys, setShowKeys] = useState(false);
@@ -91,7 +92,9 @@ export default function MailReview() {
       if (which === 'log') {
         setLogInfo((cur) => ({
           stats: m.stats?.last30 || m.last30 || (before ? cur.stats : null),
-          hasMore: m.hasMore ?? rows.length >= LOG_PAGE,
+          // The server's cursor wins; without one, a full page means there may be more.
+          hasMore: m.nextBefore !== undefined ? m.nextBefore !== null : m.hasMore ?? rows.length >= LOG_PAGE,
+          nextBefore: m.nextBefore ?? null,
           loadingMore: false,
         }));
       }
@@ -202,6 +205,7 @@ export default function MailReview() {
     const ids = sureRows.map((r) => r.heldId);
     if (!ids.length) return;
     const before = lists.waiting.rows;
+    setBulkOpen(false);
     setBulkBusy(true);
     setLists((cur) => ({ ...cur, waiting: { ...cur.waiting, rows: (cur.waiting.rows || []).filter((r) => !ids.includes(r.heldId)) } }));
     try {
@@ -274,6 +278,7 @@ export default function MailReview() {
       const st = live.current;
       if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === 'Escape') {
+        setBulkOpen(false);
         if (st.openForm) setOpenForm(null);
         else if (st.detailsItem) setDetailsItem(null);
         return;
@@ -314,7 +319,7 @@ export default function MailReview() {
     const rows = lists.log.rows || [];
     if (!rows.length) return;
     setLogInfo((cur) => ({ ...cur, loadingMore: true }));
-    load('log', { filters: logFilters, before: rows[rows.length - 1].id });
+    load('log', { filters: logFilters, before: logInfo.nextBefore ?? rows[rows.length - 1].id });
   };
 
   return (
@@ -339,6 +344,8 @@ export default function MailReview() {
           rowErrors={rowErrors}
           sureRows={sureRows}
           bulkBusy={bulkBusy}
+          bulkOpen={bulkOpen}
+          onBulkToggle={() => setBulkOpen((v) => !v)}
           onBulkAccept={bulkAccept}
           onFocusRow={(item) => setFocusedId(item.heldId)}
           onAccept={accept}

@@ -305,12 +305,18 @@ export default function Tickets() {
   // Unmatched replies (Phase RL, RL-4): held inbound mail waiting for a
   // human. Staff-only endpoint — a 403 (viewer) simply hides the pill.
   const [heldCount, setHeldCount] = useState(0);
+  const [triageOn, setTriageOn] = useState(false);
   useEffect(() => {
     let alive = true;
     Promise.resolve()
       .then(() => ticketsAPI.listHeldMessages('held'))
-      .then((res) => { if (alive) setHeldCount(res?.meta?.heldCount ?? (res?.data || []).length); })
-      .catch(() => { if (alive) setHeldCount(0); });
+      .then((res) => {
+        if (!alive) return;
+        setHeldCount(res?.meta?.heldCount ?? (res?.data || []).length);
+        // With Mail triage in Shadow or On the page is worth opening at zero too (Done, Undo, Log).
+        setTriageOn(Boolean(res?.meta?.triageMode) && res.meta.triageMode !== 'off');
+      })
+      .catch(() => { if (alive) { setHeldCount(0); setTriageOn(false); } });
     return () => { alive = false; };
   }, []);
   const [tickets, setTickets] = useState([]);
@@ -2355,12 +2361,12 @@ export default function Tickets() {
                     </div>
                   )}
                   {/* Right end: AI-approval worklist connector + pagination */}
-                  {!panelView && !loadingBlank && !loadError && (tickets.length > 0 || (stats?.awaitingApproval || 0) > 0 || heldCount > 0) && (
+                  {!panelView && !loadingBlank && !loadError && (tickets.length > 0 || (stats?.awaitingApproval || 0) > 0 || heldCount > 0 || triageOn) && (
                     <div className="order-2 ml-auto flex flex-wrap items-center gap-2">
                       {/* Held e-mail (17 Oct 2026): in this row instead of a row of
                           its own. Since 11 Nov 2026 it opens the Mail review page
                           (/tickets/mail-review), not a popup. Hidden when empty. */}
-                      {heldCount > 0 && (
+                      {(heldCount > 0 || triageOn) && (
                         <button
                           type="button"
                           onClick={() => navigate('/tickets/mail-review')}
@@ -2369,8 +2375,13 @@ export default function Tickets() {
                           data-testid="held-replies-pill"
                         >
                           <MailQuestion className="h-4 w-4" aria-hidden="true" />
-                          Mail review <span className="tabular-nums">· {heldCount}</span>
-                          <span className="sr-only"> held {heldCount === 1 ? 'e-mail' : 'e-mails'}</span>
+                          Mail review
+                          {heldCount > 0 && (
+                            <>
+                              <span className="tabular-nums">· {heldCount}</span>
+                              <span className="sr-only"> held {heldCount === 1 ? 'e-mail' : 'e-mails'}</span>
+                            </>
+                          )}
                         </button>
                       )}
                       {(stats?.awaitingApproval || 0) > 0 && (

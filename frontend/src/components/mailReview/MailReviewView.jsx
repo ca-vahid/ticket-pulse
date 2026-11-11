@@ -3,7 +3,7 @@ import { Activity, ArrowLeft, CheckCheck, Keyboard, X } from 'lucide-react';
 import WaitingRow from './WaitingRow';
 import DoneList from './DoneList';
 import LogList from './LogList';
-import { MODE_WORD } from './mailReviewText';
+import { MODE_WORD, suggestionSentence } from './mailReviewText';
 
 /**
  * The Mail review page without its data fetching (pages/MailReview.jsx owns
@@ -71,15 +71,16 @@ export default function MailReviewView({
   workspaceName = '', tab = 'waiting', onTab, meta = {}, isAdmin = false, viewerEmail = '',
   waiting = { rows: null, error: null }, done = { rows: null, error: null }, log = { rows: null, error: null },
   dim = false, focusedId = null, openForm = null, detail = null, detailError = null, rowErrors = {},
-  sureRows = [], bulkBusy = false, onBulkAccept,
+  sureRows = [], bulkBusy = false, bulkOpen = false, onBulkToggle, onBulkAccept,
   onFocusRow, onAccept, onOpenForm, onPick, onCreate, onNoTicket, onDetails,
   doneErrors = {}, undoBusyId = null, onUndoDone,
-  logFilters = {}, onLogFilter, logStats = null, logHasMore = false, logLoadingMore = false, onLogMore,
+  logFilters = {}, onLogFilter, logStats = null, logHasMore = false, logLoadingMore = false, onLogMore, logOpenIds = [],
   showKeys = false, onToggleKeys, announce = '',
 }) {
   const mode = meta.mode || 'off';
   const current = tab === 'done' ? done : tab === 'log' ? log : waiting;
-  const counts = { waiting: meta.waiting ?? waiting.rows?.length, done: done.rows?.length };
+  // The header already says how many are waiting; the tab does not repeat it.
+  const counts = { done: done.rows?.length };
 
   return (
     <div data-testid="mail-review">
@@ -126,8 +127,9 @@ export default function MailReviewView({
               <button
                 type="button"
                 disabled={bulkBusy}
-                onClick={onBulkAccept}
-                title={`Adds to a ticket or makes a new one for the ${sureRows.length} the AI is sure about. Each lands in Done, with Undo.`}
+                onClick={onBulkToggle}
+                aria-expanded={bulkOpen}
+                aria-controls="mr-bulk-summary"
                 className="tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-primary hover:bg-muted disabled:opacity-50"
                 data-testid="mr-bulk"
               >
@@ -150,7 +152,7 @@ export default function MailReviewView({
       </div>
 
       {tab === 'waiting' && showKeys && (
-        <dl id="mr-keys" className="flex flex-wrap gap-x-5 gap-y-1 border-b border-border/60 px-3 py-2 text-xs text-muted-foreground sm:px-4" data-testid="mr-keys">
+        <dl id="mr-keys" className="hidden flex-wrap gap-x-5 gap-y-1 border-b border-border/60 px-3 py-2 text-xs text-muted-foreground sm:flex sm:px-4" data-testid="mr-keys">
           {SHORTCUTS.map(([k, what]) => (
             <div key={k} className="flex gap-1.5">
               <dt className="font-mono font-semibold text-foreground/85">{k}</dt>
@@ -158,6 +160,28 @@ export default function MailReviewView({
             </div>
           ))}
         </dl>
+      )}
+
+      {tab === 'waiting' && bulkOpen && sureRows.length > 0 && (
+        <section id="mr-bulk-summary" aria-label="What accepting all sure suggestions will do" data-mr-popover className="border-b border-border/60 px-3 py-3 sm:px-4" data-testid="mr-bulk-summary">
+          <p className="text-sm text-foreground">
+            This adds {sureRows.length === 1 ? 'this e-mail' : `these ${sureRows.length} e-mails`} to a ticket or makes a new one. Nothing is discarded.
+          </p>
+          <ul className="mt-1.5 space-y-0.5">
+            {sureRows.map((r) => (
+              <li key={r.heldId} className="text-sm text-foreground/85 [overflow-wrap:anywhere]">
+                <span className="font-medium text-foreground">{suggestionSentence(r.suggestion)}</span>
+                <span className="text-muted-foreground"> · {r.from?.name || r.from?.email || 'Unknown sender'}: {r.subject || '(no subject)'}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-2.5 flex items-center gap-1.5">
+            <button type="button" disabled={bulkBusy} onClick={onBulkAccept} className="tp-focus-ring inline-flex h-8 items-center rounded-lg bg-primary px-3.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50" data-testid="mr-bulk-confirm">
+              Accept these {sureRows.length}
+            </button>
+            <button type="button" onClick={onBulkToggle} className="tp-focus-ring h-8 rounded-lg px-2.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground">Cancel</button>
+          </div>
+        </section>
       )}
 
       <div
@@ -217,6 +241,7 @@ export default function MailReviewView({
               loadingMore={logLoadingMore}
               onLoadMore={onLogMore}
               isAdmin={isAdmin}
+              initialOpenIds={logOpenIds}
             />
           </div>
         )}
