@@ -281,7 +281,7 @@ describe('sendDailyDigests', () => {
     // fallback@example.com is the super admin list (admin_emails setting mock).
     expect(params).toMatchObject({ workspaceId: 5, to: ['admin@bgcengineering.ca', 'fallback@example.com'], label: 'mailbox-hold-digest' });
     expect(params.subject).toMatch(/^Ticket Pulse: 2 held e-mails waiting for review in /);
-    expect(params.html).toContain('https://ticketpulse.example/settings#ticket-mailboxes');
+    expect(params.html).toContain('https://ticketpulse.example/tickets/mail-review?ws=');
     expect(params.html).toContain('&lt;script&gt;'); // subjects are escaped
   });
 

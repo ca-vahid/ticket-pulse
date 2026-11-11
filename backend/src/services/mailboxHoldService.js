@@ -725,7 +725,8 @@ class MailboxHoldService {
         // became two paragraphs. Plain e-mail style, every colour explicit.
         const { groups, singles } = await this.listGroups(workspaceId);
         const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true, defaultTimezone: true } }).catch(() => null);
-        const link = appUrl ? `${String(appUrl).replace(/\/$/, '')}/settings#ticket-mailboxes` : 'Settings → Ticket Mailboxes → Unmatched replies';
+        // Straight to this workspace's Mail review page (11 Nov 2026; it used to point at Settings).
+        const link = appUrl ? `${String(appUrl).replace(/\/$/, '')}/tickets/mail-review?ws=${workspaceId}` : 'Tickets → Mail review';
         // The rows themselves, so a person's subjects can be listed under their name.
         const rows = groups.some((g) => g.senderKind !== 'automated') ? await this.list(workspaceId, { status: 'held', limit: 500 }) : [];
         const { subject, html } = buildHoldDigest({
@@ -759,16 +760,16 @@ function escapeHtml(value) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-/** "Fri 23 Oct, 08:52" in the workspace's time zone (the digest used to print the server's UTC). */
+/** "Fri 23 Oct, 8:52 AM" in the workspace's time zone, 12-hour like the app and every other e-mail. */
 export function formatWhen(value, timeZone = 'America/Vancouver') {
   if (!value) return '';
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '';
   try {
-    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
-      timeZone, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+      timeZone, weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true,
     }).formatToParts(d).map((p) => [p.type, p.value]));
-    return `${parts.weekday} ${parts.day} ${parts.month}, ${parts.hour}:${parts.minute}`;
+    return `${parts.weekday} ${parts.day} ${parts.month}, ${parts.hour}:${parts.minute} ${parts.dayPeriod}`;
   } catch {
     return d.toISOString().slice(0, 16).replace('T', ' ');
   }
@@ -876,7 +877,10 @@ export function buildHoldDigest({ workspaceName, count, groups = [], singles = [
   }
   const shown = inGroups + singles.length;
   if (count > shown) parts.push(`<p style="${P}${MUTED}">${count - shown} more are not listed here.</p>`);
-  parts.push(`<p style="${P}">Review them at ${linkIsUrl ? `<a href="${escapeHtml(link)}" style="color:#1d4ed8;">${escapeHtml(link)}</a>` : escapeHtml(link)}.</p>`);
+  // A button-style link (solid cell colour, never a gradient: Outlook drops those).
+  parts.push(linkIsUrl
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:6px 0 14px;"><tr><td bgcolor="#1d4ed8" style="background-color:#1d4ed8;border-radius:8px;"><a href="${escapeHtml(link)}" style="display:inline-block;padding:10px 18px;font-family:'Segoe UI',Arial,sans-serif;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;">Open Mail review</a></td></tr></table>`
+    : `<p style="${P}">Review them at ${escapeHtml(link)}.</p>`);
 
   // The subject says what is waiting, and for whom. Alerts are named only when there are some.
   const where = workspaceName ? ` in ${workspaceName}` : '';

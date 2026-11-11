@@ -144,7 +144,7 @@ describe('bulk decisions', () => {
     expect(ticketServiceMock.addPrivateNote).toHaveBeenCalledTimes(1);
     const note = ticketServiceMock.addPrivateNote.mock.calls[0][2].bodyText;
     expect(note).toContain('3 held emails from nas-one@x.io were added here from Unmatched replies by Ari Agent.');
-    expect(note).toContain('Fri 23 Oct, 08:53 and Fri 23 Oct, 09:52'); // Pacific, not the server's UTC
+    expect(note).toContain('Fri 23 Oct, 8:53 AM and Fri 23 Oct, 9:52 AM'); // Pacific, not the server's UTC
     expect(note).toContain('- 2 × Drive # on RS1 is not on the Products Compatibility List');
     expect(note).toContain('- 1 × Storage Pool 1 on NAS-ONE has crashed');
     expect(prismaMock.mailboxHeldMessage.updateMany).toHaveBeenCalledWith({
@@ -185,19 +185,19 @@ describe('the daily digest, grouped by sender', () => {
 
   test('one paragraph per automated sender, kinds as bullets with the failure marked, times in Pacific, explicit colours, no gradient', () => {
     const { subject, html } = buildHoldDigest({
-      workspaceName: 'IT', count: 64, groups: [group], singles: [single], link: 'https://tp.example/settings#ticket-mailboxes', linkIsUrl: true,
+      workspaceName: 'IT', count: 64, groups: [group], singles: [single], link: 'https://tp.example/tickets/mail-review?ws=1', linkIsUrl: true,
     });
     expect(subject).toBe('Ticket Pulse: 64 held e-mails waiting for review in IT (63 are alerts from NAS-ONE)');
     expect(html).toContain('<strong>IT</strong> has <strong>64</strong> held e-mails waiting for review.');
     expect(html).toContain('63 of them are alerts from one automated sender');
     expect(html).not.toMatch(/device/i);
-    expect(html).toContain('<strong>NAS-ONE</strong>: 63 alerts, 2 kinds, Fri 23 Oct, 08:52 to 10:08');
+    expect(html).toContain('<strong>NAS-ONE</strong>: 63 alerts, 2 kinds, Fri 23 Oct, 8:52 AM to 10:08 AM');
     expect(html).toContain('Needs a look:</span> 1 × Storage Pool 1 on NAS-ONE has crashed');
     expect(html).toContain('<strong>no ticket yet</strong>');
     expect(html).toContain('62 × Drive # on RS1 is not on the &lt;Products&gt; List');
     expect(html).toContain('ticket TP-10563 (Closed)');
     expect(html).toContain('Other held e-mails</strong> (1)');
-    expect(html).toContain('a reply to a conversation that has no ticket here · best guess TP-5 · Sat 24 Oct, 11:00');
+    expect(html).toContain('a reply to a conversation that has no ticket here · best guess TP-5 · Sat 24 Oct, 11:00 AM');
     expect(html).not.toMatch(/gradient/i);
     expect(html).not.toContain('unknown_reference');
     expect(html).toMatch(/color:#1f2937/);
@@ -226,8 +226,8 @@ describe('the daily digest, grouped by sender', () => {
   });
 
   test('time helpers speak Pacific', () => {
-    expect(formatWhen('2026-10-23T17:08:15Z')).toBe('Fri 23 Oct, 10:08');
-    expect(formatSpan('2026-10-23T15:52:49Z', '2026-10-24T17:08:15Z')).toBe('Fri 23 Oct, 08:52 to Sat 24 Oct, 10:08');
+    expect(formatWhen('2026-10-23T17:08:15Z')).toBe('Fri 23 Oct, 10:08 AM');
+    expect(formatSpan('2026-10-23T15:52:49Z', '2026-10-24T17:08:15Z')).toBe('Fri 23 Oct, 8:52 AM to Sat 24 Oct, 10:08 AM');
   });
 });
 
@@ -250,9 +250,9 @@ describe('the daily digest: people are listed as people', () => {
   const invoice = { id: 9, subject: 'Invoice from Acme Rentals_186076352', fromEmail: 'billing@rentals.example.net', fromName: 'Acme Rentals', reason: 'sender_burst', receivedAt: '2026-11-10T18:00:00Z', bestGuessTicket: null };
 
   test('people only: "Alex Rivera: 11 e-mails", their subjects, the reason in plain words, and a subject line with no alerts in it', () => {
-    const { subject, html } = buildHoldDigest({ workspaceName: 'Accounting', count: 12, groups: [person], singles: [invoice], rows, link: 'https://tp.example/settings#ticket-mailboxes', linkIsUrl: true });
+    const { subject, html } = buildHoldDigest({ workspaceName: 'Accounting', count: 12, groups: [person], singles: [invoice], rows, link: 'https://tp.example/tickets/mail-review?ws=1', linkIsUrl: true });
     expect(subject).toBe('Ticket Pulse: 12 held e-mails waiting for review in Accounting');
-    expect(html).toContain('<strong>Alex Rivera</strong>: 11 e-mails, Tue 10 Nov, 09:10 to 11:18');
+    expect(html).toContain('<strong>Alex Rivera</strong>: 11 e-mails, Tue 10 Nov, 9:10 AM to 11:18 AM');
     expect(html).toContain(ALEX + ' · Held because: a team member’s own e-mail, and it is not clear who it is for.');
     expect(html).toContain('RE: &lt;b&gt;Statement&lt;/b&gt; for October'); // escaped
     expect(html).toContain('RE: Reminder: 71 Days Outstanding Invoice - 4053801 - Northwind');
