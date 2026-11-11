@@ -648,8 +648,19 @@ class MailboxHoldService {
 
     const { default: mailboxIngestService } = await import('./mailboxIngestService.js');
     const email = rehydrateEmail(held);
-    // Mail review (11 Nov 2026): reopen === false adds the mail to a closed ticket without reopening it.
-    const entry = await mailboxIngestService.ingestReply(held.connection, ticket, email, 'held_reply_attach', reopen === false ? { keepClosed: true } : {});
+    // The author stays right (11 Nov 2026): held mail is mostly an agent's own (possible_follow_up,
+    // agent_reply_no_requester). Attached without the agent it was stored as a requester's reply
+    // from the agent's address, and "requester replied" reopened the ticket and told people a
+    // customer had answered. With the agent, the ingest records the agent's public reply, already
+    // delivered by Outlook, counted for first response, and fires no reply_received.
+    const agent = await Promise.resolve()
+      .then(async () => (await import('./agentIntakeService.js')).resolveAgentSender(held.workspaceId, email.from))
+      .catch(() => null);
+    // Mail review: reopen === false adds the mail to a closed ticket without reopening it.
+    const entry = await mailboxIngestService.ingestReply(held.connection, ticket, email, 'held_reply_attach', {
+      ...(agent ? { agent } : {}),
+      ...(reopen === false ? { keepClosed: true } : {}),
+    });
     const updated = await this._resolve(held.id, { status: 'attached', actor, ticketId: ticket.id });
     logger.info(`Held message #${held.id} attached to ${ticketDisplayRef(ticket)} by ${actorLabel(actor)}`);
     return { held: presentHeld(updated), entry, ticket: { id: ticket.id, displayRef: ticketDisplayRef(ticket) } };
