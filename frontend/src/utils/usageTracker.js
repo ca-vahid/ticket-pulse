@@ -23,6 +23,7 @@ import { APP_VERSION } from '../data/changelog';
 // section. Public token pages are deliberately absent (their URL is a secret).
 export const TRACKED_ROUTES = [
   { path: '/tickets/new', key: 'tickets.new', label: 'New ticket' },
+  { path: '/tickets/mail-review', key: 'tickets.mail-review', label: 'Mail review' },
   { path: '/tickets/:id', key: 'tickets.detail', label: 'Ticket' },
   { path: '/tickets', key: 'tickets.list', label: 'Tickets list' },
   { path: '/approvals/:tab', key: 'approvals', label: 'Approvals' },

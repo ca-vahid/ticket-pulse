@@ -5,6 +5,7 @@ import {
 import { ticketsAPI } from '../../services/api';
 import { useTicketTypes } from '../../hooks/useTicketTypes';
 import HeldRepliesPanel from '../tickets/HeldRepliesPanel';
+import MailTriageSettings from './MailTriageSettings';
 
 /** Phase RL (RL-4): what happens to inbound mail the matcher cannot thread. */
 export const NEW_TICKET_POLICY_OPTIONS = [
@@ -693,6 +694,8 @@ export default function MailboxConnectionsPanel() {
           Turn it off to hold such mail for review instead.
         </p>
       </div>
+
+      <MailTriageSettings />
 
       <div className="pt-2 border-t border-border/60" id="unmatched-replies">
         <HeldRepliesPanel onCountChange={setHeldCount} />
