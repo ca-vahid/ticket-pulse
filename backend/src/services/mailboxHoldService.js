@@ -434,8 +434,18 @@ class MailboxHoldService {
     const counts = senders.map((s) => [s, rows.filter((r) => r.fromEmail === s).length]);
     const busy = counts.filter(([, n]) => n >= GROUP_MIN_ROWS).map(([s]) => s);
     const tickets = busy.length ? await this._recentSenderTickets(workspaceId, busy, GROUP_TICKET_LOOKBACK_HOURS) : [];
-    const { groups, singles } = groupHeldRows(rows, { tickets });
+    const { groups, singles } = groupHeldRows(rows, { tickets, people: await this._knownPeople(busy) });
     return { groups, singles, total: rows.length, mode: await this.getBurstFoldMode(workspaceId) };
+  }
+
+  /** Which of these senders are people on a team (a technician in any workspace). Never throws. */
+  async _knownPeople(senders) {
+    const list = [...new Set((senders || []).map((s) => String(s || '').trim().toLowerCase()).filter(Boolean))].slice(0, 50);
+    if (!list.length) return [];
+    return Promise.resolve()
+      .then(() => prisma.technician.findMany({ where: { email: { in: list, mode: 'insensitive' } }, select: { email: true }, take: 200 }))
+      .then((rows) => (Array.isArray(rows) ? rows : []).map((r) => String(r.email || '').toLowerCase()).filter(Boolean))
+      .catch(() => []);
   }
 
   /** occurrence_count / last_occurrence_* on the ticket the alerts were counted on (the AlertOccurrenceStrip reads them). */
@@ -683,16 +693,19 @@ class MailboxHoldService {
           logger.warn(`Mailbox hold digest: workspace ${workspaceId} has ${count} held message(s) but no admin recipients`);
           continue;
         }
-        // Grouped per device (QA 10-26 #3): 103 flat lines from two NAS units
+        // Grouped per sender (QA 10-26 #3): 103 flat lines from two NAS units
         // became two paragraphs. Plain e-mail style, every colour explicit.
         const { groups, singles } = await this.listGroups(workspaceId);
         const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true, defaultTimezone: true } }).catch(() => null);
         const link = appUrl ? `${String(appUrl).replace(/\/$/, '')}/settings#ticket-mailboxes` : 'Settings → Ticket Mailboxes → Unmatched replies';
+        // The rows themselves, so a person's subjects can be listed under their name.
+        const rows = groups.some((g) => g.senderKind !== 'automated') ? await this.list(workspaceId, { status: 'held', limit: 500 }) : [];
         const { subject, html } = buildHoldDigest({
           workspaceName: workspace?.name || `Workspace ${workspaceId}`,
           count,
           groups,
           singles,
+          rows,
           link,
           linkIsUrl: Boolean(appUrl),
           timeZone: workspace?.defaultTimezone || 'America/Vancouver',
@@ -743,15 +756,16 @@ export function formatSpan(from, to, timeZone = 'America/Vancouver') {
   return dayA === dayB ? `${dayA}, ${timeA} to ${timeB}` : `${a} to ${b}`;
 }
 
-const REASON_WORDS = {
-  unknown_reference: 'answers mail Ticket Pulse never saw',
-  agent_reply_no_requester: 'agent mail, no requester',
-  ambiguous_sender: 'sender unclear',
-  policy_replies_only: 'mailbox takes replies only',
-  ambiguous_ticket: 'two tickets match',
-  sender_burst: 'burst from one sender',
-  ingest_error: 'could not be filed',
-  meeting_invite: 'meeting invite',
+// Why a mail is waiting, in plain words (the digest and the review list say the same thing).
+export const REASON_WORDS = {
+  unknown_reference: 'a reply to a conversation that has no ticket here',
+  agent_reply_no_requester: 'a team member’s own e-mail, and it is not clear who it is for',
+  ambiguous_sender: 'it is not clear who the request is from',
+  policy_replies_only: 'this mailbox only takes replies',
+  ambiguous_ticket: 'more than one ticket matches',
+  sender_burst: 'many look-alike e-mails arrived at once, so the extra ones wait',
+  ingest_error: 'it could not be filed',
+  meeting_invite: 'a meeting invite',
 };
 
 const FONT = "font-family:Calibri,'Segoe UI',Arial,sans-serif;";
@@ -760,24 +774,57 @@ const LI = `${FONT}font-size:14px;line-height:20px;color:#1f2937;margin:0 0 4px;
 const MUTED = 'color:#6b7280;';
 const RED = 'color:#b91c1c;font-weight:bold;';
 const KINDS_SHOWN = 6;
+const SUBJECTS_SHOWN = 6;
 const SINGLES_SHOWN = 15;
 
+const mails = (n) => `${n} ${n === 1 ? 'e-mail' : 'e-mails'}`;
+const reasonWords = (reason) => REASON_WORDS[reason] || String(reason || '').replace(/_/g, ' ');
+
+/** The reason most of a sender's held e-mails share. */
+function commonReason(rows) {
+  const tally = new Map();
+  for (const r of rows) tally.set(r.reason, (tally.get(r.reason) || 0) + 1);
+  return [...tally.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+}
+
 /**
- * The daily hold digest (pure, so a test can read it): a plain e-mail, no
- * card, no gradient, explicit colours, Outlook-safe. One paragraph per device
- * that sent an alert burst, its alert kinds as bullets (broken-sounding and
- * new kinds first, marked), then the other held emails one per line.
+ * The daily Held e-mail digest (pure, so a test can read it): a plain e-mail,
+ * no card, no gradient, explicit colours, Outlook-safe.
+ *
+ * 11 Nov 2026: a colleague with several held e-mails was announced as "alert
+ * bursts from 2 devices". People are now listed as people ("Alex Rivera: 11
+ * e-mails", their subjects, and why they wait in plain words). Only senders
+ * that really are automated (`senderKind: 'automated'`) get the alert-kind
+ * list, and the subject line says what is waiting.
+ * `rows` (optional): the held rows, so a person's subjects can be listed.
  */
-export function buildHoldDigest({ workspaceName, count, groups = [], singles = [], link, linkIsUrl = false, timeZone = 'America/Vancouver' }) {
+export function buildHoldDigest({ workspaceName, count, groups = [], singles = [], rows = [], link, linkIsUrl = false, timeZone = 'America/Vancouver' }) {
+  const people = groups.filter((g) => g.senderKind !== 'automated');
+  const automated = groups.filter((g) => g.senderKind === 'automated');
   const inGroups = groups.reduce((n, g) => n + g.count, 0);
-  const noun = count === 1 ? 'email' : 'emails';
+  const inAutomated = automated.reduce((n, g) => n + g.count, 0);
+  const byId = new Map(rows.map((r) => [r.id, r]));
   const parts = [];
-  parts.push(`<p style="${P}"><strong>${escapeHtml(workspaceName)}</strong> has <strong>${count}</strong> held ${noun} waiting for review.</p>`);
-  if (groups.length) {
-    parts.push(`<p style="${P}">${inGroups} of them are alert bursts from ${groups.length === 1 ? 'one device' : `${groups.length} devices`}: the device mailed more alerts at once than the mailbox opens tickets for, so the extra ones were held. They are grouped by device below. On the review page you can add a device's alerts to its ticket, or discard them, in one click.</p>`);
-    for (const g of groups) {
+  parts.push(`<p style="${P}"><strong>${escapeHtml(workspaceName)}</strong> has <strong>${count}</strong> held ${count === 1 ? 'e-mail' : 'e-mails'} waiting for review. Each one needs a decision: add it to a ticket, make a new ticket, or discard it.</p>`);
+
+  for (const g of people) {
+    const own = g.ids.map((id) => byId.get(id)).filter(Boolean);
+    const why = reasonWords(commonReason(own.length ? own : (g.reasons || []).map((reason) => ({ reason }))));
+    const name = g.fromName || g.device || g.sender;
+    parts.push(`<p style="${P}margin-bottom:4px;"><strong>${escapeHtml(name)}</strong>: ${mails(g.count)}, ${escapeHtml(formatSpan(g.firstAt, g.lastAt, timeZone))}<br><span style="${MUTED}">${escapeHtml(g.sender)} · Held because: ${escapeHtml(why)}.</span></p>`);
+    const items = own.slice(0, SUBJECTS_SHOWN).map((r) => {
+      const other = r.reason && reasonWords(r.reason) !== why ? ` · ${escapeHtml(reasonWords(r.reason))}` : '';
+      return `<li style="${LI}">${escapeHtml(r.subject || '(no subject)')} <span style="${MUTED}">· ${escapeHtml(formatWhen(r.receivedAt, timeZone))}${other}</span></li>`;
+    });
+    if (own.length > SUBJECTS_SHOWN) items.push(`<li style="${LI}${MUTED}">and ${own.length - SUBJECTS_SHOWN} more</li>`);
+    if (items.length) parts.push(`<ul style="margin:0 0 14px 20px;padding:0;">${items.join('')}</ul>`);
+  }
+
+  if (automated.length) {
+    parts.push(`<p style="${P}">${inAutomated} of them ${inAutomated === 1 ? 'is an alert' : 'are alerts'} from ${automated.length === 1 ? 'one automated sender' : `${automated.length} automated senders`}: more alerts arrived at once than the mailbox opens tickets for, so the extra ones were held. On the review page you can add a sender's alerts to its ticket, or discard them, in one click.</p>`);
+    for (const g of automated) {
       const kinds = g.kinds.length;
-      parts.push(`<p style="${P}margin-bottom:4px;"><strong>${escapeHtml(g.device)}</strong>: ${g.count} alerts, ${kinds} ${kinds === 1 ? 'kind' : 'kinds'}, ${escapeHtml(formatSpan(g.firstAt, g.lastAt, timeZone))}<br><span style="${MUTED}">${escapeHtml(g.sender)}</span></p>`);
+      parts.push(`<p style="${P}margin-bottom:4px;"><strong>${escapeHtml(g.device)}</strong>: ${g.count} ${g.count === 1 ? 'alert' : 'alerts'}, ${kinds} ${kinds === 1 ? 'kind' : 'kinds'}, ${escapeHtml(formatSpan(g.firstAt, g.lastAt, timeZone))}<br><span style="${MUTED}">${escapeHtml(g.sender)}</span></p>`);
       const items = g.kinds.slice(0, KINDS_SHOWN).map((k) => {
         const flag = k.attention ? `<span style="${RED}">Needs a look:</span> ` : '';
         const where = k.ticket ? `ticket ${escapeHtml(k.ticket.displayRef)} (${escapeHtml(k.ticket.status)})` : '<strong>no ticket yet</strong>';
@@ -786,14 +833,14 @@ export function buildHoldDigest({ workspaceName, count, groups = [], singles = [
       if (kinds > KINDS_SHOWN) items.push(`<li style="${LI}${MUTED}">and ${kinds - KINDS_SHOWN} more kinds</li>`);
       parts.push(`<ul style="margin:0 0 14px 20px;padding:0;">${items.join('')}</ul>`);
     }
-  } else {
-    parts.push(`<p style="${P}">These emails looked like replies to a conversation Ticket Pulse does not know, or came from an agent with no identifiable requester, so they were held instead of becoming new tickets. Each one needs a decision: attach to a ticket, create a ticket, or discard.</p>`);
   }
+
   if (singles.length) {
-    if (groups.length) parts.push(`<p style="${P}margin-bottom:4px;"><strong>Other held emails</strong> (${singles.length})</p>`);
+    if (groups.length) parts.push(`<p style="${P}margin-bottom:4px;"><strong>Other held e-mails</strong> (${singles.length})</p>`);
     const items = singles.slice(0, SINGLES_SHOWN).map((r) => {
       const guess = r.bestGuessTicket ? ` · best guess ${escapeHtml(r.bestGuessTicket.displayRef)}` : '';
-      return `<li style="${LI}"><strong>${escapeHtml(r.subject || '(no subject)')}</strong> <span style="${MUTED}">· ${escapeHtml(r.fromEmail || 'unknown sender')} · ${escapeHtml(REASON_WORDS[r.reason] || r.reason)}${guess} · ${escapeHtml(formatWhen(r.receivedAt, timeZone))}</span></li>`;
+      const who = r.fromName ? `${r.fromName} (${r.fromEmail || 'unknown sender'})` : (r.fromEmail || 'unknown sender');
+      return `<li style="${LI}"><strong>${escapeHtml(r.subject || '(no subject)')}</strong> <span style="${MUTED}">· ${escapeHtml(who)} · ${escapeHtml(reasonWords(r.reason))}${guess} · ${escapeHtml(formatWhen(r.receivedAt, timeZone))}</span></li>`;
     });
     if (singles.length > SINGLES_SHOWN) items.push(`<li style="${LI}${MUTED}">and ${singles.length - SINGLES_SHOWN} more</li>`);
     parts.push(`<ul style="margin:0 0 14px 20px;padding:0;">${items.join('')}</ul>`);
@@ -801,9 +848,11 @@ export function buildHoldDigest({ workspaceName, count, groups = [], singles = [
   const shown = inGroups + singles.length;
   if (count > shown) parts.push(`<p style="${P}${MUTED}">${count - shown} more are not listed here.</p>`);
   parts.push(`<p style="${P}">Review them at ${linkIsUrl ? `<a href="${escapeHtml(link)}" style="color:#1d4ed8;">${escapeHtml(link)}</a>` : escapeHtml(link)}.</p>`);
-  const subject = groups.length
-    ? `Ticket Pulse: ${count} held ${noun} waiting for review (alert bursts from ${groups.length === 1 ? groups[0].device : `${groups.length} devices`})`
-    : `Ticket Pulse: ${count} unmatched ${count === 1 ? 'reply' : 'replies'} waiting for review`;
+
+  // The subject says what is waiting, and for whom. Alerts are named only when there are some.
+  const where = workspaceName ? ` in ${workspaceName}` : '';
+  const alerts = inAutomated ? ` (${inAutomated} ${inAutomated === 1 ? 'is an alert' : 'are alerts'} from ${automated.length === 1 ? automated[0].device : `${automated.length} automated senders`})` : '';
+  const subject = `Ticket Pulse: ${count} held ${count === 1 ? 'e-mail' : 'e-mails'} waiting for review${where}${alerts}`;
   return { subject, html: parts.join('\n') };
 }
 
