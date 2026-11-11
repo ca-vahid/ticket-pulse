@@ -11,6 +11,8 @@ import { stripQuotedHtml, stripQuotedText } from '../utils/replyQuoteStripper.js
 import { looksAutomated } from './ticketGrouping/rules.js';
 import { requiresResolutionReason } from './resolutionReasonService.js';
 import { pacificMonthStart } from './teamsAssistantSettings.js';
+import { getMailboxAliases } from './mailboxAliasService.js';
+import { followUpSubjectKey } from './followUpCandidateService.js';
 
 /**
  * Mail triage: an AI reviewer for held e-mail (plans/MAIL_TRIAGE_PLAN.md, Part 2).
@@ -174,18 +176,6 @@ export function isMachineMail(email, connectionAddress = null) {
   return looksAutomated(email?.from);
 }
 
-/** The alias setting, read leniently: a JSON list (of addresses or { address }), or addresses separated by commas or spaces. */
-export function parseAliases(raw) {
-  if (!raw) return [];
-  let list = raw;
-  if (typeof raw === 'string') {
-    try { list = JSON.parse(raw); } catch { list = raw.split(/[\s,;]+/); }
-  }
-  if (list && !Array.isArray(list) && Array.isArray(list.aliases)) list = list.aliases;
-  if (!Array.isArray(list)) return [];
-  return [...new Set(list.map((a) => lc(typeof a === 'string' ? a : a?.address || a?.email)).filter((a) => EMAIL_RE.test(a)))];
-}
-
 export function candidateKey(ids) {
   const sorted = [...new Set((ids || []).map(Number).filter(Boolean))].sort((a, b) => a - b);
   return crypto.createHash('sha1').update(sorted.join(',')).digest('hex');
@@ -345,7 +335,6 @@ class MailTriageService {
   async _similarity() { return (await import('./ticketSimilaritySearchService.js')).default; }
   async _grouping() { return (await import('./ticketGrouping/groupingService.js')).default; }
   async _tickets() { return (await import('./ticketService.js')).default; }
-  async _reopener() { return (await import('./requesterReplyReopenService.js')).default; }
   async _attachments() { return (await import('./attachmentService.js')).default; }
   async _mirror() { return (await import('./mirrorService.js')).default; }
   async _noiseRules() { return (await import('./noiseRuleService.js')).default; }
@@ -462,9 +451,7 @@ class MailTriageService {
     // Also-known-as addresses (app setting `mailbox_aliases_<connectionId>`) count as the mailbox itself.
     const aliases = [];
     for (const box of boxes || []) {
-      if (!box?.id) continue;
-      const raw = await Promise.resolve().then(() => settingsRepository.get(`mailbox_aliases_${box.id}`)).catch(() => null);
-      aliases.push(...parseAliases(raw));
+      if (box?.id) aliases.push(...await getMailboxAliases(box.id));
     }
     return {
       mailboxes: new Set([...(boxes || []).map((b) => lc(b.address)), ...aliases].filter(Boolean)),
@@ -527,10 +514,14 @@ class MailTriageService {
     if (Number(held.bestGuessTicketId) > 0) add(Number(held.bestGuessTicketId), 'best_guess', 'the best guess when the e-mail was held', 20);
 
     // 2 + 3. The same normalised subject, and shared long reference numbers (one indexed full-text query each).
-    const normalized = normalizeSubjectForMatch(email.subject);
+    // The subject key is the follow-up finder's (followUpCandidateService): normalised, with the
+    // "85 Days" count masked, so a reminder at 85 days finds the ticket of the one at 70.
+    const subjectKey = (subject) => followUpSubjectKey(normalizeSubjectForMatch(subject));
+    const normalized = subjectKey(email.subject);
+    const searchWords = normalized.replace(/# days/g, ' ').replace(/\s+/g, ' ').trim();
     const numbers = referenceNumbers(email.subject, text);
     const [subjectIds, numberIds] = await Promise.all([
-      normalized.length >= 8 ? this._fts(workspaceId, normalized, 'all') : [],
+      searchWords.length >= 8 ? this._fts(workspaceId, searchWords, 'all') : [],
       numbers.length ? this._fts(workspaceId, numbers.map((n) => `"${n}"`).join(' or '), 'any') : [],
     ]);
 
@@ -570,7 +561,7 @@ class MailTriageService {
 
     for (const id of subjectIds) {
       const t = tickets.get(id);
-      if (t && normalizeSubjectForMatch(t.subject) === normalized) add(id, 'subject', 'the same subject', 50, { strong: true });
+      if (t && subjectKey(t.subject) === normalized) add(id, 'subject', 'the same subject', 50, { strong: true });
     }
     // A number on many tickets is an account or customer number, not one matter: it is no proof of anything.
     const carriers = new Map(numbers.map((n) => [n, []]));
@@ -869,8 +860,11 @@ class MailTriageService {
    *
    * Reopen is explicit for a closed or resolved ticket: `reopen: false` adds the
    * mail without changing the status and without the "requester replied" event
-   * (so no reopen workflow runs); `reopen: true` goes through the ordinary reply
-   * path and, when the ticket is still closed after it, is reopened here.
+   * (so no reopen workflow runs); `reopen: true` adds it and, when the ticket is
+   * still closed afterwards, reopens it with a status change in the decider's
+   * name. An agent's own mail is stored as the agent's reply by the hold queue
+   * and never fires "requester replied", so for it the status change is the
+   * only thing that reopens.
    */
   async _apply(held, { action, ticketId = null, reopen = null, requesterEmail = null }, actor) {
     const workspaceId = held.workspaceId;
@@ -882,9 +876,12 @@ class MailTriageService {
       const result = await mailboxHoldService.attach(held.id, before.id, actor, { workspaceId, reopen: explicit });
       let reopened = false;
       if (closedBefore && explicit === true) {
+        // A requester's mail may already have reopened it (the workspace's own rule). An agent's own
+        // mail never does: it is an agent reply, and fires no "requester replied". Either way, when
+        // the ticket is still closed, whoever decided reopens it: a plain status change in their name.
         let after = await soft(() => prisma.ticket.findFirst({ where: { id: before.id }, select: { status: true } }));
         if (after && after.status === before.status) {
-          await soft(async () => (await this._reopener()).reopen(before));
+          await this._reopen(before, actor);
           after = await soft(() => prisma.ticket.findFirst({ where: { id: before.id }, select: { status: true } }));
         }
         reopened = Boolean(after && after.status !== before.status);
@@ -905,6 +902,19 @@ class MailTriageService {
       return { ticketId: null, undo: { kind: 'discard', at: new Date().toISOString() } };
     }
     throw new ValidationError('Choose what to do with this e-mail: add it to a ticket, make a new ticket, or no ticket needed');
+  }
+
+  /** Status back to Open, as the person who decided (or "Mail triage"). Origin-aware. Never throws: the mail is already on the ticket. */
+  async _reopen(ticket, actor) {
+    try {
+      const tickets = await this._tickets();
+      if (ticket.origin === TICKET_ORIGIN.TICKETPULSE) await tickets.changeStatus(ticket.id, ticket.workspaceId, 'Open', actor);
+      else await tickets.updateFsTicket(ticket.id, ticket.workspaceId, { status: 'Open' }, actor);
+      return true;
+    } catch (err) {
+      logger.warn(`Mail triage: ticket ${ticket.id} was not reopened after the e-mail was added (${err.message})`);
+      return false;
+    }
   }
 
   async _heldRow(workspaceId, heldId) {
@@ -1108,13 +1118,17 @@ class MailTriageService {
   // ---- reading ---------------------------------------------------------------
 
   /** What accepting would set off, in plain words, from what the code is certain of. */
-  effectsFor(suggestion, { ticket = null, statusBase = null, ws = {}, senderEmail = null, unattended = new Set() } = {}) {
+  effectsFor(suggestion, { ticket = null, statusBase = null, ws = {}, senderEmail = null, senderIsAgent = false, unattended = new Set() } = {}) {
     const effects = [];
     if (!suggestion) return effects;
     if (suggestion.action === 'attach' && ticket) {
-      if (suggestion.reopen === true && TERMINAL_BASES.includes(statusBase)) effects.push('reopens it');
+      const closed = TERMINAL_BASES.includes(statusBase);
+      if (suggestion.reopen === true && closed) effects.push('reopens it');
+      // An agent's own mail is added as that agent's reply: nobody is told "the requester replied".
+      // (An agent who is this ticket's requester writes as the requester.)
+      const asAgent = senderIsAgent === true && lc(ticket.requester?.email) !== lc(senderEmail);
       const tech = ticket.assignedTech;
-      if (ws.replyCopy === true && tech?.email && tech.isActive !== false && lc(tech.email) !== lc(senderEmail)) effects.push(`notifies ${tech.name || tech.email}`);
+      if (!asAgent && ws.replyCopy === true && tech?.email && tech.isActive !== false && lc(tech.email) !== lc(senderEmail)) effects.push(`notifies ${tech.name || tech.email}`);
     }
     if (suggestion.action === 'create') {
       const requester = lc(suggestion.requesterEmail || senderEmail);
@@ -1140,7 +1154,7 @@ class MailTriageService {
     const acknowledges = (workflows || []).some((w) => {
       const nodes = Array.isArray(w.publishedDefinition?.nodes) ? w.publishedDefinition.nodes : [];
       if (w.routingRule || !nodes.length) return false;
-      if (nodes.some((n) => !['trigger', 'recipient_resolver', 'template', 'email_template', 'send_email'].includes(String(n?.type)))) return false;
+      if (nodes.some((n) => !['trigger', 'recipient_resolver', 'template_render', 'send_email'].includes(String(n?.type)))) return false;
       return nodes.some((n) => n?.type === 'send_email')
         && nodes.some((n) => n?.type === 'recipient_resolver' && Array.isArray(n.data?.to) && n.data.to.includes('requester'));
     });
@@ -1167,6 +1181,10 @@ class MailTriageService {
     const createFor = [...new Set(rows.filter((r) => suggestions.get(r.id)?.action === 'create').map((r) => lc(suggestions.get(r.id).requesterEmail || r.fromEmail)).filter(Boolean))];
     const unattendedRows = createFor.length ? await soft(() => prisma.requester.findMany({ where: { email: { in: createFor, mode: 'insensitive' }, unattended: true }, select: { email: true } }), []) : [];
     const unattended = new Set((unattendedRows || []).map((r) => lc(r.email)));
+    // Whose mail is an agent's own (the same test the ingest uses: an active technician of this workspace).
+    const attachFrom = [...new Set(rows.filter((r) => suggestions.get(r.id)?.action === 'attach').map((r) => lc(r.fromEmail)).filter(Boolean))];
+    const agentRows = attachFrom.length ? await soft(() => prisma.technician.findMany({ where: { workspaceId: ws, isActive: true, email: { in: attachFrom, mode: 'insensitive' } }, select: { email: true } }), []) : [];
+    const agentSenders = new Set((agentRows || []).map((a) => lc(a.email)));
     // Who decided, as a name: the hold queue stores the person's e-mail.
     const deciderEmails = [...new Set(rows.map((r) => lc(r.resolvedBy)).filter((e) => EMAIL_RE.test(e)))];
     const people = deciderEmails.length ? await soft(() => prisma.technician.findMany({ where: { email: { in: deciderEmails, mode: 'insensitive' } }, select: { email: true, name: true }, take: 200 }), []) : [];
@@ -1205,7 +1223,7 @@ class MailTriageService {
           confidence: s.confidence,
           reason: s.reason || null,
           evidence: Array.isArray(s.evidence) ? s.evidence : [],
-          effects: this.effectsFor(s, { ticket: sTicket, statusBase: sBase, ws: wsEffects, senderEmail: r.fromEmail, unattended }),
+          effects: this.effectsFor(s, { ticket: sTicket, statusBase: sBase, ws: wsEffects, senderEmail: r.fromEmail, senderIsAgent: agentSenders.has(lc(r.fromEmail)), unattended }),
           needsPerson: Array.isArray(s.guards?.noAuto) ? s.guards.noAuto : [],
           mode: s.mode === 'on' ? 'on' : 'shadow',
           judgedAt: s.createdAt,

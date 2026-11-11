@@ -157,10 +157,13 @@ jest.unstable_mockModule('../src/routes/sse.routes.js', () => ({ default: {}, ss
 
 const {
   default: singleton, MailTriageService, guardDecision, referenceNumbers, newText, isMachineMail, candidateKey, normalizeSettings,
-  settingsKey, OPERATION, SYSTEM_PROMPT, ANSWER_SCHEMA, MAX_CANDIDATES, TRIAGE_ACTOR, holdReasonLabel, parseAliases,
+  settingsKey, OPERATION, SYSTEM_PROMPT, ANSWER_SCHEMA, MAX_CANDIDATES, TRIAGE_ACTOR, holdReasonLabel,
 } = await import('../src/services/mailTriageService.js');
 const { AI_OPERATIONS, getDefaultProviderSetting, supportsOperation } = await import('../src/utils/aiProviders.js');
 const { invalidateRequesterReplyCopyCache } = await import('../src/services/requesterReplyCopyService.js');
+const { invalidateAliasCache } = await import('../src/services/mailboxAliasService.js');
+const { findFollowUpCandidates } = await import('../src/services/followUpCandidateService.js');
+const { normalizeSubjectForMatch } = await import('../src/services/mailboxIngestService.js');
 
 // ------------------------------------------------------------------- fixtures
 
@@ -189,7 +192,7 @@ const answer = (over = {}) => ({
   action: 'create', ticketId: null, reopen: false, requesterEmail: null, relatedTicketIds: [], confidence: 'sure', reason: 'A plain reason.', evidence: ['same invoice number'], candidateNotes: [], ...over,
 });
 
-let svc; let gateway; let similarity; let tickets; let reopener; let attachments; let mirror; let noiseRules; let family;
+let svc; let gateway; let similarity; let tickets; let attachments; let mirror; let noiseRules; let family;
 function reply(parsed, usage = { inputTokens: 2000, outputTokens: 150 }) {
   gateway.sendJson.mockResolvedValue({ parsed, usage, provider: 'anthropic', model: 'claude-haiku-5-5' });
 }
@@ -199,13 +202,18 @@ beforeEach(() => {
   jest.clearAllMocks();
   resetDb();
   invalidateRequesterReplyCopyCache();
+  invalidateAliasCache();
   nextId = 100;
   svc = new MailTriageService();
   gateway = { sendJson: jest.fn() };
   similarity = { search: jest.fn(async () => ({ results: { mail: [] } })) };
   family = new Set();
-  tickets = { changeStatus: jest.fn(async (id, _ws, status) => { db.ticket.find((t) => t.id === id).status = status; }), deleteTicket: jest.fn(async (id) => { db.ticket.find((t) => t.id === id).status = 'Deleted'; }) };
-  reopener = { reopen: jest.fn(async (t) => { db.ticket.find((x) => x.id === t.id).status = 'Open'; return { reopened: true }; }) };
+  const setStatus = (id, status) => { db.ticket.find((t) => t.id === id).status = status; };
+  tickets = {
+    changeStatus: jest.fn(async (id, _ws, status) => setStatus(id, status)),
+    updateFsTicket: jest.fn(async (id, _ws, input) => setStatus(id, input.status)),
+    deleteTicket: jest.fn(async (id) => setStatus(id, 'Deleted')),
+  };
   attachments = { removeForThreadEntry: jest.fn(async () => 0) };
   mirror = { enqueueThreadEntryDelete: jest.fn(async () => {}) };
   noiseRules = { _getRules: jest.fn(async () => []) };
@@ -213,7 +221,6 @@ beforeEach(() => {
   svc._similarity = async () => similarity;
   svc._grouping = async () => ({ _onboardingIds: async (list) => new Set(list.filter((t) => family.has(t.id)).map((t) => t.id)) });
   svc._tickets = async () => tickets;
-  svc._reopener = async () => reopener;
   svc._attachments = async () => attachments;
   svc._mirror = async () => mirror;
   svc._noiseRules = async () => noiseRules;
@@ -326,7 +333,8 @@ describe('finding candidates without a model', () => {
     const res = await svc.findCandidates(held({ subject: 'RE: Reminder: 85 Days Outstanding Invoice - 4053377 - Northwind Traders', fromEmail: 'nobody@elsewhere.example' }));
     expect(res.candidates.map((c) => c.ticket.id)).toEqual([inSubject.id, inText.id]);
     expect(res.candidates[0]).toMatchObject({ hard: true, strong: true });
-    expect(res.candidates[0].why[0]).toBe('the same reference number 4053377 in the subject');
+    // The day count is masked, so the 85-day reminder is also "the same subject" as the 70-day one.
+    expect(res.candidates[0].why).toEqual(['the same subject', 'the same reference number 4053377 in the subject']);
     expect(res.candidates[1].why[0]).toMatch(/4053377 in the text of the ticket/);
   });
 
@@ -403,22 +411,45 @@ describe('finding candidates without a model', () => {
       candidates: [{ ticketId: followed.id, why: 'same client and the same lease' }, { ticketId: both.id, why: ['same invoice'] }, { ticketId: gone.id, why: 'x' }, { ticketId: secure.id, why: 'x' }, { ticketId: 999999, why: 'x' }, 'someone@example.org'],
     });
     const res = await svc.findCandidates(h);
-    expect(res.candidates.map((c) => [c.ticket.id, c.sources])).toEqual([[both.id, ['held', 'reference']], [followed.id, ['held']], [guess.id, ['best_guess']]]);
-    expect(res.candidates[0].why).toEqual(['same invoice', 'the same reference number 4053377 in the subject']);
+    expect(res.candidates.map((c) => [c.ticket.id, c.sources])).toEqual([[both.id, ['held', 'subject', 'reference']], [followed.id, ['held']], [guess.id, ['best_guess']]]);
+    expect(res.candidates[0].why).toEqual(['same invoice', 'the same subject', 'the same reference number 4053377 in the subject']);
     expect(res.candidates[1]).toMatchObject({ why: ['same client and the same lease'], strong: true, hard: false });
     expect(res.candidates[2]).toMatchObject({ why: ['the best guess when the e-mail was held'], strong: false, hard: false });
     expect(holdReasonLabel('possible_follow_up')).toBe('It looks like a follow-up to an existing ticket');
   });
 
+  test('the subject is compared the way the follow-up finder does: the "N Days" count is masked', async () => {
+    const t = ticket({ subject: 'Reminder: 70 Days Outstanding Balance - Northwind Traders', status: 'Closed', closedAt: ago(15), requester: { name: 'Q', email: 'q@q.example' } });
+    ticket({ subject: 'Reminder: 70 Days Outstanding Balance - Contoso Mining', requester: { name: 'Q', email: 'q@q.example' } });
+    const res = await svc.findCandidates(held({ subject: 'RE: Reminder: 85 Days Outstanding Balance - Northwind Traders', fromEmail: 'nobody@elsewhere.example' }));
+    expect(res.candidates.map((c) => [c.ticket.id, c.why])).toEqual([[t.id, ['the same subject']]]);
+  });
+
+  test('a real possible_follow_up row: what followUpCandidateService stores is what the finder merges, and both find the same tickets', async () => {
+    const closed = ticket({ subject: 'Reminder: 70 Days Outstanding Invoice - 4053377 - Northwind Traders', status: 'Closed', closedAt: ago(15), requester: { name: 'Q', email: 'q@q.example' } });
+    const other = ticket({ subject: 'Reminder: 55 Days Outstanding Invoice - 4053377 - Northwind Traders', status: 'Closed', closedAt: ago(30), createdAt: ago(45), requester: { name: 'Q', email: 'q@q.example' } });
+    ticket({ subject: 'Reminder: 70 Days Outstanding Invoice - 4060012 - Northwind Traders', requester: { name: 'Q', email: 'q@q.example' } });
+    const subject = 'RE: Reminder: 85 Days Outstanding Invoice - 4053377 - Northwind Traders';
+    const found = await findFollowUpCandidates(WS, { subject, normalize: normalizeSubjectForMatch });
+    expect(found.candidates).toEqual([
+      { ticketId: closed.id, why: 'same subject; same reference number 4053377' },
+      { ticketId: other.id, why: 'same subject; same reference number 4053377' },
+    ]);
+    const h = held({ reason: 'possible_follow_up', subject, fromEmail: 'nobody@elsewhere.example', candidates: found.candidates, bestGuessTicketId: found.bestGuessTicketId });
+    const res = await svc.findCandidates(h);
+    // The same two tickets, each once, with lane A's reason first and this finder's own beside it.
+    expect(res.candidates.map((c) => c.ticket.id)).toEqual([closed.id, other.id]);
+    expect(res.candidates[0].why).toEqual(['same subject; same reference number 4053377', 'the best guess when the e-mail was held', 'the same subject', 'the same reference number 4053377 in the subject']);
+    expect(res.candidates[0]).toMatchObject({ hard: true, strong: true, sources: ['held', 'best_guess', 'subject', 'reference'] });
+  });
+
   test('an alias of the mailbox counts as the mailbox: not one of the people, never the requester', async () => {
-    settings.set('mailbox_aliases_1', JSON.stringify(['AccountsReceivable@example.org']));
+    settings.set('mailbox_aliases_1', 'AccountsReceivable@example.org, second.alias@example.org');
     ticket({ subject: 'Filed under the alias', requester: { name: 'AR', email: 'accountsreceivable@example.org' } });
     const res = await svc.findCandidates(held({ subject: 'Different words entirely', fromEmail: 'nobody@elsewhere.example', ccEmails: ['accountsreceivable@example.org'] }));
     expect(res.candidates).toEqual([]);
-    expect([...res.mailboxes].sort()).toEqual(['accountsreceivable@example.org', 'artickets@example.org']);
-    expect(parseAliases('a@example.org, b@example.org')).toEqual(['a@example.org', 'b@example.org']);
-    expect(parseAliases('[{"address":"A@example.org"}]')).toEqual(['a@example.org']);
-    expect(parseAliases(null)).toEqual([]);
+    // Read through mailboxAliasService (the setting lane A's settings card writes).
+    expect([...res.mailboxes].sort()).toEqual(['accountsreceivable@example.org', 'artickets@example.org', 'second.alias@example.org']);
     const d = guardDecision(answer({ action: 'create', requesterEmail: 'accountsreceivable@example.org' }), [], { mailboxes: res.mailboxes });
     expect(d.requesterEmail).toBeNull();
     expect(d.guards).toContain('The AI named the mailbox itself as the requester; that was dropped.');
@@ -667,15 +698,42 @@ describe('judging a held mail', () => {
     expect(holdMock.attach).not.toHaveBeenCalled();
   });
 
-  test('On, a closed ticket, reopen yes: added through the ordinary reply path and reopened here when it is still closed', async () => {
+  test('On, a closed ticket, reopen yes: added, and reopened by a status change in the name of "Mail triage" when it is still closed', async () => {
     setMode('on');
     const t = ticket({ subject: invoiceSubject, status: 'Closed', closedAt: ago(15) });
     reply(answer({ action: 'attach', ticketId: t.id, reopen: true }));
     const row = await svc.judge(followUp().id);
     expect(holdMock.attach.mock.calls[0][3]).toEqual({ workspaceId: WS, reopen: true });
-    expect(reopener.reopen).toHaveBeenCalledTimes(1);
+    // FreshService-born: the origin-aware write. Ticket Pulse-born: the ordinary status change.
+    expect(tickets.updateFsTicket).toHaveBeenCalledWith(t.id, WS, { status: 'Open' }, TRIAGE_ACTOR);
+    expect(tickets.changeStatus).not.toHaveBeenCalled();
     expect(t.status).toBe('Open');
     expect(row.undo).toMatchObject({ previousStatus: 'Closed', reopened: true });
+
+    const native = ticket({ subject: 'Reminder: 70 Days Outstanding Invoice - 4099555 - Fabrikam', status: 'Resolved', resolvedAt: ago(2), origin: 'ticketpulse', nativeNumber: 77 });
+    reply(answer({ action: 'attach', ticketId: native.id, reopen: true }));
+    await svc.judge(held({ subject: 'RE: Reminder: 85 Days Outstanding Invoice - 4099555 - Fabrikam' }).id);
+    expect(tickets.changeStatus).toHaveBeenCalledWith(native.id, WS, 'Open', TRIAGE_ACTOR);
+    expect(native.status).toBe('Open');
+  });
+
+  test('a person accepting "reopen": the status change is in that person\u2019s name; a failed reopen leaves the mail on the ticket and says so in the undo record', async () => {
+    setMode('shadow');
+    const t = ticket({ subject: invoiceSubject, status: 'Closed', closedAt: ago(15), origin: 'ticketpulse', nativeNumber: 78 });
+    const h = followUp();
+    reply(answer({ action: 'attach', ticketId: t.id, reopen: true }));
+    await svc.judge(h.id);
+    await svc.resolve(WS, h.id, { action: 'attach', ticketId: t.id, reopen: true }, AGENT);
+    expect(tickets.changeStatus).toHaveBeenCalledWith(t.id, WS, 'Open', AGENT);
+    expect(t.status).toBe('Open');
+
+    const stuck = ticket({ subject: 'Reminder: 70 Days Outstanding Invoice - 4099556 - Fabrikam', status: 'Closed', closedAt: ago(2), origin: 'ticketpulse', nativeNumber: 79 });
+    tickets.changeStatus.mockRejectedValueOnce(new Error('A resolution reason is required'));
+    const h2 = held({ subject: 'RE: Reminder: 85 Days Outstanding Invoice - 4099556 - Fabrikam' });
+    const item = await svc.resolve(WS, h2.id, { action: 'attach', ticketId: stuck.id, reopen: true }, AGENT);
+    expect(item.resolution.status).toBe('attached');
+    expect(stuck.status).toBe('Closed');
+    expect(db.mailTriageDecision.find((d) => d.heldMessageId === h2.id).undo).toMatchObject({ reopened: false, previousStatus: 'Closed' });
   });
 
   test('On, a closed ticket, reopen yes: a workspace whose own rule already reopened it is not reopened twice', async () => {
@@ -685,7 +743,8 @@ describe('judging a held mail', () => {
     holdMock.attach.mockImplementation(async (...args) => { const out = await base(...args); t.status = 'Open'; return out; });
     reply(answer({ action: 'attach', ticketId: t.id, reopen: true }));
     const row = await svc.judge(followUp().id);
-    expect(reopener.reopen).not.toHaveBeenCalled();
+    expect(tickets.updateFsTicket).not.toHaveBeenCalled();
+    expect(tickets.changeStatus).not.toHaveBeenCalled();
     expect(row.undo).toMatchObject({ previousStatus: 'Resolved', reopened: true });
   });
 
@@ -695,7 +754,8 @@ describe('judging a held mail', () => {
     reply(answer({ action: 'attach', ticketId: t.id, reopen: false }));
     const row = await svc.judge(followUp().id);
     expect(holdMock.attach.mock.calls[0][3]).toEqual({ workspaceId: WS, reopen: false });
-    expect(reopener.reopen).not.toHaveBeenCalled();
+    expect(tickets.updateFsTicket).not.toHaveBeenCalled();
+    expect(tickets.changeStatus).not.toHaveBeenCalled();
     expect(t.status).toBe('Closed');
     expect(row.undo.reopened).toBe(false);
   });
@@ -704,7 +764,7 @@ describe('judging a held mail', () => {
     const hold = readFileSync(new URL('../src/services/mailboxHoldService.js', import.meta.url), 'utf8');
     const ingest = readFileSync(new URL('../src/services/mailboxIngestService.js', import.meta.url), 'utf8');
     expect(hold).toMatch(/async attach\(id, ticketId, actor, \{ workspaceId = null, reopen = null \} = \{\}\)/);
-    expect(hold).toMatch(/'held_reply_attach', reopen === false \? \{ keepClosed: true \} : \{\}\)/);
+    expect(hold).toMatch(/'held_reply_attach', \{\s*\.\.\.\(agent \? \{ agent \} : \{\}\),\s*\.\.\.\(reopen === false \? \{ keepClosed: true \} : \{\}\),\s*\}\)/);
     expect(ingest).toMatch(/const keepClosed = \(workflowRef \|\| addQuietly === true\) && await this\._isClosedOrResolved\(ticket\);/);
     expect(ingest).toMatch(/if \(requesterSide\) \{\s*if \(keepClosed\) \{[\s\S]{0,300}\} else \{[\s\S]{0,300}emitTicketEvent\('ticket\.reply_received'/);
   });
@@ -959,7 +1019,7 @@ describe('a person decides', () => {
 
 const ACK_WORKFLOW = (over = {}) => ({
   id: 1, workspaceId: WS, triggerType: 'ticket.created', isEnabled: true, archivedAt: null, mockModeEnabled: false, routingRule: null,
-  publishedDefinition: { nodes: [{ id: 'trigger', type: 'trigger' }, { id: 'recipients', type: 'recipient_resolver', data: { to: ['requester'] } }, { id: 'template', type: 'template' }, { id: 'send', type: 'send_email' }] },
+  publishedDefinition: { nodes: [{ id: 'trigger', type: 'trigger' }, { id: 'recipients', type: 'recipient_resolver', data: { to: ['requester'] } }, { id: 'template', type: 'template_render' }, { id: 'send', type: 'send_email' }] },
   ...over,
 });
 
@@ -1076,6 +1136,16 @@ describe('what the page reads', () => {
     const on = { replyCopy: true, acknowledges: true };
     expect(svc.effectsFor({ action: 'attach', reopen: true }, { ticket: closed, statusBase: 'Closed', ws: on, senderEmail: 'robin.vale@client.example' })).toEqual(['reopens it', 'notifies Alex Rivera']);
     expect(svc.effectsFor({ action: 'attach', reopen: true }, { ticket: { assignedTech: null }, statusBase: 'Resolved', ws: on })).toEqual(['reopens it']);
+    // An agent's own mail is added as that agent's reply: it can reopen (the explicit status change), but nobody is told "the requester replied".
+    const theirs = { ...closed, requester: { email: 'robin.vale@client.example' } };
+    expect(svc.effectsFor({ action: 'attach', reopen: true }, { ticket: theirs, statusBase: 'Closed', ws: on, senderEmail: 'pat.agent@example.org', senderIsAgent: true })).toEqual(['reopens it']);
+    expect(svc.effectsFor({ action: 'attach', reopen: false }, { ticket: theirs, statusBase: 'Closed', ws: on, senderEmail: 'pat.agent@example.org', senderIsAgent: true })).toEqual([]);
+    expect(svc.effectsFor({ action: 'attach', reopen: false }, { ticket: theirs, statusBase: 'Open', ws: on, senderEmail: 'pat.agent@example.org', senderIsAgent: true })).toEqual([]);
+    // A requester's mail: reopen yes / no, and the assignee's copy either way.
+    expect(svc.effectsFor({ action: 'attach', reopen: true }, { ticket: theirs, statusBase: 'Closed', ws: on, senderEmail: 'robin.vale@client.example' })).toEqual(['reopens it', 'notifies Alex Rivera']);
+    expect(svc.effectsFor({ action: 'attach', reopen: false }, { ticket: theirs, statusBase: 'Closed', ws: on, senderEmail: 'robin.vale@client.example' })).toEqual(['notifies Alex Rivera']);
+    // An agent who is this ticket's requester writes as the requester.
+    expect(svc.effectsFor({ action: 'attach', reopen: false }, { ticket: { ...closed, requester: { email: 'Pat.Agent@example.org' } }, statusBase: 'Open', ws: on, senderEmail: 'pat.agent@example.org', senderIsAgent: true })).toEqual(['notifies Alex Rivera']);
     // Accepting only adds the mail: nothing to say.
     expect(svc.effectsFor({ action: 'attach', reopen: false }, { ticket: { assignedTech: null }, statusBase: 'Closed', ws: on })).toEqual([]);
     expect(svc.effectsFor({ action: 'attach', reopen: true }, { ticket: closed, statusBase: 'Open', ws: { replyCopy: false } })).toEqual([]);
@@ -1097,6 +1167,7 @@ describe('what the page reads', () => {
     expect(await svc._workspaceEffects(WS)).toEqual({ replyCopy: true, acknowledges: true });
     for (const over of [{ routingRule: { any: [] } }, { mockModeEnabled: true }, { isEnabled: false }, { archivedAt: new Date() }, { triggerType: 'ticket.assigned' },
       { publishedDefinition: { nodes: [...ACK_WORKFLOW().publishedDefinition.nodes, { id: 'c', type: 'condition' }] } },
+      { publishedDefinition: { nodes: [...ACK_WORKFLOW().publishedDefinition.nodes, { id: 'ai', type: 'llm_generate' }] } },
       { publishedDefinition: { nodes: [{ type: 'trigger' }, { type: 'recipient_resolver', data: { to: ['assigned_agent'] } }, { type: 'send_email' }] } }]) {
       db.notificationWorkflow = [ACK_WORKFLOW(over)];
       expect((await svc._workspaceEffects(WS)).acknowledges).toBe(false);
@@ -1130,6 +1201,10 @@ describe('what the page reads', () => {
     expect(data[0].suggestion.judgedAt).toBeInstanceOf(Date);
     expect(data[1].suggestion).toBeNull();
     expect(data[0]).not.toHaveProperty('bodyHtml');
+    // The same mail once its sender is known as an agent of this workspace: the assignee is not told a requester replied.
+    db.technician.push({ id: 9, workspaceId: WS, email: 'Pat.Agent@example.org', name: 'Pat Agent', isActive: true });
+    expect((await svc.list(WS, { tab: 'waiting' })).data[0].suggestion.effects).toEqual(['reopens it']);
+    db.technician.pop();
     expect(data[0]).not.toHaveProperty('candidates'); // candidates come only with the detail
 
     // "Not sure" with a best guess: the ticket and the requester are shown, nothing is promised.
@@ -1183,7 +1258,7 @@ describe('what the page reads', () => {
     const detail = await svc.detail(WS, h.id);
     expect(holdMock.get).toHaveBeenCalledWith(h.id, WS);
     expect(detail.bodyHtml).toBe('<p>safe</p>');
-    expect(detail.candidates).toEqual([{ ticket: expect.objectContaining({ id: t.id, statusBase: 'Open', createdAt: t.createdAt }), why: ['the same reference number 4053377 in the subject'], score: expect.any(Number), aiNote: 'Same invoice.' }]);
+    expect(detail.candidates).toEqual([{ ticket: expect.objectContaining({ id: t.id, statusBase: 'Open', createdAt: t.createdAt }), why: ['the same subject', 'the same reference number 4053377 in the subject'], score: expect.any(Number), aiNote: 'Same invoice.' }]);
     expect(detail.decisions).toHaveLength(1);
     expect(detail.decisions[0]).toMatchObject({ heldId: h.id, action: 'attach', ticket: { id: t.id }, outcome: 'suggested', model: 'claude-haiku-5-5', candidateIds: [t.id] });
     expect(detail.suggestion.action).toBe('attach');

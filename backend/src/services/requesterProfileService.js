@@ -375,6 +375,10 @@ export function requesterContextFromSource(requester, ticket = null) {
     name: requester.name || null,
     firstName: requesterFirstName(requester),
     email: requester.email || null,
+    // 11 Nov 2026: the flag has to survive this rebuild. The workflow engine re-reads the requester
+    // here before it resolves recipients; without it the "never mail an unattended requester" guard
+    // (recipientFromToken) never saw the flag and the acknowledgment was addressed to the mailbox.
+    unattended: requester.unattended === true,
     phone: requester.phone || null,
     mobile: requester.mobile || null,
     department: freshserviceDepartment,
