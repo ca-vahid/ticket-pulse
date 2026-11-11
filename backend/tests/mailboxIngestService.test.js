@@ -1404,6 +1404,33 @@ describe('helpdesk mailbox: the ticket behind a FreshService number', () => {
     expect(await mailboxIngestService.processEmail(front, { ...fresh, internetMessageId: '<again@example.com>' })).toBe('created');
     expect(linkMock.link).toHaveBeenCalledWith(700, 1, { relatedTicketId: 813, kind: 'related_to' }, expect.anything());
   });
+
+  // 10 Nov 2026: tickets from the FreshService history import carry no closed/resolved date.
+  test('an imported closed ticket with no closed date counts as ended by its FreshService update', async () => {
+    helpdeskMock.fsHelpdeskAddresses.mockResolvedValue(new Set());
+    prismaMock.ticket.findFirst.mockResolvedValue({ id: 814, workspaceId: 1, origin: 'freshservice', freshserviceTicketId: 243414n, status: 'Closed', closedAt: null, resolvedAt: null, freshserviceUpdatedAt: long, updatedAt: new Date() });
+    const fresh = { ...baseEmail, subject: 'Same problem as [INC-243414] again' };
+    expect(await mailboxIngestService.matchEmailToTicket(1, fresh, front.address, opts)).toEqual({ relatedTicketId: 814, via: 'fs_ref_old_closed' });
+  });
+
+  test('a FreshService number in the body of a fresh mail, for a ticket closed long ago, is a new ticket linked to it', async () => {
+    helpdeskMock.fsHelpdeskAddresses.mockResolvedValue(new Set());
+    const old = { id: 815, workspaceId: 1, origin: 'freshservice', freshserviceTicketId: 128599n, status: 'Closed', closedAt: null, resolvedAt: null, freshserviceUpdatedAt: long, subject: 'Old database follow-up' };
+    prismaMock.ticket.findFirst.mockImplementation(async ({ where } = {}) => (where?.freshserviceTicketId === 128599n ? old : null));
+    const email = { ...baseEmail, internetMessageId: '<monitor@example.com>', subject: 'Second monitor and dock', bodyText: null, bodyHtml: '<p>Same setup as #128599 last year please.</p>' };
+    expect(await mailboxIngestService.processEmail(front, email)).toBe('created');
+    expect(linkMock.link).toHaveBeenCalledWith(700, 1, { relatedTicketId: 815, kind: 'related_to' }, expect.anything());
+  });
+
+  test('an emoji written as an HTML entity is not a ticket number', async () => {
+    helpdeskMock.fsHelpdeskAddresses.mockResolvedValue(new Set());
+    prismaMock.ticket.findFirst.mockImplementation(async ({ where } = {}) => (where?.freshserviceTicketId === 128522n
+      ? { id: 816, workspaceId: 1, origin: 'freshservice', freshserviceTicketId: 128522n, status: 'Open', subject: 'Unrelated' }
+      : null));
+    const email = { ...baseEmail, internetMessageId: '<emoji@example.com>', subject: 'Second monitor and dock', bodyText: null, bodyHtml: '<p>Could I get a second monitor and a dock? Thank you.&#128522;</p>' };
+    expect(await mailboxIngestService.processEmail(front, email)).toBe('created');
+    expect(prismaMock.ticket.findFirst.mock.calls.some(([arg]) => arg?.where?.freshserviceTicketId === 128522n)).toBe(false);
+  });
 });
 
 describe('helpdesk mailbox: pictures pasted into the mail', () => {

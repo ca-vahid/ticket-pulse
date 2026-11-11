@@ -80,6 +80,18 @@ describe('looksLikeReply (rung 0 classifier)', () => {
     expect(looksLikeReply({ subject: 'FW: vendor invoice' })).toEqual(expect.objectContaining({ isReply: true, strongEvidence: [], subjectPrefixKind: 'forward' }));
     expect(looksLikeReply({ subject: 'Re: vendor invoice' })).toEqual(expect.objectContaining({ strongEvidence: ['subject_prefix'], subjectPrefixKind: 'reply' }));
   });
+
+  // 10 Nov 2026: Outlook writes "Thank you.😊" as "Thank you.&#128522;" — that is not ticket #128522.
+  test('HTML numeric entities (emoji) are decoded, never read as #<n> refs', () => {
+    expect(looksLikeReply({ subject: 'x', bodyHtml: '<p>Thank you.&#128522;</p>' }).bodyRefs.fs).toEqual([]);
+    expect(looksLikeReply({ subject: 'x', bodyHtml: '<p>Great &#x1F44D; thanks</p>' }).bodyRefs.fs).toEqual([]);
+    expect(looksLikeReply({ subject: 'x', bodyText: 'raw text &#128077; kept as typed' }).bodyRefs.fs).toEqual([]);
+    // An escaped entity stays literal text, still not a ref; a real number next to an emoji still is.
+    expect(looksLikeReply({ subject: 'x', bodyHtml: '<p>code &amp;#128522; sample</p>' }).bodyRefs.fs).toEqual([]);
+    expect(looksLikeReply({ subject: 'x', bodyHtml: '<p>About #240116 &#128522;</p>' }).bodyRefs.fs).toEqual([240116]);
+    // An out-of-range code point does not throw.
+    expect(looksLikeReply({ subject: 'x', bodyHtml: '<p>&#99999999; #240117</p>' }).bodyRefs.fs).toEqual([240117]);
+  });
 });
 
 describe('recipient roles', () => {

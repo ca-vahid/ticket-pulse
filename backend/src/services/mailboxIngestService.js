@@ -39,6 +39,25 @@ const INBOX_BACKLOG = 250;
 // A description longer than the ticket schema stores (100,000) used to fail the whole message.
 const DESCRIPTION_KEEP = 90000;
 const OLD_CLOSED_DAYS = 14;
+
+/**
+ * When a ticket ended (closed or resolved). Tickets brought in by the FreshService
+ * history import carry neither date (10 Nov 2026), so a terminal status falls back
+ * to FreshService's own last update, then the last real activity — never updatedAt,
+ * which is the import time.
+ */
+export function ticketEndedAt(ticket) {
+  if (!ticket) return null;
+  const direct = ticket.closedAt || ticket.resolvedAt;
+  if (direct) return direct;
+  const terminal = /^(closed|resolved)$/i.test(String(ticket.status || ''));
+  return terminal ? (ticket.freshserviceUpdatedAt || ticket.lastRealActivityAt || null) : null;
+}
+
+export function endedLongAgo(ticket, now = Date.now()) {
+  const ended = ticketEndedAt(ticket);
+  return Boolean(ended) && now - new Date(ended).getTime() > OLD_CLOSED_DAYS * 86400000;
+}
 // Pictures pasted into a mail body. Smaller ones are signature logos and tracking dots.
 const INLINE_MIN_BYTES = 8 * 1024;
 const INLINE_MAX = 12;
@@ -658,7 +677,7 @@ class MailboxIngestService {
       await this.ingestReply(connection, match.ticket, email, match.via, { agent, ctx });
       return 'reply';
     }
-    const relatedTicketId = match?.relatedTicketId || null;
+    let relatedTicketId = match?.relatedTicketId || null;
 
     // Rung 0 (RL-3): reply evidence. Last matching attempt on TP-refs found
     // in the body head (token-stripped subjects, quoted acks) before the
@@ -684,6 +703,13 @@ class MailboxIngestService {
         where: { workspaceId: connection.workspaceId, freshserviceTicketId: BigInt(fsNumber) },
       });
       if (!ticket) continue;
+      // Same rule as rung 3 (10 Nov 2026): a fresh mail that only mentions a ticket closed
+      // long ago is a new request, linked to it, not an answer that reopens it.
+      if (endedLongAgo(ticket) && !reply.strongEvidence.length) {
+        relatedTicketId = relatedTicketId || ticket.id;
+        logger.info(`Mailbox ingest: body names FreshService #${fsNumber}, closed long ago — new request linked to ticket ${ticket.id} (from ${email.from})`);
+        break;
+      }
       if (await freshserviceWillIngest(connection.workspaceId, email)) {
         recordIngestSkip(connection.workspaceId, 'freshservice_ref');
         logger.info(`Mailbox ingest decision: skip (freshservice_ref, body) for "${email.subject}" from ${email.from} — FreshService ticket ${ticket.id} receives this mail itself`);
@@ -938,8 +964,7 @@ class MailboxIngestService {
             candidates: [{ id: gone.id, displayRef: ticketDisplayRef(gone), subject: gone.subject, updatedAt: gone.updatedAt }],
           };
         }
-        const ended = found.length === 1 ? (found[0].closedAt || found[0].resolvedAt) : null;
-        if (ended && Date.now() - new Date(ended).getTime() > OLD_CLOSED_DAYS * 86400000 && !agentIntake.looksLikeReply(email).strongEvidence.length) {
+        if (found.length === 1 && endedLongAgo(found[0]) && !agentIntake.looksLikeReply(email).strongEvidence.length) {
           // A fresh mail that only MENTIONS a ticket closed long ago is a new request, linked to it.
           return { relatedTicketId: found[0].id, via: 'fs_ref_old_closed' };
         }
