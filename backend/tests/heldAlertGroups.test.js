@@ -3,7 +3,7 @@
  * broken-sounding and new kinds first, and the fold target rule.
  */
 import {
-  alertKindKey, deviceLabel, groupHeldRows, isAttentionKind, kindLabel, kindTicketFor, stripDeviceTag,
+  alertKindKey, deviceLabel, groupHeldRows, isAttentionKind, kindLabel, kindTicketFor, senderKindFor, stripDeviceTag,
 } from '../src/utils/heldAlertGroups.js';
 
 const NAS = 'nas-one@x.io';
@@ -92,5 +92,44 @@ describe('kindTicketFor (what a repeat may be counted on)', () => {
     const kindKey = alertKindKey('[NAS] Storage Pool 1 has crashed');
     expect(kindTicketFor({ kindKey, attention: true, tickets })).toBeNull();
     expect(kindTicketFor({ kindKey, attention: true, tickets: [{ ...tickets[0], status: 'Open' }] })?.id).toBe(1);
+  });
+});
+
+// 11 Nov 2026 (mail triage, part 1).
+describe('a long number is part of the kind', () => {
+  test('two invoices from one vendor are two kinds; drive numbers still are not', () => {
+    const a = alertKindKey('Invoice from Acme Rentals_XVC4250_16520151_US_CAD_186076352_1695121008_0_462009816071');
+    const b = alertKindKey('Invoice from Acme Rentals_XVC4250_16520151_US_CAD_186145539_1692847322_0_462009826568');
+    expect(a).not.toBe(b);
+    expect(alertKindKey('Reminder: 70 Days Outstanding Invoice - 4053829 - Northwind')).toBe(alertKindKey('Reminder: 71 Days Outstanding Invoice - 4053829 - Northwind'));
+    expect(alertKindKey('[NAS] Drive 9 on RS1221 is not listed')).toBe(alertKindKey('[NAS] Drive 12 on RS1221 is not listed'));
+  });
+
+  test('the fold never offers the ticket of a different invoice; the same invoice still folds', () => {
+    const ticket = { id: 120165, subject: 'Invoice from Acme Rentals_186145539_462009826568', status: 'Open', createdAt: '2026-11-10T18:00:00Z' };
+    expect(kindTicketFor({ kindKey: alertKindKey('Invoice from Acme Rentals_186076352_462009816071'), tickets: [ticket] })).toBeNull();
+    expect(kindTicketFor({ kindKey: alertKindKey('RE: Invoice from Acme Rentals_186145539_462009826568'), tickets: [ticket] })?.id).toBe(120165);
+  });
+});
+
+describe('who sent a group: a person or an automated sender', () => {
+  const held = (id, over = {}) => ({ id, subject: 'RE: Reminder ' + id, fromEmail: 'alex.rivera@example.com', fromName: 'Alex Rivera', reason: 'agent_reply_no_requester', receivedAt: '2026-11-10T18:0' + (id % 10) + ':00Z', bestGuessTicket: null, ...over });
+
+  test('senderKindFor', () => {
+    expect(senderKindFor({ sender: 'alex.rivera@example.com', reasons: ['agent_reply_no_requester'] })).toBe('person');
+    expect(senderKindFor({ sender: 'nas-one@x.io', reasons: ['sender_burst', 'sender_burst'] })).toBe('automated');
+    expect(senderKindFor({ sender: 'noreply@vendor.example.net', reasons: ['unknown_reference'] })).toBe('automated');
+    expect(senderKindFor({ sender: 'jo.park@client.example.org', reasons: ['unknown_reference'] })).toBe('person');
+    // A colleague whose mail was burst-held is still a person when the caller knows them.
+    expect(senderKindFor({ sender: 'alex.rivera@example.com', reasons: ['sender_burst'], knownPerson: true })).toBe('person');
+  });
+
+  test('groupHeldRows marks each group', () => {
+    const rows = [held(1), held(2), held(3), ...[4, 5, 6].map((id) => held(id, { fromEmail: 'nas-one@x.io', fromName: null, reason: 'sender_burst', subject: '[NAS-ONE] Drive ' + id + ' is not listed' }))];
+    const { groups } = groupHeldRows(rows);
+    expect(groups.find((g) => g.sender === 'alex.rivera@example.com')).toMatchObject({ senderKind: 'person', fromName: 'Alex Rivera', count: 3 });
+    expect(groups.find((g) => g.sender === 'nas-one@x.io')).toMatchObject({ senderKind: 'automated', count: 3 });
+    const known = groupHeldRows(rows, { people: ['NAS-ONE@x.io'] }).groups.find((g) => g.sender === 'nas-one@x.io');
+    expect(known.senderKind).toBe('person');
   });
 });

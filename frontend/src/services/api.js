@@ -1397,6 +1397,9 @@ export const ticketsAPI = {
     return await api.patch(`/tickets/mailboxes/${id}`, payload);
   },
 
+  // "Also known as": addresses this mailbox's recent mail was often sent to (read-only).
+  getMailboxAliasSuggestions: async (id) => await api.get(`/tickets/mailboxes/${id}/alias-suggestions`),
+
   removeMailbox: async (id) => {
     return await api.delete(`/tickets/mailboxes/${id}`);
   },

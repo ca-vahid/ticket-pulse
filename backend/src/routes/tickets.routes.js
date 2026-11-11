@@ -710,7 +710,20 @@ router.get('/mailboxes', requireTicketingAdmin, asyncHandler(async (req, res) =>
     graphSendLane(req.workspaceId),
   ]);
   const { ingestSkipCounts } = await import('../services/mailboxIngestService.js');
-  res.json({ success: true, data: mailboxes.map(presentMailbox), meta: { sendLane, ingestSkips: ingestSkipCounts(req.workspaceId) } });
+  // "Also known as" (11 Nov 2026): the public addresses that deliver into each mailbox.
+  const { getMailboxAliases } = await import('../services/mailboxAliasService.js');
+  const data = await Promise.all(mailboxes.map(async (mb) => ({ ...presentMailbox(mb), aliases: await getMailboxAliases(mb.id) })));
+  res.json({ success: true, data, meta: { sendLane, ingestSkips: ingestSkipCounts(req.workspaceId) } });
+}));
+
+// Addresses that look like other names of this mailbox: the ones its recent mail was
+// most often sent to, on the organisation's own domain, that are not a person. Read-only.
+router.get('/mailboxes/:mailboxId/alias-suggestions', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const id = Number(req.params.mailboxId);
+  const existing = Number.isInteger(id) ? await prisma.mailboxConnection.findFirst({ where: { id, workspaceId: req.workspaceId } }) : null;
+  if (!existing) throw new ValidationError('Mailbox not found in this workspace');
+  const { suggestMailboxAliases } = await import('../services/mailboxAliasService.js');
+  res.json({ success: true, data: await suggestMailboxAliases(existing) });
 }));
 
 // ---------------------------------------------------------------- hold queue
@@ -890,6 +903,9 @@ router.patch('/mailboxes/:mailboxId', requireTicketingAdmin, asyncHandler(async 
     data.newTicketPolicy = req.body.newTicketPolicy;
   }
   if (req.body?.agentCcIntake !== undefined) data.agentCcIntake = req.body.agentCcIntake === true;
+  // "Also known as" is validated and saved first: a refused address changes nothing else.
+  const aliasService = await import('../services/mailboxAliasService.js');
+  if (req.body?.aliases !== undefined) await aliasService.setMailboxAliases(existing, req.body.aliases);
   let mailbox = Object.keys(data).length > 0
     ? await prisma.mailboxConnection.update({ where: { id }, data })
     : existing;
@@ -900,7 +916,7 @@ router.patch('/mailboxes/:mailboxId', requireTicketingAdmin, asyncHandler(async 
     const { setPrimaryMailbox } = await import('../services/mailboxPicker.js');
     mailbox = await setPrimaryMailbox(req.workspaceId, id, req.body.isPrimary === true);
   }
-  res.json({ success: true, data: presentMailbox(mailbox) });
+  res.json({ success: true, data: { ...presentMailbox(mailbox), aliases: await aliasService.getMailboxAliases(id) } });
 }));
 
 router.delete('/mailboxes/:mailboxId', requireTicketingAdmin, asyncHandler(async (req, res) => {
@@ -908,6 +924,7 @@ router.delete('/mailboxes/:mailboxId', requireTicketingAdmin, asyncHandler(async
   const existing = await prisma.mailboxConnection.findFirst({ where: { id, workspaceId: req.workspaceId } });
   if (!existing) throw new ValidationError('Mailbox not found in this workspace');
   await prisma.mailboxConnection.delete({ where: { id } });
+  await import('../services/mailboxAliasService.js').then((m) => m.clearMailboxAliases(id)).catch(() => {});
   res.json({ success: true });
 }));
 
