@@ -17,6 +17,7 @@ import { PARSER_VERSION, textToHtml } from '../utils/forwardedMailParser.js';
 import { fsConversationEntryId } from '../utils/fsEntryId.js';
 import { freshserviceWillIngest } from './fsHelpdeskAddressService.js';
 import { judgeMeetingMail } from '../utils/meetingInvite.js';
+import { longNumbersDiffer, maskCounters } from '../utils/subjectIdentity.js';
 
 // In-memory memory of messages handed to the hold queue (RL-4) so the delta
 // poller does not re-fetch them every catch-up round; bounded, process-local
@@ -31,6 +32,11 @@ const FIRST_LOOKBACK_MS = 15 * 60 * 1000; // fresh connections look back 15 minu
 // normalised subject (a repeating alert), and 25 per sender for anything else.
 export const MAX_SAME_SUBJECT_CREATES_PER_CYCLE = 3;
 export const MAX_CREATES_PER_SENDER_PER_CYCLE = 25;
+// 11 Nov 2026: a long number in the subject is an identity, so invoices that differ
+// only by number are no longer look-alikes. The same words with DIFFERENT long
+// numbers still stop at 10 per sender per cycle: an alert storm that stamps every
+// mail with its own incident id is held from the 11th, not the 26th.
+export const MAX_SAME_SHAPE_CREATES_PER_CYCLE = 10;
 // Cc carried from a mail onto a NEW ticket (QA 11-09 #8): a side mailbox kept the
 // whole Cc line; an invite to 400 people would have Cc'd them all on every update.
 export const MAX_CARRIED_CC = 10; // the Cc editor's own limit, so a carried list stays editable
@@ -102,23 +108,44 @@ export function normalizeSubjectForMatch(subject) {
 }
 /**
  * Burst key for a subject (9 Nov 2026): lowercase, leading Re:/Fw:/Fwd: gone,
- * every run of digits one '#', whitespace collapsed. "BGC-EDM-HV2 - Error:
+ * short runs of digits one '#', whitespace collapsed. "BGC-EDM-HV2 - Error:
  * Volume transfer has failed for BGC-EDM-FILE1" repeats on the same key;
  * invoices for different travellers do not.
+ * 11 Nov 2026: a long number (six or more digits, standing on its own) is an
+ * identity and stays in the key, so five invoices that differ only by invoice
+ * number are five different mails. "70 Days", "Drive 12", FILE1, dates and
+ * current time stamps are still masked (utils/subjectIdentity.js). A storm
+ * whose every subject carries its own long id is caught by the per-sender
+ * total cap instead.
  */
-export function burstSubjectKey(subject) {
-  return String(subject || '')
+export function burstSubjectKey(subject, { now = Date.now() } = {}) {
+  const s = String(subject || '')
     .toLowerCase()
-    .replace(/^\s*(?:(?:re|fw|fwd)\s*:\s*)+/i, '')
-    .replace(/\d+/g, '#')
+    .replace(/^\s*(?:(?:re|fw|fwd)\s*:\s*)+/i, '');
+  return maskCounters(s, { now })
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-/** The two counters a new ticket from this mail counts against, in the per-cycle Map. */
+/** The subject's words alone: every digit run masked, long numbers too. */
+export function burstShapeKey(subject) {
+  return burstSubjectKey(subject).replace(/\d+/g, '#');
+}
+
+/**
+ * The counters a new ticket from this mail counts against, in the per-cycle Map:
+ * the sender, the sender + look-alike subject, and (only when the subject carries
+ * a long number) the sender + the subject's words.
+ */
 export function senderBurstKeys(email) {
   const senderKey = String(email?.from || '').toLowerCase();
-  return { senderKey, subjectKey: `${senderKey}\u0000${burstSubjectKey(email?.subject)}` };
+  const subject = burstSubjectKey(email?.subject);
+  const shape = burstShapeKey(email?.subject);
+  return {
+    senderKey,
+    subjectKey: `${senderKey}\u0000${subject}`,
+    shapeKey: shape === subject ? null : `${senderKey}\u0000shape\u0000${shape}`,
+  };
 }
 
 /** Workflow mail sent through SendGrid comes back as `<x-message-id@geopod-ismtpd-N>`: the local parts of the refs. */
@@ -264,6 +291,26 @@ export function plusAddressFsTicketNumbers(email, mailboxAddress = null) {
 export const MAX_CC_EMAILS = 10;
 const EMAIL_SHAPE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
 
+/** The mailbox's own address, then its also-known-as addresses (connection.aliases), lowercase. */
+export function ownAddresses(connection) {
+  const list = [connection?.address, ...(Array.isArray(connection?.aliases) ? connection.aliases : [])];
+  return [...new Set(list.map((a) => String(a || '').trim().toLowerCase()).filter((a) => a.includes('@')))];
+}
+
+/** Is `address` one of these mailbox addresses, or a `+tag` variant of one? `bases`: an address or a list. */
+function isOwnAddress(address, bases) {
+  const a = String(address || '').trim().toLowerCase();
+  if (!a) return false;
+  const m = a.match(/^([^@+]+)\+[^@]*@(.+)$/);
+  return (Array.isArray(bases) ? bases : [bases]).some((raw) => {
+    const base = String(raw || '').trim().toLowerCase();
+    if (!base) return false;
+    if (a === base) return true;
+    const [baseLocal, baseDomain] = base.split('@');
+    return Boolean(m) && m[1] === baseLocal && m[2] === baseDomain;
+  });
+}
+
 /**
  * Inbound Cc merge (MB-1d), pure part. Unions the reply's Cc — and To other
  * than the mailbox itself — into the ticket's existing ccEmails. Same
@@ -278,14 +325,9 @@ export function mergeInboundCc(existing, email, { mailboxAddress = null, exclude
   const previous = [...new Set(
     (Array.isArray(existing) ? existing : []).map((e) => String(e || '').trim().toLowerCase()).filter(Boolean),
   )];
-  const base = String(mailboxAddress || '').trim().toLowerCase();
-  const [baseLocal, baseDomain] = base.split('@');
-  const isMailbox = (address) => {
-    if (!base) return false;
-    if (address === base) return true;
-    const m = address.match(/^([^@+]+)\+[^@]*@(.+)$/);
-    return Boolean(m) && m[1] === baseLocal && m[2] === baseDomain;
-  };
+  // One address or a list: the mailbox and its also-known-as addresses (11 Nov
+  // 2026). A copy to any of them would come straight back into the mailbox.
+  const isMailbox = (address) => isOwnAddress(address, mailboxAddress);
   const skip = new Set([
     ...previous,
     ...(Array.isArray(exclude) ? exclude : []).map((e) => String(e || '').trim().toLowerCase()).filter(Boolean),
@@ -593,7 +635,22 @@ class MailboxIngestService {
     this._hourly.set(connection.id, { since: now, read: 0, created: 0, reply: 0, held: 0, skipped: 0, error: 0, approval_reply: 0 });
   }
 
+  /**
+   * The connection with its also-known-as addresses attached (11 Nov 2026).
+   * Every path that asks "is this address the mailbox" reads them from here.
+   * Never throws; a connection that already carries a list is left alone.
+   */
+  async _withAliases(connection) {
+    if (!connection || Array.isArray(connection.aliases)) return connection;
+    const aliases = await import('./mailboxAliasService.js')
+      .then(({ getMailboxAliases }) => getMailboxAliases(connection.id))
+      .catch(() => []);
+    // No aliases: the connection object itself goes on, as before.
+    return Array.isArray(aliases) && aliases.length ? { ...connection, aliases } : connection;
+  }
+
   async _ingestOne(connection, email, senderCreates = new Map()) {
+    connection = await this._withAliases(connection);
     const helpdesk = isHelpdeskMailbox(connection);
     const loopReason = looksLikeLoopMail(email, connection.address, { helpdesk });
     if (loopReason) {
@@ -725,6 +782,35 @@ class MailboxIngestService {
       workspaceId: connection.workspaceId, connectionId: connection.id, internetMessageId: email.internetMessageId, policy, ...intake.decision.details,
     });
 
+    // Following up on an existing case belongs on that case's ticket (11 Nov 2026).
+    // Before an agent's copied mail, or a reply this mailbox would turn into a ticket
+    // anyway (policy = create), becomes a NEW ticket: does a ticket about the same
+    // matter exist, open or closed? Then a person (or Mail triage) decides.
+    // Fresh mail from a requester is left alone: a repeating alert or a common
+    // subject would hold in bulk, and ticket grouping already judges those.
+    const mayBeFollowUp = intake.kind === 'agent_cc' || (intake.kind === 'external_reply_unknown' && policy === 'create');
+    if (mayBeFollowUp) {
+      const found = await this._followUpCandidates(connection, email, ctx);
+      if (found) {
+        logger.info(`Mailbox ingest: "${email.subject}" from ${email.from} looks like a follow-up (${found.rules.join(' + ')}; ${found.total} ticket(s)) — held instead of a new ticket`);
+        return this._holdOrFallback(connection, email, {
+          ...intake,
+          bestGuessTicketId: found.bestGuessTicketId,
+          candidates: found.candidates,
+          decision: {
+            rule: 'possible_follow_up',
+            details: {
+              ...intake.decision.details,
+              matched: found.rules, // same_subject | shared_number
+              candidateCount: found.total,
+              bestGuessOpen: found.bestGuessOpen,
+              insteadOf: intake.decision.rule,
+            },
+          },
+        }, 'possible_follow_up', senderCreates);
+      }
+    }
+
     switch (intake.kind) {
     case 'forward':
     case 'agent_cc':
@@ -745,6 +831,21 @@ class MailboxIngestService {
     }
 
     return this._createWithCap(connection, email, relatedTicketId ? { ...intake, relatedTicketId } : intake, senderCreates);
+  }
+
+  /** Tickets this mail may be following up on (followUpCandidateService), or null. Never throws. */
+  async _followUpCandidates(connection, email, ctx = null) {
+    try {
+      const { findFollowUpCandidates } = await import('./followUpCandidateService.js');
+      return await findFollowUpCandidates(connection.workspaceId, {
+        subject: ctx?.subjectForMatch || email.subject,
+        normalize: normalizeSubjectForMatch,
+        isOpen: async (status) => ['Open', 'Pending'].includes(await statusService.resolveBaseStatus(connection.workspaceId, status)),
+      });
+    } catch (err) {
+      logger.warn(`Mailbox ingest: follow-up check failed for "${email.subject}" (${err.message}) — continuing`);
+      return null;
+    }
   }
 
   /** FreshService closes a merged ticket with a link to the one that survives; the reply belongs there. */
@@ -776,16 +877,20 @@ class MailboxIngestService {
    * Per-cycle create caps (loops the header checks didn't catch), then create.
    * Look-alike mail (same sender + normalised subject) is held from the 4th;
    * different subjects from one sender only from the 26th (9 Nov 2026).
+   * The same words with different long numbers (invoices, or alerts that each
+   * carry an incident id) are held from the 11th (11 Nov 2026).
    */
   async _createWithCap(connection, email, intake, senderCreates) {
-    const { senderKey, subjectKey } = senderBurstKeys(email);
+    const { senderKey, subjectKey, shapeKey } = senderBurstKeys(email);
     const sameSubject = senderCreates.get(subjectKey) || 0;
+    const sameShape = shapeKey ? (senderCreates.get(shapeKey) || 0) : 0;
     const total = senderCreates.get(senderKey) || 0;
     const over = sameSubject >= MAX_SAME_SUBJECT_CREATES_PER_CYCLE
       ? { kind: 'same_subject', cap: MAX_SAME_SUBJECT_CREATES_PER_CYCLE }
-      : total >= MAX_CREATES_PER_SENDER_PER_CYCLE ? { kind: 'sender_total', cap: MAX_CREATES_PER_SENDER_PER_CYCLE } : null;
+      : sameShape >= MAX_SAME_SHAPE_CREATES_PER_CYCLE ? { kind: 'same_shape', cap: MAX_SAME_SHAPE_CREATES_PER_CYCLE }
+        : total >= MAX_CREATES_PER_SENDER_PER_CYCLE ? { kind: 'sender_total', cap: MAX_CREATES_PER_SENDER_PER_CYCLE } : null;
     if (over) {
-      const what = over.kind === 'same_subject' ? 'look-alike' : 'per-sender';
+      const what = over.kind === 'same_subject' ? 'look-alike' : over.kind === 'same_shape' ? 'same-words' : 'per-sender';
       // Never dropped, on any mailbox: a person decides (30 days of IT had two such bursts).
       // Until 9 Nov 2026 a standard mailbox skipped this mail silently, so an alert storm
       // to patickets@ / fetickets@ could vanish (API Dev review).
@@ -796,6 +901,7 @@ class MailboxIngestService {
       }, 'sender_burst', new Map());
     }
     senderCreates.set(subjectKey, sameSubject + 1);
+    if (shapeKey) senderCreates.set(shapeKey, sameShape + 1);
     senderCreates.set(senderKey, total + 1);
 
     await this.createTicketFromEmail(connection, email, intake);
@@ -822,9 +928,11 @@ class MailboxIngestService {
           requester: { is: { email: { equals: String(email.from), mode: 'insensitive' } } },
         },
         orderBy: { updatedAt: 'desc' },
-        select: { id: true },
+        select: { id: true, subject: true },
       }).catch(() => null);
-      bestGuessTicketId = guess?.id ?? null;
+      // A vendor's newest ticket is not a guess for a different invoice (11 Nov 2026:
+      // two rental invoices were offered the ticket of a third).
+      bestGuessTicketId = guess && !longNumbersDiffer(email.subject, guess.subject) ? guess.id : null;
     }
     try {
       const { default: holdService } = await import('./mailboxHoldService.js');
@@ -1056,6 +1164,7 @@ class MailboxIngestService {
   async recheckInbox(connection, { since, dryRun = true, top = 250, asOfArrival = false } = {}) {
     const sinceDate = since instanceof Date ? since : new Date(since);
     if (Number.isNaN(sinceDate.getTime())) throw Object.assign(new Error('since must be a date'), { statusCode: 400 });
+    connection = await this._withAliases(connection);
     const emails = await graphMailClient.getInboxMessagesForIngest(connection.address, sinceDate, Math.min(Math.max(Number(top) || 250, 1), 500));
     const results = [];
     const senderCreates = new Map();
@@ -1226,6 +1335,13 @@ class MailboxIngestService {
     const local = (a) => a.replace(/\+[^@]*@/, '@');
     const mailbox = String(connection?.address || '').trim().toLowerCase();
     if (local(from) === mailbox || local(sender) === mailbox) return email;
+    // Sent "as" the mailbox's public address by a person (11 Nov 2026): the
+    // shared address is never the requester or the author; the writer is.
+    const own = ownAddresses(connection);
+    if (isOwnAddress(from, own) && !isOwnAddress(sender, own)) {
+      logger.info(`Mailbox ingest: "${email.subject}" was sent by ${sender} as ${from}, another address of this mailbox; ${sender} is credited as the writer`);
+      return { ...email, from: email.sender, fromName: email.senderName || '', sentAs: { email: email.from, name: email.fromName || null } };
+    }
     const ownMailbox = await Promise.resolve()
       .then(() => prisma.mailboxConnection.findFirst({
         where: { OR: [local(from), local(sender)].map((address) => ({ address: { equals: address, mode: 'insensitive' } })) },
@@ -1274,7 +1390,8 @@ class MailboxIngestService {
    *    never re-sent), no reply_received event; it fires
    *    ticket.public_reply_added marked alreadyDelivered (4.3.49).
    */
-  async ingestReply(connection, ticket, email, via, { agent: resolvedAgent = null, ctx = null } = {}) {
+  async ingestReply(connection, ticket, email, via, { agent: resolvedAgent = null, ctx = null, keepClosed: addQuietly = false } = {}) {
+    connection = await this._withAliases(connection);
     const now = new Date();
     const recipients = emailRecipients(email);
     // QA 11-09 #3: an answer to a workflow mail (a project manager replying to
@@ -1282,7 +1399,8 @@ class MailboxIngestService {
     // not an Outlook copy of an agent's reply to the requester, and on a
     // closed or resolved ticket it never reopens it.
     const workflowRef = via === 'workflow_mail_ref';
-    const keepClosed = workflowRef && await this._isClosedOrResolved(ticket);
+    // Mail review (11 Nov 2026): "add without reopening" asks for the same quiet path.
+    const keepClosed = (workflowRef || addQuietly === true) && await this._isClosedOrResolved(ticket);
     const isForward = !workflowRef && Boolean(resolvedAgent && ctx?.parsed?.isForward && ctx?.originalOk);
     // FR 09-11 #1: identity is per TICKET, not per workspace. Someone who is an
     // agent elsewhere can be the REQUESTER on this ticket — QA's own tester is
@@ -1668,7 +1786,8 @@ class MailboxIngestService {
    * every reply back into the mailbox). Returns null when nothing changes.
    */
   async _mergeReplyCc(connection, ticket, email) {
-    const probe = mergeInboundCc(ticket.ccEmails, email, { mailboxAddress: connection.address });
+    const mailboxAddress = ownAddresses(connection);
+    const probe = mergeInboundCc(ticket.ccEmails, email, { mailboxAddress });
     if (probe.added.length === 0 && probe.dropped.length === 0) return null;
 
     // A meeting invite's attendees never join the ticket's Cc (QA 11-09 #8): a plain
@@ -1690,7 +1809,7 @@ class MailboxIngestService {
     });
     for (const agent of agents) if (agent?.email) exclude.push(agent.email);
 
-    const merged = mergeInboundCc(ticket.ccEmails, email, { mailboxAddress: connection.address, exclude });
+    const merged = mergeInboundCc(ticket.ccEmails, email, { mailboxAddress, exclude });
     return merged.added.length ? merged : null;
   }
 
@@ -1703,6 +1822,7 @@ class MailboxIngestService {
    *   fresh / anything else → the sender is the requester (today's behaviour)
    */
   async createTicketFromEmail(connection, email, intake = null) {
+    connection = await this._withAliases(connection);
     if (intake?.kind === 'forward') return this._createFromForward(connection, email, intake);
     if (intake?.kind === 'agent_cc') return this._createFromAgentCc(connection, email, intake);
     return this._createFresh(connection, email, intake);
@@ -1735,7 +1855,7 @@ class MailboxIngestService {
         const drop = new Set((meeting.attendees || []).map((a) => String(a).toLowerCase()));
         return { to_emails: to.filter((a) => !drop.has(a)), cc_emails: cc.filter((a) => !drop.has(a)) };
       })()
-      : { to_emails: to.filter((a) => agentIntake.isMailboxAddress(a, connection?.address)), cc_emails: [] };
+      : { to_emails: to.filter((a) => isOwnAddress(a, ownAddresses(connection))), cc_emails: [] };
     const removed = (to.length + cc.length) - (next.to_emails.length + next.cc_emails.length);
     if (removed > 0) logger.info(`Mailbox ingest: ${removed} meeting attendee(s) of "${email.subject}" left off the ticket's recipients`);
     return next;
@@ -1835,7 +1955,7 @@ class MailboxIngestService {
         const agents = await prisma.technician.findMany({ where: { workspaceId: connection.workspaceId, isActive: true, email: { not: null } }, select: { email: true } })
           .then((rows) => rows.map((r) => String(r.email || '').toLowerCase())).catch(() => []);
         const onBehalf = email.onBehalfOf?.email ? [email.onBehalfOf.email] : [];
-        ccEmails = mergeInboundCc([], { cc: [...(recipients.cc_emails || []), ...onBehalf] }, { mailboxAddress: connection.address, exclude: [String(email.from || '').toLowerCase(), ...agents] }).next;
+        ccEmails = mergeInboundCc([], { cc: [...(recipients.cc_emails || []), ...onBehalf] }, { mailboxAddress: ownAddresses(connection), exclude: [String(email.from || '').toLowerCase(), ...agents] }).next;
       }
       await prisma.ticket.update({
         where: { id: ticket.id },

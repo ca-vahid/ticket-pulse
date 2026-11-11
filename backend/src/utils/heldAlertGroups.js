@@ -14,7 +14,8 @@
  * have no ticket yet, so a new and worse alert is never buried under sixty
  * copies of a harmless one.
  */
-import { coarseTemplate } from '../services/ticketGrouping/rules.js';
+import { coarseTemplate, looksAutomated } from '../services/ticketGrouping/rules.js';
+import { longNumbers } from './subjectIdentity.js';
 
 /** Held rows from one sender before they are shown as a group. */
 export const GROUP_MIN_ROWS = 3;
@@ -44,9 +45,33 @@ export function deviceLabel({ subject, fromName, fromEmail } = {}) {
   return local || 'Unknown sender';
 }
 
-/** The alert kind as a key: device tag gone, numbers masked (rules.coarseTemplate). */
+/**
+ * The alert kind as a key: device tag gone, numbers masked (rules.coarseTemplate).
+ * 11 Nov 2026: a long number (an invoice, an order) is part of the kind, so two
+ * invoices from one vendor are two kinds and one is never offered the other's
+ * ticket. "Drive 9" and "Drive 12" are still one kind.
+ */
 export function alertKindKey(subject) {
-  return coarseTemplate(stripDeviceTag(subject));
+  const stripped = stripDeviceTag(subject);
+  const ids = longNumbers(stripped);
+  const template = coarseTemplate(stripped);
+  return ids.length ? `${template} |${ids.join(',')}` : template;
+}
+
+// Hold reasons only a person's mail gets (an agent's own e-mail, an unclear sender).
+const PERSON_REASONS = ['agent_reply_no_requester', 'ambiguous_sender', 'meeting_invite', 'possible_follow_up'];
+
+/**
+ * Who sent a group of held e-mails: a 'person' or an 'automated' sender.
+ * Automated = an address nobody types from (rules.looksAutomated), or a sender
+ * whose held mail is all burst-held and who is not a known person. Anything an
+ * agent wrote, and any sender the caller knows as a person, is a person.
+ */
+export function senderKindFor({ sender, reasons = [], knownPerson = false } = {}) {
+  if (knownPerson) return 'person';
+  if (reasons.some((r) => PERSON_REASONS.includes(r))) return 'person';
+  if (looksAutomated(sender)) return 'automated';
+  return reasons.length > 0 && reasons.every((r) => r === 'sender_burst') ? 'automated' : 'person';
 }
 
 /** Does this subject read like something broke? */
@@ -90,7 +115,8 @@ const ticketSummary = (t) => (t ? { id: t.id, displayRef: t.displayRef, subject:
  * Returns { groups, singles }: groups for senders with GROUP_MIN_ROWS or more
  * held rows, everything else untouched in `singles` (newest first, as given).
  */
-export function groupHeldRows(rows = [], { tickets = [], minRows = GROUP_MIN_ROWS } = {}) {
+export function groupHeldRows(rows = [], { tickets = [], minRows = GROUP_MIN_ROWS, people = [] } = {}) {
+  const knownPeople = new Set((people || []).map((p) => String(p || '').toLowerCase()));
   const bySender = new Map();
   for (const row of rows) {
     const key = String(row.fromEmail || '').toLowerCase();
@@ -150,6 +176,8 @@ export function groupHeldRows(rows = [], { tickets = [], minRows = GROUP_MIN_ROW
       firstAt: newest[newest.length - 1].receivedAt || null,
       lastAt: newest[0].receivedAt || null,
       reasons: [...new Set(list.map((r) => r.reason))],
+      // 'person' | 'automated' (11 Nov 2026): a colleague with several held e-mails is not a device.
+      senderKind: senderKindFor({ sender, reasons: list.map((r) => r.reason), knownPerson: knownPeople.has(sender) }),
       ids: newest.map((r) => r.id),
       kinds: kindList,
       attention: kindList.some((k) => k.attention),

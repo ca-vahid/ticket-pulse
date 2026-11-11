@@ -43,6 +43,10 @@ export const AI_OPERATIONS = [
   // the server builds the answer card. Haiku 5.5 with GPT-6 Luna as the
   // fallback (product decision, 5 Nov). Its own cost line and monthly cap per workspace.
   'teams_assistant',
+  // Mail triage (plans/MAIL_TRIAGE_PLAN.md, 11 Nov 2026): one short judgement per
+  // held e-mail (add to a ticket, new ticket, no ticket, unsure). Economy tier:
+  // Haiku 5.5 with GPT-6 Luna as the fallback. Its own cost line and monthly cap per workspace.
+  'mail_triage',
 ];
 
 // Sonnet 5.5 (released 28 Sep 2026: same $2/$10 price as Sonnet 5, >30%
@@ -292,10 +296,13 @@ export function anthropicRequestRules(model) {
   return { thinkingOff: { type: 'disabled' }, forcedToolChoice: true };
 }
 
+/** Operations whose default is the economy pair: Haiku 5.5, with GPT-6 Luna behind it. */
+const ECONOMY_OPERATIONS = ['teams_assistant', 'mail_triage'];
+
 export function defaultModelForProvider(provider, operation = null) {
   const normalizedProvider = normalizeProvider(provider);
-  if (normalizedProvider === AI_PROVIDER_OPENAI) return operation === 'teams_assistant' ? OPENAI_ECONOMY_MODEL : DEFAULT_OPENAI_MODEL;
-  if (operation === 'teams_assistant') return HAIKU_5_5_MODEL;
+  if (normalizedProvider === AI_PROVIDER_OPENAI) return ECONOMY_OPERATIONS.includes(operation) ? OPENAI_ECONOMY_MODEL : DEFAULT_OPENAI_MODEL;
+  if (ECONOMY_OPERATIONS.includes(operation)) return HAIKU_5_5_MODEL;
   if (operation === 'ticket_reclassification' || operation === 'calendar_leave' || operation === 'requester_sentiment' || operation === 'ticket_grouping' || operation === 'requester_reply_check') {
     return DEFAULT_RECLASSIFICATION_MODEL;
   }

@@ -247,7 +247,7 @@ export default function HeldRepliesPanel({ onCountChange = null, compact = false
             <h3 className="text-base font-semibold text-foreground">Held e-mail</h3>
             <p className="text-sm text-muted-foreground">
               Emails Ticket Pulse could not file on its own: replies to a conversation it does not know, agent mail with no
-              identifiable requester, and alert bursts from one device (grouped by device below). Decide what each one is.
+              identifiable requester, and bursts of mail from one sender (grouped by sender below). Decide what each one is.
             </p>
           </div>
         </div>
@@ -280,7 +280,7 @@ export default function HeldRepliesPanel({ onCountChange = null, compact = false
       {!compact && <BurstModeControl mode={mode} onChange={changeMode} busy={Boolean(groupBusy)} />}
 
       {groups.length > 0 && (
-        <ul className="space-y-3" aria-label="Alert bursts by device" data-testid="held-groups">
+        <ul className="space-y-3" aria-label="Bursts by sender" data-testid="held-groups">
           {groups.map((g) => (
             <li key={g.sender} className="bg-card border border-border rounded-lg p-4">
               <HeldDeviceGroup group={g} mode={mode || 'shadow'} busy={groupBusy === g.sender} onBulk={(ids, action, ticket) => bulk(g, ids, action, ticket)} />

@@ -62,16 +62,30 @@ export function headerMessageIds(email) {
 }
 
 /**
- * Is `address` the connection's mailbox (or a `mailbox+tag@` variant of it)?
+ * Every address that IS this mailbox: its own address first, then its
+ * "also known as" addresses (11 Nov 2026). People write to a public address
+ * (receivables@) that delivers into the connected mailbox (ar-tickets@); the
+ * ingest attaches the list as `connection.aliases` (mailboxAliasService).
+ */
+export function mailboxAddresses(connection) {
+  const list = [connection?.address, ...(Array.isArray(connection?.aliases) ? connection.aliases : [])];
+  return [...new Set(list.map(normalizeEmail).filter((a) => a.includes('@')))];
+}
+
+/**
+ * Is `address` the mailbox (or a `mailbox+tag@` variant of it)? `mailboxAddress`
+ * is one address or a list (the mailbox and its also-known-as addresses).
  */
 export function isMailboxAddress(address, mailboxAddress) {
   const a = normalizeEmail(address);
-  const base = normalizeEmail(mailboxAddress);
-  if (!a || !base) return false;
-  if (a === base) return true;
-  const [baseLocal, baseDomain] = base.split('@');
+  if (!a) return false;
+  const bases = (Array.isArray(mailboxAddress) ? mailboxAddress : [mailboxAddress]).map(normalizeEmail).filter(Boolean);
   const m = a.match(/^([^@+]+)\+[^@]*@(.+)$/);
-  return Boolean(m) && m[1] === baseLocal && m[2] === baseDomain;
+  return bases.some((base) => {
+    if (a === base) return true;
+    const [baseLocal, baseDomain] = base.split('@');
+    return Boolean(m) && m[1] === baseLocal && m[2] === baseDomain;
+  });
 }
 
 /** Active workspace technician by email (case-insensitive), or null. */
@@ -171,7 +185,9 @@ function codePoint(n) {
 export async function recipientRoles(connection, email, { agentEmails = null } = {}) {
   const to = addressList(email?.to);
   const cc = addressList(email?.cc);
-  const mailbox = normalizeEmail(connection?.address);
+  // The mailbox and its also-known-as addresses: none of them is ever an
+  // external recipient or a requester candidate.
+  const mailbox = mailboxAddresses(connection);
   const mailboxInTo = to.some((a) => isMailboxAddress(a, mailbox));
   const mailboxInCc = cc.some((a) => isMailboxAddress(a, mailbox));
   const sender = normalizeEmail(email?.from);
@@ -244,7 +260,7 @@ export async function prepareAgentContext(connection, email, agent) {
   const subject = String(email?.subject || '');
   const parsed = parseForwardedMail({ html: email?.bodyHtml, text: email?.bodyText, subject });
   const roles = await recipientRoles(connection, email);
-  const mailbox = normalizeEmail(connection?.address);
+  const mailbox = mailboxAddresses(connection);
   const original = parsed.original;
   const originalOk = Boolean(original.email)
     && EMAIL_SHAPE.test(original.email)
@@ -391,7 +407,7 @@ export async function classifyIntake(connection, email, { knownReferenceFound = 
     const reason = !parsed.hasHeaderBlock ? 'no_header_block'
       : !parsed.original.email ? 'original_has_no_address'
         : parsed.original.email === resolvedAgent.email ? 'original_is_agent'
-          : isMailboxAddress(parsed.original.email, connection?.address) ? 'original_is_mailbox'
+          : isMailboxAddress(parsed.original.email, mailboxAddresses(connection)) ? 'original_is_mailbox'
             : 'original_invalid';
     return {
       kind: 'fresh',
@@ -426,6 +442,6 @@ export { stripSubjectPrefixes as stripSubject };
 
 export default {
   resolveAgentSender, looksLikeReply, classifyIntake, prepareAgentContext, recipientRoles,
-  isKnownReference, newTicketPolicy, agentCcIntakeEnabled, headerMessageIds, isMailboxAddress, normalizeEmail,
+  isKnownReference, newTicketPolicy, agentCcIntakeEnabled, headerMessageIds, isMailboxAddress, mailboxAddresses, normalizeEmail,
   stripSubject: stripSubjectPrefixes,
 };

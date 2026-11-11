@@ -710,7 +710,20 @@ router.get('/mailboxes', requireTicketingAdmin, asyncHandler(async (req, res) =>
     graphSendLane(req.workspaceId),
   ]);
   const { ingestSkipCounts } = await import('../services/mailboxIngestService.js');
-  res.json({ success: true, data: mailboxes.map(presentMailbox), meta: { sendLane, ingestSkips: ingestSkipCounts(req.workspaceId) } });
+  // "Also known as" (11 Nov 2026): the public addresses that deliver into each mailbox.
+  const { getMailboxAliases } = await import('../services/mailboxAliasService.js');
+  const data = await Promise.all(mailboxes.map(async (mb) => ({ ...presentMailbox(mb), aliases: await getMailboxAliases(mb.id) })));
+  res.json({ success: true, data, meta: { sendLane, ingestSkips: ingestSkipCounts(req.workspaceId) } });
+}));
+
+// Addresses that look like other names of this mailbox: the ones its recent mail was
+// most often sent to, on the organisation's own domain, that are not a person. Read-only.
+router.get('/mailboxes/:mailboxId/alias-suggestions', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const id = Number(req.params.mailboxId);
+  const existing = Number.isInteger(id) ? await prisma.mailboxConnection.findFirst({ where: { id, workspaceId: req.workspaceId } }) : null;
+  if (!existing) throw new ValidationError('Mailbox not found in this workspace');
+  const { suggestMailboxAliases } = await import('../services/mailboxAliasService.js');
+  res.json({ success: true, data: await suggestMailboxAliases(existing) });
 }));
 
 // ---------------------------------------------------------------- hold queue
@@ -729,7 +742,12 @@ router.get('/mailboxes/held', requireTicketingStaff, asyncHandler(async (req, re
   const status = String(req.query?.status || 'held');
   const rows = await mailboxHoldService.list(req.workspaceId, { status });
   const heldCount = status === 'held' ? rows.length : await mailboxHoldService.count(req.workspaceId, 'held');
-  res.json({ success: true, data: rows, meta: { heldCount } });
+  // Mail review (11 Nov 2026): the Tickets button shows whenever Mail triage is not Off.
+  const triageMode = await import('../services/mailTriageService.js')
+    .then((m) => m.default.getSettings(req.workspaceId))
+    .then((s) => s.mode)
+    .catch(() => 'off');
+  res.json({ success: true, data: rows, meta: { heldCount, triageMode } });
 }));
 
 // The queue grouped by device (QA 10-26 #3): one group per sender with three
@@ -790,6 +808,63 @@ router.post('/mailboxes/held/:heldId/discard', requireTicketingStaff, asyncHandl
   const { default: mailboxHoldService } = await import('../services/mailboxHoldService.js');
   const held = await mailboxHoldService.discard(Number(req.params.heldId), req.ticketActor, { workspaceId: req.workspaceId });
   res.json({ success: true, data: held });
+}));
+
+// ---------------------------------------------------------------- mail review
+// Mail triage (plans/MAIL_TRIAGE_PLAN.md, 11 Nov 2026): the held-mail queue as a
+// page, with the AI's suggestion on every row. Staff-gated like the hold queue;
+// running a judgement again is for admins. Specific paths come before /:heldId.
+
+const mailTriage = async () => (await import('../services/mailTriageService.js')).default;
+function heldIdParam(req) {
+  const id = Number(req.params.heldId);
+  if (!Number.isInteger(id) || id <= 0) throw new ValidationError('heldId must be a number');
+  return id;
+}
+
+router.get('/mail-review', requireTicketingStaff, asyncHandler(async (req, res) => {
+  const tab = ['waiting', 'done', 'log'].includes(String(req.query?.tab)) ? String(req.query.tab) : 'waiting';
+  const result = await (await mailTriage()).list(req.workspaceId, {
+    tab,
+    limit: req.query?.limit,
+    before: req.query?.before,
+    outcome: req.query?.outcome || null,
+    confidence: req.query?.confidence || null,
+    action: req.query?.action || null,
+  });
+  res.json({ success: true, data: result.data, meta: result.meta });
+}));
+
+router.get('/mail-review/ticket-search', requireTicketingStaff, asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await (await mailTriage()).ticketSearch(req.workspaceId, req.query?.q) });
+}));
+
+router.post('/mail-review/bulk-accept', requireTicketingStaff, asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await (await mailTriage()).bulkAccept(req.workspaceId, req.body?.heldIds, req.ticketActor) });
+}));
+
+router.get('/mail-review/:heldId', requireTicketingStaff, asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await (await mailTriage()).detail(req.workspaceId, heldIdParam(req)) });
+}));
+
+router.post('/mail-review/:heldId/resolve', requireTicketingStaff, asyncHandler(async (req, res) => {
+  const body = req.body || {};
+  const data = await (await mailTriage()).resolve(req.workspaceId, heldIdParam(req), {
+    action: body.action,
+    ticketId: body.ticketId,
+    ...(typeof body.reopen === 'boolean' ? { reopen: body.reopen } : {}),
+    ...(body.requesterEmail !== undefined ? { requesterEmail: body.requesterEmail } : {}),
+    decisionId: body.decisionId || null,
+  }, req.ticketActor);
+  res.json({ success: true, data });
+}));
+
+router.post('/mail-review/:heldId/undo', requireTicketingStaff, asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await (await mailTriage()).undo(req.workspaceId, heldIdParam(req), req.ticketActor) });
+}));
+
+router.post('/mail-review/:heldId/rejudge', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await (await mailTriage()).rejudge(req.workspaceId, heldIdParam(req)) });
 }));
 
 /** Validates the optional mailbox→group/type routing fields (T3.1). */
@@ -890,6 +965,9 @@ router.patch('/mailboxes/:mailboxId', requireTicketingAdmin, asyncHandler(async 
     data.newTicketPolicy = req.body.newTicketPolicy;
   }
   if (req.body?.agentCcIntake !== undefined) data.agentCcIntake = req.body.agentCcIntake === true;
+  // "Also known as" is validated and saved first: a refused address changes nothing else.
+  const aliasService = await import('../services/mailboxAliasService.js');
+  if (req.body?.aliases !== undefined) await aliasService.setMailboxAliases(existing, req.body.aliases);
   let mailbox = Object.keys(data).length > 0
     ? await prisma.mailboxConnection.update({ where: { id }, data })
     : existing;
@@ -900,7 +978,7 @@ router.patch('/mailboxes/:mailboxId', requireTicketingAdmin, asyncHandler(async 
     const { setPrimaryMailbox } = await import('../services/mailboxPicker.js');
     mailbox = await setPrimaryMailbox(req.workspaceId, id, req.body.isPrimary === true);
   }
-  res.json({ success: true, data: presentMailbox(mailbox) });
+  res.json({ success: true, data: { ...presentMailbox(mailbox), aliases: await aliasService.getMailboxAliases(id) } });
 }));
 
 router.delete('/mailboxes/:mailboxId', requireTicketingAdmin, asyncHandler(async (req, res) => {
@@ -908,6 +986,7 @@ router.delete('/mailboxes/:mailboxId', requireTicketingAdmin, asyncHandler(async
   const existing = await prisma.mailboxConnection.findFirst({ where: { id, workspaceId: req.workspaceId } });
   if (!existing) throw new ValidationError('Mailbox not found in this workspace');
   await prisma.mailboxConnection.delete({ where: { id } });
+  await import('../services/mailboxAliasService.js').then((m) => m.clearMailboxAliases(id)).catch(() => {});
   res.json({ success: true });
 }));
 

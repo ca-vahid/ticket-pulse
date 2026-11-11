@@ -280,8 +280,8 @@ describe('sendDailyDigests', () => {
     const params = sendTransactionalEmailMock.mock.calls[0][0];
     // fallback@example.com is the super admin list (admin_emails setting mock).
     expect(params).toMatchObject({ workspaceId: 5, to: ['admin@bgcengineering.ca', 'fallback@example.com'], label: 'mailbox-hold-digest' });
-    expect(params.subject).toBe('Ticket Pulse: 2 unmatched replies waiting for review');
-    expect(params.html).toContain('https://ticketpulse.example/settings#ticket-mailboxes');
+    expect(params.subject).toMatch(/^Ticket Pulse: 2 held e-mails waiting for review in /);
+    expect(params.html).toContain('https://ticketpulse.example/tickets/mail-review?ws=');
     expect(params.html).toContain('&lt;script&gt;'); // subjects are escaped
   });
 

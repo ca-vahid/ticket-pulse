@@ -504,6 +504,18 @@ async function initialize() {
       }
     }
 
+    // Mail triage: the AI reviewer for held e-mail (plans/MAIL_TRIAGE_PLAN.md).
+    // Every workspace is Off until an admin picks Shadow or On.
+    // Kill switch MAIL_TRIAGE_ENABLED=false.
+    if (config.sync.enableScheduledSync && process.env.MAIL_TRIAGE_ENABLED !== 'false') {
+      try {
+        const { default: mailTriageService } = await import('./services/mailTriageService.js');
+        mailTriageService.start();
+      } catch (e) {
+        logger.warn('Mail triage failed to start (non-fatal):', e.message);
+      }
+    }
+
     // Close resolved tickets: Ticket Pulse tickets that stayed Resolved for the
     // workspace's chosen time (Settings → Ticket Ops → When a ticket is
     // resolved). Kill switch AUTO_CLOSE_RESOLVED_ENABLED=false.

@@ -1,6 +1,18 @@
-export const APP_VERSION = '4.3.64-preview';
+export const APP_VERSION = '4.3.65-preview';
 
 export const changelog = [
+  {
+    version: '4.3.65-preview',
+    date: 'November 11, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Mail review, with an AI that suggests where each held e-mail belongs</strong> &mdash; Tickets &rarr; <em>Mail review</em> replaces the held e-mail pop-up. Each e-mail Ticket Pulse could not file is one row, with a suggestion in plain words: <em>Add to #249132 (Closed 27 Oct) &rarr; reopens it</em>, <em>New ticket for &hellip;</em>, or <em>No ticket needed</em>, how sure the AI is (sure, likely, unsure) and a one-line reason. Accept it, pick another ticket, or decide yourself; every action can be undone from the <em>Done</em> tab. The <em>Log</em> tab shows every judgement, what people did with it, and how often they agree. It starts in <strong>Shadow</strong>: suggestions are shown and nothing is applied until an admin switches it On in Settings &rarr; Ticket Mailboxes. Even then it only acts when it is sure, only adds to a ticket or makes a new one, never discards mail, and never acts on automated senders.' },
+      { type: 'new', html: '<strong>A mailbox can have other addresses</strong> &mdash; Settings &rarr; Ticket Mailboxes &rarr; <em>Also known as</em>. When people write to a public address that delivers into a connected mailbox, list it there. Before, an agent who copied that address on an Outlook e-mail had the e-mail held, because Ticket Pulse did not recognise the address as the mailbox.' },
+      { type: 'improved', html: '<strong>Follow-ups go to the ticket they belong to</strong> &mdash; when an agent&rsquo;s e-mail, or a requester&rsquo;s reply, matches an existing ticket by subject or by an invoice or reference number, even a closed one, it is held as <em>Looks like a follow-up to an existing ticket</em> with the candidates listed, instead of quietly becoming a new ticket. A held e-mail written by an agent is added as the agent&rsquo;s own reply; it no longer reopens the ticket as if the requester had written.' },
+      { type: 'fix', html: '<strong>Separate invoices are no longer held as look-alikes</strong> &mdash; several e-mails from one sender whose subjects differ only by an invoice or reference number each become their own ticket. Real alert storms are still held: the same subject from the 4th, and the same wording with different numbers from the 11th.' },
+      { type: 'improved', html: '<strong>The held e-mail digest reads like it should</strong> &mdash; people are listed as people (it used to call them &ldquo;devices&rdquo;), each with the reason their mail was held, times are 12-hour, and an <em>Open Mail review</em> button goes straight to the page.' },
+      { type: 'fix', html: '<strong>Automated senders are never e-mailed by workflows</strong> &mdash; a requester marked as an unattended mailbox (an alert or integration sender) was meant to be skipped by workflow e-mails, but the mark was lost on the way. Nothing was sent, because the workflows concerned were still in mock mode; it is now skipped for real.' },
+    ],
+  },
   {
     version: '4.3.64-preview',
     date: 'November 10, 2026',

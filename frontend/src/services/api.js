@@ -1397,6 +1397,9 @@ export const ticketsAPI = {
     return await api.patch(`/tickets/mailboxes/${id}`, payload);
   },
 
+  // "Also known as": addresses this mailbox's recent mail was often sent to (read-only).
+  getMailboxAliasSuggestions: async (id) => await api.get(`/tickets/mailboxes/${id}/alias-suggestions`),
+
   removeMailbox: async (id) => {
     return await api.delete(`/tickets/mailboxes/${id}`);
   },
@@ -1435,6 +1438,28 @@ export const ticketsAPI = {
   // One decision for many held mails: action 'attach' (with ticketId) or 'discard'.
   bulkHeldMessages: async (ids, action, ticketId = null) => {
     return await api.post('/tickets/mailboxes/held/bulk', { ids, action, ...(ticketId ? { ticketId } : {}) });
+  },
+  // Mail review (plans/MAIL_TRIAGE_PLAN.md): held e-mail with the AI's
+  // suggestion. tab: waiting | done | log; the log takes outcome / confidence /
+  // action filters and a `before` cursor (a decision id). Answers { data, meta }.
+  mailReviewList: async ({ tab = 'waiting', limit, before, outcome, confidence, action } = {}) => {
+    const params = { tab };
+    for (const [k, v] of Object.entries({ limit, before, outcome, confidence, action })) {
+      if (v !== undefined && v !== null && v !== '') params[k] = v;
+    }
+    return await api.get('/tickets/mail-review', { params });
+  },
+  mailReviewGet: async (heldId) => await api.get(`/tickets/mail-review/${heldId}`),
+  // body: { action: 'attach'|'create'|'no_ticket', ticketId?, reopen?, requesterEmail?, decisionId? }
+  mailReviewResolve: async (heldId, body) => await api.post(`/tickets/mail-review/${heldId}/resolve`, body),
+  mailReviewBulkAccept: async (heldIds) => await api.post('/tickets/mail-review/bulk-accept', { heldIds }),
+  mailReviewUndo: async (heldId) => await api.post(`/tickets/mail-review/${heldId}/undo`),
+  mailReviewRejudge: async (heldId) => await api.post(`/tickets/mail-review/${heldId}/rejudge`),
+  mailReviewTicketSearch: async (q) => await api.get('/tickets/mail-review/ticket-search', { params: { q } }),
+  // Settings → Ticket Mailboxes → Mail triage (workspace admins): { mode, guidance, monthlyCapUsd, stats }.
+  getMailTriageSettings: async () => await api.get('/settings/mail-triage'),
+  saveMailTriageSettings: async ({ mode, guidance, monthlyCapUsd }) => {
+    return await api.put('/settings/mail-triage', { mode, guidance, monthlyCapUsd });
   },
   getBurstGrouping: async () => await api.get('/tickets/mailboxes/burst-grouping'),
   setBurstGrouping: async (mode) => await api.put('/tickets/mailboxes/burst-grouping', { mode }),

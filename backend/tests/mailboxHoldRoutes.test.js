@@ -95,7 +95,8 @@ function asViewer() {
 describe('GET /api/tickets/mailboxes/held', () => {
   test('agents (technician profile) and admins can list; the response carries heldCount', async () => {
     const res = await request(asAgent()).get('/api/tickets/mailboxes/held?status=held').expect(200);
-    expect(res.body).toEqual({ success: true, data: [{ id: 501, reason: 'unknown_reference', status: 'held' }], meta: { heldCount: 1 } });
+    // triageMode (Mail review, 11 Nov 2026): Off unless the workspace turned Mail triage on.
+    expect(res.body).toEqual({ success: true, data: [{ id: 501, reason: 'unknown_reference', status: 'held' }], meta: { heldCount: 1, triageMode: 'off' } });
     expect(holdMock.list).toHaveBeenCalledWith(7, { status: 'held' });
 
     await request(buildApp(ADMIN)).get('/api/tickets/mailboxes/held').expect(200);
@@ -114,7 +115,7 @@ describe('GET /api/tickets/mailboxes/held', () => {
     holdMock.list.mockResolvedValue([]);
     holdMock.count.mockResolvedValue(4);
     const res = await request(asAgent()).get('/api/tickets/mailboxes/held?status=discarded').expect(200);
-    expect(res.body.meta).toEqual({ heldCount: 4 });
+    expect(res.body.meta).toEqual({ heldCount: 4, triageMode: 'off' });
     expect(holdMock.count).toHaveBeenCalledWith(7, 'held');
   });
 });
