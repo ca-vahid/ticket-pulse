@@ -2406,7 +2406,8 @@ class TicketApprovalService {
     const agentEmail = String(approval.requestedBy || '').toLowerCase();
     const deciderEmail = String(actorEmail || approval.approverEmail || '').toLowerCase();
     const involved = await this._involvedAgents(ticket, approval, parts).catch(() => []);
-    const includeRequester = notifyRequester === true && Boolean(parts.requester);
+    // An unattended requester never gets the verdict copy, ticked or not.
+    const includeRequester = notifyRequester === true && Boolean(parts.requester) && parts.requester.unattended !== true;
     // Record the decision on the conversation. Its audience decides whether a
     // later requester-facing e-mail may quote it: 'internal' keeps a verdict
     // the requester never received out of their history.

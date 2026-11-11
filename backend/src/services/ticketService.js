@@ -5847,6 +5847,11 @@ class TicketService {
     // and the reply is recorded on the FreshService ticket afterwards. Notes
     // still post straight to FreshService.
     const viaTicketPulse = !isNative && !isPrivate && await isFsBornRepliesViaTicketPulseEnabled(workspaceId);
+    // FreshService mails its own requester on createReply, so the unattended
+    // guard in _emailRequesterReply never runs on this lane: refuse, as macros do.
+    if (!isNative && !isPrivate && !viaTicketPulse && ticket.requester?.unattended === true) {
+      throw new ValidationError('The requester is an unattended mailbox (an alert or integration sender), and FreshService would e-mail it. Add a private note instead');
+    }
     let externalEntryId = null;
     if (!isNative && !viaTicketPulse) {
       const client = await mirrorService.getInteractiveClient(workspaceId);

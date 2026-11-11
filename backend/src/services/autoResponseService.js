@@ -5,6 +5,7 @@ import autoResponseRepository from './autoResponseRepository.js';
 import llmConfigService from './llmConfigService.js';
 import queueStatsService from './queueStatsService.js';
 import logger from '../utils/logger.js';
+import prisma from './prisma.js';
 import config from '../config/index.js';
 
 /**
@@ -338,10 +339,12 @@ class AutoResponseService {
         },
       );
 
-      // STEP 8: Send email (skip in dry-run)
+      // STEP 8: Send email (skip in dry-run, and never to an unattended mailbox)
       let emailResult = { success: false, error: 'Skipped (dry-run mode)' };
+      const unattendedSender = await prisma.requester.findFirst({ where: { email: { equals: String(senderEmail || ''), mode: 'insensitive' }, unattended: true }, select: { id: true } }).catch(() => null);
+      if (unattendedSender) emailResult = { success: false, error: 'Skipped (unattended requester)' };
 
-      if (!dryRun) {
+      if (!dryRun && !unattendedSender) {
         logger.info('Sending auto-response email');
         emailResult = await emailService.sendAutoResponse({
           to: senderEmail,
