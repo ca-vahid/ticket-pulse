@@ -1021,7 +1021,8 @@ export const ticketsAPI = {
   setCategoryGroupLinks: async (links) => await api.put('/tickets/category-group-links', { links }),
 
   // Presence (gap plan 2 P4.1) — in-memory "also viewing", nothing stored
-  presenceHeartbeat: async (id, leaving = false) => await api.post(`/tickets/${id}/presence`, leaving ? { leaving: true } : {}),
+  // `composing` ('reply' | 'note' | null): what this person is writing, for "X is replying".
+  presenceHeartbeat: async (id, leaving = false, composing = null) => await api.post(`/tickets/${id}/presence`, leaving ? { leaving: true } : (composing ? { composing } : {})),
   presenceSnapshot: async () => await api.get('/tickets/presence'),
 
   // Outbound webhooks (admin)

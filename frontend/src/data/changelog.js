@@ -1,6 +1,17 @@
-export const APP_VERSION = '4.3.67-preview';
+export const APP_VERSION = '4.3.68-preview';
 
 export const changelog = [
+  {
+    version: '4.3.68-preview',
+    date: 'November 11, 2026',
+    entries: [
+      { type: 'new', html: '<strong>See when someone else is writing on the ticket</strong> &mdash; if a colleague has started a reply or a note on the ticket you have open, a line above the editor says so (&ldquo;Sam is writing a reply on this ticket right now&rdquo;), so two people do not answer the same requester. Nothing is stored; it shows only while they are typing.' },
+      { type: 'new', html: '<strong>Undo send, if you want it</strong> &mdash; in the arrow menu beside Send reply there is a switch, <em>5 seconds to undo a reply</em>. With it on, a reply waits five seconds with an Undo button; press Send again (or Ctrl+Enter) to send at once. It is off unless you turn it on, it is remembered for you, and internal notes never wait.' },
+      { type: 'new', html: '<strong>Quote part of a message in your reply</strong> &mdash; select some text in the description or the conversation and a <em>Quote in reply</em> button appears; it drops the text into the editor as a quote.' },
+      { type: 'new', html: '<strong>Drag files onto the editor, and an emoji button</strong> &mdash; drop files anywhere on the reply box to attach them (the same limits as Attach). The smiley button beside Attach opens a small set of emoji.' },
+      { type: 'improved', html: '<strong>Templates: search, and they land where your cursor is</strong> &mdash; with more than five templates the list gets a search box (Enter picks the first match). A template added to a draft now goes in at the cursor instead of at the end.' },
+    ],
+  },
   {
     version: '4.3.67-preview',
     date: 'November 11, 2026',

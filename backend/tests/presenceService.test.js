@@ -26,7 +26,7 @@ describe('presence registry', () => {
     expect(broadcastMock).toHaveBeenCalledWith('presence', {
       workspaceId: 1,
       ticketId: 42,
-      viewers: [{ email: 'ana@x.com', name: 'Ana' }],
+      viewers: [{ email: 'ana@x.com', name: 'Ana', composing: null }],
     }, 1);
   });
 
@@ -51,7 +51,7 @@ describe('presence registry', () => {
     leavePresence(1, 42, 'ana@x.com');
     expect(broadcastMock).toHaveBeenCalledWith('presence', expect.objectContaining({
       ticketId: 42,
-      viewers: [{ email: 'bo@x.com', name: 'Bo' }],
+      viewers: [{ email: 'bo@x.com', name: 'Bo', composing: null }],
     }), 1);
     leavePresence(1, 42, 'bo@x.com');
     expect(presenceSnapshot(1)).toEqual({});
@@ -60,8 +60,8 @@ describe('presence registry', () => {
   test('snapshot is workspace-scoped', () => {
     heartbeatPresence(1, 42, { email: 'ana@x.com', name: 'Ana' });
     heartbeatPresence(2, 42, { email: 'zed@x.com', name: 'Zed' });
-    expect(presenceSnapshot(1)).toEqual({ 42: [{ email: 'ana@x.com', name: 'Ana' }] });
-    expect(presenceSnapshot(2)).toEqual({ 42: [{ email: 'zed@x.com', name: 'Zed' }] });
+    expect(presenceSnapshot(1)).toEqual({ 42: [{ email: 'ana@x.com', name: 'Ana', composing: null }] });
+    expect(presenceSnapshot(2)).toEqual({ 42: [{ email: 'zed@x.com', name: 'Zed', composing: null }] });
   });
 
   test('the sweep expires viewers whose heartbeats stopped', () => {
@@ -78,5 +78,27 @@ describe('presence registry', () => {
   test('leaving an unknown viewer is a silent no-op', () => {
     leavePresence(1, 99, 'ghost@x.com');
     expect(broadcastMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('"someone is replying" (Nov 2026)', () => {
+  test('starting and stopping a reply is announced; an unchanged state is not', () => {
+    heartbeatPresence(1, 42, { email: 'ana@x.com', name: 'Ana' });
+    broadcastMock.mockClear();
+    heartbeatPresence(1, 42, { email: 'ana@x.com', name: 'Ana', composing: 'reply' });
+    expect(broadcastMock).toHaveBeenCalledWith('presence', {
+      workspaceId: 1, ticketId: 42, viewers: [{ email: 'ana@x.com', name: 'Ana', composing: 'reply' }],
+    }, 1);
+    broadcastMock.mockClear();
+    heartbeatPresence(1, 42, { email: 'ana@x.com', name: 'Ana', composing: 'reply' });
+    expect(broadcastMock).not.toHaveBeenCalled();
+    heartbeatPresence(1, 42, { email: 'ana@x.com', name: 'Ana' });
+    expect(broadcastMock).toHaveBeenCalledTimes(1);
+    expect(presenceSnapshot(1)[42]).toEqual([{ email: 'ana@x.com', name: 'Ana', composing: null }]);
+  });
+
+  test('only reply and note are accepted', () => {
+    const viewers = heartbeatPresence(1, 42, { email: 'ana@x.com', name: 'Ana', composing: '<script>' });
+    expect(viewers).toEqual([{ email: 'ana@x.com', name: 'Ana', composing: null }]);
   });
 });
