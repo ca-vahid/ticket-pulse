@@ -176,7 +176,7 @@ export default function MailDetailsPanel({
                   {candidates.map((c) => (
                     <li key={c.ticket.id} className="py-2 first:pt-0 last:pb-0">
                       <p className="text-sm text-foreground [overflow-wrap:anywhere]">
-                        <a href={`/tickets?peek=${c.ticket.id}`} target="_blank" rel="noopener noreferrer" className="tp-focus-ring rounded font-medium tabular-nums text-primary hover:underline">{fmtRef(c.ticket)}</a>
+                        <a href={`/tickets/${c.ticket.id}`} target="_blank" rel="noopener noreferrer" className="tp-focus-ring rounded font-medium tabular-nums text-primary hover:underline">{fmtRef(c.ticket)}</a>
                         {c.ticket.subject ? ` · ${c.ticket.subject}` : ''}
                         <span className="text-muted-foreground">
                           {closedNote(c.ticket) ? ` ${closedNote(c.ticket)}` : c.ticket.status ? ` (${c.ticket.status})` : ''}

@@ -113,13 +113,33 @@ describe('Mail review: Waiting', () => {
     expect(within(rows()[0]).getByText('Tue 10 Nov, 12:36 PM')).toBeInTheDocument();
   });
 
+  test('Waiting is a table like the Approvals page: a head row, and each e-mail in the same four columns', async () => {
+    mount();
+    await waitFor(() => expect(rows()).toHaveLength(6));
+    const table = screen.getByTestId('mr-table');
+    expect(table.className).toMatch(/tp-card/);
+    const head = table.firstElementChild;
+    expect([...head.children].map((c) => c.textContent)).toEqual(['From', 'E-mail', 'AI suggestion', 'Received']);
+    const cols = head.className.match(/md:grid-cols-\[[^\]]+\]/)[0];
+    const row = rows()[0];
+    expect(row.firstElementChild.className).toContain(cols);
+    expect(within(row).getByTestId('mr-from')).toHaveTextContent('Robin Vale');
+    expect(within(row).getByTestId('mr-mail')).toHaveTextContent('Subject 1');
+    expect(within(row).getByTestId('mr-mail')).toHaveTextContent('Snippet 1');
+    // The buttons sit with the suggestion they act on.
+    const decision = within(row).getByTestId('mr-decision');
+    expect(within(decision).getByTestId('mr-suggestion')).toBeInTheDocument();
+    expect(within(decision).getByTestId('mr-primary')).toHaveTextContent('Accept');
+  });
+
   test('the suggestion line: verb, ticket link, the consequence, confidence as a word', async () => {
     mount();
     await waitFor(() => expect(rows()).toHaveLength(6));
     const line = (i) => within(rows()[i]).getByTestId('mr-suggestion');
     expect(line(0)).toHaveTextContent('AI suggests: Add to #249132 · Reminder: invoice 4053377 (Closed 27 Oct) reopens it · sure');
     const link = within(line(0)).getByRole('link', { name: '#249132' });
-    expect(link).toHaveAttribute('href', '/tickets?peek=9001');
+    // The ticket page, as Analytics links it (the Tickets peek link did not open reliably in a fresh tab).
+    expect(link).toHaveAttribute('href', '/tickets/9001');
     expect(link).toHaveAttribute('target', '_blank');
     expect(line(1)).toHaveTextContent('AI suggests: Add to TP-11340 · Statement request · likely');
     expect(line(2)).toHaveTextContent('AI suggests: New ticket for Dana Whitlock · sure');
