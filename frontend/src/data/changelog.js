@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.72-preview';
+export const APP_VERSION = '4.3.73-preview';
 
 export const changelog = [
+  {
+    version: '4.3.73-preview',
+    date: 'November 11, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Undo send: leaving the ticket no longer leaves the reply unsent</strong> &mdash; with <em>5 seconds to undo a reply</em> switched on, going to another ticket or page during the wait left the reply behind as a draft. It is now sent as you leave, and a message says so. If the browser tab is closed during the wait, the reply cannot be sent; when you next open the ticket, a line above the editor says <em>This reply was not sent</em>, with a <em>Send it now</em> button. The countdown also sits beside the Send button now, where it is easier to see.' },
+    ],
+  },
   {
     version: '4.3.72-preview',
     date: 'November 11, 2026',

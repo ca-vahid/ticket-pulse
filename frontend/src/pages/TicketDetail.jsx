@@ -1016,8 +1016,17 @@ export default function TicketDetail() {
   // Undo send (Nov 2026): a personal choice, off by default. A reply waits
   // 5 seconds with Undo / Send now; Ctrl+Enter again sends at once.
   const [undoSendOn, setUndoSendOn] = useState(false);
-  const [pendingSend, setPendingSend] = useState(null); // { until, opts }
+  const [pendingSend, setPendingSend] = useState(null); // { until, opts, ticketId }
   const [pendingLeft, setPendingLeft] = useState(0);
+  // Leaving the ticket while a reply waits (Vahid, 11 Nov 2026): the reply is
+  // sent, not left behind as a draft. `heldFlushRef` carries what to send; if
+  // the tab is closed instead, the draft is marked and says so on return.
+  const heldFlushRef = useRef(null);
+  const [heldDraftNotice, setHeldDraftNotice] = useState(false);
+  const pageAliveRef = useRef(true);
+  useEffect(() => { pageAliveRef.current = true; return () => { pageAliveRef.current = false; }; }, []);
+  const ticketIdRef = useRef(ticketId);
+  ticketIdRef.current = ticketId;
   useEffect(() => {
     let alive = true;
     Promise.resolve().then(() => uiPreferencesAPI?.get?.('composer.undoSend'))
@@ -1034,12 +1043,29 @@ export default function TicketDetail() {
     const tick = () => {
       const left = Math.max(0, Math.ceil((pendingSend.until - Date.now()) / 1000));
       setPendingLeft(left);
-      if (left <= 0) { const opts = pendingSend.opts; setPendingSend(null); sendNowRef.current?.({ ...opts, immediate: true }); }
+      if (left <= 0 && pendingSend.ticketId === ticketIdRef.current) { const opts = pendingSend.opts; setPendingSend(null); sendNowRef.current?.({ ...opts, immediate: true }); }
     };
     tick();
     const timer = setInterval(tick, 250);
     return () => clearInterval(timer);
   }, [pendingSend]);
+  // Leaving this ticket (another ticket, another page) while a reply waits:
+  // send it now. The same idempotency key means it can never go twice.
+  useEffect(() => () => {
+    const held = heldFlushRef.current;
+    heldFlushRef.current = null;
+    if (!held) return;
+    setPendingSend(null);
+    const say = (tone, message) => { if (pageAliveRef.current) showToast(tone, message, { duration: 6000 }); };
+    ticketsAPI.reply(held.ticketId, held.request)
+      .then(() => {
+        try { localStorage.removeItem(held.draftKey); } catch { /* no-op */ }
+        if (held.thenStatus) ticketsAPI.setStatus(held.ticketId, held.thenStatus).catch(() => {});
+        say('emerald', `Your reply on ${held.displayRef} was sent when you left the ticket`);
+      })
+      .catch(() => say('red', `Your reply on ${held.displayRef} was NOT sent. It is kept as a draft on that ticket.`));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticketId]);
   // Files dragged onto the composer.
   const [composerDragOver, setComposerDragOver] = useState(false);
   const [templateQuery, setTemplateQuery] = useState('');
@@ -1126,6 +1152,7 @@ export default function TicketDetail() {
     setComposerText('');
     setComposerCc([]);
     setComposerFiles([]);
+    setHeldDraftNotice(false);
     try {
       const raw = localStorage.getItem(draftKey);
       if (raw) {
@@ -1143,6 +1170,8 @@ export default function TicketDetail() {
           ccSeededRef.current = true;
         }
         if (draft.mode === 'note' || draft.mode === 'reply') setComposerMode(draft.mode);
+        // A reply that was waiting to send when the tab was closed.
+        setHeldDraftNotice(Boolean(draft.held && draft.body));
       }
     } catch { /* corrupt stash — start clean */ }
     draftLoadedRef.current = true;
@@ -1153,14 +1182,14 @@ export default function TicketDetail() {
     const timer = setTimeout(() => {
       try {
         if (composerText.trim() || composerCc.length) {
-          localStorage.setItem(draftKey, JSON.stringify({ body: composerBody, cc: composerCc, mode: composerMode, savedAt: Date.now() }));
+          localStorage.setItem(draftKey, JSON.stringify({ body: composerBody, cc: composerCc, mode: composerMode, savedAt: Date.now(), ...(pendingSend ? { held: true } : {}) }));
         } else {
           localStorage.removeItem(draftKey);
         }
       } catch { /* storage full/unavailable */ }
     }, 400);
     return () => clearTimeout(timer);
-  }, [composerBody, composerText, composerCc, composerMode, draftKey]);
+  }, [composerBody, composerText, composerCc, composerMode, draftKey, pendingSend]);
 
   // Tab-close guard while a draft is in flight (SPA navigation is already safe:
   // the stash restores the draft when the user comes back to this ticket).
@@ -2410,9 +2439,14 @@ export default function TicketDetail() {
     const immediate = Boolean(opts && opts.immediate === true);
     if (pendingSend && !immediate) { const held = pendingSend.opts; setPendingSend(null); sendNowRef.current?.({ ...held, immediate: true }); return; }
     if (composerMode === 'reply' && undoSendOn && !immediate && body) {
-      setPendingSend({ until: Date.now() + 5000, opts: { ...(thenStatus ? { thenStatus } : {}), mentionOk: true } });
+      setPendingSend({ until: Date.now() + 5000, ticketId, opts: { ...(thenStatus ? { thenStatus } : {}), mentionOk: true } });
+      setHeldDraftNotice(false);
+      // Marked straight away (the stash is otherwise debounced): a tab closed in
+      // the next moment must come back saying "this was not sent".
+      try { localStorage.setItem(draftKey, JSON.stringify({ body: composerBody, cc: composerCc, mode: 'reply', savedAt: Date.now(), held: true })); } catch { /* storage unavailable */ }
       return;
     }
+    setHeldDraftNotice(false);
     const statusBefore = ticket?.status;
     if (composerMode === 'forward') {
       if (forwardTo.length === 0) {
@@ -2466,6 +2500,7 @@ export default function TicketDetail() {
           ...(ccRemoved.length ? { ccRemoved } : {}),
           ...(subjectOverride ? { subject: subjectOverride } : {}),
         });
+        heldFlushRef.current = null;
       } else {
         const lower = body.toLowerCase();
         const mentions = composerMentions
@@ -2505,6 +2540,29 @@ export default function TicketDetail() {
   };
 
   sendNowRef.current = sendComposer;
+  // While a reply waits, keep what would be sent, so leaving the ticket can send it.
+  if (pendingSend && pendingSend.ticketId === ticketId) {
+    const text = composerText.trim();
+    const subjectDraft = composerSubject.trim();
+    const subjectOverride = isNative && subjectDraft && subjectDraft !== (ticket?.replySubjectDefault || '') ? subjectDraft : null;
+    heldFlushRef.current = text ? {
+      ticketId,
+      draftKey,
+      displayRef: ticket?.displayRef || 'the ticket',
+      thenStatus: canWrite ? (pendingSend.opts?.thenStatus || null) : null,
+      request: {
+        bodyText: text,
+        ...(isRichContent(composerBody) ? { bodyHtml: composerBody } : {}),
+        files: composerFiles,
+        idempotencyKey: idemKeyRef.current,
+        cc: composerCc,
+        ...(removedAdditionalRequesters.length ? { ccRemoved: removedAdditionalRequesters } : {}),
+        ...(subjectOverride ? { subject: subjectOverride } : {}),
+      },
+    } : null;
+  } else if (!pendingSend) {
+    heldFlushRef.current = null;
+  }
 
   // Header toolbar (16 Sep 2026): quiet icon buttons whose label appears at xl.
   const secondaryActionClass = 'tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 text-xs font-medium text-muted-foreground hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200';
@@ -3868,6 +3926,14 @@ export default function TicketDetail() {
                             </span>
                           )}
                         </div>
+                        {composerMode === 'reply' && heldDraftNotice && !pendingSend && (
+                          <div role="alert" data-testid="held-draft-notice" className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-l-2 border-amber-500 pl-2.5 text-xs text-amber-800 dark:text-amber-200">
+                            <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                            <span className="min-w-0 flex-1"><strong>This reply was not sent.</strong> It was still waiting its 5 seconds when the page was closed.</span>
+                            <button type="button" onClick={() => sendComposer({ immediate: true })} className="tp-focus-ring rounded-md bg-primary px-2.5 py-1 font-semibold text-primary-foreground hover:bg-blue-700">Send it now</button>
+                            <button type="button" onClick={() => setHeldDraftNotice(false)} className="tp-focus-ring rounded-md px-2 py-1 font-medium text-muted-foreground hover:bg-muted hover:text-foreground">Keep editing</button>
+                          </div>
+                        )}
                         {composerMode === 'reply' && (noteToReplyNotice || mentionInReplyConfirm) && (
                           <div role="alert" data-testid="note-to-reply-notice" className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-l-2 border-amber-500 pl-2.5 text-xs text-amber-800 dark:text-amber-200">
                             <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -4082,13 +4148,14 @@ export default function TicketDetail() {
                             {composerText.trim() && !pendingSend && (
                               <span className="text-[10px] text-muted-foreground/50 truncate" title="Drafts are kept per ticket until sent">draft saved</span>
                             )}
-                            {pendingSend && (
-                              <span role="status" data-testid="pending-send" className="inline-flex items-center gap-2 text-xs font-medium text-foreground">
-                                Sending in {pendingLeft} s
-                                <button type="button" onClick={() => setPendingSend(null)} className="tp-focus-ring rounded-md border border-border px-2 py-1 font-semibold hover:bg-muted">Undo</button>
-                              </span>
-                            )}
                           </span>
+                          {pendingSend && (
+                            <span role="status" data-testid="pending-send" className="ml-auto inline-flex items-center gap-2 text-sm font-semibold text-foreground" title="If you leave this ticket now, the reply is sent">
+                              <Loader2 className="h-4 w-4 animate-spin text-primary motion-off:animate-none" aria-hidden="true" />
+                              Sending in {pendingLeft} s
+                              <button type="button" onClick={() => setPendingSend(null)} className="tp-focus-ring rounded-lg border border-border bg-card px-3 py-1.5 text-sm font-semibold hover:bg-muted">Undo</button>
+                            </span>
+                          )}
                           {(() => {
                             const sendDisabled = isSending || (composerMode === 'forward' ? (forwardTo.length === 0 || !forwardAvailable) : !composerText.trim());
                             const tone = composerMode === 'reply' ? 'bg-primary text-primary-foreground hover:bg-blue-700'
@@ -4142,7 +4209,7 @@ export default function TicketDetail() {
                                       <label className="mt-1 flex items-start justify-between gap-3 border-t border-border px-2 pb-1 pt-2">
                                         <span>
                                           <span className="block text-xs font-medium text-foreground">5 seconds to undo a reply</span>
-                                          <span className="block text-[10px] text-muted-foreground">Replies wait 5 s with an Undo. Send again to send at once. Remembered for you.</span>
+                                          <span className="block text-[10px] text-muted-foreground">Replies wait 5 s with an Undo. Send again to send at once; leaving the ticket sends it too. Remembered for you.</span>
                                         </span>
                                         <Switch checked={undoSendOn} onCheckedChange={(v) => saveUndoSend(Boolean(v))} aria-label="5 seconds to undo a reply" />
                                       </label>
