@@ -184,6 +184,90 @@ describe('rules before a card is sent', () => {
   });
 });
 
+// QA 11-10 #1: a Ticket Pulse-born ticket carries a Ticket Pulse group (internalGroupId),
+// often with no FreshService group, so "my groups" found nobody.
+describe('new unassigned ticket in my groups (QA 11-10 #1)', () => {
+  const PRIYA = { id: 21, name: 'Priya Nair', email: 'priya@x.io', timezone: 'America/Vancouver', workStartTime: null, workEndTime: null };
+  const created = (ticketOver = {}) => ctx('ticket.created', {}, {
+    assignedAgent: null,
+    ticket: { id: 60, displayRef: 'TP-900', subject: 'Invoice coding', priority: 2, status: 'Open', groupId: null, isNoise: false, ...ticketOver },
+  });
+  beforeEach(() => {
+    prismaMock.ticket.findUnique = jest.fn().mockResolvedValue({ internalGroupId: 34 });
+    prismaMock.group.findFirst.mockReset();
+    prismaMock.groupMember.findMany.mockReset();
+    prismaMock.technician.findMany.mockReset();
+  });
+  afterEach(() => { for (const v of svc.pending.values()) clearTimeout(v.timer); svc.pending.clear(); });
+
+  test('members of the Ticket Pulse group are found when there is no FreshService group', async () => {
+    prismaMock.group.findFirst.mockImplementation(async ({ where }) => (where.id === 34 ? { id: 34 } : null));
+    prismaMock.groupMember.findMany.mockResolvedValue([{ technicianId: 21 }]);
+    prismaMock.technician.findMany.mockResolvedValue([PRIYA]);
+    const people = await svc._recipients('group', created(), 1);
+    expect(people).toEqual([PRIYA]);
+    expect(prismaMock.groupMember.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { groupId: { in: [34] }, workspaceId: 1 } }));
+  });
+
+  test('a FreshService group and a Ticket Pulse group both count, each person once', async () => {
+    prismaMock.group.findFirst.mockImplementation(async ({ where }) => (where.freshserviceId === 1000555n ? { id: 12 } : (where.id === 34 ? { id: 34 } : null)));
+    prismaMock.groupMember.findMany.mockResolvedValue([{ technicianId: 21 }, { technicianId: 21 }, { technicianId: 22 }]);
+    prismaMock.technician.findMany.mockResolvedValue([PRIYA]);
+    await svc._recipients('group', created({ groupId: '1000555' }), 1);
+    expect(prismaMock.groupMember.findMany.mock.calls[0][0].where.groupId).toEqual({ in: [12, 34] });
+    expect(prismaMock.technician.findMany.mock.calls[0][0].where.id).toEqual({ in: [21, 22] });
+  });
+
+  test('no group at all = nobody (no guessing)', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue({ internalGroupId: null });
+    expect(await svc._recipients('group', created(), 1)).toEqual([]);
+    expect(prismaMock.groupMember.findMany).not.toHaveBeenCalled();
+  });
+
+  test('a workspace priority floor of "Any priority" lets a Medium ticket through; the built-in High floor does not', async () => {
+    prismaMock.group.findFirst.mockImplementation(async ({ where }) => (where.id === 34 ? { id: 34 } : null));
+    prismaMock.groupMember.findMany.mockResolvedValue([{ technicianId: 21 }]);
+    prismaMock.technician.findMany.mockResolvedValue([PRIYA]);
+    prismaMock.notificationWorkspaceSetting.findUnique.mockResolvedValue({ workspaceId: 1, teamsEnabled: true, defaults: { events: { group_unassigned: 'teams' }, options: {} } });
+    await svc._onTicketEvent(created());
+    expect(svc.pending.size).toBe(0);
+    prismaMock.notificationWorkspaceSetting.findUnique.mockResolvedValue({ workspaceId: 1, teamsEnabled: true, defaults: { events: { group_unassigned: 'teams' }, options: { groupMinPriority: 1 } } });
+    await svc._onTicketEvent(created());
+    expect([...svc.pending.keys()]).toEqual(['priya@x.io|60']);
+  });
+
+  test('cleanPrefs keeps a workspace priority floor', () => {
+    expect(cleanPrefs({ options: { groupMinPriority: 1 } }).options.groupMinPriority).toBe(1);
+  });
+});
+
+describe('Mail & alerts shows the workspace on screen (QA 11-10 #1)', () => {
+  const rows = [{ id: 9, name: 'Sam Okafor', email: 'sam@x.io', workspaceId: 1, workspace: { id: 1, name: 'IT' } }];
+  beforeEach(() => {
+    prismaMock.technician.findMany.mockReset().mockResolvedValue(rows);
+    prismaMock.workspace.findUnique.mockImplementation(async ({ where }) => ({ id: where.id, name: where.id === 1 ? 'IT' : 'Project Accounting', nativeTicketingEnabled: true }));
+    prismaMock.ticketNotificationMute.findMany.mockResolvedValue([]);
+  });
+  afterEach(() => { prismaMock.workspace.findUnique.mockReset().mockResolvedValue({ nativeTicketingEnabled: true }); });
+
+  test('an agent in the workspace on screen sees that workspace, with no warning', async () => {
+    const s = await svc.myStatus('sam@x.io', 1);
+    expect(s.workspace).toEqual({ id: 1, name: 'IT' });
+    expect(s.notAgentIn).toBeNull();
+  });
+
+  test('not an active agent there: shows their own workspace and says so, instead of refusing', async () => {
+    const s = await svc.myStatus('sam@x.io', 5);
+    expect(s.workspace).toEqual({ id: 1, name: 'IT' });
+    expect(s.notAgentIn).toEqual({ id: 5, name: 'Project Accounting' });
+  });
+
+  test('no agent profile anywhere still refuses', async () => {
+    prismaMock.technician.findMany.mockResolvedValue([]);
+    await expect(svc.myStatus('nobody@x.io', 5)).rejects.toThrow(/No active technician profile/);
+  });
+});
+
 describe('cards', () => {
   const t = { id: 50, workspaceId: 1, ref: '#244001', subject: 'VPN down', requesterName: 'Rita', priorityLabel: 'High', dueLabel: 'Oct 1', url: 'https://tp/tickets/50' };
   test('Take it only on unassigned tickets; note and reply only where Ticket Pulse can write', () => {

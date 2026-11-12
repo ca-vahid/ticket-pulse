@@ -284,7 +284,8 @@ describe('People: faces and the onboarding / offboarding switch', () => {
     const { container } = renderAt('/onboarding/people');
     expect(await screen.findByText('Ann One')).toBeInTheDocument();
     expect(container.querySelector('img[src="photo:aone@bgcengineering.ca"]')).not.toBeNull();
-    expect(screen.getByText('Muhammad Shahidullah')).toBeInTheDocument();
+    // The name is also an option in the Agent filter (QA 11-10 #2); the row shows it outside the select.
+    expect(screen.getAllByText('Muhammad Shahidullah').some((el) => !el.closest('select'))).toBe(true);
     expect(api.families).toHaveBeenLastCalledWith({ status: 'open' });
     fireEvent.click(screen.getByRole('button', { name: 'Offboarding' }));
     await waitFor(() => expect(api.families).toHaveBeenLastCalledWith({ status: 'open', kind: 'offboarding' }));

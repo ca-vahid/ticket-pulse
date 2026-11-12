@@ -69,3 +69,28 @@ describe('Teams settings: disconnect an agent', () => {
     expect(screen.queryByTestId('teams-disconnect-8')).toBeNull();
   });
 });
+
+// QA 11-10 #1: the workspace default for "new unassigned ticket in my groups" gets a priority floor.
+describe('Teams settings: priority for new unassigned tickets', () => {
+  const GROUP_EVENT = { key: 'group_unassigned', label: 'A new unassigned ticket arrives in my groups', group: 'My team', mode: 'off' };
+  const withDefaults = (defaults) => ({ ...STATUS, agents: [], events: [GROUP_EVENT], settings: { ...STATUS.settings, defaults } });
+
+  test('hidden while the notice is Off', async () => {
+    teamsAdminAPI.status.mockResolvedValue({ data: withDefaults({ events: {}, options: {} }) });
+    render(<TeamsSettingsPanel />);
+    await screen.findByText('A new unassigned ticket arrives in my groups');
+    expect(screen.queryByLabelText('Priority for new unassigned tickets')).toBeNull();
+  });
+
+  test('shown when on; defaults to High and above; a change saves the workspace option', async () => {
+    const defaults = { events: { group_unassigned: 'teams' }, options: {} };
+    teamsAdminAPI.status.mockResolvedValue({ data: withDefaults(defaults) });
+    teamsAdminAPI.saveSettings.mockResolvedValue({ data: { ...STATUS.settings, defaults: { ...defaults, options: { groupMinPriority: 1 } } } });
+    render(<TeamsSettingsPanel />);
+    const select = await screen.findByLabelText('Priority for new unassigned tickets');
+    expect(select).toHaveValue('3');
+    expect(screen.getByText(/Goes to the active agents in the ticket.s group/)).toBeInTheDocument();
+    fireEvent.change(select, { target: { value: '1' } });
+    await waitFor(() => expect(teamsAdminAPI.saveSettings).toHaveBeenCalledWith({ defaults: { events: { group_unassigned: 'teams' }, options: { groupMinPriority: 1 } } }));
+  });
+});

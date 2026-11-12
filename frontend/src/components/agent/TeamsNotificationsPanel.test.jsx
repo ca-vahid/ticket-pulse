@@ -53,3 +53,25 @@ describe('TeamsNotificationsPanel — requester Teams chat', () => {
     expect(screen.getByRole('checkbox', { name: SWITCH })).toBeChecked();
   });
 });
+
+// QA 11-10 #1: the panel names the workspace it shows, and says when the person
+// is not an agent in the workspace on screen.
+describe('TeamsNotificationsPanel — which workspace', () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => cleanup());
+
+  test('asks for the workspace on screen and names it', async () => {
+    agentAPI.getTeams.mockResolvedValue({ data: { ...status(), workspace: { id: 5, name: 'Project Accounting' }, notAgentIn: null } });
+    render(<TeamsNotificationsPanel workspaceId={5} />);
+    expect(await screen.findByText('Settings for Project Accounting')).toBeInTheDocument();
+    expect(agentAPI.getTeams).toHaveBeenCalledWith({ workspaceId: 5 });
+    expect(screen.queryByText(/not an active agent/)).not.toBeInTheDocument();
+  });
+
+  test('not an agent there: shows their own workspace and tells them what to do', async () => {
+    agentAPI.getTeams.mockResolvedValue({ data: { ...status(), workspace: { id: 1, name: 'IT' }, notAgentIn: { id: 5, name: 'Project Accounting' } } });
+    render(<TeamsNotificationsPanel workspaceId={5} />);
+    expect(await screen.findByText('Settings for IT')).toBeInTheDocument();
+    expect(screen.getByText(/not an active agent in Project Accounting, so these don.t apply there. Switch workspace to change yours/)).toBeInTheDocument();
+  });
+});
