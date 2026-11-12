@@ -115,9 +115,10 @@ vi.mock('../components/tickets/CcChips', () => ({ default: () => <div data-testi
 vi.mock('../components/tickets/composer/TiptapEditor', async () => {
   const { forwardRef } = await import('react');
   return {
-    default: forwardRef(({ ariaLabel, onChange, slashItems, slashLabel }, _ref) => (
+    default: forwardRef(({ ariaLabel, onChange, slashItems, slashLabel, completionOn }, _ref) => (
       <textarea
         data-editor="tiptap"
+        data-completion={completionOn ? 'on' : 'off'}
         data-slash={`${slashLabel}:${(slashItems || []).map((i) => i.name).join('|')}`}
         aria-label={ariaLabel || 'editor'}
         onChange={(e) => onChange?.({ html: `<p>${e.target.value}</p>`, text: e.target.value })}
@@ -173,7 +174,7 @@ describe('Ticket composer, release C: the new editor', () => {
     expect(body('Reply body')).not.toHaveAttribute('data-editor');
   });
 
-  test('switched on: internal notes get the new editor with quick notes on "/", replies stay classic', async () => {
+  test('switched on: notes get quick notes on "/" and replies get templates on "/", both in the new editor', async () => {
     prefs.get.mockImplementation((key) => Promise.resolve({ data: { value: key === 'composer.editor' ? 'new' : null } }));
     renderPage();
     await ready();
@@ -185,7 +186,34 @@ describe('Ticket composer, release C: the new editor', () => {
     await waitFor(() => expect(apiOverrides.note).toHaveBeenCalledTimes(1));
     expect(apiOverrides.note.mock.calls[0][1]).toMatchObject({ bodyText: 'Called the user.' });
     toReply();
-    await waitFor(() => expect(body('Reply body')).not.toHaveAttribute('data-editor'));
+    await waitFor(() => expect(body('Reply body')).toHaveAttribute('data-editor', 'tiptap'));
+    await waitFor(() => expect(body('Reply body')).toHaveAttribute('data-slash', 'Templates:Ask for the model'));
+  });
+
+  test('"complete as I type" is its own switch, off by default, and only offered with the new editor', async () => {
+    prefs.get.mockImplementation((key) => Promise.resolve({ data: { value: key === 'composer.editor' ? 'new' : null } }));
+    renderPage();
+    await ready();
+    await waitFor(() => expect(body('Internal note body')).toHaveAttribute('data-completion', 'off'));
+    fireEvent.keyDown(document.body, { key: '?' });
+    const dialog = await screen.findByTestId('composer-shortcuts');
+    fireEvent.click(within(dialog).getByRole('switch', { name: 'Complete as I type' }));
+    await waitFor(() => expect(prefs.set).toHaveBeenCalledWith('composer.completion', 'on'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(body('Internal note body')).toHaveAttribute('data-completion', 'on'));
+    // What is sent is remembered for next time, in this browser.
+    type('Internal note body', 'Called the user and left a voicemail about the dock.');
+    fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
+    await waitFor(() => expect(apiOverrides.note).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(localStorage.getItem('tp_composer_phrases_v1')).toContain('Called the user and left a voicemail about the dock.'));
+  });
+
+  test('with the classic editor the completion switch is disabled', async () => {
+    renderPage();
+    await ready();
+    fireEvent.keyDown(document.body, { key: '?' });
+    const dialog = await screen.findByTestId('composer-shortcuts');
+    expect(within(dialog).getByRole('switch', { name: 'Complete as I type' })).toBeDisabled();
   });
 
   test('the switch lives in the keyboard and editor dialog and is remembered', async () => {

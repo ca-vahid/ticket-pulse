@@ -876,6 +876,7 @@ code {
     pointer-events: none;
     color: hsl(var(--muted-foreground) / 0.75);
   }
+  .tp-tiptap .tp-ghost { color: hsl(var(--muted-foreground) / 0.6); pointer-events: none; user-select: none; }
   .tp-tiptap .selectedCell { background: hsl(var(--primary) / 0.12); }
   .tp-rich-editor img.tp-editor-thumb {
     display: inline-block;

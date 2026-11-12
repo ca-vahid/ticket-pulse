@@ -6,7 +6,7 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 
 vi.mock('../../../hooks/useRequesterPhoto', () => ({ useRequesterPhoto: () => null }));
 
-import TiptapEditor, { classicShape } from './TiptapEditor';
+import TiptapEditor, { GHOST_KEY, classicShape } from './TiptapEditor';
 import { cleanPastedHtml, htmlToPlainText, sanitizeRichHtml } from '../RichTextEditor';
 
 /**
@@ -175,5 +175,49 @@ describe('the contract with the host', () => {
     for (const name of ['Bold', 'Italic', 'Underline', 'Strikethrough', 'Bulleted list', 'Numbered list', 'Quote', 'Inline code', 'Code block', 'Insert link', 'Undo', 'Redo', 'Clear formatting', 'Full screen']) {
       expect(screen.getByRole('button', { name })).toBeInTheDocument();
     }
+  });
+});
+
+describe('complete as I type', () => {
+  const PHRASES = ['I will let you know once the vendor replies.', 'Could you tell me the model of the device?'];
+  const ghost = (editor) => GHOST_KEY.getState(editor.state)?.text || null;
+  const press = (key, extra = {}) => screen.getByRole('textbox', { name: 'Body' }).dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...extra }));
+
+  test('off by default: no grey text, and Tab is not taken', async () => {
+    const { editor } = await load('', { completionPhrases: PHRASES });
+    act(() => { editor.commands.insertContent('I will'); });
+    expect(ghost(editor)).toBeNull();
+    expect(document.querySelector('[data-ghost]')).toBeNull();
+  });
+
+  test('offers the rest in grey; it is never part of what is sent; Tab takes it', async () => {
+    const { editor, onChange } = await load('', { completionPhrases: PHRASES, completionOn: true });
+    act(() => { editor.commands.insertContent('I will'); });
+    expect(ghost(editor)).toBe(' let you know once the vendor replies.');
+    await waitFor(() => expect(document.querySelector('[data-ghost]')).toHaveTextContent('let you know once the vendor replies.'));
+    expect(onChange.mock.calls.at(-1)[0]).toEqual({ html: '<p>I will</p>', text: 'I will' });
+    act(() => { press('Tab'); });
+    expect(onChange.mock.calls.at(-1)[0].text).toBe('I will let you know once the vendor replies.');
+    expect(ghost(editor)).toBeNull();
+  });
+
+  test('Ctrl+Right takes one word; Esc waves it away until the text changes', async () => {
+    const { editor, onChange } = await load('', { completionPhrases: PHRASES, completionOn: true });
+    act(() => { editor.commands.insertContent('Could you'); });
+    act(() => { press('ArrowRight', { ctrlKey: true }); });
+    expect(onChange.mock.calls.at(-1)[0].text).toBe('Could you tell');
+    expect(ghost(editor)).toBe(' me the model of the device?');
+    act(() => { press('Escape'); });
+    expect(ghost(editor)).toBeNull();
+    act(() => { editor.commands.insertContent(' me'); });
+    expect(ghost(editor)).toBe(' the model of the device?');
+  });
+
+  test('only at the end of a line of prose: not mid-sentence and not in code', async () => {
+    const { editor } = await load('<p>I will see</p>', { completionPhrases: PHRASES, completionOn: true });
+    act(() => { editor.commands.setTextSelection(7); }); // after "I will", text follows
+    expect(ghost(editor)).toBeNull();
+    act(() => { editor.commands.setContent('<pre><code>I will</code></pre>'); editor.commands.focus('end'); });
+    expect(ghost(editor)).toBeNull();
   });
 });
