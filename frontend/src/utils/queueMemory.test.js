@@ -54,3 +54,12 @@ describe('queue view memory (sticky Tickets filters, 14 Oct 2026)', () => {
     expect(() => rememberQueueView(null, '?a=1')).not.toThrow();
   });
 });
+
+describe('restoredQueueSearch (11 Nov 2026)', () => {
+  test('a link to one ticket\'s preview keeps its ?peek= on top of the restored view', async () => {
+    const { restoredQueueSearch } = await import('./queueMemory');
+    expect(restoredQueueSearch('?status=Open&assignee=7', '?peek=60405')).toBe('?status=Open&assignee=7&peek=60405');
+    expect(restoredQueueSearch('?status=Open', '')).toBe('?status=Open');
+    expect(restoredQueueSearch('', '?peek=12')).toBe('?peek=12');
+  });
+});

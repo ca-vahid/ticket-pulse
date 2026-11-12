@@ -23,7 +23,7 @@ import TicketBoard from '../components/tickets/TicketBoard';
 import { boardColumnScopes, useBoardColumns } from '../components/tickets/boardColumns';
 import MobileAssignSheet from '../components/tickets/MobileAssignSheet';
 import { OverridePromptToast, useOverridePrompt } from '../components/tickets/OverridePrompt';
-import { queueSearchToKeep, readQueueScroll, recallQueueScroll, recallQueueView, rememberQueueScroll, rememberQueueView } from '../utils/queueMemory';
+import { queueSearchToKeep, readQueueScroll, recallQueueScroll, recallQueueView, rememberQueueScroll, rememberQueueView, restoredQueueSearch } from '../utils/queueMemory';
 import { initialPull, stepPull, touchPull } from '../utils/pullToReveal';
 import { rememberTicketList } from '../utils/lastTicketList';
 import AiAssignModal from '../components/tickets/AiAssignModal';
@@ -494,7 +494,8 @@ export default function Tickets() {
       restoredForWsRef.current = workspaceId;
       const saved = !queueSearchToKeep(location.search) ? recallQueueView(workspaceId) : '';
       if (saved) {
-        navigate({ pathname: location.pathname, search: saved }, { replace: true });
+        // The saved filters come back; a ?peek= in the link stays.
+        navigate({ pathname: location.pathname, search: restoredQueueSearch(saved, location.search) }, { replace: true });
         return;
       }
     }

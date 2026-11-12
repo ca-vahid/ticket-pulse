@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.71-preview';
+export const APP_VERSION = '4.3.72-preview';
 
 export const changelog = [
+  {
+    version: '4.3.72-preview',
+    date: 'November 11, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>A link to a ticket&rsquo;s preview opens the preview</strong> &mdash; a Tickets link ending in <em>?peek=</em> and a ticket number, opened in a new tab or from a bookmark, showed the list without the preview. The page was putting your last filters back and dropping the preview from the address while doing so. The filters still come back, and the preview now opens on top of them.' },
+    ],
+  },
   {
     version: '4.3.71-preview',
     date: 'November 11, 2026',
