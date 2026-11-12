@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import ApprovalEventCard from '../components/tickets/ApprovalEventCard';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import ComposerShortcuts, { Keys, MOD } from '../components/tickets/composer/ComposerShortcuts';
 import EmojiPicker from '../components/tickets/composer/EmojiPicker';
+// The new editor (early access) loads only for the people who switch it on.
+const TiptapEditor = lazy(() => import('../components/tickets/composer/TiptapEditor'));
 import QuoteSelection from '../components/tickets/composer/QuoteSelection';
 import { Switch } from '../components/ui/switch';
 import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal';
@@ -998,6 +1000,19 @@ export default function TicketDetail() {
     document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
   }, [sendMenuOpen]);
+  // The new editor (Tiptap, early access): a personal switch, off by default,
+  // and for internal notes only until replies have had their own soak.
+  const [newEditorOn, setNewEditorOn] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    Promise.resolve().then(() => uiPreferencesAPI?.get?.('composer.editor'))
+      .then((res) => { if (alive && res?.data?.value === 'new') setNewEditorOn(true); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  const saveNewEditor = (on) => {
+    setNewEditorOn(on);
+    Promise.resolve().then(() => uiPreferencesAPI?.set?.('composer.editor', on ? 'new' : 'classic')).catch(() => {});
+  };
   // Undo send (Nov 2026): a personal choice, off by default. A reply waits
   // 5 seconds with Undo / Send now; Ctrl+Enter again sends at once.
   const [undoSendOn, setUndoSendOn] = useState(false);
@@ -2257,6 +2272,15 @@ export default function TicketDetail() {
     !(n.internalCategoryIds || []).length
     || (effectiveCategoryId && n.internalCategoryIds.includes(effectiveCategoryId)),
   ), [quickNotes, effectiveCategoryId]);
+  // Which editor the composer shows: the new one only for people who switched
+  // it on, and only for internal notes for now.
+  const ComposerEditor = newEditorOn && composerMode === 'note' ? TiptapEditor : RichTextEditor;
+  const composerSlashItems = useMemo(() => {
+    if (composerMode === 'note') {
+      return visibleQuickNotes.map((n) => ({ id: `q${n.id}`, name: n.name, hint: String(n.bodyText || '').slice(0, 70), html: n.bodyHtml || String(n.bodyText || '').replace(/\n/g, '<br>') }));
+    }
+    return templates.map((t) => ({ id: `t${t.id}`, name: t.name, hint: String(t.bodyText || '').slice(0, 70), html: t.bodyHtml || String(t.bodyText || '').replace(/\n/g, '<br>') }));
+  }, [composerMode, visibleQuickNotes, templates]);
   const insertQuickNote = (note) => {
     const addition = note.bodyHtml || String(note.bodyText || '').replace(/\n/g, '<br>');
     const joined = composerText.trim() ? `${composerBody}<p><br></p>${addition}` : addition;
@@ -3960,51 +3984,56 @@ export default function TicketDetail() {
                             </p>
                           </div>
                         )}
-                        <RichTextEditor
-                          ref={composerRef}
-                          value={composerBody}
-                          onChange={({ html, text }) => {
-                            setComposerBody(html);
-                            setComposerText(text);
-                            if (!text.trim()) { noteOriginRef.current = false; setNoteToReplyNotice(false); setMentionInReplyConfirm(false); }
-                            else if (composerMode === 'note') noteOriginRef.current = true;
-                          }}
-                          onSubmit={(o) => {
-                            if (!o?.shift || composerMode === 'forward') { sendComposer(); return; }
-                            // Ctrl+Shift+Enter: send and set the status used last; none yet → pick one.
-                            if (sendStatusPref && sendStatusChoices.includes(sendStatusPref)) sendComposer({ thenStatus: sendStatusPref });
-                            else setSendMenuOpen(true);
-                          }}
-                          placeholder={composerMode === 'reply'
-                            ? 'Write a reply to the requester… (Ctrl+Enter to send)'
-                            : composerMode === 'forward'
-                              ? 'Optional note to include above the forwarded thread…'
-                              : 'Add context for the team (never emailed) · type @ to tell a colleague…'}
-                          // @mentions: internal notes only — a reply goes to the requester word for word.
-                          mentionPeople={composerMode === 'note' ? mentionPeople : null}
-                          onMention={(person) => setComposerMentions((list) => (list.some((p) => p.id === person.id) ? list : [...list, person]))}
-                          ariaLabel={composerMode === 'reply' ? 'Reply body' : composerMode === 'forward' ? 'Forward note' : 'Internal note body'}
-                          minHeight={280}
-                          className={composerMode === 'note' ? 'bg-amber-50/25 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/30' : composerMode === 'forward' ? 'bg-violet-50/30 dark:bg-violet-500/10 border-violet-200 dark:border-violet-500/30' : 'bg-card border-input'}
-                          onImagePaste={composerMode === 'forward' ? undefined : (file) => {
-                            const ext = ((file.type || 'image/png').split('/')[1] || 'png').replace('jpeg', 'jpg');
-                            const name = `pasted-image-${++pasteCountRef.current}.${ext}`;
-                            addComposerFiles([new File([file], name, { type: file.type || 'image/png' })]);
-                            return name;
-                          }}
-                          // Phase D: read-only signature — the server appends it
-                          // to the outbound email; never seeded into the editable
-                          // HTML (draft/double-append safety). QA 10-09 #4: shown
-                          // inside the editor frame, right under the message.
-                          footer={composerMode === 'reply' && Boolean(meta?.actor?.technicianId)
-                            ? <ComposerSignatureStrip workspaceId={currentWorkspace?.id} />
-                            : null}
-                          expanded={composerExpanded}
-                          onToggleExpand={() => {
-                            setComposerExpanded((v) => !v);
-                            setTimeout(() => composerRef.current?.focus(), 0);
-                          }}
-                        />
+                        <Suspense fallback={<div className="rounded-lg border border-input bg-card" style={{ minHeight: 320 }} aria-busy="true" />}>
+                          <ComposerEditor
+                            ref={composerRef}
+                            // "/" menu (new editor): quick notes in a note, templates in a reply.
+                            slashItems={composerSlashItems}
+                            slashLabel={composerMode === 'note' ? 'Quick notes' : 'Templates'}
+                            value={composerBody}
+                            onChange={({ html, text }) => {
+                              setComposerBody(html);
+                              setComposerText(text);
+                              if (!text.trim()) { noteOriginRef.current = false; setNoteToReplyNotice(false); setMentionInReplyConfirm(false); }
+                              else if (composerMode === 'note') noteOriginRef.current = true;
+                            }}
+                            onSubmit={(o) => {
+                              if (!o?.shift || composerMode === 'forward') { sendComposer(); return; }
+                              // Ctrl+Shift+Enter: send and set the status used last; none yet → pick one.
+                              if (sendStatusPref && sendStatusChoices.includes(sendStatusPref)) sendComposer({ thenStatus: sendStatusPref });
+                              else setSendMenuOpen(true);
+                            }}
+                            placeholder={composerMode === 'reply'
+                              ? 'Write a reply to the requester… (Ctrl+Enter to send)'
+                              : composerMode === 'forward'
+                                ? 'Optional note to include above the forwarded thread…'
+                                : 'Add context for the team (never emailed) · type @ to tell a colleague…'}
+                            // @mentions: internal notes only — a reply goes to the requester word for word.
+                            mentionPeople={composerMode === 'note' ? mentionPeople : null}
+                            onMention={(person) => setComposerMentions((list) => (list.some((p) => p.id === person.id) ? list : [...list, person]))}
+                            ariaLabel={composerMode === 'reply' ? 'Reply body' : composerMode === 'forward' ? 'Forward note' : 'Internal note body'}
+                            minHeight={280}
+                            className={composerMode === 'note' ? 'bg-amber-50/25 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/30' : composerMode === 'forward' ? 'bg-violet-50/30 dark:bg-violet-500/10 border-violet-200 dark:border-violet-500/30' : 'bg-card border-input'}
+                            onImagePaste={composerMode === 'forward' ? undefined : (file) => {
+                              const ext = ((file.type || 'image/png').split('/')[1] || 'png').replace('jpeg', 'jpg');
+                              const name = `pasted-image-${++pasteCountRef.current}.${ext}`;
+                              addComposerFiles([new File([file], name, { type: file.type || 'image/png' })]);
+                              return name;
+                            }}
+                            // Phase D: read-only signature — the server appends it
+                            // to the outbound email; never seeded into the editable
+                            // HTML (draft/double-append safety). QA 10-09 #4: shown
+                            // inside the editor frame, right under the message.
+                            footer={composerMode === 'reply' && Boolean(meta?.actor?.technicianId)
+                              ? <ComposerSignatureStrip workspaceId={currentWorkspace?.id} />
+                              : null}
+                            expanded={composerExpanded}
+                            onToggleExpand={() => {
+                              setComposerExpanded((v) => !v);
+                              setTimeout(() => composerRef.current?.focus(), 0);
+                            }}
+                          />
+                        </Suspense>
                         {composerFiles.length > 0 && (
                           <ul className="mt-2 flex flex-wrap gap-2 items-start" aria-label="Files to attach">
                             {composerFiles.map((file) => (
@@ -4964,7 +4993,7 @@ export default function TicketDetail() {
       </main>
 
       <QuoteSelection scope={'[aria-label="Conversation"], [aria-label="Ticket description"]'} onQuote={quoteIntoComposer} enabled={canConverse} />
-      <ComposerShortcuts open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} singleKeys={singleKeys} onSingleKeysChange={saveSingleKeys} />
+      <ComposerShortcuts open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} singleKeys={singleKeys} onSingleKeysChange={saveSingleKeys} newEditor={newEditorOn} onNewEditorChange={saveNewEditor} />
 
       {toast && (
         <div

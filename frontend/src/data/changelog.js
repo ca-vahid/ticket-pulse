@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.69-preview';
+export const APP_VERSION = '4.3.70-preview';
 
 export const changelog = [
+  {
+    version: '4.3.70-preview',
+    date: 'November 11, 2026',
+    entries: [
+      { type: 'new', html: '<strong>A new editor to try, for internal notes</strong> &mdash; press <strong>?</strong> on a ticket (or the keyboard button under the editor) and switch on <em>New editor</em>. Internal notes then use it; replies to requesters stay on the classic editor for now. Type <strong>/</strong> to search and insert a quick note. Markdown works as you type: <strong>**bold**</strong>, <strong>-</strong> for a list, <strong>&gt;</strong> for a quote, three backticks for a code block. Undo and redo have buttons and work properly, links can be edited or removed, and there is strikethrough. Pasting from Excel, Outlook and code editors, @mentions and pasted pictures behave as before. It is off unless you switch it on, and the same switch puts the classic editor back.' },
+    ],
+  },
   {
     version: '4.3.69-preview',
     date: 'November 11, 2026',

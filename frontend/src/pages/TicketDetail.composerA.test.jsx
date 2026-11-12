@@ -42,14 +42,6 @@ const NATIVE = {
   displayRef: 'TP-1042',
   replySubjectDefault: 'Re: Laptop will not boot [TP-1042]',
 };
-const FS_BORN = {
-  ...BASE,
-  origin: 'freshservice',
-  freshserviceTicketId: '239470',
-  displayRef: '#239470',
-  replySubjectDefault: null,
-};
-
 const META = {
   nativeTicketingEnabled: true,
   technicians: [],
@@ -143,12 +135,6 @@ function renderPage() {
     </MemoryRouter>,
   );
 }
-
-const openReply = async () => {
-  await screen.findByRole('region', { name: 'Ticket description' });
-  fireEvent.click(screen.getByRole('button', { name: /reply\s?to requester/i }));
-  return screen.findByTestId('reply-subject-row');
-};
 
 const body = (name) => screen.getByRole('textbox', { name });
 const type = (name, value) => fireEvent.change(body(name), { target: { value } });
