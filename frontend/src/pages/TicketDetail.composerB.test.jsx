@@ -128,6 +128,8 @@ vi.mock('../components/tickets/RichTextEditor', async () => {
       );
     }),
     isRichContent: () => false,
+    // The page reads a restored draft through this.
+    htmlToPlainText: (h) => String(h || '').replace(/<[^>]+>/g, ''),
   };
 });
 
@@ -198,6 +200,59 @@ describe('Ticket composer, release B', () => {
     await screen.findByTestId('pending-send');
     fireEvent.click(screen.getByRole('button', { name: 'Send now' }));
     await waitFor(() => expect(apiOverrides.reply).toHaveBeenCalledTimes(1));
+  });
+
+  // Vahid, 11 Nov 2026: leaving during the wait must not leave the reply unsent.
+  test('leaving the ticket while a reply waits sends it', async () => {
+    prefs.get.mockImplementation((key) => Promise.resolve({ data: { value: key === 'composer.undoSend' ? 'on' : null } }));
+    const view = renderPage();
+    await ready();
+    await waitFor(() => expect(prefs.get).toHaveBeenCalledWith('composer.undoSend'));
+    toReply();
+    type('Reply body', 'On its way.');
+    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
+    await screen.findByTestId('pending-send');
+    expect(apiOverrides.reply).not.toHaveBeenCalled();
+    view.unmount(); // navigated away
+    await waitFor(() => expect(apiOverrides.reply).toHaveBeenCalledTimes(1));
+    expect(apiOverrides.reply.mock.calls[0][0]).toBe(501);
+    expect(apiOverrides.reply.mock.calls[0][1]).toMatchObject({ bodyText: 'On its way.' });
+    // Sent, so no draft is left behind.
+    await waitFor(() => expect(localStorage.getItem('tp_ticket_draft_501')).toBeNull());
+  });
+
+  test('Undo, then leaving: nothing is sent and the draft stays', async () => {
+    prefs.get.mockImplementation((key) => Promise.resolve({ data: { value: key === 'composer.undoSend' ? 'on' : null } }));
+    const view = renderPage();
+    await ready();
+    await waitFor(() => expect(prefs.get).toHaveBeenCalledWith('composer.undoSend'));
+    toReply();
+    type('Reply body', 'On its way.');
+    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
+    fireEvent.click(within(await screen.findByTestId('pending-send')).getByRole('button', { name: 'Undo' }));
+    await waitFor(() => expect(screen.queryByTestId('pending-send')).not.toBeInTheDocument());
+    view.unmount();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(apiOverrides.reply).not.toHaveBeenCalled();
+  });
+
+  test('a reply cut off by closing the tab comes back saying it was not sent, with Send it now', async () => {
+    localStorage.setItem('tp_ticket_draft_501', JSON.stringify({ body: '<p>On its way.</p>', cc: [], mode: 'reply', savedAt: Date.now(), held: true }));
+    renderPage();
+    await ready();
+    const notice = await screen.findByTestId('held-draft-notice');
+    expect(notice).toHaveTextContent('This reply was not sent.');
+    fireEvent.click(within(notice).getByRole('button', { name: 'Send it now' }));
+    await waitFor(() => expect(apiOverrides.reply).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByTestId('held-draft-notice')).not.toBeInTheDocument());
+  });
+
+  test('an ordinary draft comes back without that notice', async () => {
+    localStorage.setItem('tp_ticket_draft_501', JSON.stringify({ body: '<p>Half a thought</p>', cc: [], mode: 'reply', savedAt: Date.now() }));
+    renderPage();
+    await ready();
+    await screen.findByTestId('reply-subject-row');
+    expect(screen.queryByTestId('held-draft-notice')).not.toBeInTheDocument();
   });
 
   test('internal notes never wait, even with undo send on', async () => {
