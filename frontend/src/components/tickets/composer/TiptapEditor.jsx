@@ -6,7 +6,8 @@ import { Placeholder } from '@tiptap/extensions';
 import { TableKit } from '@tiptap/extension-table';
 import Image from '@tiptap/extension-image';
 import { Suggestion } from '@tiptap/suggestion';
-import { PluginKey } from '@tiptap/pm/state';
+import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import {
   Bold, Code, FileText, Heading2, Heading3, Italic, Link2, List, ListOrdered, Maximize2, Minimize2, Pilcrow, Redo2,
   RemoveFormatting, SquareCode, Strikethrough, TextQuote, Underline, Undo2,
@@ -16,6 +17,7 @@ import { awayTag } from '../../../utils/away';
 import {
   INLINE_IMAGE_KEEP_BYTES, cleanPastedHtml, extractInlineImages, htmlToPlainText, inlineImageToFile, sanitizeRichHtml,
 } from '../RichTextEditor';
+import { firstWord, suggestCompletion } from '../../../utils/composerPhrases';
 
 /**
  * The new editor (Nov 2026, early access): the same contract as RichTextEditor
@@ -87,6 +89,79 @@ const TpImage = Image.extend({
 
 const MENTION_KEY = new PluginKey('tpMentionMenu');
 const SLASH_KEY = new PluginKey('tpSlashMenu');
+export const GHOST_KEY = new PluginKey('tpGhost');
+
+/**
+ * "Complete as I type" (Nov 2026): grey text after the caret, offered from the
+ * phrases the host passes in. Tab takes all of it, Right-arrow too (the caret
+ * is at the end of the line, so the arrow has nowhere else to go), Ctrl+Right
+ * takes one word, Esc waves it away until the text changes. The grey text is a
+ * decoration: it is never part of what the editor holds or sends.
+ */
+function ghostPlugin(live) {
+  const none = { text: null, pos: null, before: null, dismissed: null };
+  return new Plugin({
+    key: GHOST_KEY,
+    state: {
+      init: () => none,
+      apply(tr, prev, _old, state) {
+        const meta = tr.getMeta(GHOST_KEY);
+        const dismissed = meta?.dismiss ? meta.dismiss : prev.dismissed;
+        const { phrases, completionOn } = live.current;
+        if (!completionOn || !phrases?.length) return none;
+        const sel = state.selection;
+        if (!sel.empty) return { ...none, dismissed };
+        const $from = sel.$from;
+        const parent = $from.parent;
+        // Only at the end of a line of prose: never mid-sentence, never in code.
+        if (!parent.isTextblock || parent.type.spec.code || $from.parentOffset !== parent.content.size) return { ...none, dismissed };
+        const before = parent.textBetween(0, $from.parentOffset, undefined, ' ');
+        if (dismissed && dismissed === before) return { text: null, pos: null, before, dismissed };
+        const text = suggestCompletion(before, phrases);
+        return { text: text || null, pos: text ? sel.from : null, before, dismissed: null };
+      },
+    },
+    props: {
+      decorations(state) {
+        const g = GHOST_KEY.getState(state);
+        if (!g?.text) return null;
+        const widget = Decoration.widget(g.pos, () => {
+          const span = document.createElement('span');
+          span.className = 'tp-ghost';
+          span.setAttribute('data-ghost', 'true');
+          span.setAttribute('aria-hidden', 'true');
+          span.title = 'Tab to accept · Ctrl+Right for one word · Esc to dismiss';
+          span.textContent = g.text;
+          return span;
+        }, { side: 1, key: `ghost-${g.text}` });
+        return DecorationSet.create(state.doc, [widget]);
+      },
+      handleKeyDown(view, event) {
+        const g = GHOST_KEY.getState(view.state);
+        if (!g?.text) return false;
+        const plain = !event.shiftKey && !event.altKey;
+        const mod = event.ctrlKey || event.metaKey;
+        if (plain && !mod && (event.key === 'Tab' || event.key === 'ArrowRight')) {
+          event.preventDefault();
+          view.dispatch(view.state.tr.insertText(g.text));
+          return true;
+        }
+        if (plain && mod && event.key === 'ArrowRight') {
+          event.preventDefault();
+          view.dispatch(view.state.tr.insertText(firstWord(g.text)));
+          return true;
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          view.dispatch(view.state.tr.setMeta(GHOST_KEY, { dismiss: g.before }));
+          return true;
+        }
+        return false;
+      },
+    },
+  });
+}
 
 function textToHtml(text) {
   const div = document.createElement('div');
@@ -148,6 +223,10 @@ const TiptapEditor = forwardRef(function TiptapEditor({
   // "/" menu: [{ id, name, hint, html }] — reply templates or quick notes.
   slashItems = null,
   slashLabel = 'Templates',
+  // "Complete as I type": the phrases on offer (most likely first), and the
+  // person's own switch. Off or empty = no grey text, Tab is an ordinary Tab.
+  completionPhrases = null,
+  completionOn = false,
 }, ref) {
   const frameRef = useRef(null);
   const lastEmittedRef = useRef(null);
@@ -162,7 +241,7 @@ const TiptapEditor = forwardRef(function TiptapEditor({
 
   // Latest props for the handlers Tiptap binds once.
   const live = useRef({});
-  live.current = { onChange, onSubmit, onImagePaste, mentionPeople, onMention, slashItems, headings };
+  live.current = { onChange, onSubmit, onImagePaste, mentionPeople, onMention, slashItems, headings, phrases: completionPhrases, completionOn };
   const sanitize = (html) => sanitizeRichHtml(html, { headings: live.current.headings });
 
   useEffect(() => () => {
@@ -218,6 +297,7 @@ const TiptapEditor = forwardRef(function TiptapEditor({
     name: 'tpMenus',
     addProseMirrorPlugins() {
       return [
+        ghostPlugin(live),
         Suggestion({
           editor: this.editor,
           pluginKey: MENTION_KEY,
@@ -243,7 +323,7 @@ const TiptapEditor = forwardRef(function TiptapEditor({
           command: ({ editor, range, props }) => {
             editor.chain().focus().insertContentAt(range, [
               { type: 'text', text: `@${props.name}`, marks: [{ type: 'tpMention' }] },
-              { type: 'text', text: ' ' },
+              { type: 'text', text: '\u00a0' },
             ]).run();
             live.current.onMention?.(props);
           },

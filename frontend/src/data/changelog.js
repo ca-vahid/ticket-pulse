@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.3.73-preview';
+export const APP_VERSION = '4.3.74-preview';
 
 export const changelog = [
+  {
+    version: '4.3.74-preview',
+    date: 'November 12, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Complete as I type, if you want it</strong> &mdash; a second switch under <em>New editor</em> (press <strong>?</strong> on a ticket). With it on, the editor offers the rest of a sentence in grey as you type. The offers come from the workspace templates and quick notes and from what you yourself have sent before; there is no AI in it. <strong>Tab</strong> takes the offer (so does the right arrow), <strong>Ctrl+Right</strong> takes one word, <strong>Esc</strong> waves it away, and typing on ignores it. Your own phrases are kept in your browser only, the requester&rsquo;s first name is swapped for whoever the ticket is for, and <em>Forget them</em> clears the list. It is off unless you switch it on.' },
+      { type: 'improved', html: '<strong>The new editor now works for replies too</strong> &mdash; if you switched on <em>New editor</em>, replies to requesters use it as well as internal notes, and typing <strong>/</strong> in a reply searches the reply templates (with the requester&rsquo;s name filled in). People who have not switched it on keep the classic editor everywhere.' },
+    ],
+  },
   {
     version: '4.3.73-preview',
     date: 'November 11, 2026',

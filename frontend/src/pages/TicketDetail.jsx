@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import ComposerShortcuts, { Keys, MOD } from '../components/tickets/composer/ComposerShortcuts';
 import EmojiPicker from '../components/tickets/composer/EmojiPicker';
+import { forgetPhrases, ownPhrases, phrasesFor, rememberSentText } from '../utils/composerPhrases';
 // The new editor (early access) loads only for the people who switch it on.
 const TiptapEditor = lazy(() => import('../components/tickets/composer/TiptapEditor'));
 import QuoteSelection from '../components/tickets/composer/QuoteSelection';
@@ -1000,8 +1001,9 @@ export default function TicketDetail() {
     document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
   }, [sendMenuOpen]);
-  // The new editor (Tiptap, early access): a personal switch, off by default,
-  // and for internal notes only until replies have had their own soak.
+  // The new editor (Tiptap, early access): a personal switch, off by default.
+  // People who switch it on get it for replies and notes (Vahid, 11 Nov 2026).
+  // "Complete as I type" is its own switch, also off by default.
   const [newEditorOn, setNewEditorOn] = useState(false);
   useEffect(() => {
     let alive = true;
@@ -1012,6 +1014,18 @@ export default function TicketDetail() {
   const saveNewEditor = (on) => {
     setNewEditorOn(on);
     Promise.resolve().then(() => uiPreferencesAPI?.set?.('composer.editor', on ? 'new' : 'classic')).catch(() => {});
+  };
+  const [completionOn, setCompletionOn] = useState(false);
+  const [phraseTick, setPhraseTick] = useState(0); // bumps when the remembered phrases change
+  useEffect(() => {
+    let alive = true;
+    Promise.resolve().then(() => uiPreferencesAPI?.get?.('composer.completion'))
+      .then((res) => { if (alive && res?.data?.value === 'on') setCompletionOn(true); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  const saveCompletion = (on) => {
+    setCompletionOn(on);
+    Promise.resolve().then(() => uiPreferencesAPI?.set?.('composer.completion', on ? 'on' : 'off')).catch(() => {});
   };
   // Undo send (Nov 2026): a personal choice, off by default. A reply waits
   // 5 seconds with Undo / Send now; Ctrl+Enter again sends at once.
@@ -2303,13 +2317,24 @@ export default function TicketDetail() {
   ), [quickNotes, effectiveCategoryId]);
   // Which editor the composer shows: the new one only for people who switched
   // it on, and only for internal notes for now.
-  const ComposerEditor = newEditorOn && composerMode === 'note' ? TiptapEditor : RichTextEditor;
+  const ComposerEditor = newEditorOn ? TiptapEditor : RichTextEditor;
+  const requesterFirstName = String(ticket?.requester?.name || '').trim().split(/\s+/)[0] || '';
+  // What "complete as I type" may offer on this ticket: the person's own sent
+  // phrases, then the templates (replies) or quick notes (notes).
+  const completionPhrases = useMemo(() => {
+    if (!newEditorOn || !completionOn) return [];
+    const source = composerMode === 'note' ? visibleQuickNotes : templates;
+    return phrasesFor({ firstName: requesterFirstName, extraTexts: source.map((t) => fillGreetingPlaceholders(String(t.bodyText || ''), greetingCtx())) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newEditorOn, completionOn, composerMode, visibleQuickNotes, templates, requesterFirstName, phraseTick, ticket?.id]);
   const composerSlashItems = useMemo(() => {
     if (composerMode === 'note') {
       return visibleQuickNotes.map((n) => ({ id: `q${n.id}`, name: n.name, hint: String(n.bodyText || '').slice(0, 70), html: n.bodyHtml || String(n.bodyText || '').replace(/\n/g, '<br>') }));
     }
-    return templates.map((t) => ({ id: `t${t.id}`, name: t.name, hint: String(t.bodyText || '').slice(0, 70), html: t.bodyHtml || String(t.bodyText || '').replace(/\n/g, '<br>') }));
-  }, [composerMode, visibleQuickNotes, templates]);
+    // Templates may carry the greeting placeholders: filled for this ticket, as the Templates button does.
+    return templates.map((t) => ({ id: `t${t.id}`, name: t.name, hint: String(t.bodyText || '').slice(0, 70), html: fillGreetingPlaceholders(t.bodyHtml || String(t.bodyText || '').replace(/\n/g, '<br>'), greetingCtx()) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composerMode, visibleQuickNotes, templates, ticket?.id]);
   const insertQuickNote = (note) => {
     const addition = note.bodyHtml || String(note.bodyText || '').replace(/\n/g, '<br>');
     const joined = composerText.trim() ? `${composerBody}<p><br></p>${addition}` : addition;
@@ -2510,6 +2535,8 @@ export default function TicketDetail() {
         setComposerMentions([]);
       }
       idemKeyRef.current = newIdempotencyKey();
+      // "Complete as I type" learns from what this person sends (kept in this browser only).
+      if (newEditorOn && completionOn) { rememberSentText(body, { firstName: requesterFirstName }); setPhraseTick((n) => n + 1); }
       setComposerBody('');
       setComposerText('');
       setComposerCc([]);
@@ -4056,6 +4083,8 @@ export default function TicketDetail() {
                             // "/" menu (new editor): quick notes in a note, templates in a reply.
                             slashItems={composerSlashItems}
                             slashLabel={composerMode === 'note' ? 'Quick notes' : 'Templates'}
+                            completionPhrases={completionPhrases}
+                            completionOn={newEditorOn && completionOn && composerMode !== 'forward'}
                             value={composerBody}
                             onChange={({ html, text }) => {
                               setComposerBody(html);
@@ -5060,7 +5089,7 @@ export default function TicketDetail() {
       </main>
 
       <QuoteSelection scope={'[aria-label="Conversation"], [aria-label="Ticket description"]'} onQuote={quoteIntoComposer} enabled={canConverse} />
-      <ComposerShortcuts open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} singleKeys={singleKeys} onSingleKeysChange={saveSingleKeys} newEditor={newEditorOn} onNewEditorChange={saveNewEditor} />
+      <ComposerShortcuts open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} singleKeys={singleKeys} onSingleKeysChange={saveSingleKeys} newEditor={newEditorOn} onNewEditorChange={saveNewEditor} completion={completionOn} onCompletionChange={saveCompletion} phraseCount={shortcutsOpen ? ownPhrases().length + phraseTick * 0 : 0} onForgetPhrases={() => { forgetPhrases(); setPhraseTick((n) => n + 1); }} />
 
       {toast && (
         <div
