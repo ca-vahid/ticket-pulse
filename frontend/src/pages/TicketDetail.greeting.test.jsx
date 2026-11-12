@@ -187,6 +187,7 @@ describe('TicketDetail reply greeting (QA 09-18 #4)', () => {
     await openReply();
     expect(screen.queryByTestId('greeting-controls')).not.toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Reply body' })).toHaveValue('');
-    expect(prefs.get).not.toHaveBeenCalled();
+    // The composer reads its own preferences (keys, send status); the greeting one is not asked for.
+    expect(prefs.get).not.toHaveBeenCalledWith('composer.greeting');
   });
 });
