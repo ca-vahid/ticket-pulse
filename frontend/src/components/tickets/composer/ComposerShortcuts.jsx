@@ -33,7 +33,7 @@ export function Keys({ keys }) {
   );
 }
 
-export default function ComposerShortcuts({ open, onClose, singleKeys, onSingleKeysChange }) {
+export default function ComposerShortcuts({ open, onClose, singleKeys, onSingleKeysChange, newEditor = false, onNewEditorChange = null }) {
   const closeRef = useRef(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -50,7 +50,7 @@ export default function ComposerShortcuts({ open, onClose, singleKeys, onSingleK
       <div className="absolute inset-0 bg-slate-950/45" aria-hidden="true" onClick={onClose} />
       <div className="tp-card relative w-full max-w-md rounded-xl p-5 shadow-soft animate-scaleIn">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-foreground">Keyboard shortcuts</h2>
+          <h2 className="text-sm font-semibold text-foreground">Keyboard and editor</h2>
           <button ref={closeRef} type="button" onClick={onClose} aria-label="Close" className="tp-focus-ring rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground">
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
@@ -70,6 +70,17 @@ export default function ComposerShortcuts({ open, onClose, singleKeys, onSingleK
           </span>
           <Switch checked={Boolean(singleKeys)} onCheckedChange={(v) => onSingleKeysChange?.(Boolean(v))} aria-label="Single-letter keys" />
         </label>
+        {onNewEditorChange && (
+          <label className="mt-3 flex items-start justify-between gap-4 border-t border-border pt-3">
+            <span>
+              <span className="block text-sm font-medium text-foreground">New editor <span className="text-xs font-normal text-muted-foreground">Early access</span></span>
+              <span className="block text-xs text-muted-foreground">
+                For internal notes for now. Type <strong>/</strong> for quick notes, use Markdown as you type (<strong>**bold**</strong>, <strong>-</strong> lists, <strong>&gt;</strong> quote, <strong>```</strong> code), and undo properly. Switch it off to go back to the classic editor. Remembered for you.
+              </span>
+            </span>
+            <Switch checked={Boolean(newEditor)} onCheckedChange={(v) => onNewEditorChange(Boolean(v))} aria-label="New editor" />
+          </label>
+        )}
       </div>
     </div>
   );
