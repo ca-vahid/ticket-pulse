@@ -457,6 +457,16 @@ code {
     0% { box-shadow: 0 0 0 0 hsl(var(--primary) / 0.45); }
     100% { box-shadow: 0 0 0 10px hsl(var(--primary) / 0); }
   }
+  /* Bigger editor beside the thread (Nov 2026): the composer docks on the
+     right; the page gives it room and drops its right-hand column. */
+  @media (min-width: 1024px) {
+    html[data-composer-dock] { --tp-dock-w: clamp(30rem, 46vw, 48rem); }
+    html[data-composer-dock] .tp-dock-shift { padding-right: var(--tp-dock-w); }
+    html[data-composer-dock] .tp-dock-hide { display: none; }
+    html[data-composer-dock] .tp-dock-single { display: block; }
+    html[data-composer-dock] .tp-dock-single > * + * { margin-top: 1rem; }
+    .tp-composer-dock { width: var(--tp-dock-w, 46vw); }
+  }
   .tp-book-pulse {
     animation: tpBookPulse 1.4s ease-out 4;
   }

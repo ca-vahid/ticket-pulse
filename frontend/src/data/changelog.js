@@ -1,6 +1,16 @@
-export const APP_VERSION = '4.3.66-preview';
+export const APP_VERSION = '4.3.67-preview';
 
 export const changelog = [
+  {
+    version: '4.3.67-preview',
+    date: 'November 11, 2026',
+    entries: [
+      { type: 'new', html: '<strong>A bigger editor that keeps the ticket beside it</strong> &mdash; press <strong>Ctrl+Shift+F</strong> (or the arrows button on the editor) and the reply box moves to the right half of the screen, full height, while the ticket and its conversation stay readable and scrollable on the left. Esc puts it back. On a small screen it opens as a full sheet, as before.' },
+      { type: 'new', html: '<strong>Keys for replying</strong> &mdash; on a ticket, <strong>R</strong> starts a reply and <strong>N</strong> an internal note; <strong>?</strong> shows the list of keys. They only work when you are not typing in a box, and the list has a switch to turn the single-letter keys off for yourself.' },
+      { type: 'new', html: '<strong>Send and set the status in one go</strong> &mdash; the arrow beside Send reply (and Add note) sends and then moves the ticket to the status you pick: Pending, Resolved, Closed and so on. <strong>Ctrl+Shift+Enter</strong> does it with the status you used last. FreshService tickets still ask you to confirm the status change.' },
+      { type: 'improved', html: '<strong>Harder to send a note to the requester by mistake</strong> &mdash; an internal note now says &ldquo;only your team sees this&rdquo; beside the buttons. If you write as a note and then switch to Reply, a line says the text will be e-mailed to the requester, with a button to keep it as a note. A reply that contains an @mention (those only exist in notes) is held until you confirm it.' },
+    ],
+  },
   {
     version: '4.3.66-preview',
     date: 'November 11, 2026',

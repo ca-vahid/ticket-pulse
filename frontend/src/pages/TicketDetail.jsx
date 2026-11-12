@@ -4,8 +4,9 @@ import ApprovalEventCard from '../components/tickets/ApprovalEventCard';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ticketShortLink } from '../utils/ticketShortLink';
 import {
-  Image as ImageIcon, Activity, SlidersHorizontal, GitBranch, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, BadgeCheck, CheckCheck, CheckCircle2, Lightbulb, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, CircleMinus, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, GitMerge, Hand, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, Plus, RefreshCw, Scissors, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle, PauseCircle, Play,
+  Image as ImageIcon, Activity, SlidersHorizontal, GitBranch, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, BadgeCheck, CheckCheck, CheckCircle2, Lightbulb, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, CircleMinus, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, GitMerge, Hand, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, Plus, RefreshCw, Scissors, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle, PauseCircle, Play, Keyboard,
 } from 'lucide-react';
+import ComposerShortcuts, { Keys, MOD } from '../components/tickets/composer/ComposerShortcuts';
 import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal';
 import TicketTagEditor from '../components/tickets/TicketTagEditor';
 import AlertOccurrenceStrip from '../components/tickets/AlertOccurrenceStrip';
@@ -935,21 +936,69 @@ export default function TicketDetail() {
   const [composerBody, setComposerBody] = useState(''); // sanitized html from the editor
   // Full-screen composer (25 Oct 2026): room for a long write-up such as a verified solution.
   const [composerExpanded, setComposerExpanded] = useState(false);
+  // Nov 2026: on a wide screen the bigger editor docks on the right and the
+  // thread stays readable beside it (agents elsewhere draft in Word because a
+  // full-screen box hides the message they are answering). Narrow screens keep
+  // the full-screen sheet.
+  const [wideScreen, setWideScreen] = useState(() => typeof window !== 'undefined' && Boolean(window.matchMedia?.('(min-width: 1024px)').matches));
+  useEffect(() => {
+    const mq = typeof window !== 'undefined' ? window.matchMedia?.('(min-width: 1024px)') : null;
+    if (!mq?.addEventListener) return undefined;
+    const on = () => setWideScreen(mq.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  const composerDocked = composerExpanded && wideScreen;
   useEffect(() => {
     if (!composerExpanded) return undefined;
+    if (composerDocked) {
+      document.documentElement.setAttribute('data-composer-dock', 'true');
+      return () => document.documentElement.removeAttribute('data-composer-dock');
+    }
     const previous = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => { document.body.style.overflow = previous; };
-  }, [composerExpanded]);
+  }, [composerExpanded, composerDocked]);
   const inComposerPortal = (node) => (composerExpanded && typeof document !== 'undefined'
     ? createPortal(
       <>
-        <div className="fixed inset-0 z-40 bg-slate-950/45" aria-hidden="true" onClick={() => setComposerExpanded(false)} />
+        {!composerDocked && <div className="fixed inset-0 z-40 bg-slate-950/45" aria-hidden="true" onClick={() => setComposerExpanded(false)} />}
         {node}
       </>,
       document.body,
     )
     : node);
+  // Keyboard list + the personal choice for single-letter keys (R, N, ?).
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [singleKeys, setSingleKeys] = useState(true);
+  // "Send and set status": the status used last, for Ctrl+Shift+Enter.
+  const [sendStatusPref, setSendStatusPref] = useState(null);
+  const [sendMenuOpen, setSendMenuOpen] = useState(false);
+  const sendMenuRef = useRef(null);
+  useEffect(() => {
+    let alive = true;
+    Promise.resolve().then(() => uiPreferencesAPI?.get?.('composer.singleKeys'))
+      .then((res) => { if (alive && res?.data?.value === 'off') setSingleKeys(false); }).catch(() => {});
+    Promise.resolve().then(() => uiPreferencesAPI?.get?.('composer.sendStatus'))
+      .then((res) => { const v = res?.data?.value; if (alive && typeof v === 'string' && v) setSendStatusPref(v); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  const saveSingleKeys = (on) => {
+    setSingleKeys(on);
+    Promise.resolve().then(() => uiPreferencesAPI?.set?.('composer.singleKeys', on ? 'on' : 'off')).catch(() => {});
+  };
+  useEffect(() => {
+    if (!sendMenuOpen) return undefined;
+    const onDoc = (e) => { if (sendMenuRef.current && !sendMenuRef.current.contains(e.target)) setSendMenuOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setSendMenuOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
+  }, [sendMenuOpen]);
+  // Note-versus-reply safety: text typed as an internal note that is now a reply.
+  const noteOriginRef = useRef(false);
+  const [noteToReplyNotice, setNoteToReplyNotice] = useState(false);
+  const [mentionInReplyConfirm, setMentionInReplyConfirm] = useState(false);
   const [composerText, setComposerText] = useState(''); // plain-text mirror for guards/sending
   const [composerCc, setComposerCc] = useState([]);
   const [composerFiles, setComposerFiles] = useState([]);
@@ -1125,6 +1174,9 @@ export default function TicketDetail() {
         if (seed.length > 0) setComposerCc(seed);
       }
     }
+    // Text that began as an internal note is about to face the requester: say so once.
+    setNoteToReplyNotice(mode === 'reply' && composerMode === 'note' && noteOriginRef.current && Boolean(composerText.trim()));
+    if (mode !== 'reply') setMentionInReplyConfirm(false);
     setComposerMode(mode);
     setTimeout(() => composerRef.current?.focus(), 0);
   };
@@ -1321,6 +1373,39 @@ export default function TicketDetail() {
   const [teamForward, setTeamForward] = useState(null);
   // FS-born tickets take confirmed write-backs for assignee/status/priority/category.
   const fsEditable = !isNative && Boolean(ticket?.freshserviceTicketId);
+  // "Send and set status": every status this ticket can move to, bar the one it has.
+  const sendStatusChoices = useMemo(
+    () => ((canWrite || fsEditable) ? statusOptions.filter((st) => st !== ticket?.status) : []),
+    [canWrite, fsEditable, statusOptions, ticket?.status],
+  );
+  // Page keys (Nov 2026): R reply, N note, ? the list; Ctrl+Shift+F the bigger
+  // editor. Never while typing in a box or while a dialog is open. The handler
+  // reads the latest state through a ref, so it is bound once.
+  const pageKeysRef = useRef({});
+  pageKeysRef.current = { singleKeys, canConverse, jumpToComposer, shortcutsOpen };
+  useEffect(() => {
+    const onKey = (e) => {
+      const st = pageKeysRef.current;
+      if (e.defaultPrevented || st.shortcutsOpen) return;
+      const typing = Boolean(e.target?.closest?.('input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [role="listbox"]'));
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'F' || e.key === 'f')) {
+        if (!st.canConverse || e.target?.closest?.('[aria-label="Reply composer"]')) return; // the composer handles its own
+        e.preventDefault();
+        setComposerExpanded((v) => !v);
+        setTimeout(() => composerRef.current?.focus(), 0);
+        return;
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey || typing || !st.singleKeys) return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      if (key === '?') { e.preventDefault(); setShortcutsOpen(true); return; }
+      if (!st.canConverse) return;
+      if (key === 'r') { e.preventDefault(); st.jumpToComposer('reply'); }
+      else if (key === 'n') { e.preventDefault(); st.jumpToComposer('note'); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
   // Header Close (2 Oct 2026): any ticket that is not Closed yet, either origin.
   const canCloseFromHeader = Boolean(ticket) && (canWrite || fsEditable) && wsRole !== 'readonly'
     && meta?.actor?.workspaceRole !== 'readonly' && meta?.actor?.role !== 'readonly'
@@ -2227,8 +2312,21 @@ export default function TicketDetail() {
     setEditOpen(false);
   };
 
-  const sendComposer = async () => {
+  // `opts.thenStatus`: after a successful send, set this status too (the
+  // split button and Ctrl+Shift+Enter). Called with a click event otherwise.
+  const sendComposer = async (opts) => {
+    const thenStatus = opts && typeof opts.thenStatus === 'string' ? opts.thenStatus : null;
+    const mentionOk = Boolean(opts && opts.mentionOk === true);
     const body = composerText.trim();
+    // @mentions only exist in internal notes; one inside a reply means note
+    // text is about to be e-mailed. Ask first.
+    if (composerMode === 'reply' && !mentionOk && /class="[^"]*tp-mention/.test(composerBody)) {
+      setMentionInReplyConfirm({ thenStatus });
+      return;
+    }
+    setMentionInReplyConfirm(false);
+    setSendMenuOpen(false);
+    const statusBefore = ticket?.status;
     if (composerMode === 'forward') {
       if (forwardTo.length === 0) {
         showToast('red', 'Add at least one destination email to forward to');
@@ -2297,8 +2395,18 @@ export default function TicketDetail() {
       setComposerSubject('');
       setSubjectOpen(false);
       setComposerExpanded(false);
+      noteOriginRef.current = false;
+      setNoteToReplyNotice(false);
       try { localStorage.removeItem(draftKey); } catch { /* no-op */ }
       await fetchTicket({ silent: true });
+      if (thenStatus && thenStatus !== statusBefore) {
+        // Same paths as the Status field: Ticket Pulse tickets change here,
+        // FreshService tickets go through the FreshService confirm.
+        if (canWrite) changeStatusGated(thenStatus, statusBefore, 'status');
+        else requestFsSync([{ field: 'Status', from: statusBefore, to: thenStatus }], { status: thenStatus }).catch(() => {});
+        setSendStatusPref(thenStatus);
+        Promise.resolve().then(() => uiPreferencesAPI?.set?.('composer.sendStatus', thenStatus)).catch(() => {});
+      }
       const ccNote = composerMode === 'reply' && composerCc.length ? ` (+${composerCc.length} Cc)` : '';
       const fileNote = composerFiles.length ? ` · ${composerFiles.length} file${composerFiles.length === 1 ? '' : 's'}` : '';
       showToast('emerald', composerMode === 'reply' ? `Reply posted — requester emailed${ccNote}${fileNote}` : `Internal note added${fileNote}`);
@@ -2335,7 +2443,7 @@ export default function TicketDetail() {
       : pipelineRuns.some((r) => r.status === 'queued') ? { state: 'queued' } : null;
 
   return (
-    <div className="tp-tickets-backdrop min-h-screen md:pl-[var(--tp-rail-w,58px)] print:pl-0">
+    <div className="tp-tickets-backdrop tp-dock-shift min-h-screen md:pl-[var(--tp-rail-w,58px)] print:pl-0">
       <div className="print-hide"><AppHeader activePage="tickets" /></div>
 
       {/* pb clears the mobile bottom tab bar (QA 07-06 #11) */}
@@ -2392,7 +2500,7 @@ export default function TicketDetail() {
           <>
             {/* Header — subtle generated artwork behind it (light + dark variants, index.css .tp-ticket-header) */}
             <div className="tp-card tp-ticket-header rounded-xl p-4 sm:p-5 mb-4 relative">
-              <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_clamp(300px,24vw,420px)] lg:gap-5">
+              <div className="tp-dock-single lg:grid lg:grid-cols-[minmax(0,1fr)_clamp(300px,24vw,420px)] lg:gap-5">
                 <div className="min-w-0">
                   {/* Row 1 (16 Sep 2026): the subject IS the top — big priority and
                       status badges on the right, and the Pick up call-to-action
@@ -3200,7 +3308,7 @@ export default function TicketDetail() {
                 context cards back on the right under the fields — the wide
                 screen goes to the description and the conversation instead of
                 a third column. */}
-            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_clamp(300px,24vw,420px)] lg:grid-rows-[auto_1fr] gap-4 items-start">
+            <div className="tp-dock-single grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_clamp(300px,24vw,420px)] lg:grid-rows-[auto_1fr] gap-4 items-start">
               {/* Main column (tabbed) */}
               <div className="space-y-4 min-w-0 lg:col-start-1 lg:row-start-1 lg:row-span-2">
                 {pageTab === 'conversation' && (
@@ -3408,16 +3516,31 @@ export default function TicketDetail() {
                     {canConverse ? inComposerPortal(
                       <section
                         ref={composerSectionRef}
-                        className={composerExpanded
-                          ? 'tp-card fixed inset-0 sm:inset-y-4 sm:inset-x-4 lg:inset-x-[max(1.5rem,calc(50vw_-_40rem))] z-50 flex flex-col overflow-y-auto settings-scrollbar sm:rounded-xl p-3.5 sm:p-5 shadow-soft print-hide'
-                          : 'tp-card rounded-xl p-3.5 print-hide scroll-mb-32'}
+                        className={composerDocked
+                          ? 'tp-composer-dock fixed inset-y-0 right-0 z-40 flex flex-col overflow-y-auto settings-scrollbar border-l border-border bg-card p-4 shadow-soft print-hide'
+                          : composerExpanded
+                            ? 'tp-card fixed inset-0 sm:inset-y-4 sm:inset-x-4 z-50 flex flex-col overflow-y-auto settings-scrollbar sm:rounded-xl p-3.5 sm:p-5 shadow-soft print-hide'
+                            : 'tp-card rounded-xl p-3.5 print-hide scroll-mb-32'}
                         aria-label="Reply composer"
-                        aria-modal={composerExpanded || undefined}
-                        role={composerExpanded ? 'dialog' : undefined}
-                        onKeyDown={composerExpanded ? (e) => {
-                          if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); setComposerExpanded(false); }
-                        } : undefined}
+                        aria-modal={(composerExpanded && !composerDocked) || undefined}
+                        role={composerExpanded && !composerDocked ? 'dialog' : undefined}
+                        data-composer-layout={composerDocked ? 'docked' : composerExpanded ? 'full' : 'inline'}
+                        onKeyDown={(e) => {
+                          if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'F' || e.key === 'f')) {
+                            e.preventDefault();
+                            setComposerExpanded((v) => !v);
+                            setTimeout(() => composerRef.current?.focus(), 0);
+                            return;
+                          }
+                          if (composerExpanded && e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); setComposerExpanded(false); }
+                        }}
                       >
+                        {composerDocked && (
+                          <p className="mb-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                            <span>Writing beside the thread. Scroll the ticket on the left while you write.</span>
+                            <span className="shrink-0">Esc to go back</span>
+                          </p>
+                        )}
                         {/* QA 07-06 #10: wraps + compact labels under sm so nothing
                             (Templates, Quick notes) ever exceeds a phone viewport. */}
                         <div role="group" aria-label="Composer mode" className="flex flex-wrap items-center gap-1.5 mb-2.5">
@@ -3606,7 +3729,42 @@ export default function TicketDetail() {
                                 : 'sent via FreshService (emails the requester)'}
                             </span>
                           )}
+                          {composerMode === 'note' && (
+                            <span className="inline-flex items-center gap-1 text-[11px] text-amber-700 dark:text-amber-300 truncate" data-testid="note-audience">
+                              <Lock className="h-3 w-3 shrink-0" aria-hidden="true" />only your team sees this
+                            </span>
+                          )}
                         </div>
+                        {composerMode === 'reply' && (noteToReplyNotice || mentionInReplyConfirm) && (
+                          <div role="alert" data-testid="note-to-reply-notice" className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-l-2 border-amber-500 pl-2.5 text-xs text-amber-800 dark:text-amber-200">
+                            <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                            <span className="min-w-0 flex-1">
+                              {mentionInReplyConfirm
+                                ? <>This text has an <strong>@mention</strong>, which only internal notes use. Sending it e-mails it to {ticket?.requester?.name || 'the requester'}.</>
+                                : <>You wrote this as an internal note. As a reply it is e-mailed to {ticket?.requester?.name || 'the requester'}.</>}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => switchComposerMode('note')}
+                              className="tp-focus-ring rounded-md bg-amber-500 px-2.5 py-1 font-semibold text-white hover:bg-amber-600"
+                            >
+                              Keep it as a note
+                            </button>
+                            {mentionInReplyConfirm ? (
+                              <button
+                                type="button"
+                                onClick={() => sendComposer({ mentionOk: true, ...(mentionInReplyConfirm.thenStatus ? { thenStatus: mentionInReplyConfirm.thenStatus } : {}) })}
+                                className="tp-focus-ring rounded-md px-2 py-1 font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                              >
+                                Send to the requester anyway
+                              </button>
+                            ) : (
+                              <button type="button" onClick={() => setNoteToReplyNotice(false)} className="tp-focus-ring rounded-md px-2 py-1 font-medium text-muted-foreground hover:bg-muted hover:text-foreground">
+                                It is a reply
+                              </button>
+                            )}
+                          </div>
+                        )}
                         {composerMode === 'reply' && (
                           <div className="mb-2" data-testid="reply-subject-row">
                             {isNative ? (
@@ -3696,8 +3854,18 @@ export default function TicketDetail() {
                         <RichTextEditor
                           ref={composerRef}
                           value={composerBody}
-                          onChange={({ html, text }) => { setComposerBody(html); setComposerText(text); }}
-                          onSubmit={sendComposer}
+                          onChange={({ html, text }) => {
+                            setComposerBody(html);
+                            setComposerText(text);
+                            if (!text.trim()) { noteOriginRef.current = false; setNoteToReplyNotice(false); setMentionInReplyConfirm(false); }
+                            else if (composerMode === 'note') noteOriginRef.current = true;
+                          }}
+                          onSubmit={(o) => {
+                            if (!o?.shift || composerMode === 'forward') { sendComposer(); return; }
+                            // Ctrl+Shift+Enter: send and set the status used last; none yet → pick one.
+                            if (sendStatusPref && sendStatusChoices.includes(sendStatusPref)) sendComposer({ thenStatus: sendStatusPref });
+                            else setSendMenuOpen(true);
+                          }}
                           placeholder={composerMode === 'reply'
                             ? 'Write a reply to the requester… (Ctrl+Enter to send)'
                             : composerMode === 'forward'
@@ -3763,22 +3931,73 @@ export default function TicketDetail() {
                                 </button>
                               </>
                             )}
+                            <button
+                              type="button"
+                              onClick={() => setShortcutsOpen(true)}
+                              title="Keyboard shortcuts (?)"
+                              aria-label="Keyboard shortcuts"
+                              className="tp-focus-ring hidden sm:inline-flex items-center rounded-lg p-1.5 text-muted-foreground/75 hover:bg-muted hover:text-foreground"
+                            >
+                              <Keyboard className="w-3.5 h-3.5" aria-hidden="true" />
+                            </button>
                             {composerText.trim() && (
                               <span className="text-[10px] text-muted-foreground/50 truncate" title="Drafts are kept per ticket until sent">draft saved</span>
                             )}
                           </span>
-                          <button
-                            onClick={sendComposer}
-                            disabled={isSending || (composerMode === 'forward' ? (forwardTo.length === 0 || !forwardAvailable) : !composerText.trim())}
-                            className={`tp-focus-ring inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg shadow-subtle transition-colors disabled:opacity-50 ${
-                              composerMode === 'reply' ? 'bg-primary text-primary-foreground hover:bg-blue-700'
-                                : composerMode === 'forward' ? 'bg-violet-600 text-white hover:bg-violet-700'
-                                  : 'bg-amber-500 text-white hover:bg-amber-600'
-                            }`}
-                          >
-                            {isSending ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Send className="w-4 h-4" aria-hidden="true" />}
-                            {composerMode === 'reply' ? 'Send reply' : composerMode === 'forward' ? 'Forward thread' : 'Add note'}
-                          </button>
+                          {(() => {
+                            const sendDisabled = isSending || (composerMode === 'forward' ? (forwardTo.length === 0 || !forwardAvailable) : !composerText.trim());
+                            const tone = composerMode === 'reply' ? 'bg-primary text-primary-foreground hover:bg-blue-700'
+                              : composerMode === 'forward' ? 'bg-violet-600 text-white hover:bg-violet-700'
+                                : 'bg-amber-500 text-white hover:bg-amber-600';
+                            const withStatus = composerMode !== 'forward' && sendStatusChoices.length > 0;
+                            const verb = composerMode === 'reply' ? 'Send' : 'Add note';
+                            return (
+                              <span ref={sendMenuRef} className="relative inline-flex shadow-subtle rounded-lg">
+                                <button
+                                  onClick={sendComposer}
+                                  disabled={sendDisabled}
+                                  title={`${composerMode === 'reply' ? `E-mails ${ticket?.requester?.name || 'the requester'}` : composerMode === 'forward' ? 'Forward the thread' : 'Only your team sees it'} (${MOD}+Enter)`}
+                                  className={`tp-focus-ring inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold transition-colors disabled:opacity-50 ${withStatus ? 'rounded-l-lg' : 'rounded-lg'} ${tone}`}
+                                >
+                                  {isSending ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Send className="w-4 h-4" aria-hidden="true" />}
+                                  {composerMode === 'reply' ? 'Send reply' : composerMode === 'forward' ? 'Forward thread' : 'Add note'}
+                                </button>
+                                {withStatus && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setSendMenuOpen((v) => !v)}
+                                    disabled={sendDisabled}
+                                    aria-haspopup="menu"
+                                    aria-expanded={sendMenuOpen}
+                                    aria-label={`${verb} and set status`}
+                                    title={`${verb} and set status (${MOD}+Shift+Enter uses the last one)`}
+                                    className={`tp-focus-ring inline-flex items-center rounded-r-lg border-l border-white/30 px-2 py-2 disabled:opacity-50 ${tone}`}
+                                  >
+                                    <ChevronDown className="w-4 h-4" aria-hidden="true" />
+                                  </button>
+                                )}
+                                {withStatus && sendMenuOpen && (
+                                  <div role="menu" aria-label={`${verb} and set status`} data-testid="send-status-menu" className="absolute bottom-full right-0 z-30 mb-1 w-64 tp-card rounded-lg p-1 shadow-soft animate-popIn">
+                                    <p className="px-2 pb-1 pt-1.5 text-[11px] font-medium text-muted-foreground">{verb} and set status to</p>
+                                    {sendStatusChoices.map((st) => (
+                                      <button
+                                        key={st}
+                                        type="button"
+                                        role="menuitem"
+                                        onClick={() => sendComposer({ thenStatus: st })}
+                                        className="tp-focus-ring flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground/85 hover:bg-muted"
+                                      >
+                                        <span className={`h-2 w-2 shrink-0 rounded-full ${statusDotClass((statusDefs || []).find((d) => d.name === st))}`} aria-hidden="true" />
+                                        <span className="min-w-0 flex-1 truncate">{st}</span>
+                                        {st === sendStatusPref && <span className="shrink-0 text-[10px] text-muted-foreground"><Keys keys={[MOD, 'Shift', 'Enter']} /></span>}
+                                      </button>
+                                    ))}
+                                    {!canWrite && <p className="px-2 pb-1 pt-1.5 text-[10px] text-muted-foreground/75">FreshService ticket: the status change asks you to confirm.</p>}
+                                  </div>
+                                )}
+                              </span>
+                            );
+                          })()}
                         </div>
                       </section>,
                     ) : isNative ? (
@@ -4048,7 +4267,7 @@ export default function TicketDetail() {
                 />
               )}
               <aside
-                className={`space-y-4 lg:col-start-2 lg:row-start-1 max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:z-[59] max-md:max-h-[84dvh] max-md:overflow-y-auto max-md:overscroll-contain max-md:rounded-t-2xl max-md:border-t max-md:border-border max-md:bg-background max-md:px-4 max-md:pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] max-md:shadow-soft ${detailsOpen ? 'motion-on:max-md:animate-in motion-on:max-md:slide-in-from-bottom motion-on:max-md:duration-200' : 'max-md:hidden'}`}
+                className={`tp-dock-hide space-y-4 lg:col-start-2 lg:row-start-1 max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:z-[59] max-md:max-h-[84dvh] max-md:overflow-y-auto max-md:overscroll-contain max-md:rounded-t-2xl max-md:border-t max-md:border-border max-md:bg-background max-md:px-4 max-md:pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] max-md:shadow-soft ${detailsOpen ? 'motion-on:max-md:animate-in motion-on:max-md:slide-in-from-bottom motion-on:max-md:duration-200' : 'max-md:hidden'}`}
                 aria-label="Ticket properties"
                 data-testid="ticket-properties"
                 data-sheet-open={detailsOpen ? 'true' : 'false'}
@@ -4428,7 +4647,7 @@ export default function TicketDetail() {
                 </div>
 
               </aside>
-              <aside className="space-y-4 lg:col-start-2 lg:row-start-2" aria-label="Ticket context">
+              <aside className="tp-dock-hide space-y-4 lg:col-start-2 lg:row-start-2" aria-label="Ticket context">
                 {/* Attachments */}
                 <div className="tp-card rounded-xl p-4">
                   <div className="flex items-center gap-2 mb-2.5">
@@ -4618,6 +4837,8 @@ export default function TicketDetail() {
           </>
         )}
       </main>
+
+      <ComposerShortcuts open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} singleKeys={singleKeys} onSingleKeysChange={saveSingleKeys} />
 
       {toast && (
         <div

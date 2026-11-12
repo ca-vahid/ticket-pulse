@@ -856,7 +856,7 @@ const RichTextEditor = forwardRef(function RichTextEditor({
           <button
             type="button"
             onClick={onToggleExpand}
-            title={expanded ? 'Exit full screen (Esc)' : 'Full screen'}
+            title={expanded ? 'Back to the small editor (Esc)' : 'Bigger editor (Ctrl+Shift+F)'}
             aria-label={expanded ? 'Exit full screen' : 'Full screen'}
             aria-pressed={expanded}
             className={toolBtn}
@@ -949,7 +949,12 @@ const RichTextEditor = forwardRef(function RichTextEditor({
             onBlur={() => { rememberRange(); emit(); setMention(null); }}
             onKeyDown={(e) => {
               if (onMentionKey(e)) return;
-              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); onSubmit?.(); return; }
+              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                // Shift = "send and set status" where the host offers it (Nov 2026).
+                if (e.shiftKey) onSubmit?.({ shift: true }); else onSubmit?.();
+                return;
+              }
               const pre = caretWithin('PRE');
               if (pre) onCodeKey(e, pre);
             }}
