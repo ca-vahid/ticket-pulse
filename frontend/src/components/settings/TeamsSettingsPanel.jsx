@@ -196,6 +196,25 @@ export default function TeamsSettingsPanel() {
               events={gridEvents}
               disabled={busy === 'save'}
               onChange={(key, mode) => save({ defaults: { ...defaults, events: { ...defaults.events, [key]: mode } } }, 'Defaults saved')}
+              extra={(e) => (e.key === 'group_unassigned' && e.mode !== 'off' ? (
+                // QA 11-10 #1: the workspace's priority floor for this notice. It was
+                // only settable per person, so the workspace default stayed High and above.
+                <div className="space-y-1">
+                  <div className="text-[11px] text-muted-foreground/75">Goes to the active agents in the ticket&apos;s group (FreshService or Ticket Pulse group).</div>
+                  <label className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                    Priority
+                    <select
+                      aria-label="Priority for new unassigned tickets"
+                      value={defaults.options?.groupMinPriority ?? 3}
+                      disabled={busy === 'save'}
+                      onChange={(ev) => save({ defaults: { ...defaults, options: { ...defaults.options, groupMinPriority: Number(ev.target.value) } } }, 'Defaults saved')}
+                      className="tp-focus-ring rounded border border-input bg-card px-1.5 py-0.5 text-[11px] text-foreground"
+                    >
+                      {PRIORITIES.map((p) => <option key={p.v} value={p.v}>{p.v === 4 ? 'Urgent only' : p.l}</option>)}
+                    </select>
+                  </label>
+                </div>
+              ) : null)}
             />
           </section>
 

@@ -457,17 +457,40 @@ class TeamsNotificationService {
     };
     if (kind === 'assignee') return pick(ctx.assignedAgent);
     if (kind === 'previous') return pick(ctx.previousAgent);
-    // group: the ticket's group members, else nobody (no guessing).
-    const groupId = ctx.ticket.groupId; // FreshService group id (string)
-    if (!groupId || !/^\d+$/.test(String(groupId))) return [];
-    const group = await prisma.group.findFirst({ where: { workspaceId, freshserviceId: BigInt(groupId) }, select: { id: true } }).catch(() => null);
-    if (!group) return [];
-    const members = await prisma.groupMember.findMany({ where: { groupId: group.id, workspaceId }, select: { technicianId: true } });
+    // group: members of the ticket's groups, else nobody (no guessing).
+    const groupIds = await this._ticketGroupIds(ctx, workspaceId);
+    if (!groupIds.length) return [];
+    const members = await prisma.groupMember.findMany({ where: { groupId: { in: groupIds }, workspaceId }, select: { technicianId: true } });
     if (!members.length) return [];
     return prisma.technician.findMany({
-      where: { id: { in: members.map((m) => m.technicianId) }, workspaceId, isActive: true, email: { not: null } },
+      where: { id: { in: [...new Set(members.map((m) => m.technicianId))] }, workspaceId, isActive: true, email: { not: null } },
       select: { id: true, name: true, email: true, timezone: true, workStartTime: true, workEndTime: true },
     });
+  }
+
+  /**
+   * The ticket's groups as local group ids: its FreshService group (groupId) and
+   * its Ticket Pulse group (internalGroupId). QA 11-10 #1: a Ticket Pulse-born
+   * ticket usually has only the second (Project Accounting's group has no
+   * FreshService id), so "my groups" found nobody for every one of them.
+   */
+  async _ticketGroupIds(ctx, workspaceId) {
+    const ids = [];
+    const fsGroupId = ctx.ticket.groupId; // FreshService group id (string)
+    if (fsGroupId && /^\d+$/.test(String(fsGroupId))) {
+      const g = await prisma.group.findFirst({ where: { workspaceId, freshserviceId: BigInt(fsGroupId) }, select: { id: true } }).catch(() => null);
+      if (g) ids.push(g.id);
+    }
+    let internalGroupId = ctx.ticket.internalGroupId;
+    if (internalGroupId === undefined) {
+      const row = await prisma.ticket.findUnique({ where: { id: Number(ctx.ticket.id) }, select: { internalGroupId: true } }).catch(() => null);
+      internalGroupId = row?.internalGroupId ?? null;
+    }
+    if (internalGroupId) {
+      const g = await prisma.group.findFirst({ where: { id: Number(internalGroupId), workspaceId }, select: { id: true } }).catch(() => null);
+      if (g && !ids.includes(g.id)) ids.push(g.id);
+    }
+    return ids;
   }
 
   /** Apply the person's rules; queue for a card, hold for the digest, or skip. */
@@ -1000,13 +1023,27 @@ class TeamsNotificationService {
 
   async _tech(email, workspaceId) {
     const { resolveAgentTechnician } = await import('./agentCompetencyService.js');
-    const { technician } = await resolveAgentTechnician(email, workspaceId);
-    return technician;
+    try {
+      const { technician } = await resolveAgentTechnician(email, workspaceId);
+      return technician;
+    } catch (err) {
+      // QA 11-10 #1: not an active agent in the workspace on screen. Show (and save)
+      // the person's own agent workspace, and say so, rather than refusing.
+      if (!workspaceId) throw err;
+      const { technician } = await resolveAgentTechnician(email, null);
+      return { ...technician, requestedWorkspaceId: Number(workspaceId) };
+    }
   }
 
   async myStatus(email, workspaceId) {
     const tech = await this._tech(email, workspaceId);
     const ws = await this.workspaceSettings(tech.workspaceId);
+    // QA 11-10 #1: say which workspace these settings belong to, and whether the
+    // person is an agent there (an inactive row never gets group notices).
+    const wsRow = await prisma.workspace.findUnique({ where: { id: tech.workspaceId }, select: { name: true } }).catch(() => null);
+    const askedRow = tech.requestedWorkspaceId && tech.requestedWorkspaceId !== tech.workspaceId
+      ? await prisma.workspace.findUnique({ where: { id: tech.requestedWorkspaceId }, select: { id: true, name: true } }).catch(() => null)
+      : null;
     const { events, options } = await this._prefsFor(tech.workspaceId, tech.id, ws);
     const conv = await prisma.teamsConversation.findUnique({ where: { email: lc(tech.email) } }).catch(() => null);
     const mutes = await prisma.ticketNotificationMute.findMany({ where: { technicianId: tech.id, until: { gt: new Date() } }, orderBy: { createdAt: 'desc' }, take: 50 });
@@ -1014,6 +1051,8 @@ class TeamsNotificationService {
     const byId = new Map(tickets.map((t) => [t.id, t]));
     const recent = await prisma.teamsDelivery.findMany({ where: { email: lc(tech.email) }, orderBy: { id: 'desc' }, take: 8, select: { eventKey: true, status: true, reason: true, summary: true, createdAt: true } });
     return {
+      workspace: { id: tech.workspaceId, name: wsRow?.name || null },
+      notAgentIn: askedRow ? { id: askedRow.id, name: askedRow.name } : null,
       configured: bot.isTeamsConfigured(),
       enabled: ws.teamsEnabled,
       connection: { connected: Boolean(conv?.conversationId) && !conv?.disconnectedAt, disconnected: Boolean(conv?.disconnectedAt), installedAt: conv?.installedAt || null, lastError: conv?.lastError || null },

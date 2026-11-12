@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Activity, BellOff, Send } from 'lucide-react';
+import { Activity, AlertTriangle, BellOff, Send } from 'lucide-react';
 import { agentAPI } from '../../services/api';
 import TeamsEventGrid from './TeamsEventGrid';
 import TeamsAssistantPersonal from './TeamsAssistantPersonal';
@@ -98,6 +98,9 @@ export default function TeamsNotificationsPanel({ workspaceId }) {
           <div>
             <h3 id="teams-notifications-heading" className="text-base font-bold text-foreground">Microsoft Teams</h3>
             <p className="text-xs text-muted-foreground">Ticket Pulse messages you in Teams about your tickets. Take a ticket, add a note, reply or snooze straight from the message.</p>
+            {data?.workspace?.name && (
+              <p className="mt-0.5 text-xs text-muted-foreground">Settings for {data.workspace.name}</p>
+            )}
           </div>
         </div>
         {data && (
@@ -127,6 +130,12 @@ export default function TeamsNotificationsPanel({ workspaceId }) {
               <span className={`h-2 w-2 rounded-full ${connected ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} aria-hidden="true" />
               <span className="text-foreground">{connected ? 'Connected — you have a chat with Ticket Pulse in Teams' : 'Not connected yet'}</span>
             </span>
+            {data.notAgentIn && (
+              <span className="inline-flex items-start gap-1 text-amber-700 dark:text-amber-200">
+                <AlertTriangle className="mt-px h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                <span>You&apos;re not an active agent in {data.notAgentIn.name || 'this workspace'}, so these don&apos;t apply there. Switch workspace to change yours.</span>
+              </span>
+            )}
             {!data.enabled && <span className="text-amber-700 dark:text-amber-200">Teams notifications are off in this workspace — an admin turns them on in Settings → Teams.</span>}
             {!data.configured && <span className="text-amber-700 dark:text-amber-200">The Teams app is not set up on the server yet.</span>}
             {data.connection?.lastError && !connected && <span className="text-red-700 dark:text-red-200">{data.connection.lastError}</span>}

@@ -1,5 +1,6 @@
 import { Bell, LayoutDashboard, LogOut } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useWorkspaceOptional } from '../contexts/WorkspaceContext';
 import NotificationSettingsPanel from '../components/agent/NotificationSettingsPanel';
 import AgentAlertsPanel from '../components/agent/AgentAlertsPanel';
 import TeamsNotificationsPanel from '../components/agent/TeamsNotificationsPanel';
@@ -13,6 +14,9 @@ import DevicePushPanel from '../components/agent/DevicePushPanel';
  */
 export default function Notifications() {
   const { user, logout } = useAuth();
+  // QA 11-10 #1: Teams settings are per workspace — show the one on screen, not
+  // always the person's first workspace.
+  const currentWorkspaceId = useWorkspaceOptional()?.currentWorkspace?.id || null;
   const canAccessDashboard = user?.role && user.role !== 'agent';
   const homeHref = canAccessDashboard ? '/dashboard' : '/my-competencies';
 
@@ -68,7 +72,7 @@ export default function Notifications() {
 
         <div className="space-y-5">
           <DevicePushPanel />
-          <TeamsNotificationsPanel />
+          <TeamsNotificationsPanel workspaceId={currentWorkspaceId} />
           <NotificationSettingsPanel />
           <AgentAlertsPanel />
         </div>

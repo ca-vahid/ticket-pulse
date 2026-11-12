@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.3.65-preview';
+export const APP_VERSION = '4.3.66-preview';
 
 export const changelog = [
+  {
+    version: '4.3.66-preview',
+    date: 'November 11, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>&ldquo;A new unassigned ticket arrives in my groups&rdquo; reaches Ticket Pulse groups</strong> &mdash; the Teams notice only looked for the ticket&rsquo;s FreshService group, so tickets that start in Ticket Pulse (all of Project Accounting&rsquo;s) found nobody to tell. It now goes to the active agents in the ticket&rsquo;s FreshService or Ticket Pulse group, and phone notifications follow the same list. Settings &rarr; Teams also gets a Priority for this notice for the whole workspace (it was High and above unless each person changed it).' },
+      { type: 'fix', html: '<strong>Mail &amp; alerts shows the workspace you are in</strong> &mdash; the Teams section always showed your first workspace without saying so, which is why it could read &ldquo;Workspace default: Off&rdquo; after an admin turned a notice on elsewhere. It now says &ldquo;Settings for &hellip;&rdquo;, and when you are not an active agent in the workspace on screen it says so and what to do.' },
+      { type: 'new', html: '<strong>Sorting and filters on On/Offboarding</strong> &mdash; every column on People sorts: Person A&ndash;Z then Z&ndash;A, Date earliest then furthest, and Type, Children, With and Status the same way; a third click goes back to the usual order. Above the table, search a name or location and pick an agent or location; &ldquo;Showing N of M&rdquo; and Clear appear while a filter is on. Your browser remembers both.' },
+    ],
+  },
   {
     version: '4.3.65-preview',
     date: 'November 11, 2026',

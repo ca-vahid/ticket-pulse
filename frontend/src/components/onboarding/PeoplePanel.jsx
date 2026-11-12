@@ -1,10 +1,14 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, UserRoundMinus, UserRoundPlus } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Search, UserRoundMinus, UserRoundPlus } from 'lucide-react';
 import { hrLifecycleAPI, ticketsAPI } from '../../services/api';
 import { ConfirmDialog, EmptyState, Loading } from '../knowledge/knowledgeUi';
 import AssigneePicker from '../tickets/AssigneePicker';
 import { AvatarStack, NoticePerson, Person, SectionTitle, StatusDot, TicketRef } from './onboardingUi';
-import { FAMILY_STATUS, KIND_LABEL, fmtDate, ticketTone } from './onboardingFormat';
+import { KIND_LABEL, fmtDate, ticketTone } from './onboardingFormat';
+import {
+  EMPTY_FILTERS, FILTERS_KEY, NO_OWNER, SORT_KEY,
+  agentOptions, familyStatus, filterFamilies, filtersActive, locationOptions, nextSort, readFilters, readSort, sortFamilies, writeStored,
+} from './peopleTable';
 
 const KINDS = [
   { id: 'all', label: 'Everyone' },
@@ -339,12 +343,38 @@ function FamilyDetail({ familyId, onChanged, techById = new Map() }) {
   );
 }
 
+const ARIA_SORT = { asc: 'ascending', desc: 'descending' };
+
+/** A column header that sorts: ascending, descending, then back to the server's order. */
+function SortHeader({ column, label, sort, onSort, className = '' }) {
+  const dir = sort?.key === column ? sort.dir : null;
+  const Icon = dir === 'asc' ? ArrowUp : dir === 'desc' ? ArrowDown : ArrowUpDown;
+  return (
+    <th scope="col" aria-sort={ARIA_SORT[dir] || 'none'} className={`px-2 py-1.5 font-medium ${className}`}>
+      <button
+        type="button"
+        onClick={() => onSort(column)}
+        title={dir === 'desc' ? 'Back to the default order' : `Sort by ${label.toLowerCase()}`}
+        className={`tp-focus-ring -mx-1 inline-flex items-center gap-1 rounded px-1 py-0.5 hover:text-foreground ${dir ? 'text-foreground' : ''}`}
+      >
+        {label}
+        <Icon className={`h-3 w-3 shrink-0 ${dir ? '' : 'opacity-40'}`} aria-hidden="true" />
+      </button>
+    </th>
+  );
+}
+
+const CONTROL = 'tp-focus-ring h-8 rounded-md border border-input bg-card text-sm text-foreground';
+
 export default function PeoplePanel({ mode = null, techById = new Map() }) {
   const [filter, setFilter] = useState('open');
   const [kind, setKind] = useState('all');
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
   const [openId, setOpenId] = useState(null);
+  // QA 11-10 #2: sort and narrow the loaded rows; remembered per browser.
+  const [sort, setSort] = useState(readSort);
+  const [filters, setFilters] = useState(readFilters);
 
   const load = useCallback(() => {
     setError(null);
@@ -353,6 +383,28 @@ export default function PeoplePanel({ mode = null, techById = new Map() }) {
       .catch((err) => { setRows([]); setError(err?.message || 'Could not load people'); });
   }, [filter, kind]);
   useEffect(() => { setRows(null); load(); }, [load]);
+
+  useEffect(() => { writeStored(SORT_KEY, sort); }, [sort]);
+  useEffect(() => { writeStored(FILTERS_KEY, filtersActive(filters) ? filters : null); }, [filters]);
+
+  const agents = useMemo(() => agentOptions(rows), [rows]);
+  const locations = useMemo(() => locationOptions(rows), [rows]);
+
+  // A remembered agent or location that is no longer among the rows falls back to everyone.
+  useEffect(() => {
+    if (!rows) return;
+    setFilters((f) => {
+      const agentGone = f.agent && !(f.agent === NO_OWNER ? agents.none : agents.people.some((p) => p.value === f.agent));
+      const locationGone = f.location && !locations.includes(f.location);
+      if (!agentGone && !locationGone) return f;
+      return { ...f, ...(agentGone ? { agent: '' } : {}), ...(locationGone ? { location: '' } : {}) };
+    });
+  }, [rows, agents, locations]);
+
+  const shown = useMemo(() => sortFamilies(filterFamilies(rows, filters), sort), [rows, filters, sort]);
+  const narrowed = filtersActive(filters);
+  const setFilterValue = (key) => (e) => setFilters((f) => ({ ...f, [key]: e.target.value }));
+  const onSort = (column) => setSort((s) => nextSort(s, column));
 
   return (
     <div>
@@ -392,76 +444,128 @@ export default function PeoplePanel({ mode = null, techById = new Map() }) {
           here with the child tickets Live would create; nothing is created until Live.
         </EmptyState>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-border bg-card shadow-subtle">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-border text-xs text-muted-foreground">
-              <tr>
-                <th scope="col" className="w-8 px-2 py-2"><span className="sr-only">Expand</span></th>
-                <th scope="col" className="px-2 py-2 font-medium">Person</th>
-                <th scope="col" className="hidden px-2 py-2 font-medium sm:table-cell">Type</th>
-                <th scope="col" className="px-2 py-2 font-medium">Date</th>
-                <th scope="col" className="hidden px-2 py-2 font-medium md:table-cell">Children</th>
-                <th scope="col" className="hidden px-2 py-2 font-medium lg:table-cell">With</th>
-                <th scope="col" className="px-2 py-2 font-medium">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {rows.map((f) => {
-                const open = openId === f.id;
-                const pct = f.progress.total ? Math.round((f.progress.done / f.progress.total) * 100) : 0;
-                const status = f.shadow
-                  ? { tone: 'amber', label: f.status === 'cancelled' ? 'Shadow · cancelled' : 'Shadow' }
-                  : (FAMILY_STATUS[f.status] || FAMILY_STATUS.open);
-                const KindIcon = f.kind === 'offboarding' ? UserRoundMinus : UserRoundPlus;
-                return (
-                  <Fragment key={f.id}>
-                    <tr className="cursor-pointer hover:bg-muted/50" onClick={() => setOpenId(open ? null : f.id)}>
-                      <td className="px-2 py-2 align-middle">
-                        <button
-                          type="button"
-                          aria-expanded={open}
-                          aria-label={`${open ? 'Hide' : 'Show'} ${f.personName}'s tickets`}
-                          onClick={(e) => { e.stopPropagation(); setOpenId(open ? null : f.id); }}
-                          className="tp-focus-ring rounded p-0.5 text-muted-foreground hover:text-foreground"
-                        >
-                          {open ? <ChevronDown className="h-4 w-4" aria-hidden="true" /> : <ChevronRight className="h-4 w-4" aria-hidden="true" />}
-                        </button>
-                      </td>
-                      <td className="px-2 py-2"><NoticePerson name={f.personName} email={f.personEmail} sub={f.office} /></td>
-                      <td className="hidden px-2 py-2 sm:table-cell">
-                        <span className="inline-flex items-center gap-1.5 text-foreground/85">
-                          <KindIcon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-                          {KIND_LABEL[f.kind] || f.kind}
-                        </span>
-                        {f.afterTheFact && <span className="block text-xs text-muted-foreground">after the fact</span>}
-                      </td>
-                      <td className="whitespace-nowrap px-2 py-2 text-foreground/85">{fmtDate(f.effectiveDate, { withYear: true })}</td>
-                      <td className="hidden px-2 py-2 md:table-cell">
-                        <div className="flex items-center gap-2">
-                          <span className="h-1.5 w-20 overflow-hidden rounded-full bg-muted" aria-hidden="true">
-                            <span className="block h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
+        <>
+          <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2" role="search" aria-label="Filter people">
+            <label className="relative block w-full sm:w-60">
+              <span className="sr-only">Search by person or location</span>
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+              <input
+                type="search"
+                value={filters.q}
+                onChange={setFilterValue('q')}
+                placeholder="Person or location"
+                className={`${CONTROL} w-full pl-8 pr-2.5 placeholder:text-muted-foreground`}
+              />
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            Agent
+              <select value={filters.agent} onChange={setFilterValue('agent')} className={`${CONTROL} max-w-[12rem] px-2`}>
+                <option value="">Anyone</option>
+                {agents.people.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+                {agents.none && <option value={NO_OWNER}>No owner yet</option>}
+              </select>
+            </label>
+            {locations.length > 0 && (
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              Location
+                <select value={filters.location} onChange={setFilterValue('location')} className={`${CONTROL} max-w-[12rem] px-2`}>
+                  <option value="">Anywhere</option>
+                  {locations.map((l) => <option key={l} value={l}>{l}</option>)}
+                </select>
+              </label>
+            )}
+            {narrowed && (
+              <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span role="status">Showing {shown.length} of {rows.length}</span>
+                <button
+                  type="button"
+                  onClick={() => setFilters(EMPTY_FILTERS)}
+                  className="tp-focus-ring rounded-md px-1.5 py-0.5 text-sm text-primary hover:underline"
+                >
+                Clear
+                </button>
+              </span>
+            )}
+          </div>
+          <div className="overflow-hidden rounded-xl border border-border bg-card shadow-subtle">
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-border text-xs text-muted-foreground">
+                <tr>
+                  <th scope="col" className="w-8 px-2 py-2"><span className="sr-only">Expand</span></th>
+                  <SortHeader column="person" label="Person" sort={sort} onSort={onSort} />
+                  <SortHeader column="kind" label="Type" sort={sort} onSort={onSort} className="hidden sm:table-cell" />
+                  <SortHeader column="date" label="Date" sort={sort} onSort={onSort} />
+                  <SortHeader column="children" label="Children" sort={sort} onSort={onSort} className="hidden md:table-cell" />
+                  <SortHeader column="owner" label="With" sort={sort} onSort={onSort} className="hidden lg:table-cell" />
+                  <SortHeader column="status" label="Status" sort={sort} onSort={onSort} />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {!shown.length && (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-6 text-center text-sm text-muted-foreground">
+                    Nobody matches these filters.{' '}
+                      <button type="button" onClick={() => setFilters(EMPTY_FILTERS)} className="tp-focus-ring rounded font-medium text-primary hover:underline">
+                      Clear filters
+                      </button>
+                    </td>
+                  </tr>
+                )}
+                {shown.map((f) => {
+                  const open = openId === f.id;
+                  const pct = f.progress.total ? Math.round((f.progress.done / f.progress.total) * 100) : 0;
+                  const status = familyStatus(f);
+                  const KindIcon = f.kind === 'offboarding' ? UserRoundMinus : UserRoundPlus;
+                  return (
+                    <Fragment key={f.id}>
+                      <tr className="cursor-pointer hover:bg-muted/50" onClick={() => setOpenId(open ? null : f.id)}>
+                        <td className="px-2 py-2 align-middle">
+                          <button
+                            type="button"
+                            aria-expanded={open}
+                            aria-label={`${open ? 'Hide' : 'Show'} ${f.personName}'s tickets`}
+                            onClick={(e) => { e.stopPropagation(); setOpenId(open ? null : f.id); }}
+                            className="tp-focus-ring rounded p-0.5 text-muted-foreground hover:text-foreground"
+                          >
+                            {open ? <ChevronDown className="h-4 w-4" aria-hidden="true" /> : <ChevronRight className="h-4 w-4" aria-hidden="true" />}
+                          </button>
+                        </td>
+                        <td className="px-2 py-2"><NoticePerson name={f.personName} email={f.personEmail} sub={f.office} /></td>
+                        <td className="hidden px-2 py-2 sm:table-cell">
+                          <span className="inline-flex items-center gap-1.5 text-foreground/85">
+                            <KindIcon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+                            {KIND_LABEL[f.kind] || f.kind}
                           </span>
-                          <span className="text-xs text-muted-foreground">{f.shadow ? `${f.progress.total} would be created` : `${f.progress.done}/${f.progress.total} closed`}{f.linked ? ` · ${f.linked} linked` : ''}</span>
-                        </div>
-                      </td>
-                      <td className="hidden px-2 py-2 lg:table-cell">
-                        {f.shadow ? <span className="text-xs text-muted-foreground">—</span> : (
-                          <AvatarStack people={(f.assignees || []).map((a) => ({ ...a, photoUrl: techById.get(a.id)?.photoUrl || null }))} empty={f.asleep ? 'Asleep, no owner yet' : 'Nobody yet'} />
-                        )}
-                      </td>
-                      <td className="px-2 py-2"><StatusDot tone={status.tone} label={status.label} /></td>
-                    </tr>
-                    {open && (
-                      <tr className="bg-muted/30">
-                        <td colSpan={7}>{f.shadow ? <ShadowFamilyDetail family={f} /> : <FamilyDetail familyId={f.id} onChanged={load} techById={techById} />}</td>
+                          {f.afterTheFact && <span className="block text-xs text-muted-foreground">after the fact</span>}
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-2 text-foreground/85">{fmtDate(f.effectiveDate, { withYear: true })}</td>
+                        <td className="hidden px-2 py-2 md:table-cell">
+                          <div className="flex items-center gap-2">
+                            <span className="h-1.5 w-20 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+                              <span className="block h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
+                            </span>
+                            <span className="text-xs text-muted-foreground">{f.shadow ? `${f.progress.total} would be created` : `${f.progress.done}/${f.progress.total} closed`}{f.linked ? ` · ${f.linked} linked` : ''}</span>
+                          </div>
+                        </td>
+                        <td className="hidden px-2 py-2 lg:table-cell">
+                          {f.shadow ? <span className="text-xs text-muted-foreground">—</span> : (
+                            <AvatarStack people={(f.assignees || []).map((a) => ({ ...a, photoUrl: techById.get(a.id)?.photoUrl || null }))} empty={f.asleep ? 'Asleep, no owner yet' : 'Nobody yet'} />
+                          )}
+                        </td>
+                        <td className="px-2 py-2"><StatusDot tone={status.tone} label={status.label} /></td>
                       </tr>
-                    )}
-                  </Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                      {open && (
+                        <tr className="bg-muted/30">
+                          <td colSpan={7}>{f.shadow ? <ShadowFamilyDetail family={f} /> : <FamilyDetail familyId={f.id} onChanged={load} techById={techById} />}</td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   );
