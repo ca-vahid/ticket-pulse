@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.3.75-preview';
+export const APP_VERSION = '4.3.76-preview';
 
 export const changelog = [
+  {
+    version: '4.3.76-preview',
+    date: 'November 12, 2026',
+    entries: [
+      { type: 'feature', html: '<strong>Writing help in the composer (AI)</strong> &mdash; a new <strong>AI</strong> button under the reply and note editor. Select part of what you wrote, or leave nothing selected to take the whole draft, and pick one: <em>Fix spelling and grammar</em>, <em>Make it shorter</em>, <em>Friendlier</em>, <em>More formal</em>, <em>Translate to English</em>, <em>Translate to French</em>, or, in a reply, <em>Turn my notes into a reply</em>. The suggestion appears under the editor and nothing changes until you choose <strong>Replace</strong> or <strong>Add below</strong>; after a replace, <strong>Put my text back</strong> restores what you had. It never sends anything. It works in the classic and the new editor.' },
+      { type: 'feature', html: '<strong>What the AI sees, and how to switch it off</strong> &mdash; only the text you picked, the ticket subject, and the requester&rsquo;s first name for a greeting. E-mail addresses and long numbers in your text are held back and put back in place afterwards. The rest of the conversation is not sent. Each person can hide the button: the keyboard icon under the editor (or <strong>?</strong>) &rarr; <strong>Writing help (AI)</strong>. It runs on the economy model with its own cost line (<em>Composer Writing Help</em>) and a limit of 12 rewrites a minute and 200 a day per person.' },
+      { type: 'feature', html: '<strong>Your draft follows you to another computer</strong> &mdash; an unsent reply or note is now also kept on the server, a moment after you stop typing. Open the same ticket on another computer and it is there (&ldquo;Picked up the draft you started on another computer&rdquo;). Sending or clearing it removes it everywhere. If both computers hold different unsent text, the one in front of you wins. Only you can read your drafts. Attached files and drafts with very large pasted pictures still stay on the computer where you added them.' },
+    ],
+  },
   {
     version: '4.3.75-preview',
     date: 'November 12, 2026',

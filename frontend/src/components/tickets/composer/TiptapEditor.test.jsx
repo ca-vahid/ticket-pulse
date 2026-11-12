@@ -158,6 +158,27 @@ describe('the contract with the host', () => {
     await waitFor(() => expect(ref.current.getEditor().isEmpty).toBe(true));
   });
 
+  test('writing help: the selected part is read and only that part is replaced; a changed selection is refused', async () => {
+    const ref = createRef();
+    const onChange = vi.fn();
+    render(<TiptapEditor ref={ref} value="<p>Hi Rita. pls restart <strong>teh</strong> laptop. Thanks</p>" onChange={onChange} ariaLabel="Body" />);
+    await waitFor(() => expect(ref.current?.getEditor?.()).toBeTruthy());
+    expect(ref.current.getSelection()).toBeNull();
+    // "pls restart teh laptop." sits at positions 10..33 of the paragraph.
+    act(() => { ref.current.getEditor().commands.setTextSelection({ from: 10, to: 33 }); });
+    const sel = ref.current.getSelection();
+    expect(sel.text).toBe('pls restart teh laptop.');
+    expect(sel.rich).toBe(true);
+    let ok;
+    act(() => { ok = ref.current.replaceSelection(sel.token, 'Please restart the laptop.'); });
+    expect(ok).toBe(true);
+    expect(onChange.mock.calls.at(-1)[0].text).toBe('Hi Rita. Please restart the laptop. Thanks');
+    // The same token again: that text is no longer there.
+    act(() => { ok = ref.current.replaceSelection(sel.token, 'again'); });
+    expect(ok).toBe(false);
+    expect(onChange.mock.calls.at(-1)[0].text).toBe('Hi Rita. Please restart the laptop. Thanks');
+  });
+
   test('it is a labelled, spell-checked textbox, and Ctrl+Enter submits (Shift for send and set status)', async () => {
     const onSubmit = vi.fn();
     await load('<p>x</p>', { onSubmit });

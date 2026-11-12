@@ -393,6 +393,25 @@ const RichTextEditor = forwardRef(function RichTextEditor({
     focus: () => editorRef.current?.focus(),
     insertText: (text) => insertAtCaret('insertText', String(text ?? '')),
     insertHtml: (html) => insertAtCaret('insertHTML', String(html ?? '')),
+    // Writing help: the selected part of the draft, and a way to replace exactly that part later.
+    getSelection: () => {
+      const el = editorRef.current;
+      const range = lastRangeRef.current;
+      if (!el || !range || range.collapsed || !el.contains(range.startContainer) || !el.contains(range.endContainer)) return null;
+      const holder = document.createElement('div');
+      holder.appendChild(range.cloneContents());
+      const text = htmlToPlainText(holder.innerHTML).trim() || range.toString().trim();
+      if (!text) return null;
+      return { text, rich: /<(img|table|a\s|strong|b>|em>|i>|u>|pre|code)/i.test(holder.innerHTML), token: { range: range.cloneRange(), raw: range.toString() } };
+    },
+    replaceSelection: (token, html) => {
+      const el = editorRef.current;
+      const range = token?.range;
+      if (!el || !range || !el.contains(range.startContainer) || !el.contains(range.endContainer) || range.toString() !== token.raw) return false;
+      lastRangeRef.current = range;
+      insertAtCaret('insertHTML', String(html ?? ''));
+      return true;
+    },
   }));
 
   // Adopt external value changes (draft restore, clear-after-send).

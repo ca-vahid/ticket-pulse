@@ -485,6 +485,23 @@ const TiptapEditor = forwardRef(function TiptapEditor({
     insertHtml: (html) => { const ed = liveEditor(); if (ed) ed.chain().focus().insertContent(sanitize(String(html ?? ''))).run(); },
     // For add-ons (inline completion): the live editor.
     getEditor: () => liveEditor(),
+    // Writing help: the selected part of the draft, and a way to replace exactly that part later.
+    getSelection: () => {
+      const ed = liveEditor();
+      if (!ed || ed.state.selection.empty) return null;
+      const { from, to } = ed.state.selection;
+      const text = ed.state.doc.textBetween(from, to, '\n').trim();
+      if (!text) return null;
+      let rich = false;
+      ed.state.doc.nodesBetween(from, to, (node) => { if (node.marks?.length || ['image', 'table'].includes(node.type.name)) rich = true; });
+      return { text, rich, token: { from, to, raw: ed.state.doc.textBetween(from, to, '\n') } };
+    },
+    replaceSelection: (token, html) => {
+      const ed = liveEditor();
+      if (!ed || !token || token.to > ed.state.doc.content.size) return false;
+      if (ed.state.doc.textBetween(token.from, token.to, '\n') !== token.raw) return false;
+      return ed.chain().focus().insertContentAt({ from: token.from, to: token.to }, sanitize(String(html ?? ''))).run();
+    },
   }));
 
   const openLink = () => { setLinkUrl(editor?.getAttributes('link').href || ''); setLinkOpen(true); };

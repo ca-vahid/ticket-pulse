@@ -940,6 +940,13 @@ export const ticketsAPI = {
   // AI thread summary (on-demand, read-only)
   summarize: async (id) => await apiLongTimeout.post(`/tickets/${id}/summarize`),
 
+  // Composer writing help: one rewrite of the agent's own text. A suggestion only.
+  composeAssist: async (id, { action, text }) => await apiLongTimeout.post(`/tickets/${id}/compose-assist`, { action, text }),
+  // Composer drafts on the server (the person's own, per ticket). Best-effort: never an error banner.
+  getDraft: async (id) => await api.get(`/tickets/${id}/draft`, { _speculative: true }),
+  saveDraft: async (id, draft) => await api.put(`/tickets/${id}/draft`, draft, { _speculative: true }),
+  deleteDraft: async (id) => await api.delete(`/tickets/${id}/draft`, { _speculative: true }),
+
   // Autofill intake (Mega 08-31 Phase AF): pasted text + up to 6 screenshots
   // → PROPOSED ticket fields (never auto-submitted). Multipart; the vision
   // round-trip can take a while, so it rides the long-timeout client.

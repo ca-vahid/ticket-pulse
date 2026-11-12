@@ -47,6 +47,10 @@ export const AI_OPERATIONS = [
   // held e-mail (add to a ticket, new ticket, no ticket, unsure). Economy tier:
   // Haiku 5.5 with GPT-6 Luna as the fallback. Its own cost line and monthly cap per workspace.
   'mail_triage',
+  // Composer writing help (12 Nov 2026): the agent's own draft text, one small
+  // rewrite at a time (tidy, shorter, tone, translate, notes to reply). Economy
+  // tier, its own cost line, per-person rate limit in composerAssistService.
+  'composer_assist',
 ];
 
 // Sonnet 5.5 (released 28 Sep 2026: same $2/$10 price as Sonnet 5, >30%
@@ -297,7 +301,7 @@ export function anthropicRequestRules(model) {
 }
 
 /** Operations whose default is the economy pair: Haiku 5.5, with GPT-6 Luna behind it. */
-const ECONOMY_OPERATIONS = ['teams_assistant', 'mail_triage'];
+const ECONOMY_OPERATIONS = ['teams_assistant', 'mail_triage', 'composer_assist'];
 
 export function defaultModelForProvider(provider, operation = null) {
   const normalizedProvider = normalizeProvider(provider);

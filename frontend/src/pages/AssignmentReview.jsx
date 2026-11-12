@@ -4384,6 +4384,8 @@ const AI_OPERATION_OPTIONS = [
   { value: 'teams_assistant', label: 'Teams Assistant' },
   // Tickets -> Mail review: what a held e-mail is (add to a ticket, new ticket, no ticket) (11 Nov 2026).
   { value: 'mail_triage', label: 'Mail Triage' },
+  // Ticket page -> composer -> AI: rewrites of the agent's own draft text (12 Nov 2026).
+  { value: 'composer_assist', label: 'Composer Writing Help' },
 ];
 
 export function AiProviderSettingsPanel({ onAssignmentModelChange }) {
