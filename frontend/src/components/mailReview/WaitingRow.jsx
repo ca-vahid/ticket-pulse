@@ -6,13 +6,14 @@ import { defaultRequester, describeSuggestion, fmtRef, isAcceptable, needsPerson
 import TicketPickPopover from './TicketPickPopover';
 
 /**
- * One held e-mail on Mail review → Waiting (UI Design, 11 Nov 2026):
- *   line 1  sender → mailbox · subject · time (Pacific, relative on hover)
- *   line 2  the snippet
- *   line 3  the suggestion: verb first, then the ticket, then what else happens
- *   line 4  why, one line (the rest is in Details)
- * then one primary button, one quiet one and a More menu. Which button is
- * primary follows how sure the AI is. No box per row; the list divides them.
+ * One held e-mail on Mail review → Waiting. Since 11 Nov 2026 (Vahid: "match
+ * the Approvals page, the stacked lines are confusing") it is a table row:
+ *   From           sender, over the mailbox it was sent to
+ *   E-mail         subject, over two lines of the text
+ *   AI suggestion  verb first, then the ticket, then what else happens; why;
+ *                  then one primary button, one quiet one and a More menu
+ *   Received       Pacific time, relative on hover
+ * Which button is primary follows how sure the AI is. Phones stack the cells.
  */
 
 const PRIMARY = 'tp-focus-ring inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-3.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 sm:flex-none';
@@ -20,6 +21,10 @@ const QUIET_BASE = 'tp-focus-ring h-8 items-center gap-1 rounded-lg px-2.5 text-
 // On a phone only the first button of the row shows; the rest are in More.
 const QUIET = `${QUIET_BASE} hidden sm:inline-flex`;
 const QUIET_LEAD = `${QUIET_BASE} inline-flex`;
+
+// Column tracks, shared by the table head and every row so they line up (the Approvals page pattern).
+export const WAITING_COLS = 'md:grid-cols-[minmax(0,1.05fr)_minmax(0,1.7fr)_minmax(0,2.5fr)_7.75rem]';
+export const WAITING_HEAD = ['From', 'E-mail', 'AI suggestion', { text: 'Received', right: true }];
 
 const LABEL = { accept: 'Accept', pick: 'Pick another ticket', new: 'New ticket', none: 'No ticket needed', details: 'Details' };
 
@@ -38,15 +43,15 @@ export function planActions(s) {
   return { primary: 'accept', quiet: ['pick'] };
 }
 
-/** The ticket number as a real link: the Tickets peek, in a new tab, so the review list stays put. */
+/** The ticket number as a real link: the ticket page, in a new tab, so the review list stays put (the same link Analytics uses; the Tickets peek link did not open reliably in a fresh tab, 11 Nov 2026). */
 export function TicketRefLink({ ticket, className = '' }) {
   if (!ticket) return null;
   return (
     <Link
-      to={`/tickets?peek=${ticket.id}`}
+      to={`/tickets/${ticket.id}`}
       target="_blank"
       rel="noopener"
-      title="Opens a preview of the ticket in a new tab"
+      title="Opens the ticket in a new tab"
       onClick={(e) => e.stopPropagation()}
       className={`tp-focus-ring rounded font-medium tabular-nums text-primary hover:underline ${className}`}
     >
@@ -208,75 +213,79 @@ export default function WaitingRow({
       aria-current={focused ? 'true' : undefined}
       aria-label={`${sender}: ${item.subject || '(no subject)'}`}
       onFocus={() => onFocus?.(item)}
-      className={`relative px-3 py-3 outline-none hover:bg-muted/40 focus-visible:bg-muted/40 sm:px-4 ${focused ? 'shadow-[inset_2px_0_0_hsl(var(--primary))]' : ''}`}
+      className={`relative border-t border-border/70 px-4 py-3 outline-none first:border-t-0 hover:bg-muted/40 focus-visible:bg-muted/40 ${focused ? 'shadow-[inset_2px_0_0_hsl(var(--primary))]' : ''}`}
     >
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-        <span className="min-w-0 shrink-0 truncate text-sm text-muted-foreground max-sm:flex-1">
-          <span className="text-foreground/85" title={item.from?.email || undefined}>{sender}</span>
+      {/* One table row: who wrote · the e-mail · what the AI suggests, with the buttons under it · when.
+          Phones stack the same cells: sender and time, the e-mail, then the suggestion. */}
+      <div className={`grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-4 gap-y-1.5 ${WAITING_COLS}`}>
+        <div className="order-1 min-w-0 md:order-none" data-testid="mr-from">
+          <span className="block truncate text-[13px] font-medium text-foreground/90" title={item.from?.email || undefined}>{sender}</span>
           {mailbox && (
-            <>
-              {' '}<ArrowRight className="inline h-3 w-3 -translate-y-px" aria-label="to" />{' '}
-              <span title={(item.to || []).join(', ') || undefined}>{mailbox}{others ? ` +${others}` : ''}</span>
-            </>
+            <span className="mt-0.5 block truncate text-[12px] text-muted-foreground" title={(item.to || []).join(', ') || undefined}>
+              <ArrowRight className="mr-1 inline h-3 w-3 -translate-y-px" aria-label="to" />
+              {mailbox}{others ? ` +${others}` : ''}
+            </span>
           )}
-        </span>
-        <span className="min-w-0 text-sm font-medium text-foreground max-sm:order-3 max-sm:basis-full max-sm:[overflow-wrap:anywhere] sm:flex-1 sm:truncate">
-          {item.subject || '(no subject)'}
-        </span>
+        </div>
+
+        <div className="order-3 col-span-2 min-w-0 md:order-none md:col-span-1" data-testid="mr-mail">
+          <span className="block text-[14px] font-semibold leading-snug text-foreground [overflow-wrap:anywhere]">{item.subject || '(no subject)'}</span>
+          {item.snippet && <p className="mt-0.5 line-clamp-2 text-[12.5px] leading-snug text-muted-foreground">{item.snippet}</p>}
+        </div>
+
+        <div className="order-4 col-span-2 min-w-0 md:order-none md:col-span-1" data-testid="mr-decision">
+          <SuggestionLine suggestion={s} mode={mode} compactOnPhone />
+          {s?.reason && <p className="mt-0.5 line-clamp-2 text-[12.5px] leading-snug text-muted-foreground" data-testid="mr-why">Why: {s.reason}</p>}
+          {needsPerson(s).length > 0 && (
+            <p className="mt-0.5 text-[12.5px] leading-snug text-muted-foreground [overflow-wrap:anywhere]" data-testid="mr-needs-person">Needs a person: {needsPerson(s).join(' · ')}</p>
+          )}
+
+          {error && <p role="alert" className="mt-1.5 text-sm text-red-700 dark:text-red-300">{error}</p>}
+
+          <div className="relative mt-2 flex items-center gap-1.5" data-testid="mr-actions">
+            {plan.primary && (
+              <button type="button" onClick={() => run(plan.primary)} aria-label={label(plan.primary)} aria-expanded={expanded(plan.primary)} className={PRIMARY} data-testid="mr-primary" data-action={plan.primary}>
+                {LABEL[plan.primary]}
+                {plan.primary === 'pick' && <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />}
+              </button>
+            )}
+            {plan.quiet.map((k) => (
+              <button key={k} type="button" onClick={() => run(k)} aria-label={label(k)} aria-expanded={expanded(k)} className={k === lead ? QUIET_LEAD : QUIET} data-testid="mr-secondary" data-action={k}>
+                {LABEL[k]}
+                {k === 'pick' && <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />}
+              </button>
+            ))}
+            <MoreMenu items={more} onChoose={run} />
+          </div>
+
+          {openForm === 'pick' && (
+            <div className="sm:relative">
+              <TicketPickPopover
+                suggested={s?.ticket || null}
+                candidates={detail ? detail.candidates || [] : null}
+                error={detailError}
+                onPick={(ticket, reopen) => onPick?.(item, ticket, reopen)}
+                onClose={() => onOpenForm?.(item, null)}
+              />
+            </div>
+          )}
+          {openForm === 'new' && (
+            <NewTicketForm
+              initial={defaultRequester(item, viewerEmail)}
+              onCreate={(email) => onCreate?.(item, email)}
+              onCancel={() => onOpenForm?.(item, null)}
+            />
+          )}
+        </div>
+
         <time
           dateTime={item.receivedAt || undefined}
           title={agoWords(item.receivedAt) || undefined}
-          className="shrink-0 whitespace-nowrap text-xs tabular-nums text-muted-foreground"
+          className="order-2 whitespace-nowrap text-right text-[12.5px] tabular-nums text-muted-foreground md:order-none"
         >
           {formatPacificWhen(item.receivedAt)}
         </time>
       </div>
-      {item.snippet && <p className="mt-0.5 truncate text-sm text-muted-foreground">{item.snippet}</p>}
-
-      <div className="mt-1.5">
-        <SuggestionLine suggestion={s} mode={mode} compactOnPhone />
-        {s?.reason && <p className="mt-0.5 line-clamp-1 text-sm text-muted-foreground" data-testid="mr-why">Why: {s.reason}</p>}
-        {needsPerson(s).length > 0 && (
-          <p className="mt-0.5 text-sm text-muted-foreground [overflow-wrap:anywhere]" data-testid="mr-needs-person">Needs a person: {needsPerson(s).join(' · ')}</p>
-        )}
-      </div>
-
-      {error && <p role="alert" className="mt-1.5 text-sm text-red-700 dark:text-red-300">{error}</p>}
-
-      <div className="relative mt-2 flex items-center gap-1.5" data-testid="mr-actions">
-        {plan.primary && (
-          <button type="button" onClick={() => run(plan.primary)} aria-label={label(plan.primary)} aria-expanded={expanded(plan.primary)} className={PRIMARY} data-testid="mr-primary" data-action={plan.primary}>
-            {LABEL[plan.primary]}
-            {plan.primary === 'pick' && <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />}
-          </button>
-        )}
-        {plan.quiet.map((k) => (
-          <button key={k} type="button" onClick={() => run(k)} aria-label={label(k)} aria-expanded={expanded(k)} className={k === lead ? QUIET_LEAD : QUIET} data-testid="mr-secondary" data-action={k}>
-            {LABEL[k]}
-            {k === 'pick' && <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />}
-          </button>
-        ))}
-        <MoreMenu items={more} onChoose={run} />
-      </div>
-
-      {openForm === 'pick' && (
-        <div className="sm:relative">
-          <TicketPickPopover
-            suggested={s?.ticket || null}
-            candidates={detail ? detail.candidates || [] : null}
-            error={detailError}
-            onPick={(ticket, reopen) => onPick?.(item, ticket, reopen)}
-            onClose={() => onOpenForm?.(item, null)}
-          />
-        </div>
-      )}
-      {openForm === 'new' && (
-        <NewTicketForm
-          initial={defaultRequester(item, viewerEmail)}
-          onCreate={(email) => onCreate?.(item, email)}
-          onCancel={() => onOpenForm?.(item, null)}
-        />
-      )}
     </li>
   );
 }

@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.3.70-preview';
+export const APP_VERSION = '4.3.71-preview';
 
 export const changelog = [
+  {
+    version: '4.3.71-preview',
+    date: 'November 11, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Mail review: the Waiting list is a table, like Approvals</strong> &mdash; each held e-mail is one row in four columns: who it is <em>From</em>, the <em>E-mail</em> (subject over the first lines), the <em>AI suggestion</em> with its reason and the buttons right under it, and when it was <em>Received</em>. Before, everything was stacked in one block and was hard to scan. On a phone the same cells stack.' },
+      { type: 'fix', html: '<strong>Mail review: the ticket number opens the ticket</strong> &mdash; the link on a suggestion (for example <em>Add to #244230</em>) opened a preview address that did not load in a new tab. It now opens the ticket page itself, in a new tab, so the review list stays where it was.' },
+    ],
+  },
   {
     version: '4.3.70-preview',
     date: 'November 11, 2026',

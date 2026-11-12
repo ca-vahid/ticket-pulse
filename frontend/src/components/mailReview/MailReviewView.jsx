@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Activity, ArrowLeft, CheckCheck, Keyboard, X } from 'lucide-react';
-import WaitingRow from './WaitingRow';
+import WaitingRow, { WAITING_COLS, WAITING_HEAD } from './WaitingRow';
+import { TableHead } from '../approvals/ApprovalRows';
 import DoneList from './DoneList';
 import LogList from './LogList';
 import { MODE_WORD, suggestionSentence } from './mailReviewText';
@@ -199,28 +200,31 @@ export default function MailReviewView({
           waiting.rows.length === 0 ? (
             !waiting.error && <p className="px-3 py-12 text-center text-sm text-muted-foreground sm:px-4" data-testid="mr-empty">{EMPTY.waiting}</p>
           ) : (
-            <ul className="divide-y divide-border/60" aria-label="Held e-mail waiting for a decision" data-testid="mr-waiting">
-              {waiting.rows.map((item) => (
-                <WaitingRow
-                  key={item.heldId}
-                  item={item}
-                  mode={mode}
-                  focused={item.heldId === focusedId}
-                  error={rowErrors[item.heldId] || null}
-                  openForm={openForm && openForm.heldId === item.heldId ? openForm.kind : null}
-                  detail={detail && detail.heldId === item.heldId ? detail : null}
-                  detailError={openForm && openForm.heldId === item.heldId ? detailError : null}
-                  viewerEmail={viewerEmail}
-                  onFocus={onFocusRow}
-                  onAccept={onAccept}
-                  onOpenForm={onOpenForm}
-                  onPick={onPick}
-                  onCreate={onCreate}
-                  onNoTicket={onNoTicket}
-                  onDetails={onDetails}
-                />
-              ))}
-            </ul>
+            <div className="tp-card mt-3 rounded-xl" data-testid="mr-table">
+              <TableHead cols={WAITING_COLS} labels={WAITING_HEAD} />
+              <ul aria-label="Held e-mail waiting for a decision" data-testid="mr-waiting">
+                {waiting.rows.map((item) => (
+                  <WaitingRow
+                    key={item.heldId}
+                    item={item}
+                    mode={mode}
+                    focused={item.heldId === focusedId}
+                    error={rowErrors[item.heldId] || null}
+                    openForm={openForm && openForm.heldId === item.heldId ? openForm.kind : null}
+                    detail={detail && detail.heldId === item.heldId ? detail : null}
+                    detailError={openForm && openForm.heldId === item.heldId ? detailError : null}
+                    viewerEmail={viewerEmail}
+                    onFocus={onFocusRow}
+                    onAccept={onAccept}
+                    onOpenForm={onOpenForm}
+                    onPick={onPick}
+                    onCreate={onCreate}
+                    onNoTicket={onNoTicket}
+                    onDetails={onDetails}
+                  />
+                ))}
+              </ul>
+            </div>
           )
         )}
 
