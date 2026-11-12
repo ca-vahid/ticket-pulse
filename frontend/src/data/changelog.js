@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.3.68-preview';
+export const APP_VERSION = '4.3.69-preview';
 
 export const changelog = [
+  {
+    version: '4.3.69-preview',
+    date: 'November 11, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Mail review: the AI&rsquo;s suggestions are closer to what a person would do</strong> &mdash; after its first day in Shadow we compared every suggestion with a hand-made answer and tuned it. An e-mail a colleague copied to the team mailbox is now treated as something to track (added to the matching ticket, or a new ticket for the person it was written to) instead of &ldquo;No ticket needed&rdquo;. When several tickets are about the same invoice it picks the newest one with the same subject. It now says <em>sure</em> when the link is one you can see for yourself, such as the same invoice number or the same e-mail thread; before, it never did, so nothing would have been applied once switched On. Still in Shadow: nothing is applied until an admin switches it On.' },
+      { type: 'fix', html: '<strong>Mail review: a ticket from the HR mailbox is no longer hidden from the suggestions</strong> &mdash; outside the workspace that runs onboarding and offboarding, a ticket whose requester is the HR mailbox was left out of the list the AI chooses from, so a follow-up to it was suggested as a new ticket. Onboarding and offboarding tickets themselves are still never offered.' },
+      { type: 'improved', html: '<strong>Mail review: reasons name tickets the way you do</strong> &mdash; a reason now says <em>TP-11819</em> or <em>#249102</em>, never an internal number.' },
+    ],
+  },
   {
     version: '4.3.68-preview',
     date: 'November 11, 2026',
