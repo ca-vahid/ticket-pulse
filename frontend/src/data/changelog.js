@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.74-preview';
+export const APP_VERSION = '4.3.75-preview';
 
 export const changelog = [
+  {
+    version: '4.3.75-preview',
+    date: 'November 12, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>The composer switches are now remembered</strong> &mdash; the personal switches added this week (single-letter keys, <em>5 seconds to undo a reply</em>, <em>New editor</em>, <em>Complete as I type</em>, and the status used last by Send and set status) worked until the page was reloaded and then went back to their defaults. The server was not saving them. It does now, per person and per workspace, so a switch you set stays set.' },
+    ],
+  },
   {
     version: '4.3.74-preview',
     date: 'November 12, 2026',
