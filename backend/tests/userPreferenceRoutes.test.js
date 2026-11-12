@@ -168,6 +168,26 @@ describe('PUT /api/tickets/preferences/:key', () => {
     expect(prismaMock.userPreference.upsert).not.toHaveBeenCalled();
   });
 
+  // 12 Nov 2026: the composer's switches were sent by the page since 4.3.67 but
+  // were not on the allowlist, so each one was forgotten on reload.
+  test('the composer switches are remembered, with their own allowed values', async () => {
+    const good = [
+      ['composer.singleKeys', 'off'], ['composer.undoSend', 'on'], ['composer.editor', 'new'],
+      ['composer.completion', 'on'], ['composer.ai', 'off'], ['composer.sendStatus', 'Pending Response'],
+    ];
+    for (const [key, value] of good) {
+      prismaMock.userPreference.upsert.mockResolvedValueOnce({ value });
+      const res = await request(buildApp()).put(`/api/tickets/preferences/${key}`).send({ value }).expect(200);
+      expect(res.body.data).toEqual({ key, value });
+      await request(buildApp()).get(`/api/tickets/preferences/${key}`).expect(200);
+    }
+    prismaMock.userPreference.upsert.mockClear();
+    await request(buildApp()).put('/api/tickets/preferences/composer.editor').send({ value: 'tiptap' }).expect(400);
+    await request(buildApp()).put('/api/tickets/preferences/composer.undoSend').send({ value: true }).expect(400);
+    await request(buildApp()).put('/api/tickets/preferences/composer.sendStatus').send({ value: '' }).expect(400);
+    expect(prismaMock.userPreference.upsert).not.toHaveBeenCalled();
+  });
+
   test('queue.freezeSubject takes true / false only (17 Oct 2026)', async () => {
     const res = await request(buildApp()).put('/api/tickets/preferences/queue.freezeSubject').send({ value: false }).expect(200);
     expect(res.body.data).toEqual({ key: 'queue.freezeSubject', value: false });

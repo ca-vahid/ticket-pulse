@@ -436,7 +436,11 @@ router.delete('/saved-views/:id', asyncHandler(async (req, res) => {
 
 // 'composer.greeting' (QA 09-18 #4): 'auto' adds the workspace greeting the
 // moment a reply starts; 'manual' waits for the Greeting button.
-const PREFERENCE_KEYS = new Set(['queue.columns', 'queue.columnWidths', 'queue.columnMap', 'queue.sideArrows', 'queue.freezeSubject', 'queue.pageSize', 'queue.createdWindow', 'queue.cards', 'ui.theme', 'ui.recentSearches', 'ui.layoutWidth', 'ui.ticketDensity', 'composer.greeting']);
+const PREFERENCE_KEYS = new Set(['queue.columns', 'queue.columnWidths', 'queue.columnMap', 'queue.sideArrows', 'queue.freezeSubject', 'queue.pageSize', 'queue.createdWindow', 'queue.cards', 'ui.theme', 'ui.recentSearches', 'ui.layoutWidth', 'ui.ticketDensity', 'composer.greeting',
+  // Composer (Nov 2026): the person's own switches. They were sent from the page
+  // from 4.3.67 on but never listed here, so every one came back 404 and was
+  // forgotten on reload.
+  'composer.singleKeys', 'composer.sendStatus', 'composer.undoSend', 'composer.editor', 'composer.completion', 'composer.ai']);
 // Closed-vocabulary keys get a value validator (Phase DM-A: 'ui.theme' is one
 // of three strings — the cross-device seed for the theme choice).
 const PREFERENCE_VALIDATORS = {
@@ -445,6 +449,13 @@ const PREFERENCE_VALIDATORS = {
   'ui.recentSearches': (v) => Array.isArray(v) && v.length <= 12 && v.every((s) => typeof s === 'string' && s.trim().length > 0 && s.length <= 120),
   'ui.layoutWidth': (v) => ['full', 'comfortable', 'classic'].includes(v),
   'composer.greeting': (v) => ['auto', 'manual'].includes(v),
+  'composer.singleKeys': (v) => ['on', 'off'].includes(v),
+  // The status "send and set status" used last: a status name.
+  'composer.sendStatus': (v) => typeof v === 'string' && v.trim().length > 0 && v.length <= 60,
+  'composer.undoSend': (v) => ['on', 'off'].includes(v),
+  'composer.editor': (v) => ['new', 'classic'].includes(v),
+  'composer.completion': (v) => ['on', 'off'].includes(v),
+  'composer.ai': (v) => ['on', 'off'].includes(v),
   'ui.ticketDensity': (v) => ['compact', 'roomy', 'dense'].includes(v),
   // Column map over the wide Tickets list (2 Oct 2026): on / off.
   'queue.columnMap': (v) => typeof v === 'boolean',
