@@ -21,6 +21,23 @@ export function queueSearchToKeep(search) {
   return out ? `?${out}` : '';
 }
 
+/**
+ * The remembered view to restore, keeping what the address still carries that
+ * is not part of a view: a link to /tickets?peek=123 opened in a new tab must
+ * still open that ticket's preview on top of the restored list (11 Nov 2026:
+ * the restore replaced the whole query string, so the preview never opened).
+ */
+export function restoredQueueSearch(saved, currentSearch) {
+  const next = new URLSearchParams(saved || '');
+  const current = new URLSearchParams(currentSearch || '');
+  for (const key of TRANSIENT) {
+    const value = current.get(key);
+    if (value) next.set(key, value);
+  }
+  const out = next.toString();
+  return out ? `?${out}` : '';
+}
+
 export function rememberQueueView(workspaceId, search) {
   if (!workspaceId) return;
   try {
