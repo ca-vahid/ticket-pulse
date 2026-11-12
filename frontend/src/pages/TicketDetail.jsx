@@ -7,6 +7,9 @@ import {
   Image as ImageIcon, Activity, SlidersHorizontal, GitBranch, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, BadgeCheck, CheckCheck, CheckCircle2, Lightbulb, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, CircleMinus, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, GitMerge, Hand, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, Plus, RefreshCw, Scissors, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle, PauseCircle, Play, Keyboard,
 } from 'lucide-react';
 import ComposerShortcuts, { Keys, MOD } from '../components/tickets/composer/ComposerShortcuts';
+import EmojiPicker from '../components/tickets/composer/EmojiPicker';
+import QuoteSelection from '../components/tickets/composer/QuoteSelection';
+import { Switch } from '../components/ui/switch';
 import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal';
 import TicketTagEditor from '../components/tickets/TicketTagEditor';
 import AlertOccurrenceStrip from '../components/tickets/AlertOccurrenceStrip';
@@ -995,6 +998,36 @@ export default function TicketDetail() {
     document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
   }, [sendMenuOpen]);
+  // Undo send (Nov 2026): a personal choice, off by default. A reply waits
+  // 5 seconds with Undo / Send now; Ctrl+Enter again sends at once.
+  const [undoSendOn, setUndoSendOn] = useState(false);
+  const [pendingSend, setPendingSend] = useState(null); // { until, opts }
+  const [pendingLeft, setPendingLeft] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    Promise.resolve().then(() => uiPreferencesAPI?.get?.('composer.undoSend'))
+      .then((res) => { if (alive && res?.data?.value === 'on') setUndoSendOn(true); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  const saveUndoSend = (on) => {
+    setUndoSendOn(on);
+    Promise.resolve().then(() => uiPreferencesAPI?.set?.('composer.undoSend', on ? 'on' : 'off')).catch(() => {});
+  };
+  const sendNowRef = useRef(null);
+  useEffect(() => {
+    if (!pendingSend) return undefined;
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((pendingSend.until - Date.now()) / 1000));
+      setPendingLeft(left);
+      if (left <= 0) { const opts = pendingSend.opts; setPendingSend(null); sendNowRef.current?.({ ...opts, immediate: true }); }
+    };
+    tick();
+    const timer = setInterval(tick, 250);
+    return () => clearInterval(timer);
+  }, [pendingSend]);
+  // Files dragged onto the composer.
+  const [composerDragOver, setComposerDragOver] = useState(false);
+  const [templateQuery, setTemplateQuery] = useState('');
   // Note-versus-reply safety: text typed as an internal note that is now a reply.
   const noteOriginRef = useRef(false);
   const [noteToReplyNotice, setNoteToReplyNotice] = useState(false);
@@ -1302,7 +1335,10 @@ export default function TicketDetail() {
   }, [ticketId, fetchTicket]);
   // "Also viewing" (gap plan 2 P4.1): heartbeat while open, live avatar list
   // over the same SSE connection.
-  const { viewers: alsoViewing, onPresence } = useTicketPresence(ticketId, Number.isFinite(ticketId));
+  // What I am writing right now, announced to others on this ticket (and theirs to me).
+  const myComposing = composerText.trim() && (composerMode === 'reply' || composerMode === 'note') ? composerMode : null;
+  const { viewers: alsoViewing, onPresence } = useTicketPresence(ticketId, Number.isFinite(ticketId), myComposing);
+  const othersWriting = alsoViewing.filter((v) => v.composing === 'reply' || v.composing === 'note');
   useSSE({ onTicketChange, onPresence, enabled: Number.isFinite(ticketId), reconnectKey: workspaceId });
   useEffect(() => () => { if (liveRefetchTimerRef.current) clearTimeout(liveRefetchTimerRef.current); }, []);
 
@@ -2153,11 +2189,30 @@ export default function TicketDetail() {
   const insertTemplate = (template) => {
     // QA 09-18 #4: templates may carry the greeting placeholders too.
     const addition = fillGreetingPlaceholders(template.bodyHtml || String(template.bodyText || '').replace(/\n/g, '<br>'), greetingCtx());
-    const joined = composerText.trim() ? `${composerBody}<p><br></p>${addition}` : addition;
-    setComposerBody(joined);
-    setComposerText(htmlToText(joined));
     setTemplatesOpen(false);
+    setTemplateQuery('');
+    // Nov 2026: into a draft, the template goes where the caret is, not at the end.
+    if (composerText.trim() && composerRef.current?.insertHtml) { composerRef.current.insertHtml(addition); return; }
+    setComposerBody(addition);
+    setComposerText(htmlToText(addition));
     setTimeout(() => composerRef.current?.focus(), 0);
+  };
+  const shownTemplates = useMemo(() => {
+    const q = templateQuery.trim().toLowerCase();
+    if (!q) return templates;
+    return templates.filter((t) => `${t.name} ${t.bodyText || ''}`.toLowerCase().includes(q));
+  }, [templates, templateQuery]);
+  // "Quote in reply": selected text from the thread, as a quote in the composer.
+  const quoteIntoComposer = (text) => {
+    const esc = document.createElement('div');
+    esc.textContent = text;
+    const html = `<blockquote>${esc.innerHTML.replace(/\n+/g, '<br>')}</blockquote><p><br></p>`;
+    if (!composerText.trim() && composerMode === 'note') switchComposerMode('reply');
+    setTimeout(() => {
+      if (composerRef.current?.insertHtml) composerRef.current.insertHtml(html);
+      else { setComposerBody((b) => `${b}${html}`); setComposerText((t) => `${t}\n${text}`); }
+      composerSectionRef.current?.scrollIntoView?.({ behavior: 'auto', block: 'center' });
+    }, 30);
   };
   const saveTemplate = async () => {
     const name = templateName.trim();
@@ -2326,6 +2381,14 @@ export default function TicketDetail() {
     }
     setMentionInReplyConfirm(false);
     setSendMenuOpen(false);
+    // Undo send: hold a reply for 5 seconds. A second send (Ctrl+Enter, the
+    // button) while it waits sends at once.
+    const immediate = Boolean(opts && opts.immediate === true);
+    if (pendingSend && !immediate) { const held = pendingSend.opts; setPendingSend(null); sendNowRef.current?.({ ...held, immediate: true }); return; }
+    if (composerMode === 'reply' && undoSendOn && !immediate && body) {
+      setPendingSend({ until: Date.now() + 5000, opts: { ...(thenStatus ? { thenStatus } : {}), mentionOk: true } });
+      return;
+    }
     const statusBefore = ticket?.status;
     if (composerMode === 'forward') {
       if (forwardTo.length === 0) {
@@ -2416,6 +2479,8 @@ export default function TicketDetail() {
       setIsSending(false);
     }
   };
+
+  sendNowRef.current = sendComposer;
 
   // Header toolbar (16 Sep 2026): quiet icon buttons whose label appears at xl.
   const secondaryActionClass = 'tp-focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 text-xs font-medium text-muted-foreground hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200';
@@ -3525,6 +3590,21 @@ export default function TicketDetail() {
                         aria-modal={(composerExpanded && !composerDocked) || undefined}
                         role={composerExpanded && !composerDocked ? 'dialog' : undefined}
                         data-composer-layout={composerDocked ? 'docked' : composerExpanded ? 'full' : 'inline'}
+                        data-drag-over={composerDragOver ? 'true' : undefined}
+                        onDragOver={composerMode === 'forward' ? undefined : (e) => {
+                          if (![...(e.dataTransfer?.types || [])].includes('Files')) return;
+                          e.preventDefault();
+                          if (!composerDragOver) setComposerDragOver(true);
+                        }}
+                        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setComposerDragOver(false); }}
+                        onDropCapture={composerMode === 'forward' ? undefined : (e) => {
+                          const files = e.dataTransfer?.files;
+                          setComposerDragOver(false);
+                          if (!files || files.length === 0) return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                          addComposerFiles(files);
+                        }}
                         onKeyDown={(e) => {
                           if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'F' || e.key === 'f')) {
                             e.preventDefault();
@@ -3539,6 +3619,17 @@ export default function TicketDetail() {
                           <p className="mb-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
                             <span>Writing beside the thread. Scroll the ticket on the left while you write.</span>
                             <span className="shrink-0">Esc to go back</span>
+                          </p>
+                        )}
+                        {othersWriting.length > 0 && (
+                          <p role="status" data-testid="others-writing" className="mb-2 flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+                            <Pencil className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                            {othersWriting.map((v) => `${(v.name || v.email).split(/\s+/)[0]} is writing ${v.composing === 'reply' ? 'a reply' : 'a note'}`).join(' · ')} on this ticket right now.
+                          </p>
+                        )}
+                        {composerDragOver && (
+                          <p className="mb-2 rounded-lg border-2 border-dashed border-primary/60 bg-primary/5 px-3 py-2 text-center text-xs font-medium text-primary" aria-hidden="true">
+                            Drop to attach (up to 5 files)
                           </p>
                         )}
                         {/* QA 07-06 #10: wraps + compact labels under sm so nothing
@@ -3625,8 +3716,26 @@ export default function TicketDetail() {
                                   {templates.length === 0 && (
                                     <span className="px-2 py-1.5 text-xs text-muted-foreground/75">No templates yet — write a reply below, then save it here.</span>
                                   )}
+                                  {templates.length > 5 && (
+                                    <input
+                                      type="search"
+                                      autoFocus
+                                      value={templateQuery}
+                                      onChange={(e) => setTemplateQuery(e.target.value)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && shownTemplates[0]) { e.preventDefault(); insertTemplate(shownTemplates[0]); }
+                                        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setTemplatesOpen(false); }
+                                      }}
+                                      placeholder="Find a template…"
+                                      aria-label="Find a template"
+                                      className="tp-focus-ring mb-1 w-full text-xs bg-card border border-input rounded-md px-2 py-1.5 placeholder:text-muted-foreground/75"
+                                    />
+                                  )}
+                                  {templates.length > 0 && shownTemplates.length === 0 && (
+                                    <span className="px-2 py-1.5 text-xs text-muted-foreground/75">No template matches “{templateQuery}”.</span>
+                                  )}
                                   <span className="max-h-52 overflow-y-auto settings-scrollbar flex flex-col">
-                                    {templates.map((template) => (
+                                    {shownTemplates.map((template) => (
                                       <span key={template.id} className="flex items-center gap-1 group">
                                         <button
                                           onClick={() => insertTemplate(template)}
@@ -3931,6 +4040,7 @@ export default function TicketDetail() {
                                 </button>
                               </>
                             )}
+                            {composerMode !== 'forward' && <EmojiPicker onPick={(ch) => composerRef.current?.insertText?.(ch)} />}
                             <button
                               type="button"
                               onClick={() => setShortcutsOpen(true)}
@@ -3940,8 +4050,14 @@ export default function TicketDetail() {
                             >
                               <Keyboard className="w-3.5 h-3.5" aria-hidden="true" />
                             </button>
-                            {composerText.trim() && (
+                            {composerText.trim() && !pendingSend && (
                               <span className="text-[10px] text-muted-foreground/50 truncate" title="Drafts are kept per ticket until sent">draft saved</span>
+                            )}
+                            {pendingSend && (
+                              <span role="status" data-testid="pending-send" className="inline-flex items-center gap-2 text-xs font-medium text-foreground">
+                                Sending in {pendingLeft} s
+                                <button type="button" onClick={() => setPendingSend(null)} className="tp-focus-ring rounded-md border border-border px-2 py-1 font-semibold hover:bg-muted">Undo</button>
+                              </span>
                             )}
                           </span>
                           {(() => {
@@ -3960,7 +4076,7 @@ export default function TicketDetail() {
                                   className={`tp-focus-ring inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold transition-colors disabled:opacity-50 ${withStatus ? 'rounded-l-lg' : 'rounded-lg'} ${tone}`}
                                 >
                                   {isSending ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Send className="w-4 h-4" aria-hidden="true" />}
-                                  {composerMode === 'reply' ? 'Send reply' : composerMode === 'forward' ? 'Forward thread' : 'Add note'}
+                                  {pendingSend ? 'Send now' : composerMode === 'reply' ? 'Send reply' : composerMode === 'forward' ? 'Forward thread' : 'Add note'}
                                 </button>
                                 {withStatus && (
                                   <button
@@ -3993,6 +4109,15 @@ export default function TicketDetail() {
                                       </button>
                                     ))}
                                     {!canWrite && <p className="px-2 pb-1 pt-1.5 text-[10px] text-muted-foreground/75">FreshService ticket: the status change asks you to confirm.</p>}
+                                    {composerMode === 'reply' && (
+                                      <label className="mt-1 flex items-start justify-between gap-3 border-t border-border px-2 pb-1 pt-2">
+                                        <span>
+                                          <span className="block text-xs font-medium text-foreground">5 seconds to undo a reply</span>
+                                          <span className="block text-[10px] text-muted-foreground">Replies wait 5 s with an Undo. Send again to send at once. Remembered for you.</span>
+                                        </span>
+                                        <Switch checked={undoSendOn} onCheckedChange={(v) => saveUndoSend(Boolean(v))} aria-label="5 seconds to undo a reply" />
+                                      </label>
+                                    )}
                                   </div>
                                 )}
                               </span>
@@ -4838,6 +4963,7 @@ export default function TicketDetail() {
         )}
       </main>
 
+      <QuoteSelection scope={'[aria-label="Conversation"], [aria-label="Ticket description"]'} onQuote={quoteIntoComposer} enabled={canConverse} />
       <ComposerShortcuts open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} singleKeys={singleKeys} onSingleKeysChange={saveSingleKeys} />
 
       {toast && (

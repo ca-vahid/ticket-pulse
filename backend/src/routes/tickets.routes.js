@@ -1086,7 +1086,7 @@ router.post('/:id/presence', asyncHandler(async (req, res) => {
     res.json({ success: true, data: { viewers: [] } });
     return;
   }
-  const viewers = heartbeatPresence(req.workspaceId, ticketId, { email, name });
+  const viewers = heartbeatPresence(req.workspaceId, ticketId, { email, name, composing: req.body?.composing ?? null });
   res.json({ success: true, data: { viewers: viewers.filter((v) => v.email !== email) } });
 }));
 

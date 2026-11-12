@@ -20,8 +20,12 @@ const registry = new Map();
 import('./memoryDiagnostics.js').then(({ registerGauge }) => registerGauge('presence.workspaces', () => registry.size)).catch(() => {});
 
 function viewersOf(ticketMap) {
-  return [...ticketMap.entries()].map(([email, v]) => ({ email, name: v.name }));
+  return [...ticketMap.entries()].map(([email, v]) => ({ email, name: v.name, composing: v.composing || null }));
 }
+
+// "Someone is replying" (Nov 2026): what a viewer is writing right now, if
+// anything. Like the rest of presence it lives in memory only.
+const COMPOSING = new Set(['reply', 'note']);
 
 function broadcastTicket(workspaceId, ticketId, ticketMap) {
   try {
@@ -36,14 +40,15 @@ function broadcastTicket(workspaceId, ticketId, ticketMap) {
 }
 
 /** Announce/refresh a viewer on a ticket. Broadcasts only when the viewer set changes. */
-export function heartbeatPresence(workspaceId, ticketId, { email, name }) {
+export function heartbeatPresence(workspaceId, ticketId, { email, name, composing = null }) {
   if (!registry.has(workspaceId)) registry.set(workspaceId, new Map());
   const wsMap = registry.get(workspaceId);
   if (!wsMap.has(ticketId)) wsMap.set(ticketId, new Map());
   const ticketMap = wsMap.get(ticketId);
-  const isNew = !ticketMap.has(email);
-  ticketMap.set(email, { name: name || email, lastSeenAt: Date.now() });
-  if (isNew) broadcastTicket(workspaceId, ticketId, ticketMap);
+  const before = ticketMap.get(email);
+  const writing = COMPOSING.has(composing) ? composing : null;
+  ticketMap.set(email, { name: name || email, lastSeenAt: Date.now(), composing: writing });
+  if (!before || (before.composing || null) !== writing) broadcastTicket(workspaceId, ticketId, ticketMap);
   return viewersOf(ticketMap);
 }
 

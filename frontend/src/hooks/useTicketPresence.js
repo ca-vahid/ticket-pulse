@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ticketsAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -10,21 +10,29 @@ const HEARTBEAT_MS = 30_000; // backend expires viewers after ~75s
  * viewers. Team-safe: presence only — the backend stores nothing and tracks
  * no durations.
  *
+ * `composing` ('reply' | 'note' | null, Nov 2026): what this person is writing
+ * right now. It rides on the heartbeat, and a change is announced at once so
+ * "X is writing a reply" does not lag half a minute. Other viewers come back
+ * with their own `composing`.
+ *
  * Returns `{ viewers, onPresence }`; wire `onPresence` into the page's
  * EXISTING `useSSE` call (don't open a second SSE connection per page —
  * browsers cap concurrent connections per host).
  */
-export function useTicketPresence(ticketId, enabled = true) {
+export function useTicketPresence(ticketId, enabled = true, composing = null) {
   const { user } = useAuth();
   const myEmail = user?.email?.toLowerCase() || null;
   const [viewers, setViewers] = useState([]);
+  const composingRef = useRef(composing);
+  composingRef.current = composing;
+  const active = Boolean(enabled && Number.isFinite(ticketId) && myEmail);
 
   useEffect(() => {
-    if (!enabled || !Number.isFinite(ticketId) || !myEmail) return undefined;
+    if (!active) return undefined;
     let cancelled = false;
 
     const beat = () => {
-      ticketsAPI.presenceHeartbeat(ticketId)
+      ticketsAPI.presenceHeartbeat(ticketId, false, composingRef.current)
         .then((res) => { if (!cancelled) setViewers(res.data?.viewers || []); })
         .catch(() => {}); // presence is best-effort, never surface errors
     };
@@ -48,7 +56,19 @@ export function useTicketPresence(ticketId, enabled = true) {
       document.removeEventListener('visibilitychange', onVisibility);
       ticketsAPI.presenceHeartbeat(ticketId, true).catch(() => {});
     };
-  }, [ticketId, enabled, myEmail]);
+  }, [ticketId, active]);
+
+  // Starting or stopping a reply/note: say so straight away (not on mount —
+  // the first heartbeat above already carries it).
+  const firstRef = useRef(true);
+  useEffect(() => {
+    if (firstRef.current) { firstRef.current = false; return; }
+    if (!active || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) return;
+    ticketsAPI.presenceHeartbeat(ticketId, false, composing)
+      .then((res) => setViewers(res.data?.viewers || []))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composing]);
 
   const onPresence = useCallback((data) => {
     if (data?.ticketId !== ticketId) return;
