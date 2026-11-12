@@ -3848,6 +3848,28 @@ model UserPreference {
   @@map("user_preferences")
 }
 
+// A person's unsent reply or note on one ticket, kept on the server so it
+// follows them to another computer (12 Nov 2026). One row per person per
+// ticket; removed when they send or clear it. Only its owner can read it.
+// No relation to Ticket on purpose (additive table, nothing else changes).
+// Rows are never pruned: the page reads a missing row as "sent elsewhere".
+model TicketDraft {
+  id          Int      @id @default(autoincrement())
+  workspaceId Int      @map("workspace_id")
+  ticketId    Int      @map("ticket_id")
+  ownerEmail  String   @map("owner_email") @db.VarChar(255)
+  mode        String   @db.VarChar(10)
+  bodyHtml    String   @map("body_html") @db.Text
+  cc          Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([ticketId, ownerEmail])
+  @@index([workspaceId, ownerEmail])
+  @@index([updatedAt])
+  @@map("ticket_drafts")
+}
+
 // Admin-configurable quick filter cards on /tickets (Mega 08-23 Phase FC):
 // `cards` is an ORDERED array of exactly 6 registry keys (server-validated;
 // dupes rejected). Absent row = today's default 6 — zero behavior change.

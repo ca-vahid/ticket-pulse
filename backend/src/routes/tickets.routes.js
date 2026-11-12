@@ -2078,6 +2078,66 @@ router.post('/:id/summarize', asyncHandler(async (req, res) => {
   res.json({ success: true, data: summary });
 }));
 
+// Composer writing help (12 Nov 2026): one rewrite of the agent's OWN draft text.
+// The result is a suggestion for the page to show; nothing is stored or sent.
+router.post('/:id/compose-assist', asyncHandler(async (req, res) => {
+  const ticketId = parseTicketId(req);
+  const ticket = await prisma.ticket.findFirst({
+    where: { id: ticketId, workspaceId: req.workspaceId },
+    select: { subject: true, requester: { select: { name: true } } },
+  });
+  if (!ticket) throw new NotFoundError('Ticket not found');
+  const { default: composerAssistService } = await import('../services/composerAssistService.js');
+  const data = await composerAssistService.assist({
+    workspaceId: req.workspaceId,
+    actorEmail: req.ticketActor.email,
+    action: String(req.body?.action || ''),
+    text: req.body?.text,
+    subject: ticket.subject || '',
+    firstName: ticket.requester?.name || '',
+  });
+  res.json({ success: true, data });
+}));
+
+// Composer drafts on the server (12 Nov 2026): a person's unsent reply or note
+// follows them to another computer. One row per person per ticket; only the
+// owner reads or writes it (the owner is the signed-in person, never the body).
+const DRAFT_MAX_BYTES = 300 * 1024;
+const draftWhere = (req, ticketId) => ({ ticketId_ownerEmail: { ticketId, ownerEmail: req.ticketActor.email.toLowerCase() } });
+const draftOut = (row) => (row ? { mode: row.mode, body: row.bodyHtml, cc: Array.isArray(row.cc) ? row.cc : [], updatedAt: row.updatedAt } : null);
+
+router.get('/:id/draft', asyncHandler(async (req, res) => {
+  const ticketId = parseTicketId(req);
+  const row = await prisma.ticketDraft.findUnique({ where: draftWhere(req, ticketId) });
+  // A row from another workspace is not this request's to show.
+  res.json({ success: true, data: row && row.workspaceId === req.workspaceId ? draftOut(row) : null });
+}));
+
+router.put('/:id/draft', asyncHandler(async (req, res) => {
+  const ticketId = parseTicketId(req);
+  const mode = req.body?.mode === 'note' ? 'note' : 'reply';
+  const body = typeof req.body?.body === 'string' ? req.body.body : '';
+  if (!body.trim()) throw new ValidationError('The draft is empty');
+  if (Buffer.byteLength(body, 'utf8') > DRAFT_MAX_BYTES) throw new ValidationError('The draft is too large to keep on the server');
+  const cc = (Array.isArray(req.body?.cc) ? req.body.cc : [])
+    .filter((v) => typeof v === 'string' && v.length <= 255).slice(0, 30);
+  const ticket = await prisma.ticket.findFirst({ where: { id: ticketId, workspaceId: req.workspaceId }, select: { id: true } });
+  if (!ticket) throw new NotFoundError('Ticket not found');
+  const ownerEmail = req.ticketActor.email.toLowerCase();
+  const row = await prisma.ticketDraft.upsert({
+    where: draftWhere(req, ticketId),
+    update: { mode, bodyHtml: body, cc, workspaceId: req.workspaceId },
+    create: { workspaceId: req.workspaceId, ticketId, ownerEmail, mode, bodyHtml: body, cc },
+  });
+  res.json({ success: true, data: draftOut(row) });
+}));
+
+router.delete('/:id/draft', asyncHandler(async (req, res) => {
+  const ticketId = parseTicketId(req);
+  await prisma.ticketDraft.deleteMany({ where: { ticketId, ownerEmail: req.ticketActor.email.toLowerCase(), workspaceId: req.workspaceId } });
+  res.json({ success: true, data: null });
+}));
+
 // Records in other systems (Sentinel incidents…) this ticket belongs to.
 router.get('/:id/external-references', asyncHandler(async (req, res) => {
   const { default: refs } = await import('../services/ticketExternalReferenceService.js');

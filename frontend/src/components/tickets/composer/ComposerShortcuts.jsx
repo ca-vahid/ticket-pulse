@@ -36,6 +36,7 @@ export function Keys({ keys }) {
 export default function ComposerShortcuts({
   open, onClose, singleKeys, onSingleKeysChange, newEditor = false, onNewEditorChange = null,
   completion = false, onCompletionChange = null, onForgetPhrases = null, phraseCount = 0,
+  ai = true, onAiChange = null,
 }) {
   const closeRef = useRef(null);
   const onCloseRef = useRef(onClose);
@@ -102,6 +103,17 @@ export default function ComposerShortcuts({
               </p>
             )}
           </div>
+        )}
+        {onAiChange && (
+          <label className="mt-3 flex items-start justify-between gap-4 border-t border-border pt-3">
+            <span>
+              <span className="block text-sm font-medium text-foreground">Writing help (AI)</span>
+              <span className="block text-xs text-muted-foreground">
+                The <strong>AI</strong> button under the editor: fix spelling, shorten, change the tone, translate, or turn notes into a reply. You always see the suggestion first; nothing changes until you choose Replace. Switch it off to hide the button. Remembered for you.
+              </span>
+            </span>
+            <Switch checked={Boolean(ai)} onCheckedChange={(v) => onAiChange(Boolean(v))} aria-label="Writing help (AI)" />
+          </label>
         )}
       </div>
     </div>

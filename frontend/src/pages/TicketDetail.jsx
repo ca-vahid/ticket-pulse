@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import ComposerShortcuts, { Keys, MOD } from '../components/tickets/composer/ComposerShortcuts';
 import EmojiPicker from '../components/tickets/composer/EmojiPicker';
+import useComposerAssist from '../components/tickets/composer/ComposerAssist';
 import { forgetPhrases, ownPhrases, phrasesFor, rememberSentText } from '../utils/composerPhrases';
 // The new editor (early access) loads only for the people who switch it on.
 const TiptapEditor = lazy(() => import('../components/tickets/composer/TiptapEditor'));
@@ -87,6 +88,7 @@ import { ticketsAPI, uiPreferencesAPI } from '../services/api';
 import { useSSE } from '../hooks/useSSE';
 import useIsPhone from '../hooks/useIsPhone';
 import { useTicketPresence } from '../hooks/useTicketPresence';
+import { forgetServerDraft, useServerDraft } from '../hooks/useServerDraft';
 import { useTicketTypes } from '../hooks/useTicketTypes';
 import MergeTicketsModal from '../components/tickets/MergeTicketsModal';
 import SplitTicketModal from '../components/tickets/SplitTicketModal';
@@ -1027,6 +1029,18 @@ export default function TicketDetail() {
     setCompletionOn(on);
     Promise.resolve().then(() => uiPreferencesAPI?.set?.('composer.completion', on ? 'on' : 'off')).catch(() => {});
   };
+  // Writing help (AI) in the composer: on unless the person switched it off.
+  const [aiAssistOn, setAiAssistOn] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    Promise.resolve().then(() => uiPreferencesAPI?.get?.('composer.ai'))
+      .then((res) => { if (alive && res?.data?.value === 'off') setAiAssistOn(false); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  const saveAiAssist = (on) => {
+    setAiAssistOn(on);
+    Promise.resolve().then(() => uiPreferencesAPI?.set?.('composer.ai', on ? 'on' : 'off')).catch(() => {});
+  };
   // Undo send (Nov 2026): a personal choice, off by default. A reply waits
   // 5 seconds with Undo / Send now; Ctrl+Enter again sends at once.
   const [undoSendOn, setUndoSendOn] = useState(false);
@@ -1074,6 +1088,7 @@ export default function TicketDetail() {
     ticketsAPI.reply(held.ticketId, held.request)
       .then(() => {
         try { localStorage.removeItem(held.draftKey); } catch { /* no-op */ }
+        forgetServerDraft(held.ticketId);
         if (held.thenStatus) ticketsAPI.setStatus(held.ticketId, held.thenStatus).catch(() => {});
         say('emerald', `Your reply on ${held.displayRef} was sent when you left the ticket`);
       })
@@ -1152,6 +1167,8 @@ export default function TicketDetail() {
   // ---- Draft guard: per-ticket stash so navigating away never loses a reply ----
   const draftKey = `tp_ticket_draft_${ticketId}`;
   const draftLoadedRef = useRef(false);
+  // What this browser's stash held when the ticket opened (the server copy is compared with it).
+  const [restoredDraft, setRestoredDraft] = useState({ id: null, body: '' });
   // One composer line = one text line (QA 09-21 #7). innerText renders every
   // block boundary as a blank line AND an empty <p><br></p> as its own line,
   // so two blank lines in the editor became six in the e-mail (each newline
@@ -1167,11 +1184,13 @@ export default function TicketDetail() {
     setComposerCc([]);
     setComposerFiles([]);
     setHeldDraftNotice(false);
+    let restored = '';
     try {
       const raw = localStorage.getItem(draftKey);
       if (raw) {
         const draft = JSON.parse(raw);
         if (draft.body) {
+          restored = draft.body;
           setComposerBody(draft.body);
           setComposerText(htmlToText(draft.body));
         }
@@ -1189,7 +1208,49 @@ export default function TicketDetail() {
       }
     } catch { /* corrupt stash — start clean */ }
     draftLoadedRef.current = true;
+    setRestoredDraft({ id: ticketId, body: restored });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftKey]);
+
+  // The same draft on the server, so it follows the person to another computer.
+  useServerDraft({
+    ticketId,
+    enabled: Number.isFinite(ticketId),
+    restoredBody: restoredDraft.id === ticketId ? restoredDraft.body : undefined,
+    body: composerBody,
+    text: composerText,
+    cc: composerCc,
+    mode: composerMode,
+    onAdopt: (draft) => {
+      setComposerBody(draft.body);
+      setComposerText(htmlToText(draft.body));
+      if (Array.isArray(draft.cc) && draft.cc.length) { setComposerCc(draft.cc); ccSeedRef.current = draft.cc; ccSeededRef.current = true; }
+      if (draft.mode === 'note' || draft.mode === 'reply') setComposerMode(draft.mode);
+      showToast('sky', 'Picked up the draft you started on another computer', { duration: 5000 });
+    },
+    onDrop: () => {
+      setComposerBody('');
+      setComposerText('');
+      setHeldDraftNotice(false);
+      try { localStorage.removeItem(draftKey); } catch { /* no-op */ }
+    },
+  });
+
+  // Writing help (AI): works on the selected text or the whole draft; the
+  // suggestion is shown first and only a click puts it in.
+  const assist = useComposerAssist({
+    ticketId,
+    enabled: aiAssistOn,
+    mode: composerMode,
+    editorRef: composerRef,
+    body: composerBody,
+    text: composerText,
+    disabled: Boolean(pendingSend),
+    onSetBody: (html, text) => {
+      setComposerBody(html);
+      setComposerText(text === null || text === undefined ? htmlToText(html) : text);
+    },
+  });
 
   useEffect(() => {
     if (!draftLoadedRef.current) return undefined;
@@ -4129,6 +4190,7 @@ export default function TicketDetail() {
                             }}
                           />
                         </Suspense>
+                        {assist.panel}
                         {composerFiles.length > 0 && (
                           <ul className="mt-2 flex flex-wrap gap-2 items-start" aria-label="Files to attach">
                             {composerFiles.map((file) => (
@@ -4165,6 +4227,7 @@ export default function TicketDetail() {
                               </>
                             )}
                             {composerMode !== 'forward' && <EmojiPicker onPick={(ch) => composerRef.current?.insertText?.(ch)} />}
+                            {assist.menu}
                             <button
                               type="button"
                               onClick={() => setShortcutsOpen(true)}
@@ -5089,7 +5152,7 @@ export default function TicketDetail() {
       </main>
 
       <QuoteSelection scope={'[aria-label="Conversation"], [aria-label="Ticket description"]'} onQuote={quoteIntoComposer} enabled={canConverse} />
-      <ComposerShortcuts open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} singleKeys={singleKeys} onSingleKeysChange={saveSingleKeys} newEditor={newEditorOn} onNewEditorChange={saveNewEditor} completion={completionOn} onCompletionChange={saveCompletion} phraseCount={shortcutsOpen ? ownPhrases().length + phraseTick * 0 : 0} onForgetPhrases={() => { forgetPhrases(); setPhraseTick((n) => n + 1); }} />
+      <ComposerShortcuts open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} singleKeys={singleKeys} onSingleKeysChange={saveSingleKeys} newEditor={newEditorOn} onNewEditorChange={saveNewEditor} completion={completionOn} onCompletionChange={saveCompletion} ai={aiAssistOn} onAiChange={saveAiAssist} phraseCount={shortcutsOpen ? ownPhrases().length + phraseTick * 0 : 0} onForgetPhrases={() => { forgetPhrases(); setPhraseTick((n) => n + 1); }} />
 
       {toast && (
         <div
