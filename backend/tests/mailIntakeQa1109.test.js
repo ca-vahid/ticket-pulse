@@ -203,7 +203,7 @@ describe('A: a reply to a workflow mail sent through SendGrid', () => {
   });
 
   test('a thread-entry match still wins over the delivery lookup', async () => {
-    prismaMock.ticketThreadEntry.findFirst.mockResolvedValueOnce({ ticketId: 4402 });
+    prismaMock.ticketThreadEntry.findFirst.mockImplementation(({ where } = {}) => Promise.resolve(where?.emailMessageId?.in ? { ticketId: 4402 } : null));
     prismaMock.ticket.findUnique.mockResolvedValue({ ...closedTicket, id: 4402 });
     const match = await ingest.matchEmailToTicket(5, pmReply(), side.address);
     expect(match.via).toBe('threading_headers');
@@ -397,5 +397,53 @@ describe('C: meeting invites', () => {
   test('ordinary mail is untouched by the invite rule', async () => {
     expect(await ingest.processEmail(front, mail({ cc: ['boss@example.com'] }))).toBe('created');
     expect(holdMock.recordSkipped).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// QA 11-12 #2: "Requester replied" says whether the reply answers an e-mail a workflow sent.
+describe('D: reply_received carries replyToWorkflowEmail', () => {
+  const SG_ID = 'ZyXwVuTsRqPoNmLkJiHgFe';
+  const wfRef = `<${SG_ID}@geopod-ismtpd-25>`;
+  const openTicket = { id: 4402, workspaceId: 5, origin: 'ticketpulse', nativeNumber: 3302, status: 'Open', subject: 'Survey request', requesterId: null, ccEmails: [] };
+  const extraOf = () => lifecycleMock.emitTicketEvent.mock.calls.find(([type]) => type === 'ticket.reply_received')?.[2]?.extra;
+
+  test('a reply-all matched by thread headers, with the workflow mail in References: true, with the workflow name', async () => {
+    prismaMock.ticketThreadEntry.findFirst.mockImplementation(({ where } = {}) => Promise.resolve(where?.emailMessageId?.in ? { ticketId: 4402 } : null));
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...openTicket });
+    prismaMock.notificationDelivery.findFirst.mockImplementation(({ where }) => Promise.resolve(
+      where?.workflowRunId && where.OR?.[0]?.providerMessageId?.in?.includes(SG_ID) ? { workflowRun: { workflow: { name: 'BST Completion Email' } } } : null,
+    ));
+    const reply = mail({ subject: 'Re: Survey request', to: ['projects@example.com'], inReplyTo: '<pm-answer@example.com>', references: `${wfRef} <pm-answer@example.com>` });
+    expect(await ingest.processEmail(side, reply)).toBe('reply');
+    expect(extraOf()).toEqual(expect.objectContaining({ via: 'threading_headers', replyToWorkflowEmail: true, replyToWorkflow: 'BST Completion Email' }));
+  });
+
+  test('a reply with no workflow mail in its thread: false, no workflow name', async () => {
+    prismaMock.ticketThreadEntry.findFirst.mockImplementation(({ where } = {}) => Promise.resolve(where?.emailMessageId?.in ? { ticketId: 4402 } : null));
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...openTicket });
+    const reply = mail({ subject: 'Re: Survey request', to: ['projects@example.com'], inReplyTo: '<agent-reply@example.com>', references: '<agent-reply@example.com>' });
+    expect(await ingest.processEmail(side, reply)).toBe('reply');
+    expect(extraOf().replyToWorkflowEmail).toBe(false);
+    expect(extraOf().replyToWorkflow).toBeUndefined();
+  });
+
+  test('matched as workflow_mail_ref on an open ticket: true even if the name lookup finds nothing', async () => {
+    prismaMock.notificationDelivery.findFirst.mockImplementation(({ where }) => {
+      if (where?.OR) return Promise.resolve(null);
+      if (where?.providerMessageId?.in?.includes(SG_ID)) return Promise.resolve({ ticketId: 4402 });
+      return Promise.resolve(null);
+    });
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...openTicket });
+    expect(await ingest.processEmail(side, mail({ subject: 'Re: Survey request', to: ['projects@example.com'], inReplyTo: wfRef, references: wfRef }))).toBe('reply');
+    expect(extraOf()).toEqual(expect.objectContaining({ via: 'workflow_mail_ref', replyToWorkflowEmail: true }));
+  });
+
+  test('a failing lookup never blocks the reply: false', async () => {
+    prismaMock.ticketThreadEntry.findFirst.mockImplementation(({ where } = {}) => Promise.resolve(where?.emailMessageId?.in ? { ticketId: 4402 } : null));
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...openTicket });
+    prismaMock.notificationDelivery.findFirst.mockImplementation(({ where }) => (where?.workflowRunId ? Promise.reject(new Error('db gone')) : Promise.resolve(null)));
+    expect(await ingest.processEmail(side, mail({ subject: 'Re: Survey request', to: ['projects@example.com'], inReplyTo: wfRef, references: wfRef }))).toBe('reply');
+    expect(extraOf().replyToWorkflowEmail).toBe(false);
   });
 });

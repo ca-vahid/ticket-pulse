@@ -5,6 +5,7 @@ import NotificationSettingsPanel from '../components/agent/NotificationSettingsP
 import AgentAlertsPanel from '../components/agent/AgentAlertsPanel';
 import TeamsNotificationsPanel from '../components/agent/TeamsNotificationsPanel';
 import DevicePushPanel from '../components/agent/DevicePushPanel';
+import HeldDigestPanel from '../components/agent/HeldDigestPanel';
 
 /**
  * Dedicated Notifications page (its own destination from the account menu) —
@@ -16,7 +17,11 @@ export default function Notifications() {
   const { user, logout } = useAuth();
   // QA 11-10 #1: Teams settings are per workspace — show the one on screen, not
   // always the person's first workspace.
-  const currentWorkspaceId = useWorkspaceOptional()?.currentWorkspace?.id || null;
+  const currentWorkspace = useWorkspaceOptional()?.currentWorkspace || null;
+  const currentWorkspaceId = currentWorkspace?.id || null;
+  // QA 11-12 #1: the held e-mail digest goes to the workspace's admins and the super admins;
+  // only they get the switch that turns it off for themselves.
+  const receivesHeldDigest = user?.role === 'admin' || String(currentWorkspace?.role || '').toLowerCase() === 'admin';
   const canAccessDashboard = user?.role && user.role !== 'agent';
   const homeHref = canAccessDashboard ? '/dashboard' : '/my-competencies';
 
@@ -74,6 +79,7 @@ export default function Notifications() {
           <DevicePushPanel />
           <TeamsNotificationsPanel workspaceId={currentWorkspaceId} />
           <NotificationSettingsPanel />
+          <HeldDigestPanel workspaceId={currentWorkspaceId} workspaceName={currentWorkspace?.name || ''} receives={receivesHeldDigest} />
           <AgentAlertsPanel />
         </div>
       </main>

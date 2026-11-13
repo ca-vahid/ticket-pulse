@@ -734,7 +734,9 @@ describe('notification-delivery Message-ID (rung 1b)', () => {
       ...baseEmail, inReplyTo: '<unknown@elsewhere>', to: ['helpdesk-pilot+tp1042@example.com'], subject: 'Re: hi',
     });
     expect(outcome).toBe('reply');
-    expect(prismaMock.notificationDelivery.findFirst).toHaveBeenCalledTimes(1);
+    // One matcher lookup; the other is QA 11-12's "answers a workflow e-mail?" check on reply_received.
+    const matcherCalls = prismaMock.notificationDelivery.findFirst.mock.calls.filter(([q]) => !q.where.workflowRunId);
+    expect(matcherCalls).toHaveLength(1);
     expect(prismaMock.ticket.findFirst.mock.calls[0][0].where).toEqual({ workspaceId: 1, nativeNumber: 1042, origin: 'ticketpulse' });
     // the matcher's bare lookup never ran (downstream notify hooks do their own include/select reads)
     expect(prismaMock.ticket.findUnique.mock.calls.some((c) => !c[0].include && !c[0].select)).toBe(false);

@@ -8,6 +8,9 @@ import {
 } from '../utils/heldAlertGroups.js';
 import { noteAtCount } from './ticketGrouping/rules.js';
 
+/** Per-user preference: 'off' leaves that person out of this workspace's morning digest (QA 11-12 #1). */
+export const HELD_DIGEST_PREF_KEY = 'mail.heldDigest';
+
 /**
  * Mailbox hold queue (MEGA 09-01 Phase RL, RL-4).
  *
@@ -706,7 +709,25 @@ class MailboxHoldService {
    */
   async _digestRecipients(workspaceId) {
     const { reportRecipients } = await import('./reportRecipients.js');
-    return reportRecipients(workspaceId);
+    const all = await reportRecipients(workspaceId);
+    const out = await this._digestOptOuts(workspaceId);
+    return out.size ? all.filter((email) => !out.has(String(email).toLowerCase())) : all;
+  }
+
+  /**
+   * QA 11-12 #1: people who switched the digest off for themselves in this
+   * workspace (Mail & alerts; the per-user preference `mail.heldDigest` = 'off').
+   * A failed read leaves everyone in: a digest too many beats held mail nobody hears about.
+   */
+  async _digestOptOuts(workspaceId) {
+    const rows = await Promise.resolve()
+      .then(() => prisma.userPreference.findMany({
+        where: { workspaceId: Number(workspaceId), key: HELD_DIGEST_PREF_KEY },
+        select: { ownerEmail: true, value: true },
+        take: 500,
+      }))
+      .catch(() => []);
+    return new Set((rows || []).filter((r) => r?.value === 'off').map((r) => String(r.ownerEmail || '').trim().toLowerCase()).filter(Boolean));
   }
 
   /**
@@ -729,7 +750,7 @@ class MailboxHoldService {
         const count = group._count._all;
         const to = await this._digestRecipients(workspaceId);
         if (!to.length) {
-          logger.warn(`Mailbox hold digest: workspace ${workspaceId} has ${count} held message(s) but no admin recipients`);
+          logger.warn(`Mailbox hold digest: workspace ${workspaceId} has ${count} held message(s) but nobody to tell (no admins, or every one of them switched the digest off)`);
           continue;
         }
         // Grouped per sender (QA 10-26 #3): 103 flat lines from two NAS units
@@ -748,6 +769,8 @@ class MailboxHoldService {
           rows,
           link,
           linkIsUrl: Boolean(appUrl),
+          // Where each person switches this e-mail off for themselves (QA 11-12 #1).
+          prefsLink: appUrl ? `${String(appUrl).replace(/\/$/, '')}/mail-alerts?ws=${workspaceId}` : null,
           timeZone: workspace?.defaultTimezone || 'America/Vancouver',
         });
         const result = await sendTransactionalEmail({
@@ -839,7 +862,7 @@ function commonReason(rows) {
  * list, and the subject line says what is waiting.
  * `rows` (optional): the held rows, so a person's subjects can be listed.
  */
-export function buildHoldDigest({ workspaceName, count, groups = [], singles = [], rows = [], link, linkIsUrl = false, timeZone = 'America/Vancouver' }) {
+export function buildHoldDigest({ workspaceName, count, groups = [], singles = [], rows = [], link, linkIsUrl = false, prefsLink = null, timeZone = 'America/Vancouver' }) {
   const people = groups.filter((g) => g.senderKind !== 'automated');
   const automated = groups.filter((g) => g.senderKind === 'automated');
   const inGroups = groups.reduce((n, g) => n + g.count, 0);
@@ -892,6 +915,10 @@ export function buildHoldDigest({ workspaceName, count, groups = [], singles = [
   parts.push(linkIsUrl
     ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:6px 0 14px;"><tr><td bgcolor="#1d4ed8" style="background-color:#1d4ed8;border-radius:8px;"><a href="${escapeHtml(link)}" style="display:inline-block;padding:10px 18px;font-family:'Segoe UI',Arial,sans-serif;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;">Open Mail review</a></td></tr></table>`
     : `<p style="${P}">Review them at ${escapeHtml(link)}.</p>`);
+  // QA 11-12 #1: each person can leave this list without asking an admin.
+  parts.push(prefsLink
+    ? `<p style="${FONT}font-size:12px;line-height:18px;${MUTED}margin:0 0 12px;">You get this because you are an admin of ${escapeHtml(workspaceName || 'this workspace')}. To stop it for yourself, open <a href="${escapeHtml(prefsLink)}" style="color:#1d4ed8;">Mail &amp; alerts</a> and switch off <strong>Held e-mail digest</strong>.</p>`
+    : `<p style="${FONT}font-size:12px;line-height:18px;${MUTED}margin:0 0 12px;">To stop this e-mail for yourself: Mail &amp; alerts, Held e-mail digest.</p>`);
 
   // The subject says what is waiting, and for whom. Alerts are named only when there are some.
   const where = workspaceName ? ` in ${workspaceName}` : '';

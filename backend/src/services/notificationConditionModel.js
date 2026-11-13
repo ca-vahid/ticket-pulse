@@ -120,6 +120,10 @@ export const CONDITION_FIELDS = Object.freeze({
   // "When a requester replies" (14 Oct 2026): a reply to a closed ticket, read
   // where that page's thank-you switch is on.
   'event.replyVerdict': { label: 'Reply to a closed ticket reads as', type: 'enum', path: 'event.extra.replyVerdict', options: ['thanks', 'auto_reply', 'reply'] },
+  // QA 11-12 #2: "Requester replied" to an e-mail a workflow sent (anywhere in
+  // the reply's thread). Absent = false, so older workflows read unchanged.
+  'event.replyToWorkflowEmail': { label: 'Reply answers a workflow e-mail', type: 'boolean', path: 'event.extra.replyToWorkflowEmail' },
+  'event.replyToWorkflow': { label: 'Workflow whose e-mail was answered', type: 'string', path: 'event.extra.replyToWorkflow' },
   'availability.isBusinessHours': { label: 'During business hours', type: 'boolean', path: 'availability.isBusinessHours' },
   'availability.isAfterHours': { label: 'After hours', type: 'boolean', path: 'availability.isAfterHours' },
   'availability.isHoliday': { label: 'On a holiday', type: 'boolean', path: 'availability.isHoliday' },

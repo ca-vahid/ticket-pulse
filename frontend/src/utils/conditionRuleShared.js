@@ -79,6 +79,8 @@ const FIELD_ROWS = [
   ['event.autoHelpAnswered', 'event.extra.autoHelpAnswered', 'boolean', 'Auto-help answered', 'Auto-help answered the requester', 'Auto-help did not answer the requester'],
   ['event.autoHelpReplyVerdict', 'event.extra.autoHelpReplyVerdict', 'enum', 'the reply after an Auto-help close'],
   ['event.replyVerdict', 'event.extra.replyVerdict', 'enum', 'how the reply reads'],
+  ['event.replyToWorkflowEmail', 'event.extra.replyToWorkflowEmail', 'boolean', 'reply to a workflow e-mail', 'the reply answers an e-mail a workflow sent', 'the reply does not answer an e-mail a workflow sent'],
+  ['event.replyToWorkflow', 'event.extra.replyToWorkflow', 'string', 'the workflow whose e-mail was answered'],
   ['availability.isBusinessHours', 'availability.isBusinessHours', 'boolean', 'business hours', 'it is business hours', 'it is outside business hours'],
   ['availability.isAfterHours', 'availability.isAfterHours', 'boolean', 'after hours', 'it is after hours', 'it is not after hours'],
   ['availability.isHoliday', 'availability.isHoliday', 'boolean', 'holiday', 'it is a holiday', 'it is not a holiday'],

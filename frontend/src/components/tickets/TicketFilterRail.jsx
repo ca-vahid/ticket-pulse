@@ -1456,16 +1456,20 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
                   ))}
                 </div>
               )}
-              {meta.tags.map((t) => (
-                <Facet
-                  key={t.id}
-                  checked={tags.includes(String(t.id))}
-                  onToggle={() => toggleCsv('tag', String(t.id))}
-                  findText={t.name}
-                >
-                  <TagChip tag={t} size="xs" />
-                </Facet>
-              ))}
+              {/* QA 11-12 #3: a 200-tag workspace scrolls inside the section
+                  instead of making the rail endless (Find a filter still narrows it). */}
+              <div className={meta.tags.length > 12 ? 'max-h-72 overflow-y-auto settings-scrollbar pr-1' : ''} data-testid="rail-tag-list">
+                {meta.tags.map((t) => (
+                  <Facet
+                    key={t.id}
+                    checked={tags.includes(String(t.id))}
+                    onToggle={() => toggleCsv('tag', String(t.id))}
+                    findText={t.name}
+                  >
+                    <TagChip tag={t} size="xs" />
+                  </Facet>
+                ))}
+              </div>
               <Facet checked={tags.includes('none')} onToggle={() => toggleCsv('tag', 'none')} findText="Untagged">
                 <span className="text-muted-foreground/75 italic"><Hit text="Untagged" /></span>
               </Facet>

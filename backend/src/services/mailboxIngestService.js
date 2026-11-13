@@ -1207,6 +1207,32 @@ class MailboxIngestService {
   }
 
   /** Rung 1b lookup — OR over provider_message_id + message_id, falling back pre-RL-5. */
+  /**
+   * QA 11-12 #2: is an e-mail a workflow sent anywhere in this reply's thread
+   * (In-Reply-To or References)? A reply-all to someone's answer to a workflow
+   * mail still carries the workflow mail in References. Returns { name } of the
+   * newest such workflow, or null. Best-effort: a failed read is "no".
+   */
+  async _workflowMailInThread(workspaceId, email) {
+    const refs = referencedMessageIds(email);
+    if (!refs.length) return null;
+    const bare = refs.map((r) => r.replace(/^<|>$/g, ''));
+    const ids = [...new Set([...refs, ...bare])];
+    const locals = referenceLocalParts(refs);
+    const row = await Promise.resolve()
+      .then(() => prisma.notificationDelivery.findFirst({
+        where: {
+          workspaceId,
+          workflowRunId: { not: null },
+          OR: [{ providerMessageId: { in: [...ids, ...locals] } }, { messageId: { in: ids } }],
+        },
+        select: { workflowRun: { select: { workflow: { select: { name: true } } } } },
+        orderBy: { id: 'desc' },
+      }))
+      .catch((err) => { logger.debug(`workflow-mail thread lookup failed (non-fatal): ${err.message?.split('\n')[0]}`); return null; });
+    return row ? { name: row.workflowRun?.workflow?.name || null } : null;
+  }
+
   async _findDeliveryByMessageIds(workspaceId, ids) {
     const select = { select: { ticketId: true }, orderBy: { id: 'desc' } };
     try {
@@ -1549,6 +1575,9 @@ class MailboxIngestService {
     // A reply to a workflow mail on a closed ticket fires nothing that reopens
     // it (QA 11-09 #3): no reply_received, so no reopen workflow, no Ticket Ops
     // reopen and no "new request" follow-up.
+    // QA 11-12 #2: workflows can ask "does this reply answer a workflow e-mail?"
+    const wfMail = requesterSide && !keepClosed ? await this._workflowMailInThread(connection.workspaceId, email) : null;
+    const replyToWorkflowEmail = workflowRef || Boolean(wfMail);
     if (requesterSide) {
       if (keepClosed) {
         logger.info(`${ticketDisplayRef(ticket)}: reply from ${email.from} to a workflow mail recorded; the ${ticket.status} ticket stays ${ticket.status}`);
@@ -1558,7 +1587,14 @@ class MailboxIngestService {
           await lifecycle.emitTicketEvent('ticket.reply_received', ticket.id, {
             source: 'email_inbound',
             dedupeStamp: `reply:${entry.id}`,
-            extra: { entryId: entry.id, from: isForward ? forwardedMeta.originalFrom : email.from, via, ...(isForward ? { forwardedBy: agent.email } : {}) },
+            extra: {
+              entryId: entry.id,
+              from: isForward ? forwardedMeta.originalFrom : email.from,
+              via,
+              replyToWorkflowEmail,
+              ...(wfMail?.name ? { replyToWorkflow: wfMail.name } : {}),
+              ...(isForward ? { forwardedBy: agent.email } : {}),
+            },
           });
         } catch (err) {
           logger.warn(`reply_received workflow dispatch failed (non-fatal): ${err.message}`);

@@ -2189,6 +2189,9 @@ export function notificationVariableCatalog(extraOutputFields = [], { customFiel
     variable('afterHoursSupport.activeContact.source', 'Active contact source', 'After-hours Support', 'manual, weekly_rotation, roster_fallback, legacy_fallback, or none.', 'manual'),
     variable('event.type', 'Event type', 'Event', 'Workflow trigger event type.', 'ticket.assigned'),
     variable('event.occurredAt', 'Event time', 'Event', 'Timestamp used for this workflow run.', '2026-05-29T18:42:00.000Z'),
+    // QA 11-12 #2: "Requester replied" to an e-mail a workflow sent.
+    variable('event.extra.replyToWorkflowEmail', 'Reply answers a workflow e-mail', 'Event', 'Requester replied: true when an e-mail a workflow sent is in the reply’s thread (answered directly or in a reply-all chain).', 'true'),
+    variable('event.extra.replyToWorkflow', 'Workflow whose e-mail was answered', 'Event', 'Requester replied: the name of that workflow.', 'BST Completion Email'),
     // "Ticket updated (fields)" payload (TU-6) — rendered by ticketChangeRenderer.
     variable('event.extra.actorName', 'Updated by (name)', 'Ticket update', 'Who made the field change — the agent, the API key name, "Notification workflow", or the FreshService actor.', 'Cora Coordinator'),
     variable('event.extra.actorKind', 'Updated by (kind)', 'Ticket update', 'human, api, system, workflow or freshservice.', 'human'),

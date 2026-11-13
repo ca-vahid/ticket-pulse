@@ -188,6 +188,18 @@ describe('PUT /api/tickets/preferences/:key', () => {
     expect(prismaMock.userPreference.upsert).not.toHaveBeenCalled();
   });
 
+  // QA 11-12 #1: each person's own switch for the morning held e-mail digest, per workspace.
+  test('mail.heldDigest takes on / off only', async () => {
+    prismaMock.userPreference.upsert.mockResolvedValueOnce({ value: 'off' });
+    const res = await request(buildApp()).put('/api/tickets/preferences/mail.heldDigest').send({ value: 'off' }).expect(200);
+    expect(res.body.data).toEqual({ key: 'mail.heldDigest', value: 'off' });
+    await request(buildApp()).get('/api/tickets/preferences/mail.heldDigest').expect(200);
+    prismaMock.userPreference.upsert.mockClear();
+    await request(buildApp()).put('/api/tickets/preferences/mail.heldDigest').send({ value: false }).expect(400);
+    await request(buildApp()).put('/api/tickets/preferences/mail.heldDigest').send({ value: 'never' }).expect(400);
+    expect(prismaMock.userPreference.upsert).not.toHaveBeenCalled();
+  });
+
   test('queue.freezeSubject takes true / false only (17 Oct 2026)', async () => {
     const res = await request(buildApp()).put('/api/tickets/preferences/queue.freezeSubject').send({ value: false }).expect(200);
     expect(res.body.data).toEqual({ key: 'queue.freezeSubject', value: false });
