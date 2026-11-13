@@ -1137,6 +1137,59 @@ describe('new hires by office', () => {
     expect(owners(e)).toEqual([[1, false], [1, false]]);
   });
 
+  // 13 Nov 2026: Andrew Fong was the whole Toronto list when he left. Lydia
+  // Fang's two children were refused and the family stayed empty.
+  test('someone who has left is skipped: the office falls through to anyone else, and says so', async () => {
+    await hr.updateSettings(1, { mode: 'live', officeRouting: ROUTING });
+    db.technicians.find((t) => t.id === 2).isActive = false; // the whole Calgary list
+    db.technicians.find((t) => t.id === 3).isActive = false; // one of two in Vancouver
+    const d = hire('Di Four', 'Edmonton', 3004);
+    const a = hire('Ann One', 'Vancouver', 3001);
+    await hr.onTicketCreated(d.id, 1);
+    await hr.onTicketCreated(a.id, 1);
+    expect(owners(d)).toEqual([[1, false], [1, false]]);
+    expect(owners(a)).toEqual([[4, false], [4, false]]);
+    const ev = db.events.find((e) => e.ticketId === d.id);
+    expect(ev.details.plan.children[0].byOffice).toMatch(/nobody on its list is active/);
+    expect(ev.details.warnings).toEqual([]);
+  });
+
+  test('an owner the ticket service refuses never costs the child: it is created with no owner', async () => {
+    await hr.updateSettings(1, { mode: 'live', officeRouting: ROUTING });
+    const real = ticketSvc.createTicket.getMockImplementation();
+    ticketSvc.createTicket.mockImplementation(async (ws, input) => {
+      if (input.assignedTechId === 2) throw new Error('Technician not found in this workspace');
+      return real(ws, input);
+    });
+    try {
+      const d = hire('Di Four', 'Calgary', 3004);
+      await hr.onTicketCreated(d.id, 1);
+      const fam = db.families.at(-1);
+      const kids = db.members.filter((m) => m.familyId === fam.id && m.role === 'child').map((m) => ticketById(m.ticketId));
+      expect(kids).toHaveLength(2);
+      expect(kids.map((k) => k.assignedTechId)).toEqual([null, null]);
+      expect(kids.every((k) => k.internalCategoryId !== null)).toBe(true);
+      const ev = db.events.find((e) => e.ticketId === d.id);
+      expect(ev.details.warnings.filter((w) => /owner was refused/.test(w))).toHaveLength(2);
+      expect(ev.details.warnings.some((w) => /not created/.test(w))).toBe(false);
+    } finally {
+      ticketSvc.createTicket.mockImplementation(real);
+    }
+  });
+
+  test('a family left with no tickets counts as not organised, and Organise starts it over', async () => {
+    await hr.updateSettings(1, { mode: 'live', officeRouting: ROUTING });
+    const d = hire('Di Four', 'Calgary', 3004);
+    db.families.push({ id: 900, workspaceId: 1, kind: 'onboarding', status: 'open', parentTicketId: d.id, personKey: 'di four', employeeId: '3004', _count: { members: 0 } });
+    prismaMock.hrLifecycleFamily.delete = jest.fn(async ({ where }) => { db.families = db.families.filter((f) => f.id !== where.id); });
+    prismaMock.hrLifecycleFamilyMember.count = jest.fn(async ({ where }) => db.members.filter((m) => m.familyId === where.familyId).length);
+    expect((await hr.candidates(1)).map((c) => c.ticketId)).toContain(d.id);
+    const r = await hr.organise(d.id, 1, { email: 'vahid@x.ca', name: 'Vahid Haeri' });
+    expect(prismaMock.hrLifecycleFamily.delete).toHaveBeenCalledWith({ where: { id: 900 } });
+    expect(r.familyId).not.toBe(900);
+    expect(db.members.filter((m) => m.familyId === r.familyId && m.role === 'child')).toHaveLength(2);
+  });
+
   test('a child with its own default assignee keeps it; an office with nobody listed falls back to AI routing', async () => {
     const list = (await hr.getSettings(1)).templates.onboarding;
     await hr.updateSettings(1, {
