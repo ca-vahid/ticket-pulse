@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.3.77-preview';
+export const APP_VERSION = '4.3.78-preview';
 
 export const changelog = [
+  {
+    version: '4.3.78-preview',
+    date: 'November 13, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Onboarding: a new hire is no longer left with no tickets when the office&rsquo;s person has left</strong> &mdash; a Toronto new hire on 13 Nov got a family with no children: the only person on the Toronto list had left the company, so both tickets were refused and never created. Now someone who has been deactivated is skipped. If nobody on an office&rsquo;s list is active, the tickets go to the &ldquo;any other office&rdquo; people in turn, and the Activity line says so. If an owner is still refused for any reason, the ticket is created with no owner and AI routing picks one, instead of not being created.' },
+      { type: 'fix', html: '<strong>Onboarding: a family that ended up empty can be organised again</strong> &mdash; a new-hire or departure notice whose tickets all failed now shows under <strong>People &rarr; Not organised yet</strong>, and <strong>Organise now</strong> creates the missing tickets.' },
+    ],
+  },
   {
     version: '4.3.77-preview',
     date: 'November 12, 2026',

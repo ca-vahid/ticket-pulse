@@ -584,6 +584,11 @@ function slugKey(title) {
 
 // ---------------------------------------------------------------- service
 
+/** An open on/offboarding family with no ticket in it: every child failed when it was organised. */
+function isEmptyFamily(f) {
+  return f?.status === 'open' && ['onboarding', 'offboarding'].includes(f.kind) && f._count?.members === 0;
+}
+
 class HrLifecycleService {
   constructor() {
     this._inFlight = new Set();
@@ -1347,7 +1352,25 @@ class HrLifecycleService {
    * is off today while somebody else is in. Reads only.
    */
   async _pickAssignee(workspaceId, item, tz) {
-    return this._takeTurn(workspaceId, assigneeIds(item), tz, { keys: [item.key] });
+    return this._takeTurn(workspaceId, await this._activeIds(workspaceId, assigneeIds(item)), tz, { keys: [item.key] });
+  }
+
+  /**
+   * 13 Nov 2026: the people on a list who can still be given a ticket. Andrew
+   * Fong was the whole Toronto list when he left; the next Toronto hire's two
+   * children were refused ("Technician not found") and never created. Someone
+   * deactivated is skipped here, so the list falls through to the next choice.
+   * A failed read keeps the list as it is.
+   */
+  async _activeIds(workspaceId, ids) {
+    const list = (ids || []).map(Number).filter(Boolean);
+    if (!list.length) return list;
+    const rows = await soft(() => prisma.technician.findMany({
+      where: { workspaceId: Number(workspaceId), id: { in: list } }, select: { id: true, isActive: true },
+    }), null);
+    if (!Array.isArray(rows)) return list;
+    const gone = new Set(rows.filter((r) => r.isActive === false).map((r) => Number(r.id)));
+    return list.filter((id) => !gone.has(id));
   }
 
   /** The office list a notice's office falls under (first match in list order), or null. */
@@ -1364,9 +1387,14 @@ class HrLifecycleService {
    */
   async _pickForOffice(workspaceId, settings, office, tz, { prefer = [], balance = false } = {}) {
     const rule = this._officeRule(settings, office);
-    const others = settings.officeRouting?.fallbackTechIds || [];
-    let ids = rule ? rule.assigneeTechIds : others;
+    const others = await this._activeIds(workspaceId, settings.officeRouting?.fallbackTechIds || []);
+    let ids = rule ? await this._activeIds(workspaceId, rule.assigneeTechIds) : others;
     let label = rule ? rule.label : 'Any other office';
+    // Nobody on the office's list is with us any more: anyone else, and say so.
+    if (rule && !ids.length && rule.assigneeTechIds.length && others.length) {
+      ids = others;
+      label = `${rule.label} — nobody on its list is active, anyone else`;
+    }
     if (!ids.length) return { techId: null, label, ids };
     const kept = prefer.map(Number).find((id) => ids.includes(id));
     if (kept) return { techId: kept, label, ids };
@@ -1823,7 +1851,13 @@ class HrLifecycleService {
       };
     }
 
-    const family = await this.findOpenFamily(ws, fx.family, c);
+    let family = await this.findOpenFamily(ws, fx.family, c);
+    // Organise now: this notice's own family with no ticket in it (every child
+    // failed) is not a family yet; the notice is planned as new.
+    if (family && adopt && family.parentTicketId === ticket.id && ['onboarding', 'offboarding'].includes(family.kind)) {
+      const held = await soft(() => prisma.hrLifecycleFamilyMember.count({ where: { familyId: family.id } }), null);
+      if (held === 0) family = null;
+    }
     // Shadow (1 Oct 2026): no real families exist, so a follow-up notice
     // looks for the family Shadow RECORDED for the same person and says what
     // Live would do to it — otherwise every NH ticket, date change and
@@ -2207,13 +2241,24 @@ class HrLifecycleService {
         let created;
         try {
           created = await svc.createTicket(ws, input, HR_LIFECYCLE_ACTOR);
-        } catch (err) {
-          // A category retired since it was picked must never cost the child.
-          if (!input.internalCategoryId) throw err;
-          out.warnings.push(`${child.title}: the template's category was refused (${err.message}); created without it`);
-          delete input.internalCategoryId;
-          delete input.internalSubcategoryId;
-          created = await svc.createTicket(ws, input, HR_LIFECYCLE_ACTOR);
+        } catch (first) {
+          let err = first;
+          // 13 Nov 2026: an owner who can no longer be given tickets must never
+          // cost the child. It is created with no owner and goes to AI routing.
+          if (input.assignedTechId && /technician/i.test(String(err.message))) {
+            out.warnings.push(`${child.title}: its owner was refused (${err.message}); created with no owner, AI routing picks one`);
+            delete input.assignedTechId;
+            input.runAiTriage = !defer;
+            try { created = await svc.createTicket(ws, input, HR_LIFECYCLE_ACTOR); err = null; } catch (second) { err = second; }
+          }
+          if (err) {
+            // A category retired since it was picked must never cost the child.
+            if (!input.internalCategoryId) throw err;
+            out.warnings.push(`${child.title}: the template's category was refused (${err.message}); created without it`);
+            delete input.internalCategoryId;
+            delete input.internalSubcategoryId;
+            created = await svc.createTicket(ws, input, HR_LIFECYCLE_ACTOR);
+          }
         }
         if (input.internalCategoryId) await this._markTemplateCategory(created.id);
         await prisma.hrLifecycleFamilyMember.create({
@@ -2848,8 +2893,14 @@ class HrLifecycleService {
     if (this._inFlight.has(key)) throw new ConflictError('This notice is being organised right now');
     this._inFlight.add(key);
     try {
-      const already = await soft(() => prisma.hrLifecycleFamily.findFirst({ where: { workspaceId: ws, parentTicketId: ticket.id }, select: { id: true } }));
-      if (already) throw new ConflictError('This notice already has a family');
+      const already = await soft(() => prisma.hrLifecycleFamily.findFirst({
+        where: { workspaceId: ws, parentTicketId: ticket.id }, select: { id: true, status: true, kind: true, _count: { select: { members: true } } },
+      }));
+      // A family whose children all failed holds nothing: Organise starts it over.
+      if (already && isEmptyFamily(already)) {
+        await prisma.hrLifecycleFamily.delete({ where: { id: already.id } });
+        logger.info(`HR lifecycle: empty family ${already.id} (notice ${ticket.id}) removed so it can be organised again`);
+      } else if (already) throw new ConflictError('This notice already has a family');
       const settings = await this.getSettings(ws);
       const plan = await this.plan(ticket, c, settings, tz, { adopt: true });
       if (!['create_family', 'create_family_after_the_fact'].includes(plan.decision)) throw new ConflictError(`${plan.summary || 'Nothing to organise'}`);
@@ -2884,9 +2935,9 @@ class HrLifecycleService {
       orderBy: { id: 'desc' },
     }), []) || [];
     if (!rows.length) return [];
-    const families = await soft(() => prisma.hrLifecycleFamily.findMany({
-      where: { workspaceId: ws }, select: { parentTicketId: true, kind: true, status: true, personKey: true, employeeId: true }, take: 2000, orderBy: { id: 'desc' },
-    }), []) || [];
+    const families = (await soft(() => prisma.hrLifecycleFamily.findMany({
+      where: { workspaceId: ws }, select: { parentTicketId: true, kind: true, status: true, personKey: true, employeeId: true, _count: { select: { members: true } } }, take: 2000, orderBy: { id: 'desc' },
+    }), []) || []).filter((f) => !isEmptyFamily(f)); // a family with no tickets is "not organised yet"
     const parents = new Set(families.map((f) => f.parentTicketId).filter(Boolean));
     const open = families.filter((f) => f.status === 'open');
     const settings = await this.getSettings(ws);
