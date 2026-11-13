@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.3.76-preview';
+export const APP_VERSION = '4.3.77-preview';
 
 export const changelog = [
+  {
+    version: '4.3.77-preview',
+    date: 'November 12, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Switch off the held e-mail digest for yourself</strong> &mdash; the 8:00 AM e-mail listing a workspace&rsquo;s held e-mail goes to its admins. Each admin can now switch it off for themselves, per workspace, in Mail &amp; alerts &rarr; <em>Held e-mail digest</em>; the others keep getting it. The digest itself now says where to switch it off.' },
+      { type: 'new', html: '<strong>Workflows can tell a reply to a workflow e-mail</strong> &mdash; the &ldquo;Requester replied&rdquo; trigger has two new conditions: <em>Reply answers a workflow e-mail</em> (true when an e-mail a workflow sent is anywhere in the reply&rsquo;s thread, also in a reply-all chain) and <em>Workflow whose e-mail was answered</em>. For example, a reopen workflow can leave a ticket closed when the requester only answered a completion e-mail.' },
+      { type: 'improved', html: '<strong>Tags on the new-ticket form and in macros</strong> &mdash; picked tags show in the field, the rest are behind a search box with Browse all, so a workspace with 200 tags no longer fills the screen. The Tags filter on the Tickets page scrolls inside its own section.' },
+    ],
+  },
   {
     version: '4.3.76-preview',
     date: 'November 12, 2026',

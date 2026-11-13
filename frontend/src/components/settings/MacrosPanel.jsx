@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import { settingsAPI, ticketsAPI } from '../../services/api';
 import RichTextEditor from '../tickets/RichTextEditor';
+import TagPicker from '../tickets/TagPicker';
 import { Switch, SwitchCue } from '../ui/switch';
 import { RESOLUTION_REASONS } from '../../utils/resolutionReasons';
 import {
@@ -284,26 +285,17 @@ function StepConfig({ step, onPatch, lookups }) {
       </select>
     );
   case 'tags':
+    // QA 11-12 #3: the shared search-first picker (picked tags as chips), so a
+    // 200-tag workspace doesn't turn this step into a wall of checkboxes.
+    // No inline create here — tags are made under Settings → Ticket Ops.
     return tags.length === 0 ? <p className="text-xs text-muted-foreground">No tags in this workspace yet (Settings → Ticket Ops → Tags).</p> : (
-      <fieldset className="max-h-40 overflow-y-auto settings-scrollbar rounded-md border border-border px-2 py-1.5">
-        <legend className="sr-only">Tags to add</legend>
-        <div className="grid gap-x-4 gap-y-1 sm:grid-cols-2">
-          {tags.map((t) => {
-            const on = (step.tagIds || []).map(Number).includes(Number(t.id));
-            return (
-              <label key={t.id} className="flex items-center gap-2 text-sm text-foreground">
-                <input
-                  type="checkbox"
-                  checked={on}
-                  onChange={() => onPatch({ tagIds: on ? step.tagIds.filter((id) => Number(id) !== Number(t.id)) : [...(step.tagIds || []), Number(t.id)] })}
-                  className="h-4 w-4 accent-[hsl(var(--primary))]"
-                />
-                {t.name}
-              </label>
-            );
-          })}
-        </div>
-      </fieldset>
+      <TagPicker
+        tags={tags}
+        value={(step.tagIds || []).map(Number)}
+        onChange={(ids) => onPatch({ tagIds: ids.map(Number) })}
+        ariaLabel="Tags to add"
+        className="max-w-xl"
+      />
     );
   case 'due':
     return (

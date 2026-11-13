@@ -665,6 +665,9 @@ export const CONDITION_FIELD_OPTIONS = [
   { value: 'event.systemNote', label: 'Note was written by the system', example: 'false' },
   { value: 'event.senderIsAgent', label: 'Reply sender is an agent', example: 'false' },
   { value: 'event.isSurveyResponse', label: 'Reply is a survey response', example: 'false' },
+  // QA 11-12 #2.
+  { value: 'event.replyToWorkflowEmail', label: 'Reply answers a workflow e-mail', example: 'true' },
+  { value: 'event.replyToWorkflow', label: 'Workflow whose e-mail was answered', example: 'BST Completion Email' },
   // "Ticket updated (fields)" payload (MEGA 09-01 Phase TU, TU-7).
   { value: 'event.changedFields', label: 'Changed fields (fields_updated)', example: 'priority' },
   { value: 'event.actorKind', label: 'Updated by kind (human / api / system / workflow / freshservice)', example: 'human' },

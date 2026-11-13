@@ -75,6 +75,9 @@ export const CG_FIELDS = [
   { value: 'event.replyVerdict', label: 'Reply to a closed ticket reads as', type: 'enum', options: ['thanks', 'auto_reply', 'reply'] },
   { value: 'event.senderIsAgent', label: 'Reply sender is an agent', type: 'boolean' },
   { value: 'event.isSurveyResponse', label: 'Reply is a survey response', type: 'boolean' },
+  // QA 11-12 #2: "Requester replied" to an e-mail a workflow sent.
+  { value: 'event.replyToWorkflowEmail', label: 'Reply answers a workflow e-mail', type: 'boolean' },
+  { value: 'event.replyToWorkflow', label: 'Workflow whose e-mail was answered', type: 'string' },
   // "Ticket updated (fields)" payload (MEGA 09-01 Phase TU, TU-7). The server
   // catalog appends this workspace's custom-field keys to changedFields.
   { value: 'event.changedFields', label: 'Changed fields (fields_updated)', type: 'list', options: ['subject', 'description', 'priority', 'ticketType', 'impact', 'urgency', 'source', 'category', 'subCategory', 'ticketCategory', 'internalCategoryId', 'internalSubcategoryId', 'groupId', 'internalGroupId', 'requester', 'ccEmails', 'dueBy', 'frDueBy'] },

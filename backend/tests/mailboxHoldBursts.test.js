@@ -259,7 +259,9 @@ describe('the daily digest: people are listed as people', () => {
     expect(html).toContain('and 5 more'); // six subjects shown
     expect(html).toContain('Other held e-mails</strong> (1)');
     expect(html).toContain('Acme Rentals (billing@rentals.example.net) · many look-alike e-mails arrived at once, so the extra ones wait');
-    expect(html).not.toMatch(/device|alert|burst/i);
+    // The list itself; the closing line names the Mail & alerts page (QA 11-12 #1).
+    expect(html.split('To stop')[0].split('You get this because')[0]).not.toMatch(/device|alert|burst/i);
+    expect(html).toMatch(/To stop this e-mail for yourself: Mail &amp; alerts, Held e-mail digest\./);
     expect(html).not.toMatch(/gradient/i);
     expect(html).not.toContain('agent_reply_no_requester');
     expect(html).toMatch(/color:#1f2937/);

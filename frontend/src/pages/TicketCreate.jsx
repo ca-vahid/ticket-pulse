@@ -6,10 +6,11 @@ import {
 } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
-import { ticketsAPI, teamsAutofillAPI, getWorkspaceId } from '../services/api';
+import { ticketsAPI, settingsAPI, teamsAutofillAPI, getWorkspaceId } from '../services/api';
 import CcChips from '../components/tickets/CcChips';
 import RichTextEditor, { isRichContent, sanitizeRichHtml } from '../components/tickets/RichTextEditor';
 import StagedFileChip from '../components/tickets/StagedFileChip';
+import TagPicker from '../components/tickets/TagPicker';
 import ImageMarkupModal from '../components/tickets/ImageMarkupModal';
 import AutofillModal, { matchByName } from '../components/tickets/AutofillModal';
 import { PRIORITY_LABELS, SOURCE_OPTIONS, initials } from '../components/tickets/ticketUi';
@@ -401,6 +402,16 @@ export default function TicketCreate() {
   const formFields = useMemo(() => new Map((form?.fields || []).map((f) => [f.key, f])), [form]);
   const fieldVisible = (key) => !formFields.size || formFields.get(key)?.visible !== false;
   const fieldRequired = (key) => formFields.get(key)?.required === true;
+
+  // Inline tag creation follows the ticket sidebar's rule: admins only (the
+  // tag endpoint is admin-only too). Everyone else picks from the palette.
+  const isTagAdmin = meta?.actor?.kind === 'admin' || meta?.actor?.workspaceRole === 'admin';
+  const createTag = async (name) => {
+    const res = await settingsAPI.createTicketTag({ name });
+    const created = res?.data?.data || res?.data;
+    if (created?.id != null) setMeta((m) => (m ? { ...m, tags: [...(m.tags || []), created] } : m));
+    return created;
+  };
 
   /** The config's initial values (used at first meta load AND by resetForm). */
   const formDefaults = () => {
@@ -1160,27 +1171,22 @@ export default function TicketCreate() {
                   from the form per QA 07-13 #5 — still editable on the detail
                   sidebar for the rare ticket that needs them. */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* QA 11-12 #3: a search-first picker, not a pill per tag — a
+                    workspace can hold 200+ tags. Picked tags show as chips. */}
                 {fieldVisible('tags') && (meta?.tags?.length || 0) > 0 && (
                   <div>
-                    <span className={labelClass}>Tags{fieldRequired('tags') && <span className="text-red-500"> *</span>}</span>
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {meta.tags.map((tag) => (
-                        <button
-                          key={tag.id}
-                          type="button"
-                          onClick={() => setTagIds((prev) => (prev.includes(tag.id) ? prev.filter((id) => id !== tag.id) : [...prev, tag.id]))}
-                          aria-pressed={tagIds.includes(tag.id)}
-                          className={`tp-focus-ring px-2 py-0.5 rounded-full border text-[11px] font-medium transition-colors ${
-                            tagIds.includes(tag.id)
-                              ? 'bg-blue-600 text-white border-blue-600'
-                              : 'bg-card text-muted-foreground border-border hover:border-blue-300 dark:hover:border-blue-500/40'
-                          }`}
-                        >
-                          {tag.name}
-                        </button>
-                      ))}
-                    </div>
-                    {fieldErrors.tags && <p className="mt-1 text-xs text-red-600 dark:text-red-300" role="alert">{fieldErrors.tags}</p>}
+                    <label htmlFor="tc-tags" className={labelClass}>Tags{fieldRequired('tags') && <span className="text-red-500"> *</span>}</label>
+                    <TagPicker
+                      id="tc-tags"
+                      tags={meta.tags}
+                      value={tagIds}
+                      onChange={setTagIds}
+                      onCreate={isTagAdmin ? createTag : null}
+                      required={fieldRequired('tags')}
+                      invalid={Boolean(fieldErrors.tags)}
+                      describedBy={fieldErrors.tags ? 'tc-tags-error' : undefined}
+                    />
+                    {fieldErrors.tags && <p id="tc-tags-error" className="mt-1 text-xs text-red-600 dark:text-red-300" role="alert">{fieldErrors.tags}</p>}
                   </div>
                 )}
               </div>

@@ -285,6 +285,47 @@ describe('sendDailyDigests', () => {
     expect(params.html).toContain('&lt;script&gt;'); // subjects are escaped
   });
 
+  test('QA 11-12 #1: a person who switched the digest off for this workspace is left out; the others still get it', async () => {
+    prismaMock.mailboxHeldMessage.groupBy.mockResolvedValue([{ workspaceId: 5, _count: { _all: 1 } }]);
+    prismaMock.workspaceAccess.findMany.mockResolvedValue([{ email: 'Admin@bgcengineering.ca' }, { email: 'second.admin@bgcengineering.ca' }]);
+    prismaMock.workspace.findUnique.mockResolvedValue({ name: 'PA' });
+    prismaMock.mailboxHeldMessage.findMany.mockResolvedValue([heldRow()]);
+    prismaMock.userPreference = { findMany: jest.fn().mockResolvedValue([
+      { ownerEmail: 'ADMIN@bgcengineering.ca', value: 'off' },
+      { ownerEmail: 'second.admin@bgcengineering.ca', value: 'on' },
+    ]) };
+    sendTransactionalEmailMock.mockResolvedValue({ sent: true, via: 'sendgrid' });
+
+    const result = await mailboxHoldService.sendDailyDigests({ appUrl: 'https://ticketpulse.example' });
+
+    expect(prismaMock.userPreference.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: 5, key: 'mail.heldDigest' } }));
+    const params = sendTransactionalEmailMock.mock.calls[0][0];
+    expect(params.to).toEqual(['second.admin@bgcengineering.ca', 'fallback@example.com']);
+    expect(result.sent[0].recipients).toBe(2);
+    // The e-mail says where the switch is, with a link to this workspace's Mail & alerts.
+    expect(params.html).toContain('https://ticketpulse.example/mail-alerts?ws=5');
+    expect(params.html).toContain('Held e-mail digest');
+
+    // Everyone opted out: nothing is sent, and the queue itself is untouched.
+    jest.clearAllMocks();
+    prismaMock.mailboxHeldMessage.groupBy.mockResolvedValue([{ workspaceId: 5, _count: { _all: 1 } }]);
+    prismaMock.workspaceAccess.findMany.mockResolvedValue([{ email: 'admin@bgcengineering.ca' }]);
+    prismaMock.userPreference.findMany.mockResolvedValue([{ ownerEmail: 'admin@bgcengineering.ca', value: 'off' }, { ownerEmail: 'fallback@example.com', value: 'off' }]);
+    expect(await mailboxHoldService.sendDailyDigests()).toEqual({ sent: [] });
+    expect(sendTransactionalEmailMock).not.toHaveBeenCalled();
+
+    // The setting cannot be read: everyone still gets it.
+    jest.clearAllMocks();
+    prismaMock.mailboxHeldMessage.groupBy.mockResolvedValue([{ workspaceId: 5, _count: { _all: 1 } }]);
+    prismaMock.workspaceAccess.findMany.mockResolvedValue([{ email: 'admin@bgcengineering.ca' }]);
+    prismaMock.mailboxHeldMessage.findMany.mockResolvedValue([heldRow()]);
+    prismaMock.userPreference.findMany.mockRejectedValue(new Error('relation does not exist'));
+    sendTransactionalEmailMock.mockResolvedValue({ sent: true, via: 'sendgrid' });
+    await mailboxHoldService.sendDailyDigests();
+    expect(sendTransactionalEmailMock.mock.calls[0][0].to).toEqual(['admin@bgcengineering.ca', 'fallback@example.com']);
+    delete prismaMock.userPreference;
+  });
+
   test('reaches the super admins when the workspace has no admin rows; no rows → nothing sent', async () => {
     prismaMock.mailboxHeldMessage.groupBy.mockResolvedValue([{ workspaceId: 5, _count: { _all: 1 } }]);
     prismaMock.workspaceAccess.findMany.mockResolvedValue([]);

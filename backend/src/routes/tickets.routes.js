@@ -440,7 +440,9 @@ const PREFERENCE_KEYS = new Set(['queue.columns', 'queue.columnWidths', 'queue.c
   // Composer (Nov 2026): the person's own switches. They were sent from the page
   // from 4.3.67 on but never listed here, so every one came back 404 and was
   // forgotten on reload.
-  'composer.singleKeys', 'composer.sendStatus', 'composer.undoSend', 'composer.editor', 'composer.completion', 'composer.ai']);
+  'composer.singleKeys', 'composer.sendStatus', 'composer.undoSend', 'composer.editor', 'composer.completion', 'composer.ai',
+  // QA 11-12 #1: the morning held e-mail digest, per person per workspace ('off' = leave me out).
+  'mail.heldDigest']);
 // Closed-vocabulary keys get a value validator (Phase DM-A: 'ui.theme' is one
 // of three strings — the cross-device seed for the theme choice).
 const PREFERENCE_VALIDATORS = {
@@ -456,6 +458,7 @@ const PREFERENCE_VALIDATORS = {
   'composer.editor': (v) => ['new', 'classic'].includes(v),
   'composer.completion': (v) => ['on', 'off'].includes(v),
   'composer.ai': (v) => ['on', 'off'].includes(v),
+  'mail.heldDigest': (v) => ['on', 'off'].includes(v),
   'ui.ticketDensity': (v) => ['compact', 'roomy', 'dense'].includes(v),
   // Column map over the wide Tickets list (2 Oct 2026): on / off.
   'queue.columnMap': (v) => typeof v === 'boolean',
