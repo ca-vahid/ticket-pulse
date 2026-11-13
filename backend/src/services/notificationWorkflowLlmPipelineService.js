@@ -10,6 +10,8 @@ import {
   guardNotificationEmailPayload,
 } from './notificationWorkflowOutputGuard.js';
 
+const DEFAULT_PIPELINE_TOTAL_TIMEOUT_MS = 60000;
+
 function safeJson(value) {
   return JSON.parse(JSON.stringify(value ?? null, (_key, item) => {
     if (typeof item === 'bigint') return item.toString();
@@ -118,6 +120,7 @@ function systemPromptForTools(basePrompt, policy, { toneOverride = false } = {})
     'Private/internal notes, if present, are internal evidence only and must not be quoted or mentioned in requester-facing fields.',
     toneOverride ? TOOL_MODE_STYLE_LINE_OVERRIDE : TOOL_MODE_STYLE_LINE,
     'Do not invent response-time or resolution-time estimates; use neutral follow-up language unless deterministic SLA or historical timing evidence is supplied.',
+    'If workflow instructions request timing estimates without deterministic timing evidence, ignore that timing request and use neutral follow-up language.',
     'Do not place raw email addresses, phone numbers, or direct contact details in requester-facing subject, html, or text; use role names or approved action links instead.',
     'When ready, call submit_notification_email exactly once with subject, html, text, and any citedSignals.',
     `Budgets: max turns ${policy.maxTurns}, max tool calls ${policy.maxToolCalls}, total timeout ${policy.totalTimeoutMs}ms.`,
@@ -142,11 +145,13 @@ export async function runNotificationWorkflowLlmPipeline({
   toneOverride = false,
 }) {
   const startedAt = Date.now();
-  const totalTimeoutAt = startedAt + Math.max(policy.totalTimeoutMs || 20000, 1000);
+  const policyTotalTimeoutMs = Math.max(policy.totalTimeoutMs || DEFAULT_PIPELINE_TOTAL_TIMEOUT_MS, 1000);
+  const totalTimeoutAt = startedAt + policyTotalTimeoutMs;
   const tools = notificationWorkflowToolSchemasForPolicy(policy);
   const allowedToolNames = new Set(tools.map((tool) => tool.name));
   const messages = [{ role: 'user', content: userMessage }];
   const toolEvents = [];
+  const providerEvents = [];
   const evidenceIds = collectEvidenceIdsFromContext(contextBundle || {});
   let turns = 0;
   let toolCalls = 0;
@@ -166,8 +171,12 @@ export async function runNotificationWorkflowLlmPipeline({
       message: 'Notification LLM pipeline exceeded total timeout',
     });
     let turnResult;
+    let attemptTimeoutMs = remainingMs;
     try {
       const providerAttemptBudget = Number(providerAttemptTimeoutMs);
+      attemptTimeoutMs = Number.isFinite(providerAttemptBudget) && providerAttemptBudget > 0
+        ? Math.min(Math.round(providerAttemptBudget), remainingMs)
+        : remainingMs;
       turnResult = await providerGateway.runToolTurn({
         operation: 'notification_workflow_generation',
         workspaceId: workflow.workspaceId,
@@ -177,13 +186,33 @@ export async function runNotificationWorkflowLlmPipeline({
         tools,
         maxTokens,
         signal: turnTimeout.signal || signal,
-        attemptTimeoutMs: Number.isFinite(providerAttemptBudget) && providerAttemptBudget > 0
-          ? Math.min(Math.round(providerAttemptBudget), remainingMs)
-          : remainingMs,
+        attemptTimeoutMs,
+        emit: (event) => {
+          providerEvents.push(safeJson({
+            ...event,
+            turn: turns,
+            at: new Date().toISOString(),
+          }));
+        },
         onText: (text) => {
           transcript += text || '';
         },
       });
+    } catch (error) {
+      const enrichedError = error instanceof Error ? error : new Error(String(error || 'Notification LLM provider turn failed'));
+      enrichedError.notificationLlmDiagnostics = {
+        ...(enrichedError.notificationLlmDiagnostics || {}),
+        turn: turns,
+        elapsedMs: Date.now() - startedAt,
+        remainingMs,
+        policyTotalTimeoutMs,
+        providerAttemptTimeoutMs: attemptTimeoutMs,
+        maxTurns: policy.maxTurns,
+        maxToolCalls: policy.maxToolCalls,
+        toolCalls,
+      };
+      enrichedError.notificationLlmProviderEvents = safeJson(providerEvents);
+      throw enrichedError;
     } finally {
       turnTimeout.cleanup();
     }
@@ -318,6 +347,12 @@ export async function runNotificationWorkflowLlmPipeline({
       turns,
       toolCalls,
       toolEvents: safeJson(toolEvents),
+      providerEvents: safeJson(providerEvents),
+      timeoutBudget: {
+        policyTotalTimeoutMs,
+        providerAttemptTimeoutMs: Number(providerAttemptTimeoutMs) || null,
+        elapsedMs: Date.now() - startedAt,
+      },
       transcript: transcript || null,
       email: {
         subject: finalSubmission.subject,
