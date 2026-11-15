@@ -4630,6 +4630,9 @@ class SyncService {
             },
           });
         }
+        // MEGA 11-14 Part B: this writer bypasses the lifecycle service too, so
+        // settle any AI suggestion the new owner / close has made moot.
+        await this._settleReviewQueue(current, updated);
         logger.info(`On-open reconcile: ticket ${ticket.id} healed from FS`, {
           workspaceId,
           status: statusChanged ? `${current.status} → ${fsStatusName}` : undefined,
@@ -4677,6 +4680,7 @@ class SyncService {
       where: { ticketId: ticket.id, status: 'queued' },
       data: { status: 'skipped_stale' },
     });
+    await this._settleReviewQueue(ticket, { ...ticket, status: newStatus });
     logger.info(`On-open reconcile: ticket ${ticket.id} (FS #${ticket.freshserviceTicketId}) → ${newStatus}`);
     await this._broadcastReconcile(workspaceId, ticket, newStatus);
     return { changed: true, status: newStatus };
@@ -4687,6 +4691,20 @@ class SyncService {
    * so the (debounced) SSE refetch reflects it — this is what lets the ticket
    * page load instantly without blocking on the FreshService round-trip.
    */
+  /**
+   * MEGA 11-14 Part B: settle open AI review suggestions on a ticket whose
+   * owner or status a reconcile just changed (writers that bypass the
+   * lifecycle service). Never throws.
+   */
+  async _settleReviewQueue(before, after) {
+    try {
+      const { default: settle } = await import('./reviewQueueSettleService.js');
+      await settle.settleOnChange(before, after, { source: 'freshservice' });
+    } catch (err) {
+      logger.debug?.(`Review settle skipped on reconcile (non-fatal): ${err.message}`);
+    }
+  }
+
   async _broadcastReconcile(workspaceId, ticket, status) {
     await this._broadcastTicketChange(workspaceId, { ...ticket, status });
   }
@@ -4885,18 +4903,18 @@ class SyncService {
               where: { id: ticket.id },
               data: { assignedTechId: newAssignedTechId, lastReconciledAt: new Date() },
             });
+            await this._settleReviewQueue(ticket, { ...ticket, assignedTechId: newAssignedTechId });
           } else {
             // Verified, nothing drifted: advance the cursor WITHOUT bumping
             // updated_at (raw SQL sidesteps Prisma's @updatedAt).
             await this._touchReconciled(ticket.id);
           }
 
-          // Note: any pending_review pipeline run remains pending — the
-          // existing "Decided > Manually in FreshService" sub-tab is built
-          // exactly for this case (ticket has both a pending run AND an
-          // external assignee). It surfaces the AI's recommendation
-          // alongside who actually got the ticket, so the coordinator can
-          // see the divergence.
+          // MEGA 11-14 Part B: a pending_review run on a ticket that now has
+          // an owner is settled ('settled_elsewhere') above. The "Decided >
+          // Manually in FreshService" sub-tab still lists it (it reads
+          // settled runs with an owner), so the AI's pick and the real
+          // owner stay side by side.
 
           verifiedCount++;
         }

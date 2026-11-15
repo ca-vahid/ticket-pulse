@@ -306,6 +306,44 @@ function Facet({ checked, onToggle, children, count, onOnly = null, findText = n
   );
 }
 
+/**
+ * A small one-of choice (MEGA 11-14 Part H: the Mentions filter's "Show" and
+ * "From"). A segmented control, not pills: radio semantics, arrow keys move
+ * the pick, the label sits to the left.
+ */
+function ChoiceRow({ label, value, onChange, choices }) {
+  const onKey = (e) => {
+    if (!['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+    e.preventDefault();
+    const i = choices.findIndex((c) => c.value === value);
+    const next = choices[(i + (e.key === 'ArrowRight' ? 1 : choices.length - 1)) % choices.length];
+    onChange(next.value);
+  };
+  return (
+    <div className="flex items-center gap-2 min-w-0">
+      <span className="w-8 flex-shrink-0 text-[11px] text-muted-foreground">{label}</span>
+      <div role="radiogroup" aria-label={label} onKeyDown={onKey} className="inline-flex min-w-0 rounded-md border border-border bg-muted/50 p-0.5">
+        {choices.map((c) => {
+          const on = c.value === value;
+          return (
+            <button
+              key={c.value}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              tabIndex={on ? 0 : -1}
+              onClick={() => onChange(c.value)}
+              className={`tp-focus-ring rounded px-1.5 py-0.5 text-[11px] whitespace-nowrap ${on ? 'bg-card font-semibold text-foreground shadow-subtle' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              {c.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /** Text/number input that commits to the URL only after a typing pause. */
 function DebouncedParamInput({ value, onCommit, type = 'text', placeholder, ariaLabel, className = '' }) {
   const [draft, setDraft] = useState(value);
@@ -572,7 +610,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
 
   // Personal, persisted facet-section order — drag to rearrange (e.g. Status
   // above Technician). New sections append so the list survives app updates.
-  const FACET_KEYS = ['status', 'technician', 'requester', 'priority', 'type', 'category', 'tag', 'impact', 'group', 'source', 'parked', 'customFields', 'created', 'due', 'origin', 'approval'];
+  const FACET_KEYS = ['status', 'technician', 'mentions', 'requester', 'priority', 'type', 'category', 'tag', 'impact', 'group', 'source', 'parked', 'customFields', 'created', 'due', 'origin', 'approval'];
   const [sectionOrder, setSectionOrder] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('tp_filter_section_order') || 'null');
@@ -667,6 +705,14 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
   };
 
   const assignees = csvList(get('assignee'));
+  // "Mentions me" (MEGA 11-14 Part H): a filter like Assignee, combinable with
+  // everything; the server reads who "me" is from the session.
+  const mentioned = get('mentioned') === 'me';
+  const mentionSince = ['90', 'any'].includes(get('mentionedSince')) ? get('mentionedSince') : '30';
+  const mentionUnseen = get('mentionedUnseen') === '1';
+  const toggleMentioned = () => setParams(mentioned
+    ? { mentioned: null, mentionedSince: null, mentionedUnseen: null }
+    : { mentioned: 'me' });
   const priorities = csvList(get('priority'));
   const types = csvList(get('type'));
   const categories = csvList(get('category'));
@@ -909,6 +955,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
       aliases: ['Assignee', 'Technician', 'Agent'],
       options: ['Unassigned', ...(meta?.actor?.technicianId ? ['Assigned to me'] : []), ...(meta?.technicians || []).map((t) => t.name)],
     },
+    mentions: { title: 'Mentions', aliases: ['@', 'Mentioned'], options: ['Mentions me', 'Not opened yet'], show: hasActorTech },
     requester: { title: 'Requester', options: requesterIds.map((id) => requesterLabel(id)) },
     priority: { title: 'Priority', options: [4, 3, 2, 1].map((p) => PRIORITY_LABELS[p]) },
     type: { title: 'Type', options: [...typeNames, 'No type'] },
@@ -957,7 +1004,7 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
   }, [techSeed, catSeed, reqSeed]);
 
   // Snapshot the active filter query for a new saved view.
-  const FILTER_KEYS = ['segment', 'status', 'assignee', 'requesterId', 'priority', 'type', 'category', 'subcategory', 'group', 'source', 'tag', 'tagMode', 'impact', 'urgency', 'due', 'origin', 'createdFrom', 'createdTo', 'created', 'resolvedFrom', 'resolvedTo', 'noise', 'solution', 'parked', 'parkKind', 'reopened', 'mentioned', 'q', 'view', 'aiState', 'approval', 'approvalCategory'];
+  const FILTER_KEYS = ['segment', 'status', 'assignee', 'requesterId', 'priority', 'type', 'category', 'subcategory', 'group', 'source', 'tag', 'tagMode', 'impact', 'urgency', 'due', 'origin', 'createdFrom', 'createdTo', 'created', 'resolvedFrom', 'resolvedTo', 'noise', 'solution', 'parked', 'parkKind', 'reopened', 'mentioned', 'mentionedSince', 'mentionedUnseen', 'q', 'view', 'aiState', 'approval', 'approvalCategory'];
   const captureParams = () => {
     const out = {};
     for (const k of FILTER_KEYS) { const val = searchParams.get(k); if (val) out[k] = val; }
@@ -1275,6 +1322,52 @@ export default function TicketFilterRail({ meta, stats = null, facets = null, mo
             </div>
           </Section>
         </SortableFacet>
+
+        {/* Mentions (MEGA 11-14 Part H): "Mentions me" next to Members,
+            combinable with every other filter and the search. Only for someone
+            who can be mentioned here: mentions are kept per agent of this
+            workspace, so without an agent row there is nothing to find. */}
+        {hasActorTech && (
+          <SortableFacet {...facetProps('mentions')}>
+            <Section
+              title="Mentions"
+              activeCount={mentioned ? 1 : 0}
+              onClear={() => setParams({ mentioned: null, mentionedSince: null, mentionedUnseen: null })}
+              defaultOpen
+              options={findSpec.mentions.options}
+              aliases={findSpec.mentions.aliases}
+              rowFilter={false}
+            >
+              <div data-testid="mentions-filter">
+                <Facet checked={mentioned} onToggle={toggleMentioned}>
+                  <AtSign className="w-3.5 h-3.5 flex-shrink-0 text-blue-500 dark:text-blue-300" aria-hidden="true" />
+                  <span className="truncate"><Hit text="Mentions me" /></span>
+                  {unseenMentions > 0 && (
+                    <span className="ml-auto pl-1 text-xs font-semibold tabular-nums text-blue-600 dark:text-blue-300" title={`${unseenMentions} not opened yet`}>
+                      {unseenMentions} new
+                    </span>
+                  )}
+                </Facet>
+                {mentioned && (
+                  <div className="mt-1 space-y-1.5 pl-2" data-testid="mentions-options">
+                    <ChoiceRow
+                      label="Show"
+                      value={mentionUnseen ? 'unseen' : 'all'}
+                      onChange={(v) => setParams({ mentionedUnseen: v === 'unseen' ? '1' : null })}
+                      choices={[{ value: 'unseen', label: 'Not opened yet' }, { value: 'all', label: 'All' }]}
+                    />
+                    <ChoiceRow
+                      label="From"
+                      value={mentionSince}
+                      onChange={(v) => setParams({ mentionedSince: v === '30' ? null : v })}
+                      choices={[{ value: '30', label: '30 days' }, { value: '90', label: '90 days' }, { value: 'any', label: 'Any time' }]}
+                    />
+                  </div>
+                )}
+              </div>
+            </Section>
+          </SortableFacet>
+        )}
 
         {/* Requester (QA 10-27 #5): the Members pattern, fed by a search */}
         <SortableFacet {...facetProps('requester')}>
@@ -1954,7 +2047,17 @@ export function ActiveFilterBar({ meta }) {
   const origin = get('origin');
   if (origin) chips.push({ label: origin === 'ticketpulse' ? 'Born in Ticket Pulse' : 'From FreshService', onRemove: () => patch({ origin: null }) });
   if (get('noise') === 'only') chips.push({ label: 'Noise & spam', onRemove: () => patch({ noise: null }) });
-  if (get('mentioned') === 'me') chips.push({ label: 'Mentions of me', onRemove: () => patch({ mentioned: null }) });
+  if (get('mentioned') === 'me') {
+    // MEGA 11-14 Part H: the chip says the choices that differ from the default.
+    const extra = [
+      get('mentionedUnseen') === '1' ? 'not opened yet' : null,
+      get('mentionedSince') === '90' ? '90 days' : get('mentionedSince') === 'any' ? 'any time' : null,
+    ].filter(Boolean);
+    chips.push({
+      label: ['Mentions of me', ...extra].join(' · '),
+      onRemove: () => patch({ mentioned: null, mentionedSince: null, mentionedUnseen: null }),
+    });
+  }
   if (get('view') === 'scheduled') chips.push({ label: 'Scheduled view', onRemove: () => patch({ view: null }) });
   if (get('view') === 'grouped') chips.push({ label: 'Grouped view', onRemove: () => patch({ view: null }) });
   if (get('aiState') === 'suggested') chips.push({ label: 'Awaiting AI approval', onRemove: () => patch({ aiState: null }) });

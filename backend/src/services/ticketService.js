@@ -826,6 +826,18 @@ export const BULK_REQUESTER_30D = 20;
 /** Below this, "similar by content" is shared vocabulary, not the same problem (the link picker's bar too). */
 export const SIMILAR_MIN_SCORE = 0.7;
 
+/** "Mentions me" period (MEGA 11-14 Part H): 30 days unless 90 or "any" (no limit) is asked for. */
+export const MENTION_PERIOD_DAYS = Object.freeze({ 30: 30, 90: 90 });
+export function mentionSinceDate(value, now = new Date()) {
+  const key = String(value ?? '').trim().toLowerCase();
+  if (key === 'any' || key === 'all') return null;
+  const days = MENTION_PERIOD_DAYS[key] || 30;
+  return new Date(now.getTime() - days * 24 * 3600 * 1000);
+}
+function isTruthyFlag(value) {
+  return value === true || value === 1 || ['1', 'true', 'yes'].includes(String(value ?? '').toLowerCase());
+}
+
 class TicketService {
   // ---------------------------------------------------------------- helpers
 
@@ -867,6 +879,21 @@ class TicketService {
   async _nextNativeNumber() {
     const rows = await prisma.$queryRaw`SELECT nextval('ticket_native_number_seq')::int AS "nextval"`;
     return rows[0].nextval;
+  }
+
+  /**
+   * MEGA 11-14 Part B: settle the ticket's open AI review suggestions when it
+   * no longer needs one (owner, closed, removed, noise). Paths that report
+   * through _notifyLifecycle are settled there; this covers the ones that do
+   * not (delete, mark as noise). Never throws.
+   */
+  async _settleReviews(ticket, actor, { source = 'ticketpulse_native', noise = false } = {}) {
+    try {
+      const { default: settle } = await import('./reviewQueueSettleService.js');
+      await settle.settleForTicket(ticket, { actor, source, noise });
+    } catch (err) {
+      logger.warn(`Review settle skipped for ticket ${ticket?.id} (non-fatal): ${err.message}`);
+    }
   }
 
   _broadcast(workspaceId, action, ticket, extra = {}) {
@@ -1065,6 +1092,7 @@ class TicketService {
         logger.warn(`Failed to enqueue FS mirror delete for ticket ${ticket.id}: ${err.message}`);
       });
     }
+    await this._settleReviews(updated, actor, { source: fromFreshService ? 'freshservice' : 'ticketpulse_native' });
     this._broadcast(workspaceId, 'deleted', updated);
     logger.info(`TP ticket ${ticketDisplayRef(updated)} (id ${ticket.id}) deleted by ${actor?.email || 'unknown'}`);
     return { ...updated, displayRef: ticketDisplayRef(updated), deleted: true };
@@ -1832,16 +1860,17 @@ class TicketService {
     } else if (query.segment === 'deleted') {
       where.status = { in: ['Deleted', 'Spam'] };
     }
-    // Mentions view (29 Oct 2026): tickets where the signed-in agent was
-    // @mentioned in the last 30 days. The route sets the id from the session.
+    // "Mentions me" (29 Oct 2026 view; MEGA 11-14 Part H filter): tickets where
+    // the signed-in agent was @mentioned. The route sets the id from the
+    // session. Period: 30 days (default), 90 days or any time; "not opened
+    // yet" keeps only mentions they have not seen. Combines with everything.
     if (query.mentionedTechnicianId !== undefined && query.mentionedTechnicianId !== null) {
       const techId = Number(query.mentionedTechnicianId);
-      where.mentions = {
-        some: {
-          technicianId: Number.isInteger(techId) && techId > 0 ? techId : -1,
-          createdAt: { gte: new Date(now.getTime() - 30 * 24 * 3600 * 1000) },
-        },
-      };
+      const some = { technicianId: Number.isInteger(techId) && techId > 0 ? techId : -1 };
+      const since = mentionSinceDate(query.mentionedSince, now);
+      if (since) some.createdAt = { gte: since };
+      if (isTruthyFlag(query.mentionedUnseen)) some.seenAt = null;
+      where.mentions = { some };
     }
     if (query.segment === 'noise') {
       // Opt-in "Noise" card (Phase FC): everything the noise rules flagged,
@@ -2021,13 +2050,16 @@ class TicketService {
     // always what clicking it shows.
     const facets = await this._listFacets(workspaceId, query);
 
-    const [incomingByTicket, aiByTicket, bypassByTicket, proposedTicketIds, approvalByTicket, combinedByTicket] = await Promise.all([
+    const [incomingByTicket, aiByTicket, bypassByTicket, proposedTicketIds, approvalByTicket, combinedByTicket, mentionsByTicket] = await Promise.all([
       this._lastPublicEntryIncoming(items.map((t) => t.id)),
       this._aiRunStateByTicket(items.map((t) => t.id)),
       this._aiBypassByTicket(items),
       this._openProposalTicketIds(items.map((t) => t.id)),
       this._approvalStateByTicket(items.map((t) => t.id)),
       this._combinedIntoByTicket(items.map((t) => t.id), workspaceId),
+      // MEGA 11-14 Part H: who mentioned me on each row, and when (the row's @ mark).
+      this._mentionsOfMeByTicket(items.map((t) => t.id), workspaceId, actor?.technicianId,
+        query.mentioned === 'me' ? mentionSinceDate(query.mentionedSince) : mentionSinceDate(null)),
     ]);
 
     return {
@@ -2051,6 +2083,8 @@ class TicketService {
         approvalState: approvalByTicket.get(t.id) || null,
         // QA 11-09 #5: a ticket closed into another reads "Combined into TP-…".
         combinedInto: combinedByTicket.get(t.id) || null,
+        // MEGA 11-14 Part H: { unseen, latest: [{ by, at, seen }] } or null.
+        mentionsOfMe: mentionsByTicket.get(t.id) || null,
       })),
       total,
       page,
@@ -2131,6 +2165,38 @@ class TicketService {
    * `duplicate_of` link or a manual `merged_into` — as { id, displayRef, kind }
    * with kind 'combined' | 'merged'. One indexed read per page. Never throws.
    */
+  /**
+   * MEGA 11-14 Part H: the signed-in agent's own mentions on a page of rows,
+   * in ONE query (never per row). Map ticketId → { unseen, latest } where
+   * latest is the three newest: [{ by, at, seen }]. Empty when the actor has
+   * no agent row in this workspace (they cannot be mentioned here). Never throws.
+   */
+  async _mentionsOfMeByTicket(ticketIds, workspaceId, technicianId, since = null) {
+    const out = new Map();
+    const techId = Number(technicianId);
+    if (!ticketIds?.length || !Number.isInteger(techId) || techId <= 0) return out;
+    const rows = await Promise.resolve()
+      .then(() => prisma.ticketMention.findMany({
+        where: {
+          workspaceId,
+          technicianId: techId,
+          ticketId: { in: ticketIds },
+          ...(since ? { createdAt: { gte: since } } : {}),
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { ticketId: true, mentionedByName: true, createdAt: true, seenAt: true },
+        take: Math.min(1000, ticketIds.length * 10),
+      }))
+      .catch(() => []);
+    for (const r of rows || []) {
+      const entry = out.get(r.ticketId) || { unseen: 0, latest: [] };
+      if (!r.seenAt) entry.unseen += 1;
+      if (entry.latest.length < 3) entry.latest.push({ by: r.mentionedByName || null, at: r.createdAt, seen: Boolean(r.seenAt) });
+      out.set(r.ticketId, entry);
+    }
+    return out;
+  }
+
   async _combinedIntoByTicket(ticketIds, workspaceId) {
     const out = new Map();
     if (!ticketIds?.length) return out;
@@ -5160,6 +5226,8 @@ class TicketService {
       updated = await this.changeStatus(ticket.id, workspaceId, 'Resolved', actor);
       resolved = true;
     } else {
+      // Marked as noise by hand: an AI suggestion still waiting has nothing left to decide.
+      if (flag) await this._settleReviews(updated, actor, { noise: true });
       this._broadcast(workspaceId, 'noise', updated, { isNoise: flag });
     }
     return { ...updated, displayRef: ticketDisplayRef(updated), isNoise: flag, resolved };
@@ -5391,7 +5459,9 @@ class TicketService {
       ...(fromFreshService ? { via: 'freshservice' } : {}),
       ...(handBackEvent ? { handBack: handBackEvent } : {}),
     });
-    await this._notifyLifecycle(ticket, updated);
+    // The actor rides along so a review this settles names who assigned it (MEGA 11-14 Part B).
+    if (actor) await this._notifyLifecycle(ticket, updated, { actor });
+    else await this._notifyLifecycle(ticket, updated);
     this._broadcast(workspaceId, 'assignment', updated, { fromTechId: ticket.assignedTechId });
     if (!fromFreshService) await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
     // The new owner inherits the ticket's unassigned open tasks (Simorgh B7).

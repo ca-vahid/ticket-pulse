@@ -1996,6 +1996,15 @@ class AssignmentPipelineService {
         ...(willTriggerSync ? { syncStatus: 'pending' } : {}),
       });
 
+      // MEGA 11-14 Part B: the ticket may have got an owner (or closed) while
+      // the AI was thinking — then there is nothing left to review. The
+      // settle reads the ticket and leaves a still-unowned, open one alone.
+      if (finalStatus === 'completed' && decision === 'pending_review') {
+        await import('./reviewQueueSettleService.js')
+          .then(({ default: settle }) => settle.settleForTicket(ticketId, { source: 'pipeline' }))
+          .catch(() => {});
+      }
+
       // Auto-help integration W1: the intake settled - category, priority,
       // noise and the decision are saved and the run is recorded. Night
       // (after-hours priority-only) runs settle provisionally; the

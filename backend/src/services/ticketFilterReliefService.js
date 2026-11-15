@@ -41,6 +41,9 @@ const FILTER_GROUPS = Object.freeze([
   { key: 'aiState', label: 'AI state', apiKeys: ['aiState'] },
   { key: 'requester', label: 'Requester', apiKeys: ['requesterId'] },
   { key: 'noise', label: 'Noise', apiKeys: ['noise', 'excludeNoise'] },
+  // "Mentions me" (MEGA 11-14 Part H): the route puts the session's own id in
+  // mentionedTechnicianId; the period and "not opened yet" go with it.
+  { key: 'mentioned', label: 'Mentions', apiKeys: ['mentionedTechnicianId', 'mentionedSince', 'mentionedUnseen'] },
 ]);
 
 // Never counted as a filter: paging, ordering, and the text query itself. The

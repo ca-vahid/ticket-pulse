@@ -5,6 +5,12 @@ import { normalizeAiModel, providerForModel } from '../utils/aiProviders.js';
 
 const STALE_RUNNING_MINUTES = 30;
 
+// MEGA 11-14 Part B: a suggestion whose ticket got an owner, closed or was
+// removed before anyone reviewed it (reviewQueueSettleService).
+export const SETTLED_DECISION = 'settled_elsewhere';
+// "Not settled", NULL-safe: `decision <> x` alone drops NULL rows in SQL.
+const NOT_SETTLED_CLAUSE = { OR: [{ decision: null }, { decision: { not: SETTLED_DECISION } }] };
+
 // Ticket status group → list of values stored in tickets.status. The values come from the
 // FreshService transformer (string labels) and may also appear as numeric codes in legacy rows.
 const TICKET_STATUS_GROUPS = {
@@ -423,7 +429,13 @@ class AssignmentRepository {
 
       // Build itemsWhere by extending baseWhere so it inherits the time-range filter (since).
       // The assignmentClause's `ticket` field overrides baseWhere's `ticket` field via spread.
-      const itemsWhere = { ...baseWhere, ...assignmentClause };
+      // MEGA 11-14 Part B: "assigned outside the pipeline" (Decided > Manually in
+      // FreshService) is now mostly SETTLED runs — the review settled itself the
+      // moment the ticket got its owner — so that view reads both decisions.
+      const outsideDecision = { in: ['pending_review', SETTLED_DECISION] };
+      const itemsWhere = assignmentStatus === 'outside_assigned'
+        ? { ...baseWhere, decision: outsideDecision, ...assignmentClause }
+        : { ...baseWhere, ...assignmentClause };
 
       // Layer the modern multi-select filters into the items-only `ticket.is` clause.
       // Counts (totalAll / totalUnassigned / totalOutsideAssigned) intentionally
@@ -510,7 +522,7 @@ class AssignmentRepository {
           where: { ...baseActiveWhere, ticket: { is: { ...activeTicketFilter.ticket.is, assignedTechId: null } } },
         }),
         prisma.assignmentPipelineRun.count({
-          where: { ...baseWhere, ticket: { is: { ...baseTicketFilter.ticket.is, assignedTechId: { not: null } } } },
+          where: { ...baseWhere, decision: outsideDecision, ticket: { is: { ...baseTicketFilter.ticket.is, assignedTechId: { not: null } } } },
         }),
         prisma.assignmentPipelineRun.count({ where: filteredItemsWhere }),
         prisma.assignmentPipelineRun.findMany({
@@ -574,6 +586,7 @@ class AssignmentRepository {
     reboundFromTechIds,
     ingestSources,
     search,
+    includeSettled = false,
   } = {}) {
     try {
       await this.sweepStaleRunningRuns(workspaceId);
@@ -596,7 +609,14 @@ class AssignmentRepository {
         const baseTicketIs = where.ticket?.is || {};
         where.ticket = { is: { ...baseTicketIs, ...advancedTicketClause } };
       }
-      const filteredWhere = compactAnd([where, buildIngestSourceFilter(ingestSources)]);
+      // MEGA 11-14 Part B: settled suggestions ('settled_elsewhere') stay out
+      // of the run lists unless asked for — by name (decision filter) or with
+      // includeSettled. A NULL decision (running / failed runs) stays in.
+      const asksForSettled = includeSettled
+        || decision === SETTLED_DECISION
+        || (Array.isArray(decisions) && decisions.includes(SETTLED_DECISION));
+      const settledClause = asksForSettled ? null : NOT_SETTLED_CLAUSE;
+      const filteredWhere = compactAnd([where, buildIngestSourceFilter(ingestSources), settledClause]);
 
       const [items, total] = await Promise.all([
         prisma.assignmentPipelineRun.findMany({

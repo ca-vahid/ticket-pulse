@@ -1383,7 +1383,10 @@ class AssignmentDailyReviewService {
       status: { notIn: ['skipped_stale', 'superseded'] },
       OR: [
         { createdAt: { gte: range.start, lte: range.end } },
-        { decidedAt: { gte: range.start, lte: range.end } },
+        // MEGA 11-14 Part B: a settled suggestion is stamped with the time it
+        // was settled (the backlog clean-up settles thousands at once). It
+        // belongs to the day the run was made, never to the day it settled.
+        { decidedAt: { gte: range.start, lte: range.end }, decision: { not: 'settled_elsewhere' } },
       ],
     };
 
@@ -1732,7 +1735,9 @@ class AssignmentDailyReviewService {
           && ticket.assignedTechId
           && recs[0].techId !== ticket.assignedTechId
         ),
-        handledInFreshService: run.decision === 'pending_review' && !!ticket.assignedTechId,
+        // Settled suggestions (MEGA 11-14 Part B) are the same case: the AI's
+        // pick was never answered and someone else took the ticket.
+        handledInFreshService: ['pending_review', 'settled_elsewhere'].includes(run.decision) && !!ticket.assignedTechId,
         overrideReason: run.overrideReason || null,
         decisionNote: run.decisionNote || null,
         decidedAt: run.decidedAt,

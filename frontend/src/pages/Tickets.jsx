@@ -17,6 +17,7 @@ import CreatedWindowControl from '../components/tickets/CreatedWindowControl';
 import { WINDOW_PREF_KEY, isWindowKey, readStoredWindow, resolveCreatedWindow, storeWindow, windowChoice } from '../components/tickets/createdWindow';
 import TicketSearchBox, { directRef, viewAllSearch } from '../components/tickets/TicketSearchBox';
 import CombinedIntoMark from '../components/tickets/CombinedIntoMark';
+import MentionMark from '../components/tickets/MentionMark';
 import StickyScrollbar from '../components/tickets/StickyScrollbar';
 import QueueSideScroll from '../components/tickets/QueueSideScroll';
 import TicketBoard from '../components/tickets/TicketBoard';
@@ -396,6 +397,9 @@ export default function Tickets() {
   const reopenedFilter = searchParams.get('reopened') || '';
   // Mentions view (29 Oct 2026): ?mentioned=me; the server knows who "me" is.
   const mentionedFilter = searchParams.get('mentioned') === 'me' ? 'me' : '';
+  // MEGA 11-14 Part H: the Mentions filter's period (30 default | 90 | any) and "not opened yet".
+  const mentionedSince = mentionedFilter && ['90', 'any'].includes(searchParams.get('mentionedSince')) ? searchParams.get('mentionedSince') : '';
+  const mentionedUnseen = mentionedFilter && searchParams.get('mentionedUnseen') === '1' ? '1' : '';
   // Parked filter (plans/PARKED_BUILD_PLAN.md): any|none|until_date|waiting_on|eta|waking7
   const parkedFilter = searchParams.get('parked') || '';
   // "Auto-help waiting" view: ?parkKind=auto_help (active auto_help parks).
@@ -736,7 +740,7 @@ export default function Tickets() {
     noise: ['noise'],
     parked: ['parked', 'parkKind'],
     reopened: ['reopened'],
-    mentioned: ['mentioned'],
+    mentioned: ['mentioned', 'mentionedSince', 'mentionedUnseen'],
   };
 
   // FR 09-09: drop one filter group, keeping the typed text. For Status we ADD
@@ -815,6 +819,8 @@ export default function Tickets() {
     if (parkKindFilter) params.parkKind = parkKindFilter;
     if (reopenedFilter) params.reopened = reopenedFilter;
     if (mentionedFilter) params.mentioned = mentionedFilter;
+    if (mentionedSince) params.mentionedSince = mentionedSince;
+    if (mentionedUnseen) params.mentionedUnseen = mentionedUnseen;
     if (tag) {
       params.tagId = tag;
       if (tagMode === 'all') params.tagMode = 'all';
@@ -829,7 +835,7 @@ export default function Tickets() {
     if (debouncedSearch) params.q = debouncedSearch;
     return params;
   }, [page, boardMode, effectivePageSize, statuses, statusesRaw, statusFilterNames, assignee, priority, origin, segment, sort, dir, debouncedSearch,
-    type, category, subcategory, group, source, createdFrom, createdTo, resolvedFrom, resolvedTo, createdWin.applied, createdWin.key, due, noise, solution, parkedFilter, parkKindFilter, reopenedFilter, mentionedFilter, tag, tagMode, impactFilter, urgencyFilter, aiState, approval, approvalCategory, requesterId, cfSerialized]);
+    type, category, subcategory, group, source, createdFrom, createdTo, resolvedFrom, resolvedTo, createdWin.applied, createdWin.key, due, noise, solution, parkedFilter, parkKindFilter, reopenedFilter, mentionedFilter, mentionedSince, mentionedUnseen, tag, tagMode, impactFilter, urgencyFilter, aiState, approval, approvalCategory, requesterId, cfSerialized]);
 
   // Serialized VALUE of queryParams. Effects that RESET live row state (the
   // pending pill, row FX, bulk selection) key on this instead of the object,
@@ -2653,6 +2659,8 @@ export default function Tickets() {
                                       </span>
                                     )}
                                     {ticket.isExternal && <ExternalChip />}
+                                    {/* MEGA 11-14 Part H: rows that mention me; hover says who and when. */}
+                                    <MentionMark mentions={ticket.mentionsOfMe} />
                                     {ticket.solutionVerifiedAt && <SolutionMark />}
                                     <ApprovalMark approval={ticket.approvalState} />
                                     {ticket.parkedUntil && <ParkedMark until={ticket.parkedUntil} kind={ticket.parkKind} />}
@@ -2992,6 +3000,7 @@ export default function Tickets() {
                                           {ticket.aiBypass && <BypassBadge bypass={ticket.aiBypass} />}
                                           <span className="ml-auto flex min-w-0 items-center gap-1.5">
                                             {ticket.isExternal && <ExternalChip />}
+                                            <MentionMark mentions={ticket.mentionsOfMe} />
                                             {ticket.solutionVerifiedAt && <SolutionMark />}
                                             <ApprovalMark approval={ticket.approvalState} />
                                             <OccurrenceMark ticket={ticket} />
