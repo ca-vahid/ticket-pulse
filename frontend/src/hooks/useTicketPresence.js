@@ -3,6 +3,7 @@ import { ticketsAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 
 const HEARTBEAT_MS = 30_000; // backend expires viewers after ~75s
+const EMPTY = [];
 
 /**
  * "Also viewing" presence for an open ticket detail page (gap plan 2 P4.1).
@@ -22,7 +23,12 @@ const HEARTBEAT_MS = 30_000; // backend expires viewers after ~75s
 export function useTicketPresence(ticketId, enabled = true, composing = null) {
   const { user } = useAuth();
   const myEmail = user?.email?.toLowerCase() || null;
-  const [viewers, setViewers] = useState([]);
+  // Viewers are kept with the ticket they belong to (MEGA 11-14 Part K):
+  // moving to the next ticket must not show the last ticket's people for a
+  // beat and then report them as having left.
+  const [state, setState] = useState({ ticketId, list: [] });
+  const viewers = state.ticketId === ticketId ? state.list : EMPTY;
+  const setViewers = useCallback((list) => setState({ ticketId, list }), [ticketId]);
   const composingRef = useRef(composing);
   composingRef.current = composing;
   const active = Boolean(enabled && Number.isFinite(ticketId) && myEmail);
@@ -56,7 +62,7 @@ export function useTicketPresence(ticketId, enabled = true, composing = null) {
       document.removeEventListener('visibilitychange', onVisibility);
       ticketsAPI.presenceHeartbeat(ticketId, true).catch(() => {});
     };
-  }, [ticketId, active]);
+  }, [ticketId, active, setViewers]);
 
   // Starting or stopping a reply/note: say so straight away (not on mount —
   // the first heartbeat above already carries it).
@@ -73,7 +79,7 @@ export function useTicketPresence(ticketId, enabled = true, composing = null) {
   const onPresence = useCallback((data) => {
     if (data?.ticketId !== ticketId) return;
     setViewers((data.viewers || []).filter((v) => v.email !== myEmail));
-  }, [ticketId, myEmail]);
+  }, [ticketId, myEmail, setViewers]);
 
   return { viewers, onPresence };
 }
