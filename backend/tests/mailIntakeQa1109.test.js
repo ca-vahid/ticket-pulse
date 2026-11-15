@@ -1,7 +1,9 @@
 /**
  * QA 11-09 mail intake:
  *  A (#3) a reply to a workflow mail sent through SendGrid threads onto its
- *         ticket (rung 1c, via 'workflow_mail_ref') and never reopens it;
+ *         ticket (rung 1c, via 'workflow_mail_ref'); since MEGA 11-14 the
+ *         workflows decide whether it reopens (replyToWorkflowEmail) and the
+ *         FreshService side is written after them;
  *  B      burst hold only for look-alike mail;
  *  C (#8) meeting invites are not tickets; a forwarded invite with a question
  *         is, without the attendees; carried Cc is capped.
@@ -152,34 +154,66 @@ describe('A: a reply to a workflow mail sent through SendGrid', () => {
     expect(await ingest.matchEmailToTicket(5, pmReply(), side.address)).toBeNull();
   });
 
-  test('on a closed ticket: recorded as an incoming reply, mirrored, and the ticket is not reopened', async () => {
+  // MEGA 11-14 (A1): the workflows decide. The reply fires "Requester replied"
+  // with replyToWorkflowEmail; the FreshService side is written AFTER them (G2).
+  test('on a closed ticket: recorded as an incoming reply, the workflows run, and the copy waits for them', async () => {
     prismaMock.notificationDelivery.findFirst.mockImplementation(deliveryFor(4401));
     prismaMock.ticket.findUnique.mockResolvedValue({ ...closedTicket });
+    const order = [];
+    lifecycleMock.emitTicketEvent.mockImplementationOnce(async () => { order.push('workflows'); return { status: 'completed' }; });
+    mirrorServiceMock.enqueueThreadEntry.mockImplementationOnce(async () => { order.push('copy'); return {}; });
     const outcome = await ingest.processEmail(side, pmReply());
     expect(outcome).toBe('reply');
     expect(prismaMock.ticketThreadEntry.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ ticketId: 4401, eventType: 'reply', incoming: true, authorType: 'requester', actorEmail: 'pm.person@example.com', mirrorState: 'pending' }),
     }));
+    expect(prismaMock.ticketThreadEntry.create.mock.calls[0][0].data.rawPayload?.keepClosed).toBeUndefined();
+    expect(lifecycleMock.emitTicketEvent).toHaveBeenCalledWith('ticket.reply_received', 4401, expect.objectContaining({
+      extra: expect.objectContaining({ via: 'workflow_mail_ref', replyToWorkflowEmail: true, from: 'pm.person@example.com' }),
+    }));
+    expect(order).toEqual(['workflows', 'copy']);
+    // Still closed after the workflows: the copy gets a note (the entry is stamped first).
+    expect(prismaMock.ticketThreadEntry.update).toHaveBeenCalledWith({ where: { id: 9001 }, data: { rawPayload: expect.objectContaining({ keepClosed: true }) } });
     expect(mirrorServiceMock.enqueueThreadEntry).toHaveBeenCalledWith(5, 4401, 9001);
-    expect(lifecycleMock.emitTicketEvent).not.toHaveBeenCalled();
     expect(holdMock.holdMessage).not.toHaveBeenCalled();
-    // Status is never touched: the only ticket update is the activity stamp.
     for (const [arg] of prismaMock.ticket.update.mock.calls) expect(arg.data.status).toBeUndefined();
     expect(activityMock.create).toHaveBeenCalledWith(expect.objectContaining({
-      activityType: 'requester_reply', details: expect.objectContaining({ via: 'workflow_mail_ref', keptClosed: true }),
+      activityType: 'requester_reply', details: expect.objectContaining({ via: 'workflow_mail_ref', replyToWorkflowEmail: true }),
     }));
+    expect(activityMock.create.mock.calls.find(([a]) => a.activityType === 'requester_reply')[0].details.keptClosed).toBeUndefined();
   });
 
-  test('on a resolved FS-born ticket the write-back is a marked note, not an incoming requester reply', async () => {
+  test('on a closed ticket a workflow reopened: the copy is an incoming reply (no note stamp)', async () => {
+    prismaMock.notificationDelivery.findFirst.mockImplementation(deliveryFor(4401));
+    let status = 'Closed';
+    prismaMock.ticket.findUnique.mockImplementation(async () => ({ ...closedTicket, status }));
+    lifecycleMock.emitTicketEvent.mockImplementationOnce(async () => { status = 'Open'; return { status: 'completed' }; });
+    expect(await ingest.processEmail(side, pmReply())).toBe('reply');
+    expect(prismaMock.ticketThreadEntry.update.mock.calls.filter(([a]) => a.data?.rawPayload?.keepClosed)).toHaveLength(0);
+    expect(mirrorServiceMock.enqueueThreadEntry).toHaveBeenCalledWith(5, 4401, 9001);
+  });
+
+  test('on a resolved FS-born ticket: a marked note while it stays resolved, an incoming requester reply once reopened', async () => {
     const fsTicket = { ...closedTicket, origin: 'freshservice', status: 'Resolved', freshserviceTicketId: BigInt(555123), requesterFreshserviceId: BigInt(42) };
     prismaMock.notificationDelivery.findFirst.mockImplementation(deliveryFor(4401));
     prismaMock.ticket.findUnique.mockResolvedValue(fsTicket);
     const addNote = jest.fn(async () => ({ conversation: { id: 9 } }));
     mirrorServiceMock.getInteractiveClient.mockResolvedValueOnce({ addNote });
     expect(await ingest.processEmail(side, pmReply())).toBe('reply');
+    expect(lifecycleMock.emitTicketEvent).toHaveBeenCalledTimes(1);
     expect(addNote).toHaveBeenCalledWith(555123, expect.stringContaining('[Ticket Pulse]'), expect.objectContaining({ incoming: false }));
     expect(addNote.mock.calls[0][2].userId).toBeUndefined();
-    expect(lifecycleMock.emitTicketEvent).not.toHaveBeenCalled();
+
+    jest.clearAllMocks();
+    let status = 'Resolved';
+    prismaMock.ticketThreadEntry.create.mockImplementation(({ data }) => Promise.resolve({ id: 9002, ...data }));
+    prismaMock.notificationDelivery.findFirst.mockImplementation(deliveryFor(4401));
+    prismaMock.ticket.findUnique.mockImplementation(async () => ({ ...fsTicket, status }));
+    lifecycleMock.emitTicketEvent.mockImplementationOnce(async () => { status = 'Open'; return { status: 'completed' }; });
+    const addNote2 = jest.fn(async () => ({ conversation: { id: 10 } }));
+    mirrorServiceMock.getInteractiveClient.mockResolvedValueOnce({ addNote: addNote2 });
+    expect(await ingest.processEmail(side, pmReply())).toBe('reply');
+    expect(addNote2).toHaveBeenCalledWith(555123, expect.not.stringContaining('[Ticket Pulse]'), expect.objectContaining({ incoming: true, userId: 42 }));
   });
 
   test('on an open ticket the reply is a normal requester reply (reply_received fires)', async () => {

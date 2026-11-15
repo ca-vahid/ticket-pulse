@@ -212,6 +212,94 @@ export async function executeCreateChildTicketNode(node, eventContext, { rendere
   }
 }
 
+// ------------------------------------------------- new ticket from a reply
+
+const escapeText = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/** The reply's own words as the new ticket's description (newRequestSuggestionService's shape). */
+function replyDescription(entry, parentRef) {
+  const text = String(entry?.bodyText || entry?.content || '').trim();
+  const body = entry?.bodyHtml && /<[a-z][\s\S]*>/i.test(entry.bodyHtml)
+    ? entry.bodyHtml
+    : text.split(/\n{2,}/).map((para) => `<p>${escapeText(para).replace(/\n/g, '<br>')}</p>`).join('');
+  return `<p style="color:#5f6b7a;font-size:13px;margin:0 0 6px;">From a reply to ${escapeText(parentRef)}:</p>${body || '<p>(The reply had no text.)</p>'}`;
+}
+
+/**
+ * "New ticket from this reply" (MEGA 11-14, A7). The reply starts a new
+ * Ticket Pulse ticket through the existing split (ticketSplitService.split):
+ * linked to the old one as related, requester = the person who replied, AI
+ * sort and assignment like any new ticket, and "Ticket arrived" fires
+ * (notifyRequester), so the usual acknowledgement goes out — except to an
+ * unattended requester, which the engine's recipient guard drops. The old
+ * ticket is left as it is (closed). Works on FreshService-born tickets too
+ * (the new ticket is always Ticket Pulse-born); it needs native ticketing in
+ * the workspace. When the new ticket cannot be started, the step reopens the
+ * old ticket instead and says so, so the reply is never lost.
+ *   live     { created: { id, displayRef } } | { skipped: true, reason, reopenedInstead }
+ *   preview  { dryRun: true, wouldCreate: true }
+ */
+export async function executeCreateTicketFromReplyNode(node, eventContext, { workflow = null, dryRun = false } = {}) {
+  if (eventContext?.event?.type !== 'ticket.reply_received') return { skipped: true, reason: 'This step only works on "Requester replied"' };
+  const parentId = Number(eventContext.ticket?.id);
+  if (!Number.isFinite(parentId) || parentId <= 0) return { skipped: true, reason: 'No ticket in event context' };
+  if (dryRun) return { dryRun: true, wouldCreate: true };
+
+  const extra = eventContext.event?.extra || {};
+  const parent = await prisma.ticket.findUnique({
+    where: { id: parentId },
+    select: { id: true, workspaceId: true, subject: true, status: true, origin: true, nativeNumber: true, freshserviceTicketId: true },
+  });
+  if (!parent) return { skipped: true, reason: 'Ticket not found' };
+  const { ticketDisplayRef } = await import('../utils/ticketOrigin.js');
+  const parentRef = ticketDisplayRef(parent);
+  const select = { id: true, bodyText: true, bodyHtml: true, content: true, actorName: true, actorEmail: true };
+  let entry = null;
+  if (extra.entryId) entry = await Promise.resolve().then(() => prisma.ticketThreadEntry.findFirst({ where: { id: Number(extra.entryId), ticketId: parentId }, select })).catch(() => null);
+  if (!entry && extra.externalEntryId) entry = await Promise.resolve().then(() => prisma.ticketThreadEntry.findFirst({ where: { ticketId: parentId, externalEntryId: String(extra.externalEntryId) }, select })).catch(() => null);
+  const requesterEmail = String(extra.from || extra.fromEmail || entry?.actorEmail || '').trim().toLowerCase();
+  const actor = { name: `Workflow: ${workflow?.name || 'New ticket from this reply'}`, email: null, role: 'workflow' };
+  try {
+    const { default: ticketSplitService } = await import('./ticketSplitService.js');
+    const result = await ticketSplitService.split(parent.id, parent.workspaceId, {
+      subject: String(parent.subject || '').trim().slice(0, 480) || `Reply to ${parentRef}`,
+      description: replyDescription(entry, parentRef),
+      entryIds: [],
+      includeDescription: false,
+      internalCategoryId: null,
+      internalSubcategoryId: null,
+      runAiTriage: true,
+      linkKind: 'related_to',
+      notifyRequester: true,
+      createdVia: 'email',
+      ...(requesterEmail.includes('@') ? { requesterEmail, requesterName: entry?.actorName || extra.fromName || undefined } : {}),
+    }, actor);
+    // Files that came with the reply belong to the new ticket.
+    if (entry?.id) {
+      await Promise.resolve().then(() => prisma.ticketAttachment.updateMany({
+        where: { ticketId: parent.id, workspaceId: parent.workspaceId, threadEntryId: entry.id },
+        data: { ticketId: result.child.id, threadEntryId: null },
+      })).catch(() => {});
+    }
+    logger.info(`Workflow "New ticket from this reply": ${parentRef} -> ${result.child.ref}`);
+    return { created: { id: result.child.id, displayRef: result.child.ref }, linkKind: result.linkKind };
+  } catch (error) {
+    logger.warn(`Workflow "New ticket from this reply" on ${parentRef} could not start a ticket (${error.message}) — reopening instead`);
+    const { executeUpdateTicketNode } = await import('./notificationWorkflowEngine.js');
+    const reopen = await executeUpdateTicketNode(
+      { id: `${node?.id || 'new-ticket'}-reopen`, type: 'update_ticket', data: { setStatus: 'Open', note: `Reopened instead of a new ticket (${error.message}).` } },
+      eventContext,
+      { workflowId: workflow?.id ?? null },
+    ).catch((err) => ({ skipped: true, reason: err.message }));
+    return {
+      skipped: true,
+      reason: `No new ticket (${error.message}); the ticket was reopened instead`,
+      reopenedInstead: !reopen?.skipped,
+      reopen,
+    };
+  }
+}
+
 // ---------------------------------------------------------------- approval
 
 export async function executeRequestApprovalNode(node, eventContext, { renderedNote, dryRun = false }) {

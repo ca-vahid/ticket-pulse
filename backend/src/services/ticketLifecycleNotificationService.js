@@ -1098,6 +1098,39 @@ export async function emitTicketEvent(eventType, ticketId, {
   }
   const eventContext = buildEventContext({ event, ticket, previousAgent: null, source, statusBase, ...(createdVia ? { createdVia } : {}) });
   if (extra) eventContext.event.extra = extra;
+  // One reopen path (MEGA 11-14, Part A). Before anything hears about the
+  // reply: Auto-help's own reading (W3 — a reply to a ticket Auto-help closed
+  // in the last 7 days; "thanks, that worked" rides as
+  // autoHelpReplyVerdict='confirmed'), then the reply facts, worked out once
+  // for every road (mail intake, FreshService sync, copy sync): who sent it,
+  // time since the ticket closed, reopens by replies today and — only when an
+  // enabled reply workflow asks — how it reads. The webhook and the Teams card
+  // carry them. A manual one-workflow replay gets the cheap facts only.
+  let replyFacts = null;
+  if (eventType === 'ticket.reply_received') {
+    if (ticket.resolvedByKind === 'auto_help') {
+      try {
+        const { default: followUp } = await import('./autoHelpFollowUpService.js');
+        const read = await followUp.classifyPostCloseReply(ticket, extra || {});
+        if (read?.verdict) {
+          eventContext.event.extra = { ...(eventContext.event.extra || {}), autoHelpReplyVerdict: read.verdict };
+        }
+      } catch (err) {
+        logger.warn(`Auto-help post-close reply check skipped for ticket ${ticket.id}: ${err.message}`);
+      }
+    }
+    try {
+      const { computeReplyFacts } = await import('./replyFacts.js');
+      replyFacts = await computeReplyFacts({
+        ticket, statusBase, extra: extra || {}, cheapOnly: Boolean(onlyWorkflowId),
+        autoHelpVerdict: eventContext.event.extra?.autoHelpReplyVerdict || null,
+      });
+      eventContext.event.extra = { ...(eventContext.event.extra || {}), ...replyFacts.extra };
+      eventContext.ticket.closedMinutes = replyFacts.closedMinutes;
+    } catch (err) {
+      logger.warn(`Reply facts skipped for ticket ${ticket.id}: ${err.message}`);
+    }
+  }
   dispatchLifecycleWebhook(eventContext);
   dispatchTeamsNotifications(eventContext);
   maybeRefreshSentiment(eventContext);
@@ -1126,42 +1159,6 @@ export async function emitTicketEvent(eventType, ticketId, {
       .then(({ default: intake }) => intake.onIntakeSettled(ticket.id, ticket.workspaceId, { ...extra, stamp: extra.stamp || stamp }))
       .catch((err) => logger.warn(`Auto-help intake settle not queued for ticket ${ticket.id}: ${err.message}`));
   }
-  // W3 reopen-on-reply guard: a reply to a ticket Auto-help closed in the last
-  // 7 days is read first (the P1 reply classifier); "thanks, that worked"
-  // rides on the event as autoHelpReplyVerdict='confirmed' and the seeded
-  // reopen workflow leaves the ticket closed. Anything else reopens as before.
-  if (eventType === 'ticket.reply_received' && ticket.resolvedByKind === 'auto_help') {
-    try {
-      const { default: followUp } = await import('./autoHelpFollowUpService.js');
-      const read = await followUp.classifyPostCloseReply(ticket, extra || {});
-      if (read?.verdict) {
-        eventContext.event.extra = { ...(eventContext.event.extra || {}), autoHelpReplyVerdict: read.verdict };
-      }
-    } catch (err) {
-      logger.warn(`Auto-help post-close reply check skipped for ticket ${ticket.id}: ${err.message}`);
-    }
-  }
-  // "When a requester replies" (Settings → Ticket Ops, 14 Oct 2026): where the
-  // page is on, a reply to a closed ticket is read (thank-you / out-of-office
-  // → event.extra.replyVerdict) and a reply to a ticket in a ticked status is
-  // reopened here, before the workflows. Off (the default) → null, nothing
-  // changes. autoHelpReplyVerdict above is kept as it is.
-  let replyHandling = null;
-  let replyReopen = null;
-  if (eventType === 'ticket.reply_received' && !onlyWorkflowId) {
-    try {
-      ({ default: replyReopen } = await import('./requesterReplyReopenService.js'));
-      replyHandling = await replyReopen.beforeWorkflows({
-        ticket, statusBase, extra: extra || {}, autoHelpVerdict: eventContext.event.extra?.autoHelpReplyVerdict || null,
-      });
-      if (replyHandling?.replyVerdict) {
-        eventContext.event.extra = { ...(eventContext.event.extra || {}), replyVerdict: replyHandling.replyVerdict };
-      }
-    } catch (err) {
-      logger.warn(`Requester-reply settings skipped for ticket ${ticket.id}: ${err.message}`);
-    }
-  }
-
   let result;
   try {
     result = await notificationWorkflowEngine.executeForEvent(eventContext, {
@@ -1174,23 +1171,33 @@ export async function emitTicketEvent(eventType, ticketId, {
     });
     result = { status: 'failed', eventType, error: error.message };
   }
-  // A thank-you / out-of-office that left the ticket closed: the quiet line
-  // in the conversation (only when the ticket really is still closed).
-  let staysClosed = false;
-  if (replyReopen && replyHandling?.staysClosed) {
-    staysClosed = (await replyReopen.afterWorkflows({ ticket, handling: replyHandling, stamp }).catch(() => null))?.staysClosed === true;
-  }
-  // After the workflows (the reopen one first of all): is the owner away, and
-  // is this reply to a long-resolved ticket really a new request (13 Oct
-  // 2026)? `ticket` is the row as it was BEFORE they ran. Not awaited: one of
-  // the two makes a model call, and the reply is already recorded. A reply
-  // that stayed closed as a thank-you / out-of-office starts neither.
   if (eventType === 'ticket.reply_received' && !onlyWorkflowId) {
-    import('./requesterReplyFollowUp.js')
-      .then(({ afterRequesterReplyEvent }) => afterRequesterReplyEvent({
-        before: ticket, statusBaseBefore: statusBase, stamp, extra, ...(staysClosed ? { staysClosed: replyHandling.replyVerdict } : {}),
-      }))
-      .catch((err) => logger.warn(`Requester-reply follow-up skipped for ticket ${ticket.id}: ${err.message}`));
+    // A reply on a ticket that was closed and still is: one private line that
+    // says why (A6). `replyOutcome.openNow` tells the mail intake how to write
+    // the FreshService copy (G2).
+    let outcome = null;
+    try {
+      const { default: replyReopen } = await import('./requesterReplyReopenService.js');
+      outcome = await replyReopen.afterWorkflows({ ticket, statusBase, facts: replyFacts || {}, result, extra: extra || {}, stamp });
+    } catch (err) {
+      logger.warn(`Requester-reply outcome skipped for ticket ${ticket.id}: ${err.message}`);
+    }
+    // After the workflows (the reopen one first of all): is the owner away, and
+    // is this reply to a long-resolved ticket really a new request (13 Oct
+    // 2026)? Only when the ticket is open after the workflows (G7): a reply the
+    // workflows left closed, for any reason, starts neither. `ticket` is the
+    // row as it was BEFORE they ran. Not awaited: one of the two makes a model
+    // call, and the reply is already recorded.
+    if (outcome?.openNow === true) {
+      import('./requesterReplyFollowUp.js')
+        .then(({ afterRequesterReplyEvent }) => afterRequesterReplyEvent({ before: ticket, statusBaseBefore: statusBase, stamp, extra }))
+        .catch((err) => logger.warn(`Requester-reply follow-up skipped for ticket ${ticket.id}: ${err.message}`));
+    }
+    if (result && typeof result === 'object') {
+      result.replyOutcome = outcome
+        ? { openNow: outcome.openNow, wasClosed: outcome.wasClosed, stillClosed: outcome.stillClosed, line: outcome.line?.text || null }
+        : null;
+    }
   }
   return result;
 }

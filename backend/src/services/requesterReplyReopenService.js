@@ -1,63 +1,77 @@
 /**
- * "When a requester replies": the reopen and the thank-you reading
- * (14 Oct 2026, plans/REQUESTER_REPLY_SETTINGS_PLAN.md — Vahid: "YES!").
+ * What a requester reply does to a closed ticket — the pieces that are not
+ * policy (MEGA 11-14, Part A: one reopen path).
  *
- * Settings → Ticket Ops → When a requester replies holds, per workspace
- * (requesterReplyRulesService):
+ * Workflows are the only thing that reopens a ticket on a reply (Mail
+ * Workflows → "Reopen on requester reply"). The Ticket Ops page's own reopen,
+ * its status ticks, its retire / restore of the workflow and its retries are
+ * gone. What stays here:
  *
- *  - Which statuses reopen. A requester reply to a ticket in a ticked status
- *    puts it back to Open HERE, in code, before the workflows run — through
- *    the same write the "Reopen on requester reply" workflow used
- *    (notificationWorkflowEngine.executeUpdateTicketNode: origin-aware,
- *    ticket.reopened, the reopen counter, mirror, live update), recorded as
- *    Ticket Pulse. Saving it on archives that workflow (never deletes it) and
- *    the page names what it replaced.
- *  - A thank-you or out-of-office reply does not reopen. A reply to a
- *    Resolved / Closed ticket is read first: an out-of-office
- *    (isOutOfOfficeReply), the keyword fast path, then ONE model call
- *    (operation 'requester_reply_check', its own monthly limit — never
- *    Auto-help's cap). Only an explicit thank-you or out-of-office leaves the
- *    ticket closed; unclear, empty, failed, timed out or over the limit all
- *    reopen. When it stays closed the conversation gets one quiet line
- *    (a private Ticket Pulse note written straight to the thread: no e-mail,
- *    no Teams, no watcher, no workflow event, never mirrored).
+ *  - readReply: how one reply reads (event.extra.replyVerdict), asked for by
+ *    replyFacts.js only when an enabled reply workflow has the "Don't reopen
+ *    on a thank-you or out-of-office reply" switch on or uses "Reply reads as".
+ *    Out-of-office first (mail headers or text, any status, no AI), then the
+ *    keyword thank-you, then ONE model call (operation 'requester_reply_check',
+ *    its own monthly limit — never Auto-help's cap). Six answers: thanks,
+ *    auto_reply, still_broken, new_request, question, reply. A thank-you only
+ *    counts on a Resolved / Closed ticket; any failure, timeout or spent limit
+ *    is 'reply', so the ticket reopens.
+ *  - budgetState: this month's reading spend against the workspace's limit.
+ *  - afterWorkflows: a reply on a ticket that was closed and still is after
+ *    the workflows gets ONE private line saying why ("why it didn't reopen"):
+ *    a Ticket Pulse note written straight to the thread (no e-mail, no Teams,
+ *    no watcher, no workflow event, never mirrored) plus the
+ *    requester_reply_stays_closed history row with details.note.
+ *  - reopenCheck: the reopen workflows of a workspace and the two warnings the
+ *    editor shows (two at once / none).
  *
- * The reading rides on the event as event.extra.replyVerdict ('thanks',
- * 'auto_reply' or 'reply'); Auto-help's own verdict (autoHelpReplyVerdict,
- * set before this for a ticket Auto-help closed) is kept as it is and is
- * reused here instead of reading the reply twice. Where the workspace still
- * reopens through a workflow, that workflow's "Ignore a thank-you" step
- * switch honours replyVerdict too (conditionRuleShared.conditionSwitchStop).
- *
- * Never throws into the reply path: a reply is always recorded, and on any
- * doubt the ticket reopens as it did before.
+ * Never throws into the reply path: a reply is always recorded.
  */
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { isFsSystemConversation } from '../utils/fsSystemConversation.js';
 import { isOutOfOfficeReply, monthStartUtc } from './autoHelpOutcomes.js';
-import {
-  getRequesterReplyRules, recordRetiredWorkflows, forgetRetiredWorkflows,
-  SUGGESTED_REOPEN_STATUSES, REPLY_CHECK_CAP_CHOICES,
-} from './requesterReplyRulesService.js';
+import { getRequesterReplyRules, REPLY_CHECK_CAP_CHOICES } from './requesterReplyRulesService.js';
+import { REPLY_LOOP_LIMIT, SENT_BY_OPTIONS } from './conditionRuleShared.js';
 
 export const REPLY_CHECK_OPERATION = 'requester_reply_check';
 /** The reading is awaited before the workflows run: short, and a timeout reopens. */
 export const REPLY_CHECK_TIMEOUT_MS = 8000;
-export const REPLY_VERDICTS = Object.freeze({ THANKS: 'thanks', AUTO_REPLY: 'auto_reply', REPLY: 'reply' });
+export const REPLY_VERDICTS = Object.freeze({
+  THANKS: 'thanks',
+  AUTO_REPLY: 'auto_reply',
+  STILL_BROKEN: 'still_broken',
+  NEW_REQUEST: 'new_request',
+  QUESTION: 'question',
+  REPLY: 'reply',
+});
 const STAYS_CLOSED = Object.freeze([REPLY_VERDICTS.THANKS, REPLY_VERDICTS.AUTO_REPLY]);
 const TERMINAL_BASES = Object.freeze(['Resolved', 'Closed']);
-export const REOPEN_ACTOR = Object.freeze({ name: 'Ticket Pulse', kind: 'system', source: 'requester_reply' });
-export const REOPEN_NOTE = 'Reopened automatically — the requester replied.';
 export const QUIET_LINES = Object.freeze({
   thanks: 'Reply read as a thank-you; the ticket stays closed.',
   auto_reply: 'Reply read as an out-of-office; the ticket stays closed.',
 });
+/** The "why it didn't reopen" lines (plan A6). */
+export const WHY_LINES = Object.freeze({
+  thanks: () => QUIET_LINES.thanks,
+  auto_reply: () => QUIET_LINES.auto_reply,
+  condition: ({ who, sentence, workflow }) => `Reply from ${who}; not reopened: ${sentence} (${workflow}).`,
+  loop: () => `Reopened ${REPLY_LOOP_LIMIT} times by replies today; not reopened again. Please take a look.`,
+  no_workflow: () => 'Reply received; no workflow reopens replies in this workspace.',
+  reopen_failed: ({ reason }) => `Reply received; the reopen failed: ${reason}.`,
+  mail_review: ({ person }) => `Added without reopening by ${person}.`,
+  new_ticket: ({ ref }) => `Reply opened a new ticket, ${ref}; this one stays closed.`,
+});
 export const STAYS_CLOSED_ACTIVITY = 'requester_reply_stays_closed';
-/** FreshService-born reopen that failed: tried again this often, this many times in all. */
-export const REOPEN_RETRY_MS = 2 * 60 * 1000;
-export const REOPEN_MAX_ATTEMPTS = 3;
+/** Model answers (reader 'person') → replyVerdict. Anything else is 'reply'. */
+const MODEL_ANSWERS = Object.freeze({
+  thanks: REPLY_VERDICTS.THANKS,
+  auto_reply: REPLY_VERDICTS.AUTO_REPLY,
+  still_broken: REPLY_VERDICTS.STILL_BROKEN,
+  new_request: REPLY_VERDICTS.NEW_REQUEST,
+  question: REPLY_VERDICTS.QUESTION,
+});
 /** Nodes a reopen-only workflow may have besides its update_ticket step. */
 const QUIET_NODE_TYPES = Object.freeze(['trigger', 'condition', 'branch', 'stop', 'delay']);
 
@@ -71,7 +85,7 @@ function withTimeout(promise, ms) {
   ]).finally(() => clearTimeout(timer));
 }
 
-/** Auto-help's reading of the same reply, in this page's words. */
+/** Auto-help's reading of the same reply, in these words. */
 export function autoHelpVerdictAsReply(verdict) {
   if (verdict === 'confirmed') return REPLY_VERDICTS.THANKS;
   if (verdict === 'auto_reply') return REPLY_VERDICTS.AUTO_REPLY;
@@ -79,10 +93,10 @@ export function autoHelpVerdictAsReply(verdict) {
   return null;
 }
 
-/** Is the ticket's status one the workspace ticked? Case-insensitive. */
-export function statusIsTicked(rules, status) {
-  const key = String(status ?? '').trim().toLowerCase();
-  return Boolean(key) && (rules?.reopenStatuses || []).some((s) => String(s).trim().toLowerCase() === key);
+/** A model answer as a replyVerdict; a thank-you only where it may count. */
+export function verdictFromModel(answer, { allowThanks = true } = {}) {
+  const verdict = MODEL_ANSWERS[answer] || REPLY_VERDICTS.REPLY;
+  return verdict === REPLY_VERDICTS.THANKS && !allowThanks ? REPLY_VERDICTS.REPLY : verdict;
 }
 
 const SETS_MORE_THAN_STATUS = ['setPriority', 'setInternalCategoryId', 'setInternalSubcategoryId', 'setCategoryName', 'setSubcategoryName', 'setInternalGroupId'];
@@ -99,27 +113,39 @@ function onlySetsStatus(data = {}) {
  * Is this a "reopen on requester reply" workflow? By its trigger and what it
  * does, never by id or name: trigger "Requester replied" and an update step
  * that sets the status to Open, in the version that runs (published).
- *   'reopen_only'  it does nothing else (conditions and stops aside) — the
- *                  page replaces it and archives it;
- *   'reopen_plus'  it also sends, assigns, tags … — left alone (archiving it
- *                  would lose the rest) and named on the page;
+ *   'reopen_only'  it does nothing else (conditions and stops aside);
+ *   'reopen_plus'  it also sends, assigns, tags …;
  *   null           not a reopen workflow, or never published.
+ * `definition` reads another version (the draft, for the upgrade offer).
  */
-export function reopenWorkflowShape(workflow) {
+export function reopenWorkflowShape(workflow, definition = null) {
   if (workflow?.triggerType !== 'ticket.reply_received') return null;
-  if (!(Number(workflow.publishedVersion) > 0)) return null;
-  const nodes = Array.isArray(workflow.publishedDefinition?.nodes) ? workflow.publishedDefinition.nodes : [];
+  const def = definition || (Number(workflow.publishedVersion) > 0 ? workflow.publishedDefinition : null);
+  const nodes = Array.isArray(def?.nodes) ? def.nodes : [];
   const reopens = nodes.filter((n) => n?.type === 'update_ticket' && String(n.data?.setStatus || '').trim().toLowerCase() === 'open');
   if (!reopens.length) return null;
   const otherWork = nodes.some((n) => !reopens.includes(n) && !QUIET_NODE_TYPES.includes(n?.type));
   return !otherWork && reopens.every((n) => onlySetsStatus(n.data)) ? 'reopen_only' : 'reopen_plus';
 }
 
-class RequesterReplyReopenService {
-  constructor() {
-    this._retryTimers = new Set();
-  }
+/** Does this reply workflow decide what a reply does (reopen, or a new ticket from it)? */
+export function handlesReplies(workflow, definition = null) {
+  if (workflow?.triggerType !== 'ticket.reply_received') return false;
+  if (reopenWorkflowShape(workflow, definition)) return true;
+  const def = definition || (Number(workflow.publishedVersion) > 0 ? workflow.publishedDefinition : null);
+  return (def?.nodes || []).some((n) => n?.type === 'create_ticket_from_reply');
+}
 
+/** "the requester" / "alex@example.com (someone Cc'd)" for the why line. */
+function whoReplied(facts = {}, extra = {}) {
+  const address = String(extra.from || extra.fromEmail || '').trim();
+  const label = SENT_BY_OPTIONS.find((o) => o.value === facts.sentBy)?.label || null;
+  if (facts.sentBy === 'requester' || (!address && !label)) return 'the requester';
+  if (!address) return label.charAt(0).toLowerCase() + label.slice(1);
+  return label && facts.sentBy !== 'other' ? `${address} (${label.charAt(0).toLowerCase() + label.slice(1)})` : address;
+}
+
+class RequesterReplyReopenService {
   /** The requester message this reply event was about (newRequestSuggestionService's lookup). */
   async _replyEntry(ticketId, extra = {}) {
     const select = {
@@ -180,20 +206,35 @@ class RequesterReplyReopenService {
   }
 
   /**
-   * Read one reply to a closed ticket. { verdict: 'thanks' | 'auto_reply' |
-   * 'reply', via, entryId? }. Never throws; every doubt is 'reply'.
+   * Read one reply. { verdict, via, entryId? }. Never throws; every doubt is 'reply'.
+   *   allowThanks  a thank-you may count (the ticket is Resolved / Closed and
+   *                the reply is not an agent's forward); otherwise a thank-you
+   *                reads as 'reply'
+   *   rich         a workflow uses "Reply reads as": the model call runs for
+   *                the full answer even where a thank-you cannot count
+   *   useAi        false = no model call (the editor's "try it" without "Use AI")
    */
-  async readReply(ticket, extra = {}, { rules = null, timeoutMs = REPLY_CHECK_TIMEOUT_MS } = {}) {
+  async readReply(ticket, extra = {}, {
+    rules = null, timeoutMs = REPLY_CHECK_TIMEOUT_MS, allowThanks = true, rich = false, useAi = true,
+  } = {}) {
     try {
       const entry = await this._replyEntry(Number(ticket.id), extra);
       if (!entry) return { verdict: REPLY_VERDICTS.REPLY, via: 'no_reply_text' };
       if (entry.isPrivate === true || entry.authorType === 'system' || entry.eventType === 'activity' || isFsSystemConversation(entry)) {
         return { verdict: REPLY_VERDICTS.REPLY, via: 'not_a_reply', entryId: entry.id };
       }
-      // Out-of-office first: headers when the mail kept them, else the text
-      // (a FreshService-synced entry has neither headers nor a subject).
+      // Out-of-office first, whatever the status (G5): headers when the mail
+      // kept them, else the text (a FreshService-synced entry has neither
+      // headers nor a subject). No AI.
       if (isOutOfOfficeReply(entry)) return { verdict: REPLY_VERDICTS.AUTO_REPLY, via: 'auto_reply', entryId: entry.id };
+      // Nothing more to learn: a thank-you cannot count here and nobody asks for the full reading.
+      if (!allowThanks && !rich) return { verdict: REPLY_VERDICTS.REPLY, via: extra?.forwardedBy ? 'forward' : 'not_closed', entryId: entry.id };
       const text = entry.bodyText || entry.content || String(entry.bodyHtml || '').replace(/<[^>]*>/g, ' ');
+      const { classifyThanksFast } = await import('./autoHelpOutcomes.js');
+      if (!useAi) {
+        const fast = classifyThanksFast(text);
+        return { verdict: fast === 'confirmed' && allowThanks ? REPLY_VERDICTS.THANKS : REPLY_VERDICTS.REPLY, via: fast ? 'keywords' : 'no_ai', entryId: entry.id };
+      }
       const { default: autoHelpFollowUp } = await import('./autoHelpFollowUpService.js');
       const read = await withTimeout(autoHelpFollowUp.classifyReply(ticket.workspaceId, text, {
         subject: ticket.subject || null,
@@ -203,8 +244,11 @@ class RequesterReplyReopenService {
         timeoutMs,
       }), timeoutMs + 1000);
       if (read?.timedOut) return { verdict: REPLY_VERDICTS.REPLY, via: 'timeout', entryId: entry.id };
+      let verdict = REPLY_VERDICTS.REPLY;
+      if (read?.via === 'keywords') verdict = read.verdict === 'confirmed' && allowThanks ? REPLY_VERDICTS.THANKS : REPLY_VERDICTS.REPLY;
+      else if (read?.via === 'model') verdict = verdictFromModel(read.modelVerdict, { allowThanks });
       return {
-        verdict: read?.verdict === 'confirmed' ? REPLY_VERDICTS.THANKS : REPLY_VERDICTS.REPLY,
+        verdict,
         via: read?.via || 'unknown',
         entryId: entry.id,
         ...(read?.reason ? { reason: read.reason } : {}),
@@ -216,114 +260,79 @@ class RequesterReplyReopenService {
   }
 
   /**
-   * Before the workflows run on a requester reply (emitTicketEvent). Returns
-   * null when the page is off in this workspace (nothing changes), otherwise
-   * { replyVerdict, via, entryId, ticked, staysClosed, reopened, reason }.
-   * `ticket` and `statusBase` are the ticket as the reply found it.
+   * The "why it didn't reopen" line for a reply on a ticket that was closed
+   * when it arrived, from what the workflows did. Pure. Returns
+   * { cause, text } or null (nothing to say: a replay of the same reply).
+   *   facts    replyFacts' result (sentBy, replyVerdict, aliasCheck, workflows)
+   *   result   executeForEvent's result
    */
-  async beforeWorkflows({ ticket, statusBase = null, extra = {}, autoHelpVerdict = null } = {}) {
-    if (!ticket?.id || !ticket?.workspaceId) return null;
-    try {
-      const rules = await getRequesterReplyRules(ticket.workspaceId);
-      if (!rules.reopenOnReply && !rules.ignoreThanks) return null;
-      if (extra?.isSurveyResponse === true || extra?.senderIsAgent === true) return { replyVerdict: null, reason: 'not_a_requester_reply' };
+  whyLine({ facts = {}, result = null, extra = {} } = {}) {
+    const results = Array.isArray(result?.results) ? result.results : [];
+    if (results.length && results.every((r) => r?.status === 'skipped' && r?.reason === 'Duplicate workflow event')) return null;
+    const aliasNote = facts.aliasCheck === 'failed' ? ' (Could not check aliases.)' : '';
+    const done = (cause, text, more = {}) => ({ cause, text: `${text}${aliasNote}`, ...more });
 
-      const ticked = rules.reopenOnReply && statusIsTicked(rules, ticket.status);
-      const closed = TERMINAL_BASES.includes(statusBase);
-      let read = null;
-      if (closed) {
-        // Auto-help read this reply already (a ticket it closed in the last
-        // 7 days): its verdict stands, as it did for the workflow.
-        const fromAutoHelp = autoHelpVerdictAsReply(autoHelpVerdict);
-        if (fromAutoHelp) read = { verdict: fromAutoHelp, via: 'auto_help' };
-        // An agent forwarding mail onto the ticket is new information, never a thank-you.
-        else if (rules.ignoreThanks && !extra?.forwardedBy && (ticked || !rules.reopenOnReply)) {
-          read = await this.readReply(ticket, extra, { rules });
-        }
-      }
-      const out = {
-        replyVerdict: read?.verdict || null,
-        via: read?.via || null,
-        entryId: read?.entryId ?? null,
-        ticked,
-        staysClosed: Boolean(read && STAYS_CLOSED.includes(read.verdict)),
-        reopened: false,
-        reason: null,
-      };
-      if (out.staysClosed) return { ...out, reason: 'reads_as_' + out.replyVerdict };
-      if (!rules.reopenOnReply) return { ...out, reason: 'workflow_reopens' };
-      if (!ticked) return { ...out, reason: 'status_not_ticked' };
-      // Auto-help is waiting on this requester: its loop reads the reply itself.
-      if (ticket.parkKind === 'auto_help') return { ...out, reason: 'auto_help_waiting' };
-      const result = await this.reopen(ticket);
-      return { ...out, reopened: result.reopened, reason: result.reason };
-    } catch (err) {
-      logger.warn(`When a requester replies: skipped for ticket ${ticket.id} (${err.message})`);
-      return null;
+    const created = results.map((r) => r?.state?.replyNewTicket).find((t) => t?.id);
+    if (created) {
+      const note = String(created.note || '').trim();
+      return done('new_ticket', `${WHY_LINES.new_ticket({ ref: created.displayRef || `#${created.id}` })}${note ? ` ${note}` : ''}`, { newTicketId: created.id });
     }
+    const workflows = (facts.workflows || []).filter((w) => handlesReplies(w));
+    if (!workflows.length) return done('no_workflow', WHY_LINES.no_workflow());
+    const names = new Map(workflows.map((w) => [Number(w.id), w.name || `#${w.id}`]));
+    const ours = results.filter((r) => names.has(Number(r?.workflowId)));
+    const failed = ours.find((r) => r?.status === 'failed');
+    if (failed) return done('reopen_failed', WHY_LINES.reopen_failed({ reason: String(failed.error || 'unknown error').slice(0, 200) }));
+    const stepSkip = ours
+      .flatMap((r) => (Array.isArray(r?.steps) ? r.steps : []))
+      .find((s) => s?.nodeType === 'update_ticket' && (s.output?.skipped || s.output?.failed) && !/No effective changes/.test(String(s.output?.reason || '')));
+    if (stepSkip) return done('reopen_failed', WHY_LINES.reopen_failed({ reason: String(stepSkip.output.reason || stepSkip.output.error || 'the update was skipped').slice(0, 200) }));
+    const who = whoReplied(facts, extra);
+    for (const r of ours) {
+      const last = r?.state?.lastCondition;
+      if (!last || last.passed !== false) continue;
+      if (last.source === 'reply_loop') return done('loop', WHY_LINES.loop());
+      if (last.source === 'reply_thanks') {
+        const verdict = last.verdict === 'auto_reply' || facts.replyVerdict === 'auto_reply' ? 'auto_reply' : 'thanks';
+        return done(verdict, WHY_LINES[verdict]());
+      }
+      return done('condition', WHY_LINES.condition({ who, sentence: String(last.summary || 'a condition did not pass').slice(0, 300), workflow: names.get(Number(r.workflowId)) }));
+    }
+    const skipped = ours.find((r) => r?.status === 'skipped' && r?.reason);
+    if (skipped) return done('condition', WHY_LINES.condition({ who, sentence: String(skipped.reason).slice(0, 200), workflow: names.get(Number(skipped.workflowId)) }));
+    if (!ours.length) {
+      // The reopen workflows exist but none ran for this reply (routing chose another variant).
+      return done('condition', WHY_LINES.condition({ who, sentence: 'no reopen workflow was chosen for this ticket', workflow: workflows.map((w) => w.name || `#${w.id}`).join(', ') }));
+    }
+    return done('condition', WHY_LINES.condition({ who, sentence: 'the workflow did not reach its reopen step', workflow: names.get(Number(ours[0].workflowId)) }));
   }
 
   /**
-   * Status → Open through the update_ticket write (both origins). A
-   * FreshService write that fails is tried again in REOPEN_RETRY_MS, up to
-   * REOPEN_MAX_ATTEMPTS in all, while the ticket is still in a ticked status.
+   * After the workflows ran on a reply: is the ticket open now, and if it was
+   * closed and still is, the one private "why" line. Returns
+   * { openNow, wasClosed, stillClosed, line }. Never throws.
    */
-  async reopen(ticket, { attempt = 1 } = {}) {
-    const node = { id: 'requester-reply-reopen', type: 'update_ticket', data: { setStatus: 'Open', note: REOPEN_NOTE } };
-    const eventContext = {
-      ticket: { id: ticket.id, workspaceId: ticket.workspaceId },
-      workspace: { id: ticket.workspaceId },
-      event: { type: 'ticket.reply_received' },
-    };
+  async afterWorkflows({ ticket, statusBase = null, facts = {}, result = null, extra = {}, stamp = null } = {}) {
+    const out = { openNow: null, wasClosed: TERMINAL_BASES.includes(statusBase), stillClosed: false, line: null };
+    if (!ticket?.id) return out;
     try {
-      const { executeUpdateTicketNode } = await import('./notificationWorkflowEngine.js');
-      const res = await executeUpdateTicketNode(node, eventContext, { actor: REOPEN_ACTOR });
-      const reopened = Boolean(res?.updated?.status || res?.applied);
-      if (reopened) logger.info(`When a requester replies: ${ticketDisplayRef(ticket)} reopened (${ticket.status} → Open)`);
-      return { reopened, reason: reopened ? 'reopened' : (res?.reason || 'no_change') };
-    } catch (err) {
-      logger.warn(`When a requester replies: ${ticketDisplayRef(ticket)} not reopened, attempt ${attempt} of ${REOPEN_MAX_ATTEMPTS} (${err.message})`);
-      if (attempt < REOPEN_MAX_ATTEMPTS) this._retryLater(ticket, attempt + 1);
-      return { reopened: false, reason: attempt < REOPEN_MAX_ATTEMPTS ? 'retry_scheduled' : 'reopen_failed' };
-    }
-  }
-
-  _retryLater(ticket, attempt) {
-    const timer = setTimeout(async () => {
-      this._retryTimers.delete(timer);
-      try {
-        const current = await prisma.ticket.findFirst({
-          where: { id: Number(ticket.id), workspaceId: Number(ticket.workspaceId) },
-          select: { id: true, workspaceId: true, status: true, origin: true, nativeNumber: true, freshserviceTicketId: true },
-        });
-        const rules = await getRequesterReplyRules(ticket.workspaceId);
-        if (!current || !rules.reopenOnReply || !statusIsTicked(rules, current.status)) return;
-        await this.reopen(current, { attempt });
-      } catch (err) {
-        logger.warn(`When a requester replies: retry for ticket ${ticket.id} failed (${err.message})`);
-      }
-    }, REOPEN_RETRY_MS);
-    timer.unref?.();
-    this._retryTimers.add(timer);
-  }
-
-  /**
-   * After the workflows: a reply read as a thank-you or out-of-office on a
-   * ticket that is STILL closed (the page left it, or the workflow's switch
-   * did) gets the quiet line. Returns { staysClosed }.
-   */
-  async afterWorkflows({ ticket, handling, stamp = null } = {}) {
-    if (!ticket?.id || !handling || !STAYS_CLOSED.includes(handling.replyVerdict)) return { staysClosed: false };
-    try {
-      const row = await prisma.ticket.findFirst({ where: { id: Number(ticket.id) }, select: { id: true, status: true } });
+      const row = await prisma.ticket.findUnique({ where: { id: Number(ticket.id) }, select: { id: true, status: true } });
       const { default: statusService } = await import('./statusService.js');
       const base = await soft(() => statusService.resolveBaseStatus(ticket.workspaceId, row?.status ?? ticket.status));
-      if (!TERMINAL_BASES.includes(base)) return { staysClosed: false };
-      await this.writeQuietLine(ticket, { verdict: handling.replyVerdict, via: handling.via, replyEntryId: handling.entryId, stamp });
-      return { staysClosed: true };
+      out.openNow = base ? !TERMINAL_BASES.includes(base) : null;
+      out.stillClosed = out.wasClosed && TERMINAL_BASES.includes(base);
+      if (!out.stillClosed) return out;
+      const why = this.whyLine({ facts, result, extra });
+      if (!why) return out;
+      out.line = why;
+      await this.writeQuietLine(ticket, {
+        text: why.text, cause: why.cause, verdict: facts.replyVerdict || null, via: facts.verdictVia || null,
+        replyEntryId: facts.entryId ?? extra?.entryId ?? null, stamp,
+      });
+      return out;
     } catch (err) {
-      logger.warn(`When a requester replies: quiet line not written for ticket ${ticket.id} (${err.message})`);
-      return { staysClosed: false };
+      logger.warn(`Requester reply: why line not written for ticket ${ticket.id} (${err.message})`);
+      return out;
     }
   }
 
@@ -331,11 +340,20 @@ class RequesterReplyReopenService {
    * One quiet line in the conversation: a private Ticket Pulse note written
    * straight to the thread (the Assetron-note pattern) — no e-mail, no Teams,
    * no watcher, no note_added workflow event, never mirrored to FreshService —
-   * plus the history row, and open ticket pages refresh.
+   * plus the history row (details.note = the line), and open ticket pages
+   * refresh. One per reply: a second call with the same stamp writes nothing.
    */
-  async writeQuietLine(ticket, { verdict, via = null, replyEntryId = null, stamp = null } = {}) {
-    const text = QUIET_LINES[verdict];
-    if (!text) return null;
+  async writeQuietLine(ticket, { text = null, cause = null, verdict = null, via = null, replyEntryId = null, stamp = null } = {}) {
+    const line = text || QUIET_LINES[verdict];
+    if (!line) return null;
+    if (stamp) {
+      const recent = await soft(() => prisma.ticketActivity.findMany({
+        where: { ticketId: Number(ticket.id), activityType: STAYS_CLOSED_ACTIVITY, performedAt: { gte: new Date(Date.now() - 7 * 86400e3) } },
+        select: { details: true },
+        take: 50,
+      }), []);
+      if ((recent || []).some((a) => a?.details?.replyStamp === String(stamp))) return null;
+    }
     const now = new Date();
     const entry = await prisma.ticketThreadEntry.create({
       data: {
@@ -349,11 +367,11 @@ class RequesterReplyReopenService {
         incoming: false,
         isPrivate: true,
         visibility: 'private',
-        bodyText: text,
-        content: text,
+        bodyText: line,
+        content: line,
         occurredAt: now,
         mirrorState: null,
-        rawPayload: { kind: 'reply_stays_closed', verdict, via, replyEntryId, ...(stamp ? { replyStamp: String(stamp) } : {}) },
+        rawPayload: { kind: 'reply_stays_closed', cause, verdict, via, replyEntryId, ...(stamp ? { replyStamp: String(stamp) } : {}) },
       },
     });
     const { default: ticketActivityRepository } = await import('./ticketActivityRepository.js');
@@ -362,114 +380,74 @@ class RequesterReplyReopenService {
       activityType: STAYS_CLOSED_ACTIVITY,
       performedBy: 'Ticket Pulse',
       performedAt: now,
-      details: { note: text, verdict, via, replyEntryId, actorKind: 'system', ...(stamp ? { replyStamp: String(stamp) } : {}) },
+      details: { note: line, cause, verdict, via, replyEntryId, actorKind: 'system', ...(stamp ? { replyStamp: String(stamp) } : {}) },
     }));
     import('../routes/sse.routes.js')
       .then(({ sseManager }) => sseManager?.broadcast?.('ticket-change', { action: 'update', workspaceId: ticket.workspaceId, ticketId: ticket.id }, ticket.workspaceId))
       .catch(() => {});
-    logger.info(`When a requester replies: ${ticketDisplayRef(ticket)} stays closed (${verdict}, via ${via || 'unknown'})`);
+    logger.info(`Requester reply: ${ticketDisplayRef(ticket)} stays closed (${cause || verdict || 'line'})`);
     return entry;
   }
 
-  // ---------- the workflow it replaces ----------
+  // ---------- the reopen workflows ----------
 
-  /** Live "reopen on requester reply" workflows in a workspace (not archived), with their shape. */
+  /** Live reply workflows that reopen (or open a new ticket), not archived, with their shape. */
   async reopenWorkflows(workspaceId) {
     const rows = await prisma.notificationWorkflow.findMany({
       where: { workspaceId: Number(workspaceId), triggerType: 'ticket.reply_received', archivedAt: null },
       select: {
         id: true, name: true, key: true, triggerType: true, isEnabled: true, isDefaultVariant: true,
-        publishedVersion: true, publishedDefinition: true,
+        routingMode: true, publishedVersion: true, publishedDefinition: true,
       },
       orderBy: { id: 'asc' },
     });
     return (rows || [])
-      .map((w) => ({ id: w.id, name: w.name, isEnabled: w.isEnabled === true, isDefaultVariant: w.isDefaultVariant === true, shape: reopenWorkflowShape(w) }))
-      .filter((w) => w.shape);
+      .filter((w) => handlesReplies(w))
+      .map((w) => ({
+        id: w.id, name: w.name, isEnabled: w.isEnabled === true, isDefaultVariant: w.isDefaultVariant === true,
+        routingMode: w.routingMode || 'exclusive', shape: reopenWorkflowShape(w) || 'new_ticket',
+      }));
   }
 
   /**
-   * Archive (never delete) the reopen-only workflows once the page reopens
-   * by itself, and remember them by name. Called when the page is SAVED
-   * with the reopen on. A workflow that also does other things is left on.
+   * The editor's reopen check (contract §4): the workspace's reopen
+   * workflows and two warnings — two enabled ones that would both run for
+   * the same reply (an additive one beside any other), or none enabled.
    */
-  async retireReopenWorkflows(workspaceId, actor = null) {
-    const found = await this.reopenWorkflows(workspaceId);
-    const { setWorkflowArchived } = await import('./notificationWorkflowRepository.js');
-    const retired = [];
-    const kept = [];
-    const failed = [];
-    for (const wf of found) {
-      if (wf.shape !== 'reopen_only') { kept.push({ id: wf.id, name: wf.name, isEnabled: wf.isEnabled }); continue; }
-      try {
-        await setWorkflowArchived(Number(workspaceId), wf.id, true, actor, { allowDefaultVariant: true });
-        retired.push({ id: wf.id, name: wf.name, wasEnabled: wf.isEnabled, at: new Date().toISOString(), by: actor?.email || null });
-      } catch (err) {
-        logger.warn(`When a requester replies: workflow ${wf.id} not archived in workspace ${workspaceId} (${err.message})`);
-        failed.push({ id: wf.id, name: wf.name, error: err.message });
-      }
-    }
-    if (retired.length) {
-      await recordRetiredWorkflows(workspaceId, retired);
-      logger.info(`When a requester replies: workspace ${workspaceId} archived ${retired.map((w) => `#${w.id} "${w.name}"`).join(', ')} by ${actor?.email || 'unknown'}`);
-    }
-    return { retired, kept, failed };
-  }
-
-  /** Bring one retired workflow back (archived → restored, switched on again if it was on). */
-  async restoreRetiredWorkflow(workspaceId, workflowId, actor = null) {
-    const rules = await getRequesterReplyRules(workspaceId);
-    const record = rules.retiredWorkflows.find((w) => w.id === Number(workflowId));
-    if (!record) {
-      const err = new Error('That workflow was not retired by this page.');
-      err.statusCode = 404;
-      throw err;
-    }
-    const { setWorkflowArchived, setWorkflowEnabled } = await import('./notificationWorkflowRepository.js');
-    await setWorkflowArchived(Number(workspaceId), record.id, false, actor);
-    if (record.wasEnabled) {
-      await setWorkflowEnabled(Number(workspaceId), record.id, true, actor).catch((err) => {
-        logger.warn(`When a requester replies: workflow ${record.id} restored but not switched on (${err.message})`);
+  async reopenCheck(workspaceId) {
+    const found = await soft(() => this.reopenWorkflows(workspaceId), []) || [];
+    const enabled = found.filter((w) => w.isEnabled);
+    const additive = enabled.filter((w) => w.routingMode === 'additive');
+    const warnings = [];
+    if (additive.length >= 2 || (additive.length >= 1 && enabled.length > additive.length)) {
+      warnings.push({
+        code: 'two_reopen_workflows',
+        message: `${enabled.map((w) => `"${w.name}"`).join(' and ')} both act on the same replies. Keep one, or make them variants of each other.`,
       });
     }
-    await forgetRetiredWorkflows(workspaceId, [record.id]);
-    logger.info(`When a requester replies: workspace ${workspaceId} restored workflow #${record.id} "${record.name}" by ${actor?.email || 'unknown'}`);
-    return record;
+    if (!enabled.length) {
+      warnings.push({ code: 'no_reopen_workflow', message: 'No switched-on workflow reopens a ticket when the requester replies. Replies to closed tickets stay closed.' });
+    }
+    return { reopenWorkflows: found.map((w) => ({ id: w.id, name: w.name, isEnabled: w.isEnabled })), warnings };
   }
 
   /**
-   * Everything the settings page shows: the rules, the workspace's statuses
-   * that can reopen (all but the Open ones), the suggested ticks, the live
-   * reopen workflows, the ones this page archived (still archived), and this
-   * month's spend on reading replies.
+   * Settings → Ticket Ops → When a requester replies (contract §5): the two
+   * remaining switches, the reading limit, its choices and this month's spend.
    */
   async pageContext(workspaceId) {
     const ws = Number(workspaceId);
     const rules = await getRequesterReplyRules(ws);
-    const { default: statusService } = await import('./statusService.js');
-    const statuses = (await soft(() => statusService.listStatuses(ws), []) || [])
-      .filter((s) => s && s.name && s.baseStatus !== 'Open')
-      .map((s) => ({ name: s.name, baseStatus: s.baseStatus }));
-    const names = new Set(statuses.map((s) => s.name.toLowerCase()));
-    const live = await soft(() => this.reopenWorkflows(ws), []);
-    const retiredIds = rules.retiredWorkflows.map((w) => w.id);
-    const stillArchived = retiredIds.length
-      ? new Set(((await soft(() => prisma.notificationWorkflow.findMany({
-        where: { workspaceId: ws, id: { in: retiredIds } },
-        select: { id: true, archivedAt: true },
-      }), [])) || []).filter((w) => w.archivedAt).map((w) => w.id))
-      : new Set();
     const budget = await soft(() => this.budgetState(ws, rules), { capUsd: rules.replyCheckMonthlyCapUsd, spentUsd: null, unknown: true });
     return {
-      ...rules,
-      retiredWorkflows: rules.retiredWorkflows.filter((w) => stillArchived.has(w.id)),
-      statuses,
-      suggestedReopenStatuses: SUGGESTED_REOPEN_STATUSES.filter((n) => names.has(n.toLowerCase())),
-      reopenWorkflows: (live || []).map((w) => ({ id: w.id, name: w.name, isEnabled: w.isEnabled, shape: w.shape })),
+      rerouteWhenOwnerAway: rules.rerouteWhenOwnerAway,
+      suggestNewRequest: rules.suggestNewRequest,
+      replyCheckMonthlyCapUsd: rules.replyCheckMonthlyCapUsd,
       replyCheckCapChoices: [...REPLY_CHECK_CAP_CHOICES],
       replyCheckBudget: { capUsd: budget.capUsd, spentUsd: budget.spentUsd, checks: budget.checks ?? null },
     };
   }
 }
 
+export { STAYS_CLOSED };
 export default new RequesterReplyReopenService();

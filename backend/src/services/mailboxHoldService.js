@@ -662,7 +662,8 @@ class MailboxHoldService {
     // Mail review: reopen === false adds the mail to a closed ticket without reopening it.
     const entry = await mailboxIngestService.ingestReply(held.connection, ticket, email, 'held_reply_attach', {
       ...(agent ? { agent } : {}),
-      ...(reopen === false ? { keepClosed: true } : {}),
+      // The ticket's history names who chose that ("Added without reopening by …").
+      ...(reopen === false ? { keepClosed: true, keptClosedBy: actor?.name || actor?.email || null } : {}),
     });
     const updated = await this._resolve(held.id, { status: 'attached', actor, ticketId: ticket.id });
     logger.info(`Held message #${held.id} attached to ${ticketDisplayRef(ticket)} by ${actorLabel(actor)}`);

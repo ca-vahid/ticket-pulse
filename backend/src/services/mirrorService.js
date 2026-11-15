@@ -1534,7 +1534,8 @@ class MirrorService {
           .then(({ emitTicketEvent }) => emitTicketEvent('ticket.reply_received', ticket.id, {
             source: 'freshservice_reconciliation',
             dedupeStamp: externalEntryId,
-            extra: { externalEntryId, fromEmail: conv.from_email || null },
+            // The reply facts (replyFacts.js) read `from` (mail intake's name) or `fromEmail`.
+            extra: { externalEntryId, from: conv.from_email || null, fromEmail: conv.from_email || null },
           }))
           .catch(() => {});
       }
