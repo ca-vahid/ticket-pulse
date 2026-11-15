@@ -101,7 +101,7 @@ export async function resolveTicketShortLink({ ref, workspace = null, user }) {
 /** Top-level page names a workspace slug must never take, or its short links would be shadowed. */
 export const RESERVED_WORKSPACE_SLUGS = Object.freeze([
   'login', 'auth', 'workspace', 'workspaces', 'dashboard', 'tickets', 'technician', 'timeline', 'analytics',
-  'assignments', 'settings', 'visuals', 'knowledge', 'approval', 'approval-reply', 'approvals', 'availability',
+  'assignments', 'settings', 'visuals', 'knowledge', 'approval', 'approval-reply', 'approvals', 'availability', 'vacation-pulse',
   'onboarding', 'on-call', 'profile', 'mail-alerts', 'notifications', 'my-competencies', 'requesters',
   'workflows', 'feedback', 'summit', 'summit-taxonomy', 'ticket-status', 'ticket-escalation', 'ticket-urgency',
   'api', 'health', 'assets', 'brand', 'branding-mockups', 'demo-avatars', 'downloads', 'feedback-themes',

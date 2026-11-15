@@ -54,6 +54,54 @@ describe('TeamsNotificationsPanel — requester Teams chat', () => {
   });
 });
 
+// MEGA 11-14 Part C: the person's own panel says they are blocked, and what to ask for.
+describe('TeamsNotificationsPanel — blocked by a Teams policy', () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => cleanup());
+  const blocked = () => ({
+    ...status(),
+    enabled: true,
+    connection: {
+      connected: false, disconnected: false, lastError: 'App is blocked by app permission policy. TenantId: x',
+      status: 'blocked', lastBlockedAt: '2026-11-13T22:53:12Z', missed7d: 12, emailedInstead7d: 0, backoffUntil: null,
+    },
+    recent: [{ eventKey: 'assigned', status: 'failed', reason: 'App is blocked by app permission policy. TenantId: x', summary: 'TP-11777 Printer', createdAt: '2026-11-13T22:53:12Z' }],
+  });
+
+  test('says what is wrong, what to ask the Teams admin, and keeps Connect', async () => {
+    agentAPI.getTeams.mockResolvedValue({ data: blocked() });
+    render(<TeamsNotificationsPanel />);
+    const note = await screen.findByTestId('teams-blocked-note');
+    expect(note).toHaveTextContent('Teams blocks the Ticket Pulse app for you');
+    expect(note).toHaveTextContent('Ask your Teams admin: “Please allow the Ticket Pulse app for me in Teams.”');
+    expect(note).toHaveTextContent('Permission policies');
+    expect(note).toHaveTextContent('Last refused Fri 13 Nov, 2:53 PM · 12 cards missed in 7 days');
+    expect(note).toHaveTextContent('time-away requests waiting for you come by e-mail');
+    expect(screen.getByTestId('teams-my-status')).toHaveTextContent('Blocked by Teams policy');
+    expect(screen.getByRole('button', { name: 'Connect Teams' })).toBeInTheDocument();
+    // The raw Graph message is not repeated; the recent list says it plainly.
+    expect(screen.queryByText(/TenantId/)).not.toBeInTheDocument();
+    expect(screen.getByText(/failed \(blocked by Teams policy\)/)).toBeInTheDocument();
+  });
+
+  test('connected people see no note; disconnected people are told who did it', async () => {
+    agentAPI.getTeams.mockResolvedValue({ data: { ...status(), connection: { connected: true, status: 'connected' } } });
+    render(<TeamsNotificationsPanel />);
+    expect(await screen.findByTestId('teams-my-status')).toHaveTextContent('Connected');
+    expect(screen.queryByTestId('teams-blocked-note')).toBeNull();
+    cleanup();
+    agentAPI.getTeams.mockResolvedValue({ data: { ...status(), connection: { connected: false, disconnected: true, status: 'disconnected', disconnectedByAdmin: true } } });
+    render(<TeamsNotificationsPanel />);
+    expect(await screen.findByTestId('teams-my-status')).toHaveTextContent('Disconnected by an admin');
+  });
+
+  test('a card sent by e-mail instead says so in Recent', async () => {
+    agentAPI.getTeams.mockResolvedValue({ data: { ...blocked(), recent: [{ eventKey: 'av_approval_waiting', status: 'emailed', reason: 'av:approver:x:2026-11-16', summary: '2 time-away requests are waiting for you', createdAt: new Date().toISOString() }] } });
+    render(<TeamsNotificationsPanel />);
+    expect(await screen.findByText(/sent by e-mail instead/)).toBeInTheDocument();
+  });
+});
+
 // QA 11-10 #1: the panel names the workspace it shows, and says when the person
 // is not an agent in the workspace on screen.
 describe('TeamsNotificationsPanel — which workspace', () => {

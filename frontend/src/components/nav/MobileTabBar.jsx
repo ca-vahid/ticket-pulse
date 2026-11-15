@@ -23,7 +23,7 @@ import { canPromptInstall, isIos, isStandalone, onInstallChange, promptInstall }
 import ThemeControl from './ThemeControl';
 import LayoutControl from './LayoutControl';
 import MotionControl from './MotionControl';
-import { NAV_DESTINATIONS, useCanAccessSettings, useNavDestinations } from './navDestinations';
+import { NAV_DESTINATIONS, destinationMatches, useCanAccessSettings, useNavDestinations } from './navDestinations';
 
 // Short labels so the fixed tabs stay legible on narrow phones.
 const SHORT_LABEL = {
@@ -59,8 +59,7 @@ export default function MobileTabBar() {
   useEffect(() => onInstallChange(() => bumpInstall((n) => n + 1)), []);
   const showInstall = !isStandalone() && (canPromptInstall() || isIos());
 
-  const matchPath = (path) => location.pathname === path || location.pathname.startsWith(`${path}/`);
-  const activeId = NAV_DESTINATIONS.find((dest) => matchPath(dest.path))?.id || null;
+  const activeId = NAV_DESTINATIONS.find((dest) => destinationMatches(dest, location.pathname))?.id || null;
   const destinations = useNavDestinations();
   // QA 09-21 #13: Approvals was the last destination and so always lived in
   // the "More" sheet — on a phone it looked like the app had no approvals.

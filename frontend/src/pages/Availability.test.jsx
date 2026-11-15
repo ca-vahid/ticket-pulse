@@ -72,6 +72,7 @@ Object.assign(api, {
     { id: 42, email: 'ali.k@x.ca', leaveTypeId: 1, startDate: '2099-04-01', endDate: '2099-04-01', dayPart: 'full', days: 1, hours: 8, status: 'pending', note: null, decision: { outcome: 'pending', reason: 'Less than 14 days notice.', fired: [] } },
   ] })),
   decide: vi.fn(async () => ({ success: true, data: {} })),
+  requestHistory: vi.fn(async () => ({ success: true, data: { requests: [], truncated: false } })),
   adminConfig: vi.fn(async () => ({ success: true, data: {
     settings: { yearStartMonth: 1, outlookEventsEnabled: false, autoRepliesEnabled: false, purposeNotice: '' },
     leaveTypes: TYPES, offices: me.offices, groups: [], rules: [], people: [{ id: 7, email: 'kim@x.ca', name: 'Kim Lee', officeId: 1, workdays: [1, 2, 3, 4, 5], dailyHours: 8 }],
@@ -224,6 +225,80 @@ describe('Approvals', () => {
     fireEvent.click(within(row).getByRole('button', { name: 'Deny request' }));
     await waitFor(() => expect(api.decide).toHaveBeenCalledWith(42, 'deny', 'Release week'));
     await waitFor(() => expect(screen.queryByTestId('approval-42')).not.toBeInTheDocument());
+  });
+});
+
+// MEGA 11-14 Part J: the section is "Vacation Pulse" to people; code, API and
+// /availability URLs keep the old name, and /vacation-pulse is an alias.
+describe('Vacation Pulse (was Availability)', () => {
+  const renderBoth = (path) => render(
+    <MemoryRouter initialEntries={[path]}>
+      <Routes>
+        <Route path="/availability/:tab?" element={<Availability />} />
+        <Route path="/vacation-pulse/:tab?" element={<Availability />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+
+  test.each(['/availability/my-time', '/vacation-pulse/my-time'])('%s renders the same page', async (path) => {
+    renderBoth(path);
+    expect(await screen.findByTestId('availability-balances')).toBeInTheDocument();
+    expect(screen.getByRole('tablist', { name: 'Vacation Pulse sections' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'My time' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  test('a bare /vacation-pulse opens the Overview and the tabs stay on the alias', async () => {
+    renderBoth('/vacation-pulse');
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true'));
+    fireEvent.click(screen.getByRole('tab', { name: 'Wallchart' }));
+    expect(await screen.findByTestId('cal-row-kim@x.ca')).toBeInTheDocument();
+  });
+
+  test('the browser tab says Vacation Pulse', async () => {
+    renderBoth('/availability/overview');
+    await screen.findByRole('tab', { name: 'Overview' });
+    expect(document.title).toBe('Vacation Pulse — Ticket Pulse');
+  });
+
+  test('no "Availability" left on the section\'s own screens', async () => {
+    me = baseMe({ isAdmin: true, pendingApprovals: 2 });
+    for (const tab of ['overview', 'calendar', 'month', 'my-time', 'approvals', 'history']) {
+      const { unmount } = renderBoth(`/vacation-pulse/${tab}`);
+      expect(await screen.findByRole('tab', { selected: true })).toBeInTheDocument();
+      await waitFor(() => expect(screen.queryByText(/^Loading/)).not.toBeInTheDocument());
+      expect(document.body.textContent).not.toMatch(/\bAvailability\b/);
+      expect(document.body.innerHTML).not.toMatch(/aria-label="[^"]*\bAvailability\b/);
+      unmount();
+    }
+    for (const section of ['types', 'groups', 'rules', 'offices', 'people', 'import', 'general']) {
+      const { unmount } = renderBoth(`/availability/settings?section=${section}`);
+      expect(await screen.findByRole('navigation', { name: 'Vacation Pulse settings' })).toBeInTheDocument();
+      expect(document.body.textContent).not.toMatch(/\bAvailability\b/);
+      unmount();
+    }
+  });
+
+  test('the section\'s own source writes no "Availability" for people to read', async () => {
+    const { readFileSync, readdirSync, statSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    // jsdom's import.meta.url is not a file URL; vitest runs from frontend/.
+    const here = join(globalThis.process.cwd(), 'src', 'pages');
+    const files = [join(here, 'Availability.jsx')];
+    const walk = (dir) => {
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        if (statSync(p).isDirectory()) walk(p);
+        else if (/\.jsx?$/.test(name) && !/\.test\./.test(name)) files.push(p);
+      }
+    };
+    walk(join(here, '..', 'components', 'availability'));
+    const offenders = [];
+    for (const f of files) {
+      const code = readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
+      // Quoted strings and JSX text; identifiers such as useAvailabilityApprovalCount have no word boundary.
+      for (const m of code.matchAll(/(['"`>])([^'"`<>\n]*\bAvailability\b[^'"`<>\n]*)/g)) offenders.push(`${f.split(/[\\/]/).pop()}: ${m[2].trim()}`);
+    }
+    expect(offenders).toEqual([]);
   });
 });
 

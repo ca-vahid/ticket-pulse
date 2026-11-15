@@ -34,8 +34,12 @@ export const TRACKED_ROUTES = [
   { path: '/knowledge', key: 'knowledge', label: 'Knowledge' },
   { path: '/onboarding/:tab', key: 'onboarding', label: 'Onboarding' },
   { path: '/onboarding', key: 'onboarding', label: 'Onboarding' },
-  { path: '/availability/:tab', key: 'availability', label: 'Availability' },
-  { path: '/availability', key: 'availability', label: 'Availability' },
+  // Vacation Pulse (was Availability): the stored key stays 'availability', so
+  // old and new visits, and the /vacation-pulse alias, count as one page.
+  { path: '/availability/:tab', key: 'availability', label: 'Vacation Pulse' },
+  { path: '/availability', key: 'availability', label: 'Vacation Pulse' },
+  { path: '/vacation-pulse/:tab', key: 'availability', label: 'Vacation Pulse' },
+  { path: '/vacation-pulse', key: 'availability', label: 'Vacation Pulse' },
   { path: '/on-call', key: 'oncall', label: 'On-call' },
   { path: '/dashboard', key: 'dashboard', label: 'Dashboard' },
   { path: '/technician/:id', key: 'technician.detail', label: 'Technician' },

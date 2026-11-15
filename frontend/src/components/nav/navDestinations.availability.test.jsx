@@ -11,15 +11,29 @@ vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => authState }));
 vi.mock('../../contexts/WorkspaceContext', () => ({ useWorkspace: () => wsState }));
 vi.mock('../../hooks/useHrLifecycleStatus', () => ({ useHrLifecycleStatus: () => ({ available: false, mode: 'off', loading: false }) }));
 
-const { NAV_DESTINATIONS, useNavDestinations } = await import('./navDestinations');
+const { NAV_DESTINATIONS, destinationMatches, useNavDestinations } = await import('./navDestinations');
 
-describe('Availability nav entry', () => {
+describe('Vacation Pulse nav entry (was Availability)', () => {
   test('label, hint, path and icon', () => {
     const dest = NAV_DESTINATIONS.find((d) => d.id === 'availability');
-    expect(dest.label).toBe('Availability');
+    // MEGA 11-14 Part J: people see "Vacation Pulse"; the id, path and icon keep the code name.
+    expect(dest.label).toBe('Vacation Pulse');
     expect(dest.path).toBe('/availability');
     expect(dest.hint).toBe('Time away, WFH and site visits');
     expect(dest.Icon.displayName).toBe('AvailabilityNavIcon');
+  });
+
+  test('the /vacation-pulse alias counts as the same entry', () => {
+    const dest = NAV_DESTINATIONS.find((d) => d.id === 'availability');
+    expect(destinationMatches(dest, '/vacation-pulse')).toBe(true);
+    expect(destinationMatches(dest, '/vacation-pulse/approvals')).toBe(true);
+    expect(destinationMatches(dest, '/availability/my-time')).toBe(true);
+    expect(destinationMatches(dest, '/vacation-pulsex')).toBe(false);
+    expect(destinationMatches(NAV_DESTINATIONS.find((d) => d.id === 'tickets'), '/vacation-pulse')).toBe(false);
+  });
+
+  test('never abbreviated', () => {
+    for (const d of NAV_DESTINATIONS) expect(`${d.label} ${d.hint || ''}`).not.toMatch(/\b(VP|VT)\b/);
   });
 
   test.each([

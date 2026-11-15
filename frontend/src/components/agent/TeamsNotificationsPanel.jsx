@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Activity, AlertTriangle, BellOff, Send } from 'lucide-react';
+import { Activity, AlertTriangle, BellOff, Send, ShieldAlert } from 'lucide-react';
 import { agentAPI } from '../../services/api';
 import TeamsEventGrid from './TeamsEventGrid';
 import TeamsAssistantPersonal from './TeamsAssistantPersonal';
+import { TEAMS_ADMIN_STEPS, blockedDetail, statusOf } from './teamsStatus';
 
 /**
  * My Teams notifications (plans/TEAMS_NOTIFICATIONS_PLAN.md): connection,
@@ -14,6 +15,8 @@ const REASON = {
   off_shift: 'outside your work hours',
   quiet_hours: 'quiet hours',
   muted: 'ticket muted',
+  disconnected: 'disconnected',
+  blocked_backoff: 'paused after Teams blocked the last cards',
 };
 const EVENT_WORD = {
   assigned: 'Assigned to you', requester_replied: 'Requester replied', teammate_update: 'New note or reply',
@@ -89,6 +92,16 @@ export default function TeamsNotificationsPanel({ workspaceId }) {
   const setMode = (key, mode) => persist({ ...data, events: data.events.map((e) => (e.key === key ? { ...e, mode } : e)) });
   const setOpt = (patch) => persist({ ...data, options: { ...data.options, ...patch } });
   const connected = data?.connection?.connected;
+  // Part C: the server's status; older servers only send the two flags.
+  const status = data?.connection?.status || (data?.connection?.disconnected ? 'disconnected' : connected ? 'connected' : 'not_connected');
+  const STATUS_WORDS = {
+    connected: 'Connected — you have a chat with Ticket Pulse in Teams',
+    blocked: 'Blocked by Teams policy',
+    disconnected: data?.connection?.disconnectedByAdmin === false
+      ? 'Disconnected — press Connect Teams to start again'
+      : 'Disconnected by an admin — Ticket Pulse won’t message you in Teams until you connect again',
+    not_connected: 'Not connected yet',
+  };
 
   return (
     <section className="tp-card rounded-xl border border-border p-4 sm:p-5" aria-labelledby="teams-notifications-heading">
@@ -125,10 +138,24 @@ export default function TeamsNotificationsPanel({ workspaceId }) {
 
       {data && (
         <>
+          {status === 'blocked' && (
+            // MEGA 11-14 Part C: say what is wrong and what to ask for, plainly.
+            <div className="mt-3 flex items-start gap-2 text-sm" role="status" data-testid="teams-blocked-note">
+              <ShieldAlert className="mt-0.5 h-4 w-4 flex-shrink-0 text-red-600 dark:text-red-300" aria-hidden="true" />
+              <div className="min-w-0 space-y-1">
+                <p className="font-semibold text-foreground">Teams blocks the Ticket Pulse app for you</p>
+                <p className="text-xs text-muted-foreground">Your organisation&apos;s Teams settings don&apos;t allow the app for your account, so Ticket Pulse can&apos;t send you cards. This isn&apos;t something you did.</p>
+                <p className="text-xs text-foreground">
+                  <span className="font-semibold">Ask your Teams admin:</span> &ldquo;Please allow the Ticket Pulse app for me in Teams.&rdquo; <span className="text-muted-foreground">{TEAMS_ADMIN_STEPS} Then press Connect Teams here.</span>
+                </p>
+                <p className="text-xs text-muted-foreground">Until then, time-away requests waiting for you come by e-mail.{blockedDetail(data.connection) ? ` ${blockedDetail(data.connection)}.` : ''}</p>
+              </div>
+            </div>
+          )}
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-            <span className="inline-flex items-center gap-1.5">
-              <span className={`h-2 w-2 rounded-full ${connected ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} aria-hidden="true" />
-              <span className="text-foreground">{connected ? 'Connected — you have a chat with Ticket Pulse in Teams' : 'Not connected yet'}</span>
+            <span className="inline-flex items-center gap-1.5" data-testid="teams-my-status">
+              <span className={`h-2 w-2 rounded-full ${statusOf(status).dot}`} aria-hidden="true" />
+              <span className="text-foreground">{STATUS_WORDS[status] || STATUS_WORDS.not_connected}</span>
             </span>
             {data.notAgentIn && (
               <span className="inline-flex items-start gap-1 text-amber-700 dark:text-amber-200">
@@ -138,7 +165,7 @@ export default function TeamsNotificationsPanel({ workspaceId }) {
             )}
             {!data.enabled && <span className="text-amber-700 dark:text-amber-200">Teams notifications are off in this workspace — an admin turns them on in Settings → Teams.</span>}
             {!data.configured && <span className="text-amber-700 dark:text-amber-200">The Teams app is not set up on the server yet.</span>}
-            {data.connection?.lastError && !connected && <span className="text-red-700 dark:text-red-200">{data.connection.lastError}</span>}
+            {data.connection?.lastError && !connected && status !== 'blocked' && <span className="text-red-700 dark:text-red-200">{data.connection.lastError}</span>}
             {saved && <span className="text-muted-foreground">Saved</span>}
           </div>
 
@@ -214,10 +241,10 @@ export default function TeamsNotificationsPanel({ workspaceId }) {
               <ul className="space-y-1 text-xs">
                 {data.recent.map((r, i) => (
                   <li key={i} className="flex gap-2">
-                    <span className={`mt-1 h-1.5 w-1.5 flex-shrink-0 rounded-full ${r.status === 'sent' ? 'bg-emerald-500' : r.status === 'failed' ? 'bg-red-500' : 'bg-muted-foreground/40'}`} aria-hidden="true" />
+                    <span className={`mt-1 h-1.5 w-1.5 flex-shrink-0 rounded-full ${r.status === 'sent' || r.status === 'emailed' ? 'bg-emerald-500' : r.status === 'failed' ? 'bg-red-500' : 'bg-muted-foreground/40'}`} aria-hidden="true" />
                     <span className="min-w-0 truncate text-foreground">
                       {EVENT_WORD[r.eventKey] || r.eventKey}
-                      <span className="text-muted-foreground"> · {r.status === 'sent' ? 'sent' : r.status === 'digest' ? 'held for the digest' : r.status === 'failed' ? `failed${r.reason ? ` (${r.reason})` : ''}` : `not sent — ${REASON[r.reason] || r.reason}`}{r.summary ? ` · ${r.summary}` : ''}</span>
+                      <span className="text-muted-foreground"> · {r.status === 'sent' ? 'sent' : r.status === 'emailed' ? 'sent by e-mail instead' : r.status === 'digest' ? 'held for the digest' : r.status === 'failed' ? `failed${r.reason ? ` (${/blocked by (the )?app permission polic/i.test(r.reason) ? 'blocked by Teams policy' : r.reason})` : ''}` : `not sent — ${REASON[r.reason] || r.reason}`}{r.summary ? ` · ${r.summary}` : ''}</span>
                     </span>
                     <span className="ml-auto flex-shrink-0 text-muted-foreground">{ago(r.createdAt)}</span>
                   </li>

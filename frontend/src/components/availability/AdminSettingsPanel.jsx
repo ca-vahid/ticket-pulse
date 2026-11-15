@@ -10,7 +10,7 @@ import ImportSection from './admin/ImportSection';
 import GeneralSection from './admin/GeneralSection';
 
 /**
- * Availability → Settings (Availability admins only). A quiet section list on
+ * Vacation Pulse → Settings (Vacation Pulse admins only). A quiet section list on
  * the left (a scrolling row on phones) and one section at a time on the right;
  * the open section lives in ?section= so a refresh stays put.
  */
@@ -31,12 +31,12 @@ export default function AdminSettingsPanel({ config, error, reload, toast }) {
   const active = SECTIONS.find((s) => s.id === params.get('section')) || SECTIONS[0];
 
   if (error && !config) return <ErrorNote>{error}</ErrorNote>;
-  if (!config) return <Loading label="Loading Availability settings…" />;
+  if (!config) return <Loading label="Loading Vacation Pulse settings…" />;
 
   const Section = active.C;
   return (
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-[11rem_minmax(0,1fr)]">
-      <nav aria-label="Availability settings" className="tp-swipe-row -mx-1 min-w-0 overflow-x-auto lg:mx-0 lg:overflow-visible">
+      <nav aria-label="Vacation Pulse settings" className="tp-swipe-row -mx-1 min-w-0 overflow-x-auto lg:mx-0 lg:overflow-visible">
         <ul className="flex gap-0.5 px-1 lg:flex-col lg:px-0">
           {SECTIONS.map((s) => {
             const on = s.id === active.id;

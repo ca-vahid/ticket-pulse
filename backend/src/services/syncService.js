@@ -2142,7 +2142,7 @@ class SyncService {
             const held = ends ? [
               ends.openTickets && `${ends.openTickets} open ticket${ends.openTickets === 1 ? '' : 's'} still assigned`,
               ends.categoryManager && `manager on ${ends.categoryManager} approval categor${ends.categoryManager === 1 ? 'y' : 'ies'}`,
-              ends.availabilityApprover && `approver in ${ends.availabilityApprover} Availability approval group${ends.availabilityApprover === 1 ? '' : 's'}`,
+              ends.availabilityApprover && `approver in ${ends.availabilityApprover} Vacation Pulse approval group${ends.availabilityApprover === 1 ? '' : 's'}`,
               ends.pendingApprovals && `${ends.pendingApprovals} pending ticket approval${ends.pendingApprovals === 1 ? '' : 's'} waiting on them`,
             ].filter(Boolean) : [];
             if (held.length) logger.warn(`Technician ${t.name} (${t.id}) is switched off but still has: ${held.join('; ')}. Reassign these.`);

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Activity, Download, RefreshCw } from 'lucide-react';
+import { Activity, AlertTriangle, Download, RefreshCw } from 'lucide-react';
 import { teamsAdminAPI } from '../../services/api';
 import TeamsEventGrid from '../agent/TeamsEventGrid';
 import TeamsAssistantSettings from './TeamsAssistantSettings';
+import { TEAMS_ADMIN_STEPS, blockedDetail, statusOf } from '../agent/teamsStatus';
 
 /**
  * Settings → Teams (plans/TEAMS_NOTIFICATIONS_PLAN.md): is the bot healthy,
@@ -18,6 +19,33 @@ const Check = ({ ok, children }) => (
   </li>
 );
 
+/**
+ * MEGA 11-14 Part C: the status column. Connected · Disconnected (by whom) ·
+ * Blocked by Teams policy (last refusal, cards missed in 7 days) · Not
+ * connected yet (with the last error). Older servers send no status: fall
+ * back to the connected / disconnected flags.
+ */
+function AgentStatus({ a }) {
+  const state = a.status || (a.disconnected ? 'disconnected' : a.connected ? 'connected' : 'not_connected');
+  const s = statusOf(state);
+  let detail = '';
+  let label = s.label;
+  if (state === 'blocked') detail = blockedDetail(a);
+  else if (state === 'disconnected') {
+    label = `Disconnected ${a.disconnectedBySelf ? 'by themselves' : a.disconnectedBy ? `by ${a.disconnectedBy}` : 'by an admin'}`;
+    detail = a.missed7d ? `${a.missed7d} card${a.missed7d === 1 ? '' : 's'} not sent in 7 days` : '';
+  } else if (state === 'not_connected' && a.lastError) detail = a.lastError;
+  return (
+    <span className="col-span-2 flex min-w-0 items-start gap-1.5 text-xs sm:col-span-1 sm:col-start-2 sm:row-start-1" data-testid={`teams-status-${a.id}`}>
+      <span className={`mt-1 h-2 w-2 flex-shrink-0 rounded-full ${s.dot}`} aria-hidden="true" />
+      <span className="min-w-0">
+        <span className={`font-medium ${s.text}`}>{label}</span>
+        {detail && <span className={`block truncate ${state === 'not_connected' ? 'text-red-700 dark:text-red-200' : 'text-muted-foreground'}`} title={detail}>{detail}</span>}
+      </span>
+    </span>
+  );
+}
+
 export default function TeamsSettingsPanel() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -26,6 +54,8 @@ export default function TeamsSettingsPanel() {
   const [webhook, setWebhook] = useState('');
   // QA 10-01 #4: Disconnect asks once, inline (no browser dialog).
   const [confirmDisconnect, setConfirmDisconnect] = useState(null);
+  // Part C: "Show them" narrows the list to the people a Teams policy blocks.
+  const [onlyBlocked, setOnlyBlocked] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -95,6 +125,9 @@ export default function TeamsSettingsPanel() {
   const defaults = s?.defaults || { events: {}, options: {} };
   const gridEvents = (data?.events || []).map((e) => ({ ...e, mode: defaults.events?.[e.key] || e.mode }));
   const connectedCount = data?.agents?.filter((a) => a.connected).length || 0;
+  const blockedCount = data?.health?.blocked ?? (data?.agents || []).filter((a) => a.status === 'blocked').length;
+  const disconnectedCount = data?.health?.disconnected ?? (data?.agents || []).filter((a) => a.disconnected).length;
+  const shownAgents = onlyBlocked && blockedCount > 0 ? (data?.agents || []).filter((a) => a.status === 'blocked') : (data?.agents || []);
 
   return (
     <div className="space-y-6 p-6">
@@ -145,39 +178,58 @@ export default function TeamsSettingsPanel() {
                 Connect all agents
               </button>
             </div>
-            <ul className="max-h-72 divide-y divide-border overflow-y-auto border-y border-border settings-scrollbar">
-              {data.agents.map((a) => (
-                <li key={a.id} className="flex items-center justify-between gap-3 py-1.5 text-sm">
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className={`h-2 w-2 flex-shrink-0 rounded-full ${a.connected ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} aria-hidden="true" />
-                    <span className="truncate text-foreground">{a.name}</span>
-                    {a.disconnected && <span className="flex-shrink-0 text-xs text-muted-foreground">Disconnected{a.disconnectedBy ? ` by ${a.disconnectedBy}` : ''}</span>}
-                    {a.lastError && !a.connected && !a.disconnected && <span className="truncate text-xs text-red-700 dark:text-red-200">{a.lastError}</span>}
-                  </span>
-                  {!a.connected && (
-                    <button type="button" disabled={!!busy || !data.bot.catalogAppId} onClick={() => install([a.id])} className="tp-focus-ring flex-shrink-0 rounded px-2 py-0.5 text-xs font-semibold text-primary hover:bg-muted disabled:opacity-50">
-                      {busy === `install-${a.id}` ? 'Connecting…' : a.disconnected ? 'Connect again' : 'Connect'}
-                    </button>
-                  )}
-                  {a.connected && confirmDisconnect !== a.id && (
-                    <button type="button" disabled={!!busy || !data.bot.catalogAppId} onClick={() => install([a.id])} title="Checks with Teams and puts the app back if it was removed" className="tp-focus-ring flex-shrink-0 rounded px-2 py-0.5 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50" data-testid={`teams-reinstall-${a.id}`}>
-                      {busy === `install-${a.id}` ? 'Checking…' : 'Reinstall'}
-                    </button>
-                  )}
-                  {a.connected && confirmDisconnect !== a.id && (
-                    <button type="button" disabled={!!busy} onClick={() => setConfirmDisconnect(a.id)} className="tp-focus-ring flex-shrink-0 rounded px-2 py-0.5 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-red-700 dark:hover:text-red-200 disabled:opacity-50" data-testid={`teams-disconnect-${a.id}`}>
-                      Disconnect
-                    </button>
-                  )}
-                  {a.connected && confirmDisconnect === a.id && (
-                    <span className="flex flex-shrink-0 items-center gap-1 text-xs" role="group" aria-label={`Disconnect ${a.name}?`}>
-                      <span className="text-muted-foreground">Remove the app from their Teams?</span>
-                      <button type="button" disabled={!!busy} onClick={() => disconnect(a)} className="tp-focus-ring rounded px-2 py-0.5 font-semibold text-red-700 hover:bg-red-50 dark:text-red-200 dark:hover:bg-red-500/15 disabled:opacity-50" data-testid={`teams-disconnect-confirm-${a.id}`}>
-                        {busy === `disconnect-${a.id}` ? 'Disconnecting…' : 'Disconnect'}
+            {blockedCount > 0 && (
+              // MEGA 11-14 Part C: who cannot get cards, at the top, with the list behind it.
+              <div className="mb-2 flex flex-wrap items-start gap-x-3 gap-y-1 text-sm" data-testid="teams-blocked-count">
+                <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-600 dark:text-amber-300" aria-hidden="true" />
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-foreground">{blockedCount === 1 ? '1 person can’t get Teams cards' : `${blockedCount} people can’t get Teams cards`}</p>
+                  <p className="text-xs text-muted-foreground">
+                    A Teams policy blocks the Ticket Pulse app for them. {TEAMS_ADMIN_STEPS} Then press Connect on their row.
+                    {disconnectedCount > 0 ? ` ${disconnectedCount} more ${disconnectedCount === 1 ? 'is' : 'are'} disconnected.` : ''}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  aria-pressed={onlyBlocked}
+                  onClick={() => setOnlyBlocked((v) => !v)}
+                  className="tp-focus-ring flex-shrink-0 rounded px-2 py-0.5 text-xs font-semibold text-primary hover:bg-muted"
+                >
+                  {onlyBlocked ? 'Show everyone' : 'Show them'}
+                </button>
+              </div>
+            )}
+            <ul className="max-h-72 divide-y divide-border overflow-y-auto border-y border-border settings-scrollbar" aria-label="Agents and their Teams status">
+              {shownAgents.map((a) => (
+                <li key={a.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 py-1.5 text-sm sm:grid-cols-[minmax(0,13rem)_minmax(0,1fr)_auto]">
+                  <span className="truncate text-foreground">{a.name}</span>
+                  <AgentStatus a={a} />
+                  <span className="col-start-2 row-start-1 flex items-center justify-end gap-0.5 sm:col-start-3">
+                    {!a.connected && (
+                      <button type="button" disabled={!!busy || !data.bot.catalogAppId} onClick={() => install([a.id])} className="tp-focus-ring flex-shrink-0 rounded px-2 py-0.5 text-xs font-semibold text-primary hover:bg-muted disabled:opacity-50">
+                        {busy === `install-${a.id}` ? 'Connecting…' : a.disconnected ? 'Connect again' : 'Connect'}
                       </button>
-                      <button type="button" disabled={!!busy} onClick={() => setConfirmDisconnect(null)} className="tp-focus-ring rounded px-2 py-0.5 font-semibold text-muted-foreground hover:bg-muted">Keep</button>
-                    </span>
-                  )}
+                    )}
+                    {a.connected && confirmDisconnect !== a.id && (
+                      <button type="button" disabled={!!busy || !data.bot.catalogAppId} onClick={() => install([a.id])} title="Checks with Teams and puts the app back if it was removed" className="tp-focus-ring flex-shrink-0 rounded px-2 py-0.5 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50" data-testid={`teams-reinstall-${a.id}`}>
+                        {busy === `install-${a.id}` ? 'Checking…' : 'Reinstall'}
+                      </button>
+                    )}
+                    {a.connected && confirmDisconnect !== a.id && (
+                      <button type="button" disabled={!!busy} onClick={() => setConfirmDisconnect(a.id)} className="tp-focus-ring flex-shrink-0 rounded px-2 py-0.5 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-red-700 dark:hover:text-red-200 disabled:opacity-50" data-testid={`teams-disconnect-${a.id}`}>
+                      Disconnect
+                      </button>
+                    )}
+                    {a.connected && confirmDisconnect === a.id && (
+                      <span className="flex flex-shrink-0 items-center gap-1 text-xs" role="group" aria-label={`Disconnect ${a.name}?`}>
+                        <span className="text-muted-foreground">Remove the app from their Teams?</span>
+                        <button type="button" disabled={!!busy} onClick={() => disconnect(a)} className="tp-focus-ring rounded px-2 py-0.5 font-semibold text-red-700 hover:bg-red-50 dark:text-red-200 dark:hover:bg-red-500/15 disabled:opacity-50" data-testid={`teams-disconnect-confirm-${a.id}`}>
+                          {busy === `disconnect-${a.id}` ? 'Disconnecting…' : 'Disconnect'}
+                        </button>
+                        <button type="button" disabled={!!busy} onClick={() => setConfirmDisconnect(null)} className="tp-focus-ring rounded px-2 py-0.5 font-semibold text-muted-foreground hover:bg-muted">Keep</button>
+                      </span>
+                    )}
+                  </span>
                 </li>
               ))}
             </ul>
