@@ -37,6 +37,7 @@ const DECISION_CHIPS = {
   noise_dismissed: 'bg-muted text-muted-foreground ring-border',
   duplicate_dismissed: 'bg-cyan-50 dark:bg-cyan-500/15 text-cyan-700 dark:text-cyan-200 ring-cyan-200 dark:ring-cyan-500/30',
   priority_only: 'bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200 ring-violet-200 dark:ring-violet-500/30',
+  settled_elsewhere: 'bg-muted text-muted-foreground ring-border',
 };
 
 const RUN_STATUS_CHIPS = {

@@ -4556,6 +4556,13 @@ export async function executeUpdateTicketNode(node, eventContext, { dryRun = fal
   // deliberately still NOT emitted from workflow writes: that is a standing
   // decision to keep status-setting workflows from cascading into each other.
   await emitWorkflowReopened({ ticket, patch, workflowId, actor });
+  // MEGA 11-14 Part B: a workflow that closes the ticket settles its open AI
+  // review suggestions (this write never reaches the lifecycle service).
+  if (patch.status && patch.status !== ticket.status) {
+    await import('./reviewQueueSettleService.js')
+      .then(({ default: settle }) => settle.settleOnChange(ticket, { ...ticket, ...patch }, { source: 'workflow' }))
+      .catch(() => {});
+  }
   // Re-opened counter (QA 09-25 #1): same bypass — this write never reaches
   // the lifecycle service, so feed the counter here. Never throws.
   if (patch.status && patch.status !== ticket.status) {

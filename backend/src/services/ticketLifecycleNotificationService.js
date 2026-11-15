@@ -883,6 +883,25 @@ async function creditCloseToSkills(existingTicket, upsertedTicket) {
   }
 }
 
+/**
+ * MEGA 11-14 Part B: open AI review suggestions on a ticket that just got an
+ * owner, closed, or was removed are settled ('settled_elsewhere'). Only when
+ * the owner or the status actually moved; never throws.
+ */
+async function settleReviewQueue(existingTicket, upsertedTicket, { source = null, actor = null } = {}) {
+  try {
+    if (!existingTicket || !upsertedTicket?.id) return;
+    const gotOwner = asNumber(upsertedTicket.assignedTechId)
+      && asNumber(upsertedTicket.assignedTechId) !== asNumber(existingTicket.assignedTechId);
+    const statusMoved = String(upsertedTicket.status || '') !== String(existingTicket.status || '');
+    if (!gotOwner && !statusMoved) return;
+    const { default: settle } = await import('./reviewQueueSettleService.js');
+    await settle.settleOnChange(existingTicket, upsertedTicket, { actor, source: source || 'ticket-pulse' });
+  } catch (err) {
+    logger.warn(`Review queue settle skipped (non-fatal): ${err.message}`);
+  }
+}
+
 export async function emitTicketLifecycleNotifications({
   existingTicket,
   upsertedTicket,
@@ -906,6 +925,11 @@ export async function emitTicketLifecycleNotifications({
   // Learn-on-close — before the workflow gate, like the reopen counter, so
   // syncs that run no workflows still teach the matrix.
   await creditCloseToSkills(existingTicket, upsertedTicket);
+  // The review queue settles itself (MEGA 11-14 Part B): an owner, a close or
+  // a removal ends any AI suggestion still waiting for review on this ticket —
+  // before the workflow gate, so every path that reports a change counts.
+  // Never throws; no read at all unless the owner or the status moved.
+  await settleReviewQueue(existingTicket, upsertedTicket, { source, actor });
   // Auto-help (P1 audit): a reassignment to someone else while Auto-help
   // waits on the requester means that person owns it now — the loop ends.
   const ahNewTech = asNumber(upsertedTicket?.assignedTechId);

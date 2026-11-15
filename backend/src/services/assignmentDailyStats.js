@@ -85,16 +85,21 @@ export async function getTodayStats(workspaceId, timezone = PACIFIC_TIMEZONE) {
   // whose ticket later got an assignedTechId (the agent grabbed it in FS
   // before the admin could review). Identical filters + window as the
   // "Manually in FreshService" sub-tab so the count matches exactly.
-  const handledInFs = await prisma.assignmentPipelineRun.count({
-    where: {
-      workspaceId,
-      createdAt: { gte: start, lte: end },
-      status: 'completed',
-      decision: 'pending_review',
-      ticket: { is: { assignedTechId: { not: null } } },
-    },
-  });
-  adjustForHandledInFs(tally, handledInFs);
+  // MEGA 11-14 Part B: those runs are now settled ('settled_elsewhere') the
+  // moment the ticket gets its owner, so both decisions count here. Only the
+  // still-pending ones are taken off manualReviewRequired (the settled ones
+  // were never in it).
+  const handledWhere = {
+    workspaceId,
+    createdAt: { gte: start, lte: end },
+    status: 'completed',
+    ticket: { is: { assignedTechId: { not: null } } },
+  };
+  const [handledInFs, handledStillPending] = await Promise.all([
+    prisma.assignmentPipelineRun.count({ where: { ...handledWhere, decision: { in: ['pending_review', 'settled_elsewhere'] } } }),
+    prisma.assignmentPipelineRun.count({ where: { ...handledWhere, decision: 'pending_review' } }),
+  ]);
+  adjustForHandledInFs(tally, handledStillPending);
 
   // Pipeline-bypass — tickets that arrived in the current PT day and got assigned
   // in FS entirely outside our system (no pipeline run created at all,

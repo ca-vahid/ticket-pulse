@@ -46,7 +46,17 @@ export const PICK_RULES = {
   START_TOLERANCE_MS: 60 * 1000,
 };
 
-export const SUGGEST_DECISIONS = ['pending_review', 'approved', 'modified', 'rejected'];
+// MEGA 11-14 Part B: a suggestion nobody answered before the ticket got an
+// owner (or closed) is now settled as 'settled_elsewhere' instead of staying
+// 'pending_review'. For this panel it is the same thing — a suggestion that
+// was not answered — so it stays in, counted under "not answered". Leaving it
+// out would drop exactly the suggest-mode tickets a person took by hand.
+export const SETTLED_DECISION = 'settled_elsewhere';
+export const SUGGEST_DECISIONS = ['pending_review', SETTLED_DECISION, 'approved', 'modified', 'rejected'];
+/** The review answer a run stands for: settled counts as not answered. */
+export function reviewAnswerOf(decision) {
+  return decision === SETTLED_DECISION ? 'pending_review' : decision;
+}
 export const FULL_RUN_DECISIONS = ['auto_assigned', ...SUGGEST_DECISIONS];
 const REMOVED_STATUSES = ['deleted', 'spam'];
 const DUPLICATE_LINK_KINDS = ['duplicate_of', 'merged_into'];
@@ -284,7 +294,7 @@ export function computePickAccuracy({
       mode,
       week: weekKeyOf(new Date(first.createdAt)),
       runAt: new Date(first.createdAt).toISOString(),
-      reviewDecision: mode === 'suggest' ? first.decision : null,
+      reviewDecision: mode === 'suggest' ? reviewAnswerOf(first.decision) : null,
       aiFirstChoiceId: pick,
       aiFirstChoice: techNames.get(pick) || `Technician ${pick}`,
       aiList: list.map((id) => techNames.get(id) || `Technician ${id}`),
@@ -502,7 +512,7 @@ export async function fetchPickInputs(db, { workspaceId, start, end, ticketWhere
               WHERE c.workspace_id = ${workspaceId}
                 AND c.created_at >= ${start}
                 AND c.created_at <= ${end}
-                AND c.decision IN ('auto_assigned', 'pending_review', 'approved', 'modified', 'rejected')
+                AND c.decision IN ('auto_assigned', 'pending_review', 'settled_elsewhere', 'approved', 'modified', 'rejected')
            )
      ORDER BY r.id
   `, []);

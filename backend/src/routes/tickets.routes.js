@@ -13,6 +13,7 @@ import workspaceRepository from '../services/workspaceRepository.js';
 import { heartbeatPresence, leavePresence, presenceSnapshot } from '../services/presenceService.js';
 import prisma from '../services/prisma.js';
 import logger from '../utils/logger.js';
+import { scopeMentions } from '../utils/mentionScope.js';
 
 const attachmentUpload = multer({
   storage: multer.memoryStorage(),
@@ -272,22 +273,21 @@ router.get('/intake-runs', requireTicketingAdmin, asyncHandler(async (req, res) 
 }));
 
 // ------------------------------------------------------------------- reads
+// "Mentions me": scopeMentions (utils/mentionScope.js) puts the session's own
+// agent id on every list-shaped query — list, relief, CSV, bulk-by-query.
 
 // "Your filters are hiding this" (FR 09-09): given the SAME query the list was
 // fetched with, how many more rows would appear if each filter group were
 // dropped. Read-only, and asked only when the page has something to offer.
 router.get('/filter-relief', asyncHandler(async (req, res) => {
   const { default: ticketFilterReliefService } = await import('../services/ticketFilterReliefService.js');
-  const data = await ticketFilterReliefService.analyse(req.workspaceId, req.query || {});
+  const data = await ticketFilterReliefService.analyse(req.workspaceId, scopeMentions(req.query, req));
   res.json({ success: true, data });
 }));
 
 router.get('/', asyncHandler(async (req, res) => {
   // Up to 200 a page (17 Oct 2026: the Tickets pager offers 25 / 50 / 100 / 200).
-  // Mentions view: always the signed-in agent's own mentions, never an id from the URL.
-  const query = { ...(req.query || {}) };
-  delete query.mentionedTechnicianId;
-  if (query.mentioned === 'me') query.mentionedTechnicianId = req.ticketActor?.technicianId || -1;
+  const query = scopeMentions(req.query, req);
   // QA 11-09 #5: a typed ticket number finds that ticket whatever its noise flag, grouping or status.
   query.exactRefAnyState = true;
   const result = await ticketService.listTickets(req.workspaceId, query, { actor: req.ticketActor, maxPageSize: 200 });
@@ -624,7 +624,7 @@ router.delete('/scheduled/:sid/attachments/:attachmentId', requireNativeTicketin
 router.get('/export.csv', asyncHandler(async (req, res) => {
   const result = await ticketService.listTickets(
     req.workspaceId,
-    { ...req.query, page: 1, pageSize: 5000 },
+    { ...scopeMentions(req.query, req), page: 1, pageSize: 5000 },
     { maxPageSize: 5000 },
   );
   // Custom-field columns (Custom Fields Activation Phase 2): one column per
@@ -1211,7 +1211,8 @@ router.post('/bulk-by-query', asyncHandler(async (req, res) => {
     throw new ValidationError('Bulk editing requires coordinator or admin access');
   }
   const result = await ticketService.bulkByQuery(req.workspaceId, {
-    query: req.body?.query || {},
+    // The same "Mentions me" scoping as the list: the id is the session's.
+    query: scopeMentions(req.body?.query || {}, req),
     action: req.body?.action,
     preview: req.body?.preview === true,
     expectedTotal: req.body?.expectedTotal ?? null,

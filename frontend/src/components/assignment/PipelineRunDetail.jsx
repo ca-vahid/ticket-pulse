@@ -578,7 +578,20 @@ const DECISION_BADGES = {
   noise_dismissed: { label: 'Noise Dismissed', style: 'bg-muted text-muted-foreground' },
   duplicate_dismissed: { label: 'Duplicate Dismissed', style: 'bg-cyan-50 dark:bg-cyan-500/15 text-cyan-700 dark:text-cyan-200' },
   priority_only: { label: 'Priority Only', style: 'bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-200' },
+  // MEGA 11-14 Part B: the ticket got an owner, closed or was removed before anyone reviewed it.
+  settled_elsewhere: { label: 'Settled elsewhere', style: 'bg-muted text-muted-foreground' },
 };
+
+/** decidedByEmail reads as a person, or as where a settled run was settled ("system:<source>"). */
+function deciderLabel(value) {
+  const raw = String(value || '');
+  if (!raw.startsWith('system:')) return raw || 'Unknown';
+  const source = raw.slice('system:'.length);
+  if (source.startsWith('freshservice') || source === 'reconcile') return 'FreshService';
+  if (source === 'workflow') return 'A workflow';
+  if (source === 'api') return 'The API';
+  return 'Ticket Pulse';
+}
 
 const RUN_STATUS_BADGES = {
   queued: { label: 'Queued', style: 'bg-orange-100 dark:bg-orange-500/20 text-orange-800 dark:text-orange-200' },
@@ -1917,7 +1930,7 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
       {/* Decided info */}
       {run.decidedAt && (
         <div className="bg-muted/50 border rounded-lg p-3 text-sm">
-          <p><span className="text-muted-foreground">Decided by:</span> {run.decidedByEmail}</p>
+          <p><span className="text-muted-foreground">{run.decision === 'settled_elsewhere' ? 'Settled by:' : 'Decided by:'}</span> {deciderLabel(run.decidedByEmail)}</p>
           <p><span className="text-muted-foreground">At:</span> {formatDateTimeInTimezone(run.decidedAt, workspaceTimezone)}</p>
           {run.assignedTech && <p><span className="text-muted-foreground">Original AI assignment:</span> {run.assignedTech.name}</p>}
           {currentAssignedTechName && (
@@ -1927,7 +1940,7 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
             </p>
           )}
           {run.overrideReason && <p><span className="text-muted-foreground">Override reason:</span> {run.overrideReason}</p>}
-          {run.decisionNote && <p><span className="text-muted-foreground">Triage note:</span> {run.decisionNote}</p>}
+          {run.decisionNote && <p><span className="text-muted-foreground">{run.decision === 'settled_elsewhere' ? 'Why:' : 'Triage note:'}</span> {run.decisionNote}</p>}
         </div>
       )}
 

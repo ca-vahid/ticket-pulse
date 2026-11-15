@@ -16,6 +16,7 @@ import SpreadTab from '../components/assignment/SpreadTab';
 import SharesTab from '../components/assignment/SharesTab';
 import LevelMatchTab from '../components/assignment/LevelMatchTab';
 import RunEscalationLine from '../components/assignment/RunEscalationLine';
+import SettledBacklogButton from '../components/assignment/SettledBacklogButton';
 import { formatDateTimeInTimezone } from '../utils/dateHelpers';
 import LivePipelineView from '../components/assignment/LivePipelineView';
 import FilterDropdown from '../components/FilterDropdown';
@@ -1516,7 +1517,8 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Van
         }),
         assignmentAPI.getRuns({ decisions: 'noise_dismissed,duplicate_dismissed', since, sinceField: 'decidedAt', limit: nonPendingLimit, ticketStatus: dismissedTicketStatus, ...commonFilters }),
         assignmentAPI.getRuns({ decisions: 'rejected', since, sinceField: 'decidedAt', limit: nonPendingLimit, ticketStatus: rejectedTicketStatus, ...commonFilters }),
-        assignmentAPI.getRuns({ since, sinceField: 'createdAt', limit: nonPendingLimit, ticketStatus: 'deleted', ...commonFilters }),
+        // Deleted tab: every run on a deleted ticket, settled ones included (deleting settles them).
+        assignmentAPI.getRuns({ since, sinceField: 'createdAt', limit: nonPendingLimit, ticketStatus: 'deleted', includeSettled: 1, ...commonFilters }),
         assignmentAPI.getQueuedRuns().catch(() => queuedSnapshotFallback),
         assignmentAPI.getQueueStatus().catch(() => null),
       ]);
@@ -2150,8 +2152,8 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Van
       return 0;
     });
 
-  const DECISION_LABELS = { approved: 'Approved', modified: 'Override', auto_assigned: 'Auto', noise_dismissed: 'Noise', duplicate_dismissed: 'Duplicate', rejected: 'Rejected', pending_review: 'Pending' };
-  const DECISION_PILL = { approved: 'bg-green-100 dark:bg-green-500/20 text-green-800 dark:text-green-200', modified: 'bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-200', auto_assigned: 'bg-purple-100 dark:bg-purple-500/20 text-purple-800 dark:text-purple-200', noise_dismissed: 'bg-muted text-muted-foreground', duplicate_dismissed: 'bg-cyan-50 dark:bg-cyan-500/15 text-cyan-700 dark:text-cyan-200', rejected: 'bg-red-100 dark:bg-red-500/20 text-red-800 dark:text-red-200' };
+  const DECISION_LABELS = { approved: 'Approved', modified: 'Override', auto_assigned: 'Auto', noise_dismissed: 'Noise', duplicate_dismissed: 'Duplicate', rejected: 'Rejected', pending_review: 'Pending', settled_elsewhere: 'Settled elsewhere' };
+  const DECISION_PILL = { approved: 'bg-green-100 dark:bg-green-500/20 text-green-800 dark:text-green-200', modified: 'bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-200', auto_assigned: 'bg-purple-100 dark:bg-purple-500/20 text-purple-800 dark:text-purple-200', noise_dismissed: 'bg-muted text-muted-foreground', duplicate_dismissed: 'bg-cyan-50 dark:bg-cyan-500/15 text-cyan-700 dark:text-cyan-200', rejected: 'bg-red-100 dark:bg-red-500/20 text-red-800 dark:text-red-200', settled_elsewhere: 'bg-muted text-muted-foreground' };
 
   // Contextual decision label. A run's `decision` may be 'pending_review'
   // even though no human action is needed in our app — the ticket has
@@ -2189,12 +2191,14 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Van
         tooltip: `The AI judged this noise, but the ticket was NOT flagged — ${why}. It stays a normal ticket; anything that closed it happened outside the noise pipeline.`,
       };
     }
-    const externallyAssigned = run.decision === 'pending_review' && run.ticket?.assignedTechId;
+    // MEGA 11-14 Part B: such a run is now settled ('settled_elsewhere') the
+    // moment the ticket gets its owner; it reads the same here.
+    const externallyAssigned = ['pending_review', 'settled_elsewhere'].includes(run.decision) && run.ticket?.assignedTechId;
     if (externallyAssigned) {
       return {
         label: 'Handled in FS',
         pillClass: 'bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-200',
-        tooltip: `Assigned in FreshService outside the pipeline${run.ticket?.assignedTech?.name ? ' — ' + run.ticket.assignedTech.name : ''}. AI suggestion left unresolved.`,
+        tooltip: `Assigned outside the pipeline${run.ticket?.assignedTech?.name ? ' — ' + run.ticket.assignedTech.name : ''}. ${run.decision === 'settled_elsewhere' ? 'The AI suggestion was settled.' : 'AI suggestion left unresolved.'}`,
       };
     }
     return {
@@ -2729,6 +2733,9 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Van
               onSearchChange={setSearchQuery}
               trailing={
                 <>
+                  {/* MEGA 11-14 Part B: one click clears suggestions left from before
+                      the queue settled itself (count first, then a confirmation). */}
+                  <SettledBacklogButton isAdmin={isAdmin} onCleared={() => fetchQueue({ silent: true })} />
                   {subView === 'pending' && (queue.totals?.all ?? queue.total) > 0 && isAdmin && (
                     <button type="button" onClick={() => setShowClearConfirm(true)} className="flex touch-manipulation items-center gap-1 rounded border border-red-200 dark:border-red-500/30 px-2 py-1 text-[10px] text-red-600 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/15 hover:text-red-700 dark:hover:text-red-200">
                       <Trash2 className="h-3 w-3" /> Delete all ({queue.totals?.all ?? queue.total})
@@ -3720,17 +3727,24 @@ function HistoryTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/V
   const [filterDecision, setFilterDecision] = useState('all');
   const limit = 20;
 
+  // MEGA 11-14 Part B: settled suggestions stay out of "All decisions"; the
+  // "Settled elsewhere" choice asks the server for exactly those.
+  const showSettled = filterDecision === 'settled_elsewhere';
   const fetchRuns = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await assignmentAPI.getRuns({ limit, offset: page * limit });
+      const res = await assignmentAPI.getRuns({
+        limit,
+        offset: page * limit,
+        ...(showSettled ? { decision: 'settled_elsewhere', includeSettled: 1 } : {}),
+      });
       setRuns({ items: res?.items || [], total: res?.total || 0 });
     } catch {
       setRuns({ items: [], total: 0 });
     } finally {
       setLoading(false);
     }
-  }, [page]);
+  }, [page, showSettled]);
 
   useEffect(() => { fetchRuns(); }, [fetchRuns]);
 
@@ -3803,7 +3817,9 @@ function HistoryTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/V
     noise_dismissed: 'bg-muted text-muted-foreground',
     duplicate_dismissed: 'bg-cyan-50 dark:bg-cyan-500/15 text-cyan-700 dark:text-cyan-200',
     deferred: 'bg-orange-100 dark:bg-orange-500/20 text-orange-800 dark:text-orange-200',
+    settled_elsewhere: 'bg-muted text-muted-foreground',
   };
+  const DECISION_NAMES = { settled_elsewhere: 'settled elsewhere' };
   const STATUS_BADGES = {
     queued: 'bg-orange-100 dark:bg-orange-500/20 text-orange-800 dark:text-orange-200',
     running: 'bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-200',
@@ -3863,7 +3879,7 @@ function HistoryTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/V
                 <option value="queued">Queued</option>
                 <option value="cancelled">Cancelled</option>
               </select>
-              <select value={filterDecision} onChange={(e) => setFilterDecision(e.target.value)} className="border border-border rounded px-2 py-1 text-xs bg-card">
+              <select value={filterDecision} onChange={(e) => { setFilterDecision(e.target.value); setPage(0); }} aria-label="Decision" className="border border-border rounded px-2 py-1 text-xs bg-card">
                 <option value="all">All decisions</option>
                 <option value="pending_review">Pending review</option>
                 <option value="approved">Approved</option>
@@ -3872,6 +3888,7 @@ function HistoryTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/V
                 <option value="auto_assigned">Auto assigned</option>
                 <option value="rejected">Rejected</option>
                 <option value="modified">Modified</option>
+                <option value="settled_elsewhere">Settled elsewhere</option>
               </select>
             </div>
           </div>
@@ -3911,7 +3928,7 @@ function HistoryTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/V
                       </span>
                       {run.status === 'completed' && run.decision && (
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${DECISION_BADGES[run.decision] || 'bg-muted text-muted-foreground'}`}>
-                          {run.decision.replace(/_/g, ' ')}
+                          {DECISION_NAMES[run.decision] || run.decision.replace(/_/g, ' ')}
                         </span>
                       )}
                       {run.syncStatus && (() => {

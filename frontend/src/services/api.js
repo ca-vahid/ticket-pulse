@@ -1930,6 +1930,10 @@ export const assignmentAPI = {
   runNowStreamPath: (id) => `/assignment/runs/${id}/run-now?stream=true`,
   getQueue: (params) => api.get('/assignment/queue', { params }),
   getRuns: (params) => api.get('/assignment/runs', { params }),
+  // MEGA 11-14 Part B: suggestions left from before the queue settled itself.
+  // GET → { data: { count } }; POST → { data: { settled, remaining } } (idempotent).
+  getSettledBacklog: () => api.get('/assignment/settled-backlog'),
+  clearSettledBacklog: () => api.post('/assignment/settled-backlog/clear'),
   getPriorityAlertAudit: (params) => api.get('/assignment/audit/priority-alerts', { params }),
   getRun: (id) => api.get(`/assignment/runs/${id}`),
   getLatestRunForTicket: (ticketId) => api.get(`/assignment/ticket/${ticketId}/latest-run`),
