@@ -1,6 +1,24 @@
-export const APP_VERSION = '4.3.78-preview';
+export const APP_VERSION = '4.3.79-preview';
 
 export const changelog = [
+  {
+    version: '4.3.79-preview',
+    date: 'November 15, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>One place decides what a reply does to a closed ticket: the workflow</strong> &mdash; the built-in rule that kept a ticket closed when someone answered a workflow e-mail is gone, and so are the reopen switches in Settings &rarr; Ticket Ops &rarr; <em>When a requester replies</em> (the owner-away and new-request switches stay). Each workspace&rsquo;s <strong>Reopen on requester reply</strong> workflow now decides. Mail review&rsquo;s <em>Add without reopening</em> still keeps a ticket closed.' },
+      { type: 'new', html: '<strong>New reply conditions</strong> &mdash; <em>Reply sent by</em> (Requester, Someone Cc&rsquo;d, Someone a workflow e-mailed, Someone else; the requester is also recognised under another of their addresses), <em>Time since the ticket closed</em>, <em>Reopened by replies in the last 24 hours</em>, and <em>Reply reads as</em> (Thanks, Out-of-office, Still not fixed, New request, Question, Other reply). The reading runs only when a workflow asks for it; if it fails, the reply counts as a real reply and the ticket reopens.' },
+      { type: 'new', html: '<strong>Two switches on the reopen step</strong> &mdash; <em>Don&rsquo;t reopen on a thank-you or out-of-office reply</em> (for every close, Auto-help&rsquo;s included; an out-of-office is caught at any status) and <em>Stop after 3 reopens by replies in a day</em>. Both are on in the ready-made workflow.' },
+      { type: 'new', html: '<strong>New step: New ticket from this reply</strong> &mdash; instead of reopening, start a new ticket from the reply, linked to the old one, which stays closed and says where the reply went. For example: closed more than 14 days ago &rarr; new ticket, otherwise reopen.' },
+      { type: 'new', html: '<strong>&ldquo;Why didn&rsquo;t this reopen?&rdquo;</strong> &mdash; a reply that leaves a closed ticket closed now writes one private line saying why: a thank-you, an out-of-office, a condition (in its own words, with the workflow&rsquo;s name), the loop guard, or no reopen workflow. Never mirrored, no e-mail.' },
+      { type: 'improved', html: '<strong>The workflow editor shows only the conditions that fit the trigger</strong>, offers a one-click update for older reopen workflows (saved as a draft, never published by itself), warns when two workflows both reopen on a reply or none does, and lets you <strong>try a reply workflow on a past reply</strong>: pick a ticket and one of its replies and see whether it would reopen, stay closed or start a new ticket. Durations are entered as a number and a unit.' },
+      { type: 'new', html: '<strong>Who else is on the ticket, impossible to miss</strong> &mdash; a larger eye with the number of people, then &ldquo;Sam Ortiz is here&rdquo; or &ldquo;Sam and 2 others are here&rdquo;, and who is writing a reply. When someone arrives the eye opens once; when someone leaves it closes and says &ldquo;Sam left&rdquo; for a few seconds. Click it for the list. It follows the app&rsquo;s motion setting and is read out to screen readers.' },
+      { type: 'new', html: '<strong>&ldquo;Mentions me&rdquo; filter on the Tickets page</strong> &mdash; combine it with any other filter or search; choose <em>Not opened yet</em> or <em>All</em>, and 30 days, 90 days or any time. Rows that mention you show an @; hover it to see who and when.' },
+      { type: 'improved', html: '<strong>The AI review queue clears itself</strong> &mdash; a suggestion waiting for review is settled when its ticket gets an owner some other way, is resolved or closed, deleted, or marked spam or noise. Nothing is assigned and nobody is told. Admins get a one-time <em>Clear settled items</em> button in Assignment Review for the backlog.' },
+      { type: 'improved', html: '<strong>Teams: see who can&rsquo;t get cards</strong> &mdash; Settings &rarr; Teams shows each person as Connected, Disconnected or Blocked by Teams policy, with a count at the top; each person sees the same on their own Teams page, with what to ask their Teams admin. After 3 blocked sends in a row, Teams sending pauses for a day.' },
+      { type: 'new', html: '<strong>A morning reminder of time-away requests waiting for you</strong> &mdash; approvers get one Teams card each working day at 9:00 AM (their own time zone) listing the requests still waiting, the urgent ones first. It stops by itself once each is decided; when Teams can&rsquo;t reach you, it comes by e-mail.' },
+      { type: 'improved', html: '<strong>Availability is now called Vacation Pulse</strong> &mdash; the same section, the same links (<em>/availability</em> still works, <em>/vacation-pulse</em> too). Inside, time away is still &ldquo;time away&rdquo;, so a sick day is never called a vacation.' },
+    ],
+  },
   {
     version: '4.3.78-preview',
     date: 'November 13, 2026',

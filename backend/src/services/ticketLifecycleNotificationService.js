@@ -1211,8 +1211,9 @@ export async function emitTicketEvent(eventType, ticketId, {
     // 2026)? Only when the ticket is open after the workflows (G7): a reply the
     // workflows left closed, for any reason, starts neither. `ticket` is the
     // row as it was BEFORE they ran. Not awaited: one of the two makes a model
-    // call, and the reply is already recorded.
-    if (outcome?.openNow === true) {
+    // call, and the reply is already recorded. A status that could not be read
+    // (openNow null) runs them as before; only a known-closed ticket skips them.
+    if (outcome?.openNow !== false) {
       import('./requesterReplyFollowUp.js')
         .then(({ afterRequesterReplyEvent }) => afterRequesterReplyEvent({ before: ticket, statusBaseBefore: statusBase, stamp, extra }))
         .catch((err) => logger.warn(`Requester-reply follow-up skipped for ticket ${ticket.id}: ${err.message}`));

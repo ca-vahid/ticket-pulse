@@ -67,7 +67,8 @@ describe('emitTicketEvent → engine dispatch', () => {
   test.each(singleEventCases)('%s reaches the engine with type, stamp and extra intact', async (eventType, options) => {
     const result = await emitTicketEvent(eventType, 501, options);
 
-    expect(result).toEqual({ status: 'completed' });
+    // MEGA 11-14: a reply event's result also carries replyOutcome (A6).
+    expect(result).toMatchObject({ status: 'completed' });
     expect(engineMock.executeForEvent).toHaveBeenCalledTimes(1);
     const [eventContext] = engineMock.executeForEvent.mock.calls[0];
     expect(eventContext.event.type).toBe(eventType);
