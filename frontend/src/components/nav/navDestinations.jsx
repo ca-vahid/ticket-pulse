@@ -151,12 +151,15 @@ export const NAV_DESTINATIONS = [
     badgeKey: 'approvals', // pending-count overlay (see AppHeader useApprovalCount)
   },
   {
-    // Availability (native Vacation Tracker replacement): book time away, WFH
-    // and site visits; team calendar; approvals. Everyone signed in, agents too.
+    // Vacation Pulse (MEGA 11-14 Part J; was "Availability" — the code, API and
+    // /availability URLs keep that name): the native Vacation Tracker
+    // replacement. Book time away, WFH and site visits; team calendar;
+    // approvals. Everyone signed in, agents too. /vacation-pulse is an alias.
     id: 'availability',
-    label: 'Availability',
+    label: 'Vacation Pulse',
     hint: 'Time away, WFH and site visits',
     path: '/availability',
+    aliases: ['/vacation-pulse'],
     Icon: AvailabilityNavIcon,
     tile: 'border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-400/30 dark:bg-cyan-500/15 dark:text-cyan-200',
     hover: 'hover:border-cyan-300 hover:bg-cyan-100',
@@ -179,6 +182,12 @@ export const NAV_DESTINATIONS = [
     gate: 'onCall',
   },
 ];
+
+/** Is `pathname` inside this destination (its path or one of its aliases)? */
+export function destinationMatches(dest, pathname = '') {
+  return [dest?.path, ...(dest?.aliases || [])].filter(Boolean)
+    .some((p) => pathname === p || pathname.startsWith(`${p}/`));
+}
 
 // Session-scoped marker written by AdminRoute when it bounces a non-admin off
 // an admin page; AccessBounceToast reads it once so Tickets can say why.

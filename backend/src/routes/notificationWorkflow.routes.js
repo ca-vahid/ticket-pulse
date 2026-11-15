@@ -2217,12 +2217,60 @@ router.post(
   }),
 );
 
+// ----------------------------- One reopen path (MEGA 11-14, Part A, contract §4)
+
+// "Try it on a past reply": the ticket's last 10 incoming requester replies.
+router.get(
+  '/reply-candidates',
+  asyncHandler(async (req, res) => {
+    const ticketId = parseId(req.query.ticketId, 'ticket id');
+    const { replyCandidates } = await import('../services/replyPreviewService.js');
+    res.json({ success: true, data: await replyCandidates(req.workspaceId, ticketId) });
+  }),
+);
+
+// The workspace's reopen workflows and the two warnings (two at once / none).
+router.get(
+  '/reopen-check',
+  asyncHandler(async (req, res) => {
+    const { default: replyReopen } = await import('../services/requesterReplyReopenService.js');
+    res.json({ success: true, data: await replyReopen.reopenCheck(req.workspaceId) });
+  }),
+);
+
+// "This workflow can be updated": what the upgrade would change.
+router.get(
+  '/:id/reopen-upgrade',
+  asyncHandler(async (req, res) => {
+    const workflow = await notificationWorkflowRepository.getWorkflow(req.workspaceId, parseId(req.params.id, 'workflow id'));
+    const { planReopenUpgrade } = await import('../services/replyWorkflowUpgrade.js');
+    const plan = planReopenUpgrade(workflow);
+    res.json({ success: true, data: { available: plan.available, changes: plan.changes } });
+  }),
+);
+
+// Accept it: the upgraded definition becomes the DRAFT (never published here).
+router.post(
+  '/:id/reopen-upgrade',
+  asyncHandler(async (req, res) => {
+    const id = parseId(req.params.id, 'workflow id');
+    const workflow = await notificationWorkflowRepository.getWorkflow(req.workspaceId, id);
+    const { planReopenUpgrade } = await import('../services/replyWorkflowUpgrade.js');
+    const plan = planReopenUpgrade(workflow);
+    if (!plan.available) throw new ValidationError('This workflow is already up to date');
+    const saved = await notificationWorkflowRepository.saveDraft(req.workspaceId, id, { definition: plan.definition }, requestActor(req));
+    logger.info(`Reopen workflow #${id} upgraded to a draft in workspace ${req.workspaceId} by ${requestActorEmail(req) || 'unknown'}: ${plan.changes.join(' ')}`);
+    res.json({ success: true, data: { draftDefinition: saved.draftDefinition, changes: plan.changes } });
+  }),
+);
+
 router.post(
   '/test',
   asyncHandler(async (req, res) => {
     const workflowId = parseId(req.body.workflowId, 'workflow id');
     const workflow = await notificationWorkflowRepository.getWorkflow(req.workspaceId, workflowId);
     let eventContext = req.body.eventContext || null;
+    let replyPreview = null;
     if (req.body.ticketId) {
       const ticketId = parseId(req.body.ticketId, 'ticket id');
       const ticket = await prisma.ticket.findFirst({
@@ -2237,6 +2285,21 @@ router.post(
       });
       if (!ticket) throw new NotFoundError('Preview ticket not found in this workspace');
       eventContext = await buildPreviewEventContext({ ticket, triggerType: workflow.triggerType });
+      // "Try it on a past reply" (contract §4): one real reply, as if the
+      // ticket were `asStatus` (Closed by default). Preview only.
+      if (workflow.triggerType === 'ticket.reply_received' && req.body.replyEntryId !== undefined && req.body.replyEntryId !== null) {
+        const { prepareReplyPreview } = await import('../services/replyPreviewService.js');
+        replyPreview = await prepareReplyPreview({
+          workspaceId: req.workspaceId,
+          ticket,
+          eventContext,
+          replyEntryId: req.body.replyEntryId,
+          asStatus: typeof req.body.asStatus === 'string' && req.body.asStatus.trim() ? req.body.asStatus : 'Closed',
+          executeLlm: req.body.executeLlm === true,
+          definition: req.body.definition || workflow.draftDefinition || workflow.publishedDefinition,
+        });
+        eventContext = replyPreview.eventContext;
+      }
     }
     const routingPreview = await buildWorkflowRoutingPreview({
       workspaceId: req.workspaceId,
@@ -2275,7 +2338,21 @@ router.post(
         .map((finding) => ({ type: 'Unknown variable', message: finding.message, nodeId: finding.nodeId })))
       .catch(() => []);
     const warnings = [...(Array.isArray(result?.warnings) ? result.warnings : []), ...variableWarnings];
-    res.json({ success: true, data: { ...result, warnings, routingPreview: { ...routingPreview, ignoredRouting: req.body.ignoreRouting === true } } });
+    let replyPreviewOut = null;
+    if (replyPreview) {
+      const { previewOutcome } = await import('../services/replyPreviewService.js');
+      replyPreviewOut = {
+        ...replyPreview.replyPreviewBase,
+        ...previewOutcome({ steps: result?.steps, state: result?.state, asTerminal: replyPreview.asTerminal, replyVerdict: replyPreview.replyPreviewBase.replyVerdict }),
+      };
+    }
+    res.json({
+      success: true,
+      data: {
+        ...result, warnings, routingPreview: { ...routingPreview, ignoredRouting: req.body.ignoreRouting === true },
+        ...(replyPreviewOut ? { replyPreview: replyPreviewOut } : {}),
+      },
+    });
   }),
 );
 

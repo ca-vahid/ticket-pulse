@@ -25,6 +25,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import RunResultView from './RunResultView';
+import ReplyTrialBar, { ReplyOutcome } from './ReplyTrialBar';
 
 function cls(...parts) {
   return parts.filter(Boolean).join(' ');
@@ -173,7 +174,7 @@ function ticketCategory(ticket) {
 // spare pixel (a wide empty middle on a big screen) while requester, owner and
 // category stayed at fixed widths and cut their text short. Now the text
 // columns share the width in proportion; only the small ones stay fixed.
-function TicketTable({ items, loading, runningTicketId, lastTicketId, running, onRun }) {
+function TicketTable({ items, loading, runningTicketId, lastTicketId, running, onRun, pickOnly = false }) {
   return (
     <div className="settings-scrollbar min-h-0 flex-1 overflow-auto" data-testid="preview-ticket-table">
       <table className="w-full table-fixed border-separate border-spacing-0 text-xs">
@@ -226,12 +227,12 @@ function TicketTable({ items, loading, runningTicketId, lastTicketId, running, o
                     type="button"
                     onClick={() => onRun(ticket)}
                     disabled={running}
-                    aria-label={`Run preview on ${ticketRef(ticket)}`}
-                    title={`Run this workflow on ${ticketRef(ticket)}`}
+                    aria-label={pickOnly ? `Pick ${ticketRef(ticket)}` : `Run preview on ${ticketRef(ticket)}`}
+                    title={pickOnly ? `Pick one of ${ticketRef(ticket)}'s replies to try` : `Run this workflow on ${ticketRef(ticket)}`}
                     className="tp-focus-ring inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[11px] font-semibold text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {isRunning ? <RefreshCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Play className="h-3.5 w-3.5 fill-current" aria-hidden="true" />}
-                    Run
+                    {pickOnly ? 'Pick' : 'Run'}
                   </button>
                 </td>
                 <td className="truncate border-b border-border/60 px-2 font-mono text-[11px] font-semibold text-muted-foreground">{ticketRef(ticket)}</td>
@@ -374,8 +375,14 @@ export default function WorkflowPreviewPage({
   testSending = false,
   testResult = null,
   signalLabel,
+  // MEGA 11-14 (A4 item 8): a "Requester replied" workflow is tried on one of
+  // the ticket's past replies. A row picks the ticket; the bar picks the reply.
+  replyMode = false,
+  replyStatuses = undefined,
+  replyPreview = null,
 }) {
   const [pickerOpen, setPickerOpen] = useState(!hasRun && !running);
+  const [trialTicket, setTrialTicket] = useState(null);
   // A new run folds the list away; the strip brings it back.
   useEffect(() => {
     if (running) setPickerOpen(false);
@@ -393,7 +400,9 @@ export default function WorkflowPreviewPage({
 
   const items = tickets?.items || [];
   const showRun = hasRun || running;
-  const showPicker = pickerOpen || !showRun;
+  const activeTicket = replyMode ? (trialTicket || runTicket) : runTicket;
+  const showPicker = pickerOpen || (!showRun && !(replyMode && activeTicket));
+  const showStrip = (showRun || (replyMode && activeTicket)) && !showPicker;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="workflow-preview-page">
@@ -416,21 +425,23 @@ export default function WorkflowPreviewPage({
         </p>
       </header>
 
-      {showRun && !showPicker && (
+      {showStrip && (
         <div className="flex shrink-0 items-center gap-2 border-b border-border/60 bg-muted/30 px-4 py-1.5 text-xs" data-testid="preview-ticket-strip">
           <span className="text-muted-foreground">Ticket</span>
-          <span className="font-mono font-semibold text-foreground/85">{ticketRef(runTicket)}</span>
-          <span className="min-w-0 truncate text-foreground/85">{runTicket?.subject}</span>
+          <span className="font-mono font-semibold text-foreground/85">{ticketRef(activeTicket)}</span>
+          <span className="min-w-0 truncate text-foreground/85">{activeTicket?.subject}</span>
           <span className="ml-auto flex shrink-0 items-center gap-1">
-            <button
-              type="button"
-              onClick={() => runTicket && onRun(runTicket)}
-              disabled={running || !runTicket}
-              className="tp-focus-ring inline-flex h-7 items-center gap-1 rounded-md px-2 font-semibold text-primary hover:bg-primary/10 disabled:opacity-40"
-            >
-              {running ? <RefreshCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />}
-              Run again
-            </button>
+            {!replyMode && (
+              <button
+                type="button"
+                onClick={() => runTicket && onRun(runTicket)}
+                disabled={running || !runTicket}
+                className="tp-focus-ring inline-flex h-7 items-center gap-1 rounded-md px-2 font-semibold text-primary hover:bg-primary/10 disabled:opacity-40"
+              >
+                {running ? <RefreshCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />}
+                Run again
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setPickerOpen(true)}
@@ -441,6 +452,15 @@ export default function WorkflowPreviewPage({
             </button>
           </span>
         </div>
+      )}
+      {replyMode && activeTicket && !showPicker && (
+        <ReplyTrialBar
+          ticket={activeTicket}
+          statuses={replyStatuses}
+          running={running}
+          onTry={(reply) => onRun(activeTicket, { reply })}
+          onRunPlain={() => onRun(activeTicket)}
+        />
       )}
 
       {showPicker && (
@@ -460,10 +480,15 @@ export default function WorkflowPreviewPage({
             loading={ticketsLoading}
             running={running}
             runningTicketId={runTicket?.id}
-            lastTicketId={showRun ? runTicket?.id : null}
-            onRun={(ticket) => { setPickerOpen(false); onRun(ticket); }}
+            lastTicketId={showRun || (replyMode && activeTicket) ? activeTicket?.id : null}
+            pickOnly={replyMode}
+            onRun={(ticket) => {
+              setPickerOpen(false);
+              if (replyMode) setTrialTicket(ticket);
+              else onRun(ticket);
+            }}
           />
-          {showRun && (
+          {(showRun || (replyMode && activeTicket)) && (
             <button
               type="button"
               onClick={() => setPickerOpen(false)}
@@ -483,6 +508,7 @@ export default function WorkflowPreviewPage({
         </div>
       )}
 
+      {replyMode && showRun && !running && <ReplyOutcome replyPreview={replyPreview} />}
       {showRun && (
         <RunResultView
           model={model}

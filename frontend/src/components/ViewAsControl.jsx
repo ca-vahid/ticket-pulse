@@ -20,7 +20,7 @@ const VIEW_AS_ROLES = [
   { id: 'viewer', label: 'Standard', hint: 'Works tickets and approvals. Sees AI suggestions but cannot act on them.' },
   { id: 'reviewer', label: 'Reviewer', hint: 'Standard, plus approving or dismissing AI suggestions and Auto-help review.' },
   { id: 'admin', label: 'Workspace admin', hint: 'Everything in this workspace, without the super-admin sections.' },
-  { id: 'agent', label: 'Agent', hint: 'A technician with no access row: tickets, approvals, availability, own profile.' },
+  { id: 'agent', label: 'Agent', hint: 'A technician with no access row: tickets, approvals, Vacation Pulse, own profile.' },
 ];
 
 // The API module is loaded on use: this file is imported by the app header,

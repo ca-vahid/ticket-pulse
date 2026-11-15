@@ -827,8 +827,6 @@ export const ticketsAPI = {
   updateRequesterReplySettings: async (patch) => await api.put('/tickets/requester-reply-settings', patch),
   getAutoCloseSettings: async () => await api.get('/tickets/auto-close-settings'),
   updateAutoCloseSettings: async (patch) => await api.put('/tickets/auto-close-settings', patch),
-  // Bring back a mail workflow the page archived (14 Oct 2026).
-  restoreRequesterReplyWorkflow: async (workflowId) => await api.post('/tickets/requester-reply-settings/restore-workflow', { workflowId }),
   // "This reply looks like a new request" on one ticket.
   getNewRequestSuggestion: async (id) => await api.get(`/tickets/${id}/new-request-suggestion`),
   splitNewRequest: async (id, eventId) => await api.post(`/tickets/${id}/new-request-suggestion/${eventId}/split`),
@@ -1930,6 +1928,10 @@ export const assignmentAPI = {
   runNowStreamPath: (id) => `/assignment/runs/${id}/run-now?stream=true`,
   getQueue: (params) => api.get('/assignment/queue', { params }),
   getRuns: (params) => api.get('/assignment/runs', { params }),
+  // MEGA 11-14 Part B: suggestions left from before the queue settled itself.
+  // GET → { data: { count } }; POST → { data: { settled, remaining } } (idempotent).
+  getSettledBacklog: () => api.get('/assignment/settled-backlog'),
+  clearSettledBacklog: () => api.post('/assignment/settled-backlog/clear'),
   getPriorityAlertAudit: (params) => api.get('/assignment/audit/priority-alerts', { params }),
   getRun: (id) => api.get(`/assignment/runs/${id}`),
   getLatestRunForTicket: (ticketId) => api.get(`/assignment/ticket/${ticketId}/latest-run`),
@@ -2072,6 +2074,11 @@ export const notificationWorkflowAPI = {
   getRoutingMetadata: (params = {}) => api.get('/notification-workflows/routing/metadata', { params }),
   previewRouting: (data) => api.post('/notification-workflows/routing/preview', data),
   test: (data) => apiLongTimeout.post('/notification-workflows/test', data),
+  // MEGA 11-14 (Part A): reopen on a requester reply.
+  replyCandidates: (ticketId) => api.get('/notification-workflows/reply-candidates', { params: { ticketId } }),
+  reopenCheck: () => api.get('/notification-workflows/reopen-check'),
+  getReopenUpgrade: (id) => api.get(`/notification-workflows/${id}/reopen-upgrade`),
+  applyReopenUpgrade: (id) => api.post(`/notification-workflows/${id}/reopen-upgrade`),
   sendTestEmail: (data) => api.post('/notification-workflows/test-email', data),
   sendAuditTestEmail: (auditId) => api.post(`/notification-workflows/audits/${encodeURIComponent(auditId)}/send-test-email`),
   getAuditRunEmail: (auditId) => api.get(`/notification-workflows/audits/${encodeURIComponent(auditId)}/rendered-email`),

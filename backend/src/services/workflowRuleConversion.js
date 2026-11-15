@@ -14,7 +14,7 @@ import jsonLogic from 'json-logic-js';
 import {
   CONDITION_FIELDS, compileConditionGroup, registerWorkflowConditionOps, ruleVarPaths,
 } from './notificationConditionModel.js';
-import { conditionSwitchStop, describeConditionStep, ruleToConditionGroup } from './conditionRuleShared.js';
+import { conditionSwitchStop, describeConditionStep, ignoresThanks, ruleToConditionGroup } from './conditionRuleShared.js';
 
 registerWorkflowConditionOps(jsonLogic);
 
@@ -140,7 +140,9 @@ export function proveSame(oldData, newData, { kind = 'condition' } = {}) {
   const evaluate = kind === 'branch' ? branchMatches : conditionStepPasses;
   const paths = new Set(ruleVarPaths(oldData?.rule ?? true));
   if (oldData?.skipNoise || newData?.skipNoise) paths.add('ticket.isNoise');
-  if (oldData?.ignoreAutoHelpThanks || newData?.ignoreAutoHelpThanks) paths.add('event.extra.autoHelpReplyVerdict');
+  // The raw guard it replaces read Auto-help's verdict only (the switch also
+  // honours replyVerdict, which no raw rule ever set).
+  if (ignoresThanks(oldData) || ignoresThanks(newData)) paths.add('event.extra.autoHelpReplyVerdict');
   const { scopes, exhaustive } = scopeGrid([...paths], oldData?.rule ?? true);
   for (const scope of scopes) {
     let before;

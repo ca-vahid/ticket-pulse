@@ -106,6 +106,9 @@ const READERS = Object.freeze({
       'Reply with JSON only: {"verdict":"resolved"|"needs_help"|"unclear","reason":"one line"}.',
     ],
   },
+  // MEGA 11-14 (A3): six answers, so a reply workflow can branch on "Reply
+  // reads as". Only "thanks" leaves a closed ticket closed (with the step
+  // switch on); the reader maps the rest (requesterReplyReopenService).
   person: {
     yes: 'thanks',
     schema: Object.freeze({
@@ -113,17 +116,20 @@ const READERS = Object.freeze({
       additionalProperties: false,
       required: ['verdict'],
       properties: {
-        verdict: { type: 'string', enum: ['thanks', 'needs_reply', 'unclear'] },
+        verdict: { type: 'string', enum: ['thanks', 'auto_reply', 'still_broken', 'new_request', 'question', 'unclear'] },
         reason: { type: 'string' },
       },
     }),
     prompt: [
-      'Someone on a helpdesk answered a support ticket and resolved or closed it. The requester has now replied. Decide whether the reply needs anyone to do anything.',
+      'Someone on a helpdesk answered a support ticket and resolved or closed it. The requester has now replied. Decide whether the reply needs anyone to do anything, and what kind of reply it is.',
       FENCE_RULE,
       'verdict "thanks": the reply only thanks the helpdesk, acknowledges the answer, or says the problem is solved, and asks for nothing.',
-      'verdict "needs_reply": they still have a problem (even partly, even for someone else), it broke again, they ask a question or for anything new, they add information, or they want a person.',
+      'verdict "auto_reply": an automatic reply (out of office, on leave, mailbox not monitored), not written by the person for this ticket.',
+      'verdict "still_broken": the same problem is not fixed, came back, or is only partly fixed.',
+      'verdict "new_request": they ask for something different from the original ticket (a new problem or a new piece of work).',
+      'verdict "question": they ask a question about the answer or the ticket, or add information for it.',
       'verdict "unclear": anything else (e.g. "thanks, will try" or "I will check tomorrow"). When in doubt, answer "unclear".',
-      'Reply with JSON only: {"verdict":"thanks"|"needs_reply"|"unclear","reason":"one line"}.',
+      'Reply with JSON only: {"verdict":"thanks"|"auto_reply"|"still_broken"|"new_request"|"question"|"unclear","reason":"one line"}.',
     ],
   },
 });

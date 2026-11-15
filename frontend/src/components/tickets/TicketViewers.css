@@ -1,0 +1,69 @@
+/* Who else is on this ticket (MEGA 11-14 Part K). The eye moves once on a
+   change — opens when someone arrives, closes when someone leaves — and never
+   loops. Every move is under a second. With the app's motion setting off
+   (html[data-motion="reduce"]) the JS skips the eye classes and the name line
+   gets a short steady underline + tint instead; the rules at the bottom also
+   cover the setting flipping mid-change. */
+
+.tp-eye-lid,
+.tp-eye-count,
+.tp-eye-closed {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.tp-eye-anim-open .tp-eye-lid { animation: tpEyeOpen 560ms cubic-bezier(0.2, 0.8, 0.3, 1) 1 both; }
+.tp-eye-anim-open .tp-eye-count { animation: tpEyeBump 420ms ease-out 360ms 1 both; }
+.tp-eye-anim-blink .tp-eye-lid { animation: tpEyeBlink 620ms ease-in-out 1 both; }
+.tp-eye-anim-blink .tp-eye-count { animation: tpEyeBump 400ms ease-out 420ms 1 both; }
+.tp-eye-anim-shut .tp-eye-lid { animation: tpEyeShut 520ms ease-in 1 both; }
+.tp-eye-anim-shut .tp-eye-closed { animation: tpEyeLidIn 520ms ease-out 1 both; }
+
+@keyframes tpEyeOpen {
+  0% { transform: scaleY(0.08); }
+  55% { transform: scaleY(1.06); }
+  100% { transform: scaleY(1); }
+}
+@keyframes tpEyeBlink {
+  0% { transform: scaleY(1); }
+  45% { transform: scaleY(0.08); }
+  100% { transform: scaleY(1); }
+}
+@keyframes tpEyeShut {
+  0% { transform: scaleY(1); opacity: 1; }
+  75% { transform: scaleY(0.08); opacity: 1; }
+  100% { transform: scaleY(0.08); opacity: 0; }
+}
+@keyframes tpEyeLidIn {
+  0%, 70% { opacity: 0; }
+  100% { opacity: 1; }
+}
+@keyframes tpEyeBump {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.3); }
+  100% { transform: scale(1); }
+}
+
+/* The name line on a change (motion off): a brief underline and tint. */
+.tp-viewers-flash .tp-viewers-line {
+  text-decoration-line: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+  text-decoration-color: rgb(139 92 246);
+  background-color: rgb(139 92 246 / 0.12);
+  border-radius: 4px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.dark .tp-viewers-flash .tp-viewers-line {
+  text-decoration-color: rgb(196 181 253);
+  background-color: rgb(139 92 246 / 0.22);
+}
+
+html[data-motion="reduce"] .tp-eye-lid,
+html[data-motion="reduce"] .tp-eye-count,
+html[data-motion="reduce"] .tp-eye-closed {
+  animation: none !important;
+}
+html[data-motion="reduce"] .tp-eye-anim-shut .tp-eye-lid { display: none; }
+html[data-motion="reduce"] .tp-eye-anim-shut .tp-eye-closed { opacity: 1; }

@@ -59,13 +59,21 @@ import {
   Waypoints,
   XCircle,
   PauseCircle,
+  TicketPlus,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { notificationWorkflowAPI, ticketsAPI } from '../../services/api';
-import ConditionGroupBuilder from './ConditionGroupBuilder';
+import ConditionGroupBuilder, { CG_FIELDS, sentenceValueLabel } from './ConditionGroupBuilder';
 import ConditionStepEditor, { RuleAsCodeNotice } from './ConditionStepEditor';
-import { stepRuleConversionPatch } from '../../utils/conditionStepView';
+import { REPLY_TRIGGER, describeStep, stepRuleConversionPatch } from '../../utils/conditionStepView';
 import { describeConditionStep, ruleToConditionGroup } from '../../utils/conditionRuleShared';
+import {
+  NewTicketFromReplyEditor,
+  ReopenCheckNotice,
+  ReopenUpgradeBanner,
+  reopenCheckKey,
+  useReopenCheck,
+} from './ReopenWorkflowNotices';
 import SenderIdentityCard from './SenderIdentityCard';
 import EmailChipsInput from '../common/EmailChipsInput';
 import FieldCardNote, { FIELD_CARD_ACCENTS } from '../tickets/FieldCardNote';
@@ -361,6 +369,16 @@ const WORKFLOW_NODE_REGISTRY = {
     outputHandles: ['default'],
     addable: true,
   },
+  // MEGA 11-14 (A7): "Requester replied" only (REPLY_ONLY_NODE_TYPES).
+  create_ticket_from_reply: {
+    label: 'New ticket from this reply',
+    icon: TicketPlus,
+    color: '#2563eb',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+    addable: true,
+  },
   request_approval: {
     label: 'Request approval',
     icon: UserCheck,
@@ -442,6 +460,14 @@ const ADDABLE_NODE_TYPES = Object.entries(WORKFLOW_NODE_REGISTRY)
   .filter(([, config]) => config.addable)
   .map(([type]) => type);
 
+/** Steps that only make sense on one trigger (MEGA 11-14, contract §3). */
+const TRIGGER_ONLY_NODE_TYPES = { create_ticket_from_reply: REPLY_TRIGGER };
+
+/** The steps "Add step" / "Insert a step" offer on a workflow with this trigger. */
+export function addableNodeTypesFor(triggerType) {
+  return ADDABLE_NODE_TYPES.filter((type) => !TRIGGER_ONLY_NODE_TYPES[type] || TRIGGER_ONLY_NODE_TYPES[type] === triggerType);
+}
+
 // Grouped "Add step" palette (QA 07-07 #8): same registry, organized with
 // one-line hints instead of a flat list. Unlisted addable types fall into
 // "More" so a new node type can never silently vanish from the palette.
@@ -471,6 +497,7 @@ const NODE_PALETTE_GROUPS = [
       add_note: 'Post an internal note or interactive field card to the conversation',
       park_ticket: 'Park the ticket for N days with a reason (or end its park)',
       create_child_ticket: 'Spawn a linked follow-up ticket',
+      create_ticket_from_reply: 'Start a linked ticket from the reply; this one stays closed',
       request_approval: 'Route an approval to a category of managers',
       propose_reply: 'Stage the draft on the ticket for human approval',
     },
@@ -660,7 +687,11 @@ export const CONDITION_FIELD_OPTIONS = [
   { value: 'event.readyReason', label: 'Ticket ready because (auto_help_answering / auto_help_done / auto_help_off / timeout)', example: 'auto_help_done' },
   { value: 'event.autoHelpAnswered', label: 'Auto-help answered the requester', example: 'false' },
   { value: 'event.autoHelpReplyVerdict', label: 'Reply after an Auto-help close reads as', example: 'confirmed' },
-  { value: 'event.replyVerdict', label: 'Reply to a closed ticket reads as (thanks / auto_reply / reply)', example: 'thanks' },
+  // MEGA 11-14 (Part A): the facts about a reply, worked out once per reply.
+  { value: 'event.sentBy', label: 'Reply sent by (requester / cc / workflow_recipient / other)', example: 'requester' },
+  { value: 'event.replyVerdict', label: 'Reply reads as (thanks / auto_reply / still_broken / new_request / question / reply)', example: 'thanks' },
+  { value: 'event.replyReopens24h', label: 'Reopened by replies in the last 24 hours', example: '1' },
+  { value: 'ticket.closedMinutes', label: 'Minutes since the ticket closed (empty while open)', example: '4320' },
   { value: 'availability.isAfterHours', label: 'After-hours state', example: 'true' },
   { value: 'event.systemNote', label: 'Note was written by the system', example: 'false' },
   { value: 'event.senderIsAgent', label: 'Reply sender is an agent', example: 'false' },
@@ -1870,10 +1901,12 @@ function flowNodesFromDefinition(definition, selectedNodeId) {
 
 /** Canvas subtitle for a condition step: the short sentence, the long one on hover. */
 export function conditionCaption(data = {}) {
-  // describeConditionStep reads a raw rule through the same converter.
-  const short = describeConditionStep(data || {}, { short: true });
+  // describeStep reads a raw rule through the same converter, and words the
+  // step switches (thank-you, loop guard) too.
+  const words = { fields: CG_FIELDS, valueLabel: sentenceValueLabel };
+  const short = describeStep(data || {}, { ...words, short: true });
   if (!short) return { sourceCaption: 'Rule written as code', captionTitle: 'This step uses a rule written as code. Open it to see the rule.' };
-  return { sourceCaption: short, captionTitle: describeConditionStep(data || {}) };
+  return { sourceCaption: short, captionTitle: describeStep(data || {}, words) };
 }
 
 function flowEdgesFromDefinition(definition, onInsert = null) {
@@ -2125,6 +2158,9 @@ function defaultNodeData(type, triggerType = 'ticket.created') {
       priority: 2,
       notifyRequester: false,
     };
+  }
+  if (type === 'create_ticket_from_reply') {
+    return { label: 'New ticket from this reply', note: '' };
   }
   if (type === 'request_approval') {
     return {
@@ -2411,9 +2447,14 @@ export function validateWorkflowDefinitionClient(definition, triggerType = null)
   }
   // Mirrors the server rule: any ACTION node qualifies — a propose_reply-only
   // workflow (e.g. the AI first-reply template) is valid without a send node.
-  const CLIENT_ACTION_NODE_TYPES = ['send_email', 'update_ticket', 'add_note', 'park_ticket', 'call_webhook', 'send_teams_message', 'create_child_ticket', 'request_approval', 'propose_reply'];
+  const CLIENT_ACTION_NODE_TYPES = ['send_email', 'update_ticket', 'add_note', 'park_ticket', 'call_webhook', 'send_teams_message', 'create_child_ticket', 'create_ticket_from_reply', 'request_approval', 'propose_reply'];
   if (!nodes.some((node) => CLIENT_ACTION_NODE_TYPES.includes(node.type))) {
     errors.push('Workflow must include at least one action node (send email, update ticket, add note, webhook, Teams message, child ticket, approval, or stage-for-approval)');
+  }
+  // MEGA 11-14 (contract §3): mirrors the server's publish check.
+  const workflowTrigger = triggerType || triggers[0]?.data?.triggerType || null;
+  if (workflowTrigger && nodes.some((node) => TRIGGER_ONLY_NODE_TYPES[node.type] && TRIGGER_ONLY_NODE_TYPES[node.type] !== workflowTrigger)) {
+    errors.push('"New ticket from this reply" works only on "Requester replied" workflows.');
   }
 
   for (const edge of edges) {
@@ -3109,6 +3150,11 @@ function summarizePreviewStep(step) {
   }
   if (step?.nodeType === 'template_render') return output.email?.subject || 'Template rendered';
   if (step?.nodeType === 'add_note') return output.summary || output.reason || 'Note added to the ticket';
+  if (step?.nodeType === 'create_ticket_from_reply') {
+    if (output.dryRun) return 'Would open a new ticket from this reply';
+    if (output.created) return `Opened ${output.created.displayRef || `ticket ${output.created.id}`} from this reply`;
+    if (output.skipped) return output.reason || 'No new ticket';
+  }
   if (step?.nodeType === 'send_email') return output.reason || 'Email delivery simulated';
   if (step?.nodeType === 'send_teams_message') {
     if (output.failed) return output.error || 'Teams message could not be sent';
@@ -7064,7 +7110,7 @@ function StepNameField({ value, placeholder, onCommit }) {
   );
 }
 
-function NodePalette({ onAddNode, onRemoveNode, onUndo, canUndo = false, workflow, onRename }) {
+export function NodePalette({ onAddNode, onRemoveNode, onUndo, canUndo = false, workflow, onRename, triggerType = null }) {
   const { resolvedTheme } = useTheme();
   const [addOpen, setAddOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -7148,12 +7194,13 @@ function NodePalette({ onAddNode, onRemoveNode, onUndo, canUndo = false, workflo
             Add step
             </button>
             {addOpen && (() => {
+              const addable = addableNodeTypesFor(triggerType || workflow?.triggerType || null);
               const grouped = new Set(NODE_PALETTE_GROUPS.flatMap((group) => Object.keys(group.hints)));
-              const leftovers = ADDABLE_NODE_TYPES.filter((type) => !grouped.has(type));
+              const leftovers = addable.filter((type) => !grouped.has(type));
               const sections = [
                 ...NODE_PALETTE_GROUPS.map((group) => ({
                   label: group.label,
-                  entries: Object.entries(group.hints).filter(([type]) => ADDABLE_NODE_TYPES.includes(type)),
+                  entries: Object.entries(group.hints).filter(([type]) => addable.includes(type)),
                 })),
                 ...(leftovers.length ? [{ label: 'More', entries: leftovers.map((type) => [type, null]) }] : []),
               ].filter((section) => section.entries.length);
@@ -7325,6 +7372,7 @@ export default function NotificationWorkflowsPanel({
   // not mounted while the page shows); runs and the pipeline use it.
   const previewDefinitionRef = useRef(null);
   const previewPreviousRunIdRef = useRef(null);
+  const previewReplyRef = useRef(null); // the reply being tried on a reply workflow (MEGA 11-14)
   const [previewTestSending, setPreviewTestSending] = useState(false);
   const [previewTestResult, setPreviewTestResult] = useState(null);
   // Ticket metadata (technicians / categories / groups / approval categories /
@@ -8932,10 +8980,14 @@ export default function NotificationWorkflowsPanel({
     setPreviewModalOpen(false);
   }
 
-  async function runPreview(ticket = selectedPreviewTicket, { ignoreRouting = false } = {}) {
+  async function runPreview(ticket = selectedPreviewTicket, { ignoreRouting = false, reply = null } = {}) {
     if (!selected || !ticket || previewRunning) return;
     const previewDefinition = previewDefinitionRef.current || draft;
     if (!previewDefinition) return;
+    // MEGA 11-14: "Try it on a past reply". A "Run anyway" past the routing
+    // rule keeps the reply that was being tried.
+    const replyTrial = reply || (ignoreRouting ? previewReplyRef.current : null);
+    previewReplyRef.current = replyTrial;
     previewPreviousRunIdRef.current = preview?.runId || previewLive?.runId || null;
     setSelectedPreviewTicket(ticket);
     setPreview(null);
@@ -8953,10 +9005,12 @@ export default function NotificationWorkflowsPanel({
         workflowId: selected.id,
         ticketId: ticket.id,
         definition: previewDefinition,
-        executeLlm: true,
+        // A reply trial runs the AI only when "Use AI" is ticked (contract §4).
+        executeLlm: replyTrial ? replyTrial.executeLlm === true : true,
         forceActionLinks: true,
         // QA 10-20 #8: a ticket the routing rule skips stops there unless asked.
         ...(ignoreRouting ? { ignoreRouting: true } : {}),
+        ...(replyTrial ? { replyEntryId: replyTrial.replyEntryId, asStatus: replyTrial.asStatus || 'Closed' } : {}),
       });
       setPreview(response.data);
     } catch (error) {
@@ -10332,6 +10386,10 @@ export default function NotificationWorkflowsPanel({
       );
     }
 
+    if (selectedNode.type === 'create_ticket_from_reply') {
+      return <NewTicketFromReplyEditor data={selectedNode.data || {}} onChange={updateNodeData} />;
+    }
+
     if (selectedNode.type === 'add_note') {
       return (
         <AddNoteNodeEditor
@@ -10410,7 +10468,11 @@ export default function NotificationWorkflowsPanel({
                         {describeConditionStep({ conditionGroup: group }).replace(/^Continues when /, 'Takes this branch when ').replace(/^Every ticket continues\./, 'Every ticket takes this branch.')}
                       </p>
                     )}
-                    <ConditionGroupBuilder value={group} onChange={(next) => writeBranch({ conditionGroup: next })} />
+                    <ConditionGroupBuilder
+                      value={group}
+                      onChange={(next) => writeBranch({ conditionGroup: next })}
+                      triggerType={draft?.nodes?.find((node) => node.type === 'trigger')?.data?.triggerType || selected?.triggerType || null}
+                    />
                   </>
                 );
               })()}
@@ -11515,6 +11577,29 @@ export default function NotificationWorkflowsPanel({
     );
   }
 
+  // MEGA 11-14 (Part A): the reopen-on-reply pieces. The reopen check is asked
+  // again whenever a reply workflow is switched, published or archived.
+  const draftTriggerType = draft?.nodes?.find((node) => node.type === 'trigger')?.data?.triggerType || selected?.triggerType || null;
+  const selectedIsReplyWorkflow = Boolean(selected) && draftTriggerType === REPLY_TRIGGER;
+  const reopenCheck = useReopenCheck(reopenCheckKey(workflows));
+  const reopenWarnings = Array.isArray(reopenCheck?.warnings) ? reopenCheck.warnings : [];
+  const replyPreviewOpen = previewModalOpen && selectedIsReplyWorkflow;
+  const [replyStatuses, setReplyStatuses] = useState(null);
+  useEffect(() => {
+    if (!replyPreviewOpen || replyStatuses) return undefined;
+    let cancelled = false;
+    // The workspace's own statuses, from the condition-field catalog (any admin can read it).
+    Promise.resolve()
+      .then(() => notificationWorkflowAPI.conditionFields())
+      .then((res) => {
+        const field = (res?.data || []).find((f) => f?.value === 'ticket.status');
+        const names = (field?.options || []).map((o) => (o && typeof o === 'object' ? o.value : o)).filter(Boolean);
+        if (!cancelled && names.length) setReplyStatuses(names);
+      })
+      .catch(() => { /* the bar falls back to Open / Pending / Resolved / Closed */ });
+    return () => { cancelled = true; };
+  }, [replyPreviewOpen, replyStatuses]);
+
   const healthWarnings = Array.isArray(health?.warnings) ? health.warnings : [];
   // Workflow watch signals for the open workflow (QA 10-05 #5). The list hides
   // "Skip noise tickets no longer skips noise" (QA 10-19 #3); its own page
@@ -11601,6 +11686,9 @@ export default function NotificationWorkflowsPanel({
           testSending={previewTestSending}
           testResult={previewTestResult}
           signalLabel={signalLevelLabel}
+          replyMode={selectedIsReplyWorkflow}
+          replyStatuses={replyStatuses || undefined}
+          replyPreview={preview?.replyPreview || null}
         />
       </div>
     );
@@ -11937,6 +12025,7 @@ export default function NotificationWorkflowsPanel({
               onDiscardLocalDraft={discardLocalDraftFromList}
               actions={<WorkflowTemplatesMenu saving={saving} onInstalled={loadWorkflows} setMessage={setMessage} />}
               footer={<WorkflowHealthMenu health={health} warnings={healthWarnings} variant="card" />}
+              notice={reopenWarnings.length > 0 ? <ReopenCheckNotice warnings={reopenWarnings} className="rounded-lg border px-3 py-2" /> : null}
             />
           </div>
         )}
@@ -11953,6 +12042,22 @@ export default function NotificationWorkflowsPanel({
               <div ref={editorSplitRef} className="flex min-h-0 min-w-0">
                 <div className="min-h-0 min-w-0 flex-1">
                   <main className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
+                    {/* MEGA 11-14 (A4): on a "Requester replied" workflow, the
+                        upgrade offer and the reopen check sit above the canvas. */}
+                    {selectedIsReplyWorkflow && !selected?.archivedAt && (
+                      <ReopenUpgradeBanner
+                        workflowId={selected.id}
+                        className="border-b px-4 py-2.5"
+                        disabledReason={editorDirty ? 'Save or discard your changes on screen first.' : null}
+                        onApplied={async () => {
+                          await loadWorkflow(selected.id);
+                          setMessage({ type: 'success', text: 'The update is in the draft. Check it, then Save & publish.' });
+                        }}
+                      />
+                    )}
+                    {selectedIsReplyWorkflow && reopenWarnings.length > 0 && (
+                      <ReopenCheckNotice warnings={reopenWarnings} className="border-b px-4 py-2" />
+                    )}
                     {selectedWatchSignals.length > 0 && (
                       <div className="border-b border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-4 py-2 text-xs text-amber-900 dark:text-amber-200" data-testid="workflow-editor-watch-signals">
                         <ul className="space-y-1">
@@ -12051,6 +12156,7 @@ export default function NotificationWorkflowsPanel({
                           canUndo={undoDepth > 0}
                           workflow={selected}
                           onRename={renameWorkflow}
+                          triggerType={draftTriggerType}
                         />
                       )}
                       {edgeInsert && draft && (
@@ -12066,7 +12172,7 @@ export default function NotificationWorkflowsPanel({
                                 {edgeInsert.sourceHandle ? ` (${edgeInsert.sourceHandle} branch)` : ''}
                               </div>
                             </div>
-                            {ADDABLE_NODE_TYPES.map((type) => {
+                            {addableNodeTypesFor(draftTriggerType).map((type) => {
                               const TypeIcon = WORKFLOW_NODE_REGISTRY[type]?.icon;
                               return (
                                 <button

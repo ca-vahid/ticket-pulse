@@ -173,7 +173,8 @@ export function addReopenGuard(definition) {
   const node = (def?.nodes || []).find((n) => n?.id === 'is-resolved' && n?.type === 'condition');
   if (!node) return { changed: false, definition, why: 'no is-resolved condition' };
   const text = JSON.stringify(node.data || {});
-  if (node.data?.ignoreAutoHelpThanks === true || text.includes('autoHelpReplyVerdict')) return { changed: false, definition, why: 'already guarded' };
+  // `ignoreThanks` is the same switch under its MEGA 11-14 name.
+  if (node.data?.ignoreAutoHelpThanks === true || node.data?.ignoreThanks === true || text.includes('autoHelpReplyVerdict')) return { changed: false, definition, why: 'already guarded' };
   if (!node.data?.conditionGroup && !node.data?.rule) return { changed: false, definition, why: 'no rule to extend' };
   // 14 Oct 2026: the guard is the step's switch ("Ignore a thank-you or
   // out-of-office reply after an Auto-help close"), applied by the engine

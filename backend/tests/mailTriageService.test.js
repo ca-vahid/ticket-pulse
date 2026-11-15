@@ -834,9 +834,10 @@ describe('judging a held mail', () => {
     const hold = readFileSync(new URL('../src/services/mailboxHoldService.js', import.meta.url), 'utf8');
     const ingest = readFileSync(new URL('../src/services/mailboxIngestService.js', import.meta.url), 'utf8');
     expect(hold).toMatch(/async attach\(id, ticketId, actor, \{ workspaceId = null, reopen = null \} = \{\}\)/);
-    expect(hold).toMatch(/'held_reply_attach', \{\s*\.\.\.\(agent \? \{ agent \} : \{\}\),\s*\.\.\.\(reopen === false \? \{ keepClosed: true \} : \{\}\),\s*\}\)/);
-    expect(ingest).toMatch(/const keepClosed = \(workflowRef \|\| addQuietly === true\) && await this\._isClosedOrResolved\(ticket\);/);
-    expect(ingest).toMatch(/if \(requesterSide\) \{\s*if \(keepClosed\) \{[\s\S]{0,300}\} else \{[\s\S]{0,300}emitTicketEvent\('ticket\.reply_received'/);
+    expect(hold).toMatch(/'held_reply_attach', \{\s*\.\.\.\(agent \? \{ agent \} : \{\}\),[\s\S]{0,200}\.\.\.\(reopen === false \? \{ keepClosed: true, keptClosedBy: [^}]+\} : \{\}\),\s*\}\)/);
+    // MEGA 11-14 (A1): only Mail review's choice keeps a closed ticket closed; a workflow-mail match no longer does.
+    expect(ingest).toMatch(/const keepClosed = addQuietly === true && closedOnArrival;/);
+    expect(ingest).toMatch(/if \(requesterSide\) \{\s*if \(keepClosed\) \{[\s\S]{0,900}\} else \{[\s\S]{0,300}emitTicketEvent\('ticket\.reply_received'/);
   });
 
   test('On: machine mail never reopens, whatever the model says', async () => {

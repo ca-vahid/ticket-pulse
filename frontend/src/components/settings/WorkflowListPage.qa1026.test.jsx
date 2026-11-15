@@ -4,9 +4,9 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 
 // QA 10-26 #1: the row "⋯" only shows where its menu holds something real.
-// The seeded "Reopen on requester reply" default had a menu with only
-// "New variant", and a variant of it has nothing to add (Ticket Ops → When a
-// requester replies owns what a reply does).
+// MEGA 11-14 (G9): workflows are now the only thing that reopens a ticket on
+// a reply, so the seeded "Reopen on requester reply" default offers "New
+// variant" again (it was blocked while Ticket Ops owned the reopen).
 vi.mock('../../contexts/WorkspaceContext', () => ({ useWorkspace: () => ({ currentWorkspace: { id: 1 } }) }));
 
 import WorkflowListPage from './WorkflowListPage';
@@ -24,29 +24,28 @@ const keys = (wf) => rowMenuItems(wf).map((i) => i.key);
 const rowFor = (name) => screen.getAllByTestId('workflow-list-row').find((row) => within(row).getByRole('link').textContent.startsWith(name));
 
 describe('workflow row menu (QA 10-26 #1)', () => {
-  test('New variant is offered only where a variant can apply', () => {
-    expect(canAddVariant(REOPEN)).toBe(false);
+  test('New variant is offered on every live workflow, the reopen default included (G9)', () => {
+    expect(canAddVariant(REOPEN)).toBe(true);
     expect(canAddVariant(CLOSED)).toBe(true);
     expect(canAddVariant(ROUTED)).toBe(true);
     expect(canAddVariant(ARCHIVED)).toBe(false);
-    // A non-default workflow on the reply trigger is someone's own automation: it can still be copied.
+    expect(canAddVariant(null)).toBe(false);
     expect(canAddVariant({ ...ROUTED, triggerType: 'ticket.reply_received' })).toBe(true);
-    expect(keys(REOPEN)).toEqual([]);
+    expect(keys(REOPEN)).toEqual(['variant']);
     expect(keys(CLOSED)).toEqual(['variant']);
     expect(keys(ROUTED)).toEqual(['variant', 'archive']);
     expect(keys(ARCHIVED)).toEqual(['restore', 'delete']);
-    // An archived default (retired by Ticket Ops) can still be restored.
+    // An archived default (retired by the old Ticket Ops switch) can still be restored.
     expect(keys({ ...REOPEN, archivedAt: new Date().toISOString() })).toEqual(['restore']);
   });
 
-  test('the reopen default has no ⋯ button; other rows keep theirs', () => {
+  test('the reopen default has its ⋯ with "New variant…"', () => {
     const onRowAction = vi.fn();
     render(<WorkflowListPage workflows={[REOPEN, CLOSED, ROUTED]} onOpen={vi.fn()} onRowAction={onRowAction} eventLabels={LABELS} getVisuals={() => ({})} />);
-    expect(within(rowFor('Reopen on requester reply')).queryByRole('button', { name: /More actions/ })).toBeNull();
-    fireEvent.click(within(rowFor('Ticket resolved or closed')).getByRole('button', { name: 'More actions for Ticket resolved or closed' }));
+    fireEvent.click(within(rowFor('Reopen on requester reply')).getByRole('button', { name: 'More actions for Reopen on requester reply' }));
     expect(screen.getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['New variant…']);
     fireEvent.click(screen.getByRole('menuitem', { name: 'New variant…' }));
-    expect(onRowAction).toHaveBeenCalledWith(CLOSED, 'variant');
+    expect(onRowAction).toHaveBeenCalledWith(REOPEN, 'variant');
   });
 });
 

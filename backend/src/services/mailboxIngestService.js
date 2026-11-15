@@ -18,6 +18,7 @@ import { fsConversationEntryId } from '../utils/fsEntryId.js';
 import { freshserviceWillIngest } from './fsHelpdeskAddressService.js';
 import { judgeMeetingMail } from '../utils/meetingInvite.js';
 import { longNumbersDiffer, maskCounters } from '../utils/subjectIdentity.js';
+import { ticketEndedAt } from '../utils/ticketEndedAt.js';
 
 // In-memory memory of messages handed to the hold queue (RL-4) so the delta
 // poller does not re-fetch them every catch-up round; bounded, process-local
@@ -46,19 +47,9 @@ const INBOX_BACKLOG = 250;
 const DESCRIPTION_KEEP = 90000;
 const OLD_CLOSED_DAYS = 14;
 
-/**
- * When a ticket ended (closed or resolved). Tickets brought in by the FreshService
- * history import carry neither date (10 Nov 2026), so a terminal status falls back
- * to FreshService's own last update, then the last real activity — never updatedAt,
- * which is the import time.
- */
-export function ticketEndedAt(ticket) {
-  if (!ticket) return null;
-  const direct = ticket.closedAt || ticket.resolvedAt;
-  if (direct) return direct;
-  const terminal = /^(closed|resolved)$/i.test(String(ticket.status || ''));
-  return terminal ? (ticket.freshserviceUpdatedAt || ticket.lastRealActivityAt || null) : null;
-}
+// When a ticket ended (closed or resolved): utils/ticketEndedAt.js, shared with
+// the reply facts (replyFacts.js closedMinutes).
+export { ticketEndedAt };
 
 export function endedLongAgo(ticket, now = Date.now()) {
   const ended = ticketEndedAt(ticket);
@@ -1416,17 +1407,20 @@ class MailboxIngestService {
    *    never re-sent), no reply_received event; it fires
    *    ticket.public_reply_added marked alreadyDelivered (4.3.49).
    */
-  async ingestReply(connection, ticket, email, via, { agent: resolvedAgent = null, ctx = null, keepClosed: addQuietly = false } = {}) {
+  async ingestReply(connection, ticket, email, via, { agent: resolvedAgent = null, ctx = null, keepClosed: addQuietly = false, keptClosedBy = null } = {}) {
     connection = await this._withAliases(connection);
     const now = new Date();
     const recipients = emailRecipients(email);
     // QA 11-09 #3: an answer to a workflow mail (a project manager replying to
     // "BST completion") goes into the conversation as an incoming reply. It is
-    // not an Outlook copy of an agent's reply to the requester, and on a
-    // closed or resolved ticket it never reopens it.
+    // not an Outlook copy of an agent's reply to the requester.
     const workflowRef = via === 'workflow_mail_ref';
-    // Mail review (11 Nov 2026): "add without reopening" asks for the same quiet path.
-    const keepClosed = (workflowRef || addQuietly === true) && await this._isClosedOrResolved(ticket);
+    // MEGA 11-14 (A1): a reply to a workflow mail is a reply like any other —
+    // the workflows decide whether it reopens (with event.replyToWorkflowEmail).
+    // Only Mail review's explicit "add without reopening" keeps a closed
+    // ticket closed here, and fires no "Requester replied".
+    const closedOnArrival = await this._isClosedOrResolved(ticket);
+    const keepClosed = addQuietly === true && closedOnArrival;
     const isForward = !workflowRef && Boolean(resolvedAgent && ctx?.parsed?.isForward && ctx?.originalOk);
     // FR 09-11 #1: identity is per TICKET, not per workspace. Someone who is an
     // agent elsewhere can be the REQUESTER on this ticket — QA's own tester is
@@ -1442,6 +1436,11 @@ class MailboxIngestService {
     const isAgentReply = Boolean(agent && !isForward && !workflowRef);
     // "Requester replied" (and its reopen workflow) is for the requester side only.
     const requesterSide = !isAgentReply && !(workflowRef && agent);
+    // G2: a requester reply on a ticket that is closed when it lands is written
+    // to the FreshService side only AFTER the workflows ran — as a note while
+    // the ticket stays closed, as an incoming reply once it reopened — so
+    // FreshService can never undo a "stays closed". Open tickets: as before.
+    const copyAfterWorkflows = requesterSide && !keepClosed && closedOnArrival;
     const forwardedMeta = isForward ? this._forwardedMeta(agent, email, ctx.parsed, { sliced: false }) : null;
     // Helpdesk mailbox: pictures pasted into the reply, resolved on what the person wrote (not on the quoted thread).
     const writtenHtml = stripQuotedHtml(email.bodyHtml);
@@ -1516,6 +1515,10 @@ class MailboxIngestService {
         ...(ccAdded ? { ccEmails: ccMerge.next, mirrorState: 'pending' } : {}),
       },
     });
+    // QA 11-12 #2: workflows can ask "does this reply answer a workflow e-mail?"
+    // (also kept on the reply's history row for the editor's "try it on a past reply").
+    const wfMail = requesterSide && !keepClosed && !workflowRef ? await this._workflowMailInThread(connection.workspaceId, email) : null;
+    const replyToWorkflowEmail = workflowRef || Boolean(wfMail);
     await ticketActivityRepository.create({
       ticketId: ticket.id,
       activityType: isAgentReply ? 'agent_reply' : 'requester_reply',
@@ -1526,6 +1529,7 @@ class MailboxIngestService {
         emailMessageId: email.internetMessageId,
         source: 'email_inbound',
         entryId: entry.id,
+        ...(requesterSide ? { replyToWorkflowEmail } : {}),
         ...(keepClosed ? { keptClosed: true } : {}),
         ...(isAgentReply ? { deliveryState: 'external', technicianId: agent.id, actorEmail: agent.email } : {}),
         ...(isForward ? {
@@ -1560,27 +1564,24 @@ class MailboxIngestService {
     // nothing answered before it — the same stamp the in-app reply sets.
     if (isAgentReply) await this._stampAgentFirstResponse(ticket, entry, email, agent, now);
 
-    if (ticket.origin === TICKET_ORIGIN.TICKETPULSE) {
-      await mirrorService.enqueueThreadEntry(ticket.workspaceId, ticket.id, entry.id);
-      if (ccAdded) await mirrorService.enqueueFieldSync?.(ticket.workspaceId, ticket.id)?.catch?.(() => {});
-    } else if (ticket.freshserviceTicketId) {
-      // FS-born (17 Sep 2026): this mail answered something Ticket Pulse sent, so
-      // FreshService has not seen it — write it onto the FS ticket as an incoming
-      // note by the requester; the later FS conversation sync lands on this row.
-      await this._writeReplyToFreshService(ticket, entry, email, { isAgentReply, agent, keepClosed });
-    }
+    if (!copyAfterWorkflows) await this._writeReplyCopy(ticket, entry, email, { isAgentReply, agent, keepClosed, ccAdded });
 
-    // Workflow trigger: "Requester replied" (drives the seeded reopen
-    // workflow). An agent's own Outlook reply is not a requester reply.
-    // A reply to a workflow mail on a closed ticket fires nothing that reopens
-    // it (QA 11-09 #3): no reply_received, so no reopen workflow, no Ticket Ops
-    // reopen and no "new request" follow-up.
-    // QA 11-12 #2: workflows can ask "does this reply answer a workflow e-mail?"
-    const wfMail = requesterSide && !keepClosed ? await this._workflowMailInThread(connection.workspaceId, email) : null;
-    const replyToWorkflowEmail = workflowRef || Boolean(wfMail);
+    // Workflow trigger: "Requester replied" (drives the reopen workflow). An
+    // agent's own Outlook reply is not a requester reply. Mail review's "add
+    // without reopening" fires nothing that could reopen the ticket (and the
+    // ticket's history says who chose that).
     if (requesterSide) {
       if (keepClosed) {
-        logger.info(`${ticketDisplayRef(ticket)}: reply from ${email.from} to a workflow mail recorded; the ${ticket.status} ticket stays ${ticket.status}`);
+        logger.info(`${ticketDisplayRef(ticket)}: reply from ${email.from} added without reopening; the ${ticket.status} ticket stays ${ticket.status}`);
+        try {
+          const { default: replyReopen, WHY_LINES } = await import('./requesterReplyReopenService.js');
+          await replyReopen.writeQuietLine(ticket, {
+            text: WHY_LINES.mail_review({ person: keptClosedBy || 'a person in Mail review' }),
+            cause: 'mail_review', replyEntryId: entry.id, stamp: `reply:${entry.id}`,
+          });
+        } catch (err) {
+          logger.warn(`"Added without reopening" line not written for ${ticketDisplayRef(ticket)} (non-fatal): ${err.message}`);
+        }
       } else {
         try {
           const { default: lifecycle } = await import('./ticketLifecycleNotificationService.js');
@@ -1590,6 +1591,8 @@ class MailboxIngestService {
             extra: {
               entryId: entry.id,
               from: isForward ? forwardedMeta.originalFrom : email.from,
+              ...(email.fromName ? { fromName: email.fromName } : {}),
+              ...(email.onBehalfOf?.email ? { onBehalfOf: email.onBehalfOf.email } : {}),
               via,
               replyToWorkflowEmail,
               ...(wfMail?.name ? { replyToWorkflow: wfMail.name } : {}),
@@ -1599,6 +1602,15 @@ class MailboxIngestService {
         } catch (err) {
           logger.warn(`reply_received workflow dispatch failed (non-fatal): ${err.message}`);
         }
+      }
+      // G2: the ticket was closed when the reply landed — the workflows have
+      // run; write the FreshService side by what they left (never skipped).
+      if (copyAfterWorkflows) {
+        const stillClosed = await Promise.resolve()
+          .then(() => prisma.ticket.findUnique({ where: { id: ticket.id }, select: { id: true, workspaceId: true, status: true } }))
+          .then((row) => this._isClosedOrResolved(row || ticket))
+          .catch(() => true);
+        await this._writeReplyCopy(ticket, entry, email, { isAgentReply, agent, keepClosed: stillClosed, ccAdded });
       }
 
       // Category/group watchers who opted into requester replies (fire-and-forget).
@@ -1730,6 +1742,33 @@ class MailboxIngestService {
     } catch (err) {
       logger.warn(`public_reply_added for the Outlook reply on ${ticketDisplayRef(ticket)} not dispatched (non-fatal): ${err.message}`);
       return false;
+    }
+  }
+
+  /**
+   * The FreshService side of an inbound reply. TP-born: the fallback copy via
+   * the mirror queue — `keepClosed` stamps the entry so the copy gets a note,
+   * not an incoming reply FreshService would reopen on. FS-born: the direct
+   * write-back (_writeReplyToFreshService), the same rule. Never throws.
+   */
+  async _writeReplyCopy(ticket, entry, email, { isAgentReply = false, agent = null, keepClosed = false, ccAdded = false } = {}) {
+    try {
+      if (ticket.origin === TICKET_ORIGIN.TICKETPULSE) {
+        if (keepClosed && entry.rawPayload?.keepClosed !== true) {
+          const rawPayload = { ...(entry.rawPayload && typeof entry.rawPayload === 'object' ? entry.rawPayload : {}), keepClosed: true };
+          await Promise.resolve().then(() => prisma.ticketThreadEntry.update({ where: { id: entry.id }, data: { rawPayload } })).catch(() => {});
+          entry.rawPayload = rawPayload;
+        }
+        await mirrorService.enqueueThreadEntry(ticket.workspaceId, ticket.id, entry.id);
+        if (ccAdded) await mirrorService.enqueueFieldSync?.(ticket.workspaceId, ticket.id)?.catch?.(() => {});
+      } else if (ticket.freshserviceTicketId) {
+        // FS-born (17 Sep 2026): this mail answered something Ticket Pulse sent, so
+        // FreshService has not seen it — write it onto the FS ticket as an incoming
+        // note by the requester; the later FS conversation sync lands on this row.
+        await this._writeReplyToFreshService(ticket, entry, email, { isAgentReply, agent, keepClosed });
+      }
+    } catch (err) {
+      logger.warn(`FreshService side of the reply on ${ticketDisplayRef(ticket)} not queued (non-fatal): ${err.message}`);
     }
   }
 

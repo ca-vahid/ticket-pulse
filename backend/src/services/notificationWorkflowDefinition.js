@@ -145,6 +145,18 @@ export function installableWorkflowTemplates() {
 }
 
 export const WORKFLOW_TEMPLATES = [
+  // MEGA 11-14 (contract §7): the ready-made reopen workflow, for a workspace
+  // that lost its seeded copy or wants a second one for a set of tickets.
+  {
+    key: 'reopen_on_requester_reply',
+    name: 'Reopen on requester reply',
+    description: 'When the requester (not an agent, not a survey answer) replies to a resolved, closed or waiting ticket, reopen it. A thank-you or out-of-office does not reopen, and it stops after 3 reopens by replies in a day.',
+    triggerType: 'ticket.reply_received',
+    build: () => {
+      const def = buildReopenOnReplyDefinition({ generatedBy: 'ticket-pulse-template' });
+      return { ...def, version: 2, metadata: { ...def.metadata, installedFromTemplate: true } };
+    },
+  },
   // QA 09-16 #3: HR's "On Leave Notification" e-mails are protected from the
   // noise verdict (person sender) but a FreshService rule closes them within
   // minutes. This files them instead: low priority, a tag, a note that says
@@ -922,6 +934,14 @@ export const NOTIFICATION_NODE_REGISTRY = Object.freeze({
     inputHandles: ['default'],
     outputHandles: ['default'],
   },
+  // MEGA 11-14 (A7): "Requester replied" only — the reply starts its own
+  // ticket (linked as related); the replied-to ticket stays closed.
+  create_ticket_from_reply: {
+    label: 'New ticket from this reply',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+  },
   request_approval: {
     label: 'Request approval',
     terminal: false,
@@ -1168,7 +1188,7 @@ function validateGraph(definition, triggerType) {
 
   // Keep in sync with the client mirror in NotificationWorkflowsPanel.jsx
   // (the builder repeats this "at least one action" check for save-time UX).
-  const ACTION_NODE_TYPES = ['send_email', 'update_ticket', 'add_note', 'park_ticket', 'call_webhook', 'send_teams_message', 'create_child_ticket', 'request_approval', 'propose_reply'];
+  const ACTION_NODE_TYPES = ['send_email', 'update_ticket', 'add_note', 'park_ticket', 'call_webhook', 'send_teams_message', 'create_child_ticket', 'create_ticket_from_reply', 'request_approval', 'propose_reply'];
   if (!definition.nodes.some((node) => ACTION_NODE_TYPES.includes(node.type))) {
     errors.push(`Workflow must include at least one action node (${ACTION_NODE_TYPES.join(', ')})`);
   }
@@ -1309,6 +1329,15 @@ function validateGraph(definition, triggerType) {
       if (node.data?.placement !== undefined && node.data?.placement !== null
         && !ADD_NOTE_PLACEMENTS.includes(node.data.placement)) {
         errors.push(`Add-note node ${node.id} placement must be note, pinned, or both`);
+      }
+    }
+
+    if (node.type === 'create_ticket_from_reply') {
+      if (triggerType !== 'ticket.reply_received') {
+        errors.push(`"New ticket from this reply" (${node.id}) only works on the "Requester replied" trigger`);
+      }
+      if (node.data?.note !== undefined && node.data?.note !== null && (typeof node.data.note !== 'string' || node.data.note.length > 300)) {
+        errors.push(`"New ticket from this reply" (${node.id}): the extra line must be text of at most 300 characters`);
       }
     }
 
@@ -1650,6 +1679,74 @@ function defaultAfterHoursTemplate() {
   };
 }
 
+/** The reopen workflow's shape version: rows + both switches (MEGA 11-14). */
+export const REOPEN_SHAPE_VERSION = 2;
+export const REOPEN_STATUSES = Object.freeze(['Resolved', 'Closed', 'Pending Response']);
+export const REOPEN_NOTE = 'Reopened automatically — the requester replied.';
+/** The rows every ready-made reopen workflow checks before its status list. */
+export const REOPEN_GUARD_ROWS = Object.freeze([
+  Object.freeze({ field: 'event.senderIsAgent', operator: 'is_false' }),
+  Object.freeze({ field: 'event.isSurveyResponse', operator: 'is_false' }),
+]);
+
+/**
+ * The ready-made "Reopen on requester reply" (contract §7): the sender is not
+ * an agent or a survey answer → the status list → both step switches ("Don't
+ * reopen on a thank-you or out-of-office reply", "Stop after 3 reopens by
+ * replies in a day") → reopen. The seeded default and the gallery template.
+ */
+export function buildReopenOnReplyDefinition({ scheduleMode = 'standard', generatedBy = 'ticket-pulse-default' } = {}) {
+  const triggerType = 'ticket.reply_received';
+  return {
+    version: 1,
+    metadata: {
+      label: 'Reopen on requester reply',
+      generatedBy,
+      scheduleMode,
+      offHoursWorkflow: false,
+      shapeVersion: REOPEN_SHAPE_VERSION,
+      description: 'When a requester replies to a resolved or closed ticket, reopen it so the reply is not missed.',
+    },
+    nodes: [
+      { id: 'trigger', type: 'trigger', position: { x: 0, y: 60 }, data: { triggerType } },
+      {
+        id: 'is-resolved',
+        type: 'condition',
+        position: { x: 260, y: 60 },
+        data: {
+          label: 'A requester reply to a resolved, closed or waiting ticket?',
+          conditionGroup: {
+            logic: 'all',
+            conditions: [
+              ...REOPEN_GUARD_ROWS.map((row) => ({ ...row })),
+              { field: 'ticket.status', operator: 'in', value: [...REOPEN_STATUSES] },
+            ],
+          },
+          // A thank-you or out-of-office (Auto-help's reading or the reply
+          // facts') leaves the ticket closed; the 4th reopen by replies in a
+          // day takes the False path.
+          ignoreThanks: true,
+          replyLoopGuard: true,
+        },
+      },
+      {
+        id: 'reopen',
+        type: 'update_ticket',
+        position: { x: 540, y: 0 },
+        data: { setStatus: 'Open', note: REOPEN_NOTE },
+      },
+      { id: 'done', type: 'stop', position: { x: 800, y: 0 }, data: {} },
+      { id: 'skip', type: 'stop', position: { x: 540, y: 150 }, data: {} },
+    ],
+    edges: [
+      { id: 'e-trigger', source: 'trigger', target: 'is-resolved' },
+      { id: 'e-true', source: 'is-resolved', target: 'reopen', sourceHandle: 'true' },
+      { id: 'e-reopen', source: 'reopen', target: 'done' },
+      { id: 'e-false', source: 'is-resolved', target: 'skip', sourceHandle: 'false' },
+    ],
+  };
+}
+
 export function defaultWorkflowKey(triggerType) {
   return triggerType.replace('ticket.', 'ticket_').replace('.', '_');
 }
@@ -1660,53 +1757,9 @@ export function buildDefaultWorkflowDefinition(triggerType, options = {}) {
   // "Reopen on requester reply" is an ACTION workflow (no email): if the
   // requester replies to a Resolved/Closed ticket, reopen it. Fully editable —
   // admins can add conditions, change the target status, or bolt on an email.
-  if (triggerType === 'ticket.reply_received') {
-    return {
-      version: 1,
-      metadata: {
-        label: 'Reopen on requester reply',
-        generatedBy: 'ticket-pulse-default',
-        scheduleMode,
-        offHoursWorkflow: false,
-        description: 'When a requester replies to a resolved or closed ticket, reopen it so the reply is not missed.',
-      },
-      nodes: [
-        { id: 'trigger', type: 'trigger', position: { x: 0, y: 60 }, data: { triggerType } },
-        {
-          id: 'is-resolved',
-          type: 'condition',
-          position: { x: 260, y: 60 },
-          data: {
-            label: 'Ticket resolved, closed or waiting on the requester?',
-            // 14 Oct 2026: builder rows + a step switch instead of a raw rule
-            // (the rule that mattered was invisible behind an empty builder).
-            // Pending Response joins Resolved/Closed — the requester answered.
-            conditionGroup: {
-              logic: 'all',
-              conditions: [{ field: 'ticket.status', operator: 'in', value: ['Resolved', 'Closed', 'Pending Response'] }],
-            },
-            // Auto-help integration W3: within 7 days of an Auto-help close the
-            // reply is read first — a thank-you / an out-of-office leaves it closed.
-            ignoreAutoHelpThanks: true,
-          },
-        },
-        {
-          id: 'reopen',
-          type: 'update_ticket',
-          position: { x: 540, y: 0 },
-          data: { setStatus: 'Open', note: 'Reopened automatically — the requester replied.' },
-        },
-        { id: 'done', type: 'stop', position: { x: 800, y: 0 }, data: {} },
-        { id: 'skip', type: 'stop', position: { x: 540, y: 150 }, data: {} },
-      ],
-      edges: [
-        { id: 'e-trigger', source: 'trigger', target: 'is-resolved' },
-        { id: 'e-true', source: 'is-resolved', target: 'reopen', sourceHandle: 'true' },
-        { id: 'e-reopen', source: 'reopen', target: 'done' },
-        { id: 'e-false', source: 'is-resolved', target: 'skip', sourceHandle: 'false' },
-      ],
-    };
-  }
+  // Since MEGA 11-14 (Part A) workflows are the only thing that reopens on a
+  // reply, and this is the ready-made shape (metadata.shapeVersion 2).
+  if (triggerType === 'ticket.reply_received') return buildReopenOnReplyDefinition({ scheduleMode });
 
   const template = scheduleMode === 'after_hours' && triggerType === 'ticket.created'
     ? defaultAfterHoursTemplate()
@@ -2192,6 +2245,10 @@ export function notificationVariableCatalog(extraOutputFields = [], { customFiel
     // QA 11-12 #2: "Requester replied" to an e-mail a workflow sent.
     variable('event.extra.replyToWorkflowEmail', 'Reply answers a workflow e-mail', 'Event', 'Requester replied: true when an e-mail a workflow sent is in the reply’s thread (answered directly or in a reply-all chain).', 'true'),
     variable('event.extra.replyToWorkflow', 'Workflow whose e-mail was answered', 'Event', 'Requester replied: the name of that workflow.', 'BST Completion Email'),
+    variable('event.extra.sentBy', 'Reply sent by', 'Event', 'Requester replied: requester, cc (someone Cc\'d), workflow_recipient (someone a workflow e-mailed) or other.', 'requester'),
+    variable('event.extra.replyVerdict', 'Reply reads as', 'Event', 'Requester replied: thanks, auto_reply, still_broken, new_request, question or reply. Only when a reply workflow reads it.', 'still_broken'),
+    variable('event.extra.replyReopens24h', 'Reopened by replies in the last 24 hours', 'Event', 'Requester replied: how many times reply workflows reopened this ticket in the last day.', '1'),
+    variable('ticket.closedMinutes', 'Time since the ticket closed (minutes)', 'Event', 'Requester replied: minutes since the ticket was resolved or closed; empty when it is open.', '2880'),
     // "Ticket updated (fields)" payload (TU-6) — rendered by ticketChangeRenderer.
     variable('event.extra.actorName', 'Updated by (name)', 'Ticket update', 'Who made the field change — the agent, the API key name, "Notification workflow", or the FreshService actor.', 'Cora Coordinator'),
     variable('event.extra.actorKind', 'Updated by (kind)', 'Ticket update', 'human, api, system, workflow or freshservice.', 'human'),

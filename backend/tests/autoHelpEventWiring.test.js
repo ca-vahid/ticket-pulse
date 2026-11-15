@@ -84,19 +84,22 @@ test('ticket.categorized (first) no longer starts Auto-help', async () => {
 });
 
 describe('reopen-on-reply guard: the reply after an Auto-help close is read first', () => {
+  // MEGA 11-14 (A2): the cheap reply facts ride on every reply (no sender here,
+  // no close date, no reopens today).
+  const FACTS = { sentBy: 'other', replyReopens24h: 0, closedMinutes: null };
   test('thanks after an Auto-help close → autoHelpReplyVerdict confirmed on the event', async () => {
     prismaMock.ticket.findUnique.mockResolvedValue({ ...TICKET, status: 'Resolved', resolvedByKind: 'auto_help' });
     followUpMock.classifyPostCloseReply.mockResolvedValue({ verdict: 'confirmed', via: 'keywords', runId: 901 });
     await emitTicketEvent('ticket.reply_received', 501, { dedupeStamp: 'reply:77', extra: { entryId: 77 } });
     expect(followUpMock.classifyPostCloseReply).toHaveBeenCalledWith(expect.objectContaining({ id: 501, resolvedByKind: 'auto_help' }), { entryId: 77 });
-    expect(engineMock.executeForEvent.mock.calls[0][0].event.extra).toEqual({ entryId: 77, autoHelpReplyVerdict: 'confirmed' });
+    expect(engineMock.executeForEvent.mock.calls[0][0].event.extra).toEqual({ entryId: 77, autoHelpReplyVerdict: 'confirmed', ...FACTS });
   });
 
   test('tickets a person closed are not read (no extra model call)', async () => {
     prismaMock.ticket.findUnique.mockResolvedValue({ ...TICKET, status: 'Resolved', resolvedByKind: 'agent' });
     await emitTicketEvent('ticket.reply_received', 501, { dedupeStamp: 'reply:78', extra: { entryId: 78 } });
     expect(followUpMock.classifyPostCloseReply).not.toHaveBeenCalled();
-    expect(engineMock.executeForEvent.mock.calls[0][0].event.extra).toEqual({ entryId: 78 });
+    expect(engineMock.executeForEvent.mock.calls[0][0].event.extra).toEqual({ entryId: 78, ...FACTS });
   });
 
   test('a failed read never blocks the reply event (reopen as usual)', async () => {
@@ -104,6 +107,6 @@ describe('reopen-on-reply guard: the reply after an Auto-help close is read firs
     followUpMock.classifyPostCloseReply.mockRejectedValue(new Error('model down'));
     await emitTicketEvent('ticket.reply_received', 501, { dedupeStamp: 'reply:79', extra: { entryId: 79 } });
     expect(engineMock.executeForEvent).toHaveBeenCalledTimes(1);
-    expect(engineMock.executeForEvent.mock.calls[0][0].event.extra).toEqual({ entryId: 79 });
+    expect(engineMock.executeForEvent.mock.calls[0][0].event.extra).toEqual({ entryId: 79, ...FACTS });
   });
 });

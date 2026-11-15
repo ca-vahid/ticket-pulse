@@ -9,10 +9,11 @@
  *  2. New request?    → suggest splitting the reply into its own ticket.
  *
  * Both are per-workspace switches (requesterReplyRulesService) and both are
- * no-ops for a FreshService system line (survey response), an agent's own
- * reply, or a thank-you / out-of-office that left the ticket closed
- * (14 Oct 2026, requesterReplyReopenService). Never throws: a reply is always
- * recorded whatever happens here.
+ * no-ops for a FreshService system line (survey response) or an agent's own
+ * reply. Since MEGA 11-14 (G7) the caller starts them only when the ticket is
+ * open after the workflows: a reply the workflows left closed, for whatever
+ * reason, reroutes nothing and suggests nothing. Never throws: a reply is
+ * always recorded whatever happens here.
  */
 import logger from '../utils/logger.js';
 
@@ -22,7 +23,8 @@ import logger from '../utils/logger.js';
  * @param {string|null} p.statusBaseBefore  its base status then (Open / Pending / Resolved / Closed)
  * @param {string|null} p.stamp  the reply's dedupe stamp
  * @param {object|null} p.extra  the event's extra
- * @param {string|null} p.staysClosed  'thanks' | 'auto_reply' when the reply left the ticket closed
+ * @param {string|null} p.staysClosed  a reason the reply left the ticket closed (callers since
+ *                                     MEGA 11-14 do not call at all then; kept for safety)
  */
 export async function afterRequesterReplyEvent({ before, statusBaseBefore = null, stamp = null, extra = null, staysClosed = null } = {}) {
   const out = { ownerAway: null, newRequest: null };

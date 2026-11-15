@@ -29,10 +29,10 @@ export const EVENT_META = {
   survey_response: { icon: '⭐', word: 'Survey', heading: 'Survey response', banner: 'accent' },
   group_unassigned: { icon: '🆕', word: 'New', heading: 'New unassigned ticket', banner: 'accent' },
   test: { icon: '👋', word: 'Test', heading: 'Test message', banner: 'accent' },
-  av_submitted: { icon: '🗓️', word: 'Availability', heading: 'Time away', banner: 'accent' },
-  av_decided: { icon: '🗓️', word: 'Availability', heading: 'Time away decided', banner: 'accent' },
-  av_reminder: { icon: '⏰', word: 'Availability', heading: 'Time away starts', banner: 'accent' },
-  av_approval_waiting: { icon: '🙋', word: 'Availability', heading: 'Time-away approval waiting', banner: 'accent' },
+  av_submitted: { icon: '🗓️', word: 'Vacation Pulse', heading: 'Time away', banner: 'accent' },
+  av_decided: { icon: '🗓️', word: 'Vacation Pulse', heading: 'Time away decided', banner: 'accent' },
+  av_reminder: { icon: '⏰', word: 'Vacation Pulse', heading: 'Time away starts', banner: 'accent' },
+  av_approval_waiting: { icon: '🙋', word: 'Vacation Pulse', heading: 'Time-away approval waiting', banner: 'accent' },
 };
 
 const PRIORITY = { 1: ['Low', 'Default'], 2: ['Medium', 'Good'], 3: ['High', 'Warning'], 4: ['Urgent', 'Attention'] };

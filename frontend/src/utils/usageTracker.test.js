@@ -27,6 +27,9 @@ describe('resolvePage', () => {
     ['/assignments/run/28885', '', '', 'assignments.run', ''],
     ['/knowledge/solutions/412', '', '', 'knowledge', 'solutions'],
     ['/availability', '', '', 'availability', ''],
+    // MEGA 11-14 Part J: the /vacation-pulse alias is the same page.
+    ['/vacation-pulse', '', '', 'availability', ''],
+    ['/vacation-pulse/approvals', '', '', 'availability', 'approvals'],
     ['/on-call', '', '?request=41', 'oncall', ''],
     ['/analytics/category-map', '', '', 'analytics.category-map', ''],
   ])('%s%s%s is %s / "%s"', (pathname, hash, search, key, section) => {
@@ -69,6 +72,7 @@ describe('resolvePage', () => {
 test('labels and window sizes', () => {
   expect(pageLabel('tickets.detail')).toBe('Ticket');
   expect(pageLabel('assignments', 'history')).toBe('Assignment review: history');
+  expect(pageLabel('availability', 'my-time')).toBe('Vacation Pulse: my-time');
   expect(pageLabel('something.new')).toBe('something.new');
   expect([500, 800, 1280, 1600, 2560].map(viewportBand)).toEqual(['phone', 'tablet', 'laptop', 'desktop', 'wide']);
 });

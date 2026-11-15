@@ -190,7 +190,11 @@ class TicketSplitService {
       // re-deciding it, and don't email the requester unless asked.
       runAiTriage: input.runAiTriage === true,
       notifyRequester: input.notifyRequester === true,
-    }, actor);
+    }, actor, {
+      // "New ticket from this reply" (MEGA 11-14, A7): the new ticket came in by
+      // e-mail, so "Ticket arrived" workflows that check "Created via" treat it so.
+      ...(['email', 'app'].includes(input.createdVia) ? { createdVia: input.createdVia } : {}),
+    });
 
     const childRef = child.displayRef || `TP-${child.nativeNumber || child.id}`;
 

@@ -70,7 +70,7 @@ import {
   groupReferencesCustomFields,
   registerWorkflowConditionOps,
 } from './notificationConditionModel.js';
-import { AUTO_HELP_THANKS_VERDICTS, conditionSwitchStop } from './conditionRuleShared.js';
+import { AUTO_HELP_THANKS_VERDICTS, REPLY_LOOP_LIMIT, conditionSwitchStop } from './conditionRuleShared.js';
 import { bulletproofButtons, withBaseFont } from '../utils/emailHtmlHardening.js';
 import { DEFAULT_ZONE, formatHumanTime, isIsoTimestamp } from '../utils/humanTime.js';
 import { refPositionFor, ticketMailSubject } from './mailSubjectService.js';
@@ -2462,18 +2462,27 @@ export function explainSwitchStop(kind, evalScope = {}) {
     return { source: 'skip_noise', noiseSkipped: true, summary: 'Skip noise tickets is on and this ticket is marked as noise' };
   }
   const extra = evalScope?.event?.extra || {};
+  if (kind === 'reply_loop') {
+    return {
+      source: 'reply_loop',
+      replyLoopStopped: true,
+      reopens: Number(extra.replyReopens24h) || 0,
+      summary: `replies reopened this ticket ${Number(extra.replyReopens24h) || 0} times in the last 24 hours, and this step stops after ${REPLY_LOOP_LIMIT}`,
+    };
+  }
+  // 'reply_thanks' (MEGA 11-14; 'auto_help_thanks' before): Auto-help's own
+  // reading after its close, else the reply facts' reading of any reply.
   const autoHelp = AUTO_HELP_THANKS_VERDICTS.includes(extra.autoHelpReplyVerdict);
-  // 14 Oct 2026: the "When a requester replies" page reads replies to any
-  // closed ticket (event.extra.replyVerdict) and the same switch honours it.
-  const verdict = autoHelp ? extra.autoHelpReplyVerdict : extra.replyVerdict;
+  const raw = autoHelp ? extra.autoHelpReplyVerdict : extra.replyVerdict;
+  const verdict = raw === 'auto_reply' ? 'auto_reply' : 'thanks';
   const reads = verdict === 'auto_reply' ? 'an out-of-office or automatic reply' : 'a thank-you';
   return {
-    source: 'auto_help_thanks',
-    autoHelpThanksIgnored: true,
+    source: 'reply_thanks',
+    replyThanksIgnored: true,
     verdict,
     summary: autoHelp
-      ? `the reply reads as ${reads} after an Auto-help close, and this step is set to ignore those`
-      : `the reply reads as ${reads} (When a requester replies), and this step is set to ignore those`,
+      ? `the reply reads as ${reads} after an Auto-help close, and this step is set not to reopen on those`
+      : `the reply reads as ${reads}, and this step is set not to reopen on those`,
   };
 }
 
@@ -2531,10 +2540,11 @@ async function executeNode({
       }
     }
     // QA 10-06 #2: "Skip noise tickets" is the step's own switch now, not a
-    // condition row that could be dropped without anyone seeing it. 14 Oct
-    // 2026: so is "Ignore a thank-you or out-of-office reply after an
-    // Auto-help close" (ignoreAutoHelpThanks) — both checked before the
-    // conditions (conditionRuleShared.conditionSwitchStop).
+    // condition row that could be dropped without anyone seeing it. So are
+    // "Don't reopen on a thank-you or out-of-office reply" (ignoreThanks, or
+    // the older ignoreAutoHelpThanks) and "Stop after 3 reopens by replies in
+    // a day" (replyLoopGuard) — all checked before the conditions
+    // (conditionRuleShared.conditionSwitchStop).
     const switchStop = conditionSwitchStop(node.data, evalScope);
     const passed = switchStop || compileError ? false : Boolean(jsonLogic.apply(rule, evalScope));
     // QA 10-05 #5: say what was checked and what the ticket had, so a stop is
@@ -2543,7 +2553,11 @@ async function executeNode({
       ? explainSwitchStop(switchStop, evalScope)
       : explainConditionStep(node, { passed, compileError, evalScope, customFieldTypes: conditionTypes });
     if (state && typeof state === 'object') {
-      state.lastCondition = { nodeId: node.id, label: node.data?.label || node.id, passed, summary: explain.summary };
+      // `source` / `verdict`: the reply's "why it didn't reopen" line (MEGA 11-14, A6).
+      state.lastCondition = {
+        nodeId: node.id, label: node.data?.label || node.id, passed, summary: explain.summary,
+        source: explain.source || null, ...(explain.verdict ? { verdict: explain.verdict } : {}),
+      };
     }
     return { passed, rule, explain, ...(compileError ? { compileError } : {}) };
   }
@@ -2706,6 +2720,22 @@ async function executeNode({
       renderedDescription,
       dryRun: dryRun === true || executionMode === 'mock' || executionMode === 'preview',
     });
+  }
+
+  // "New ticket from this reply" (MEGA 11-14, A7): the reply starts its own
+  // ticket, linked to this one as related; this one stays closed. Preview and
+  // Shadow only say so. The engine notes it on the run state, so the reply's
+  // "why" line points at the new ticket.
+  if (node.type === 'create_ticket_from_reply') {
+    const { executeCreateTicketFromReplyNode } = await import('./notificationWorkflowActionNodes.js');
+    const output = await executeCreateTicketFromReplyNode(node, eventContext, {
+      workflow,
+      dryRun: dryRun === true || executionMode === 'mock' || executionMode === 'preview',
+    });
+    if (output?.created?.id && state && typeof state === 'object') {
+      state.replyNewTicket = { id: output.created.id, displayRef: output.created.displayRef || null, note: String(node.data?.note || '').slice(0, 300) || null };
+    }
+    return output;
   }
 
   if (node.type === 'request_approval') {
@@ -4556,6 +4586,13 @@ export async function executeUpdateTicketNode(node, eventContext, { dryRun = fal
   // deliberately still NOT emitted from workflow writes: that is a standing
   // decision to keep status-setting workflows from cascading into each other.
   await emitWorkflowReopened({ ticket, patch, workflowId, actor });
+  // MEGA 11-14 Part B: a workflow that closes the ticket settles its open AI
+  // review suggestions (this write never reaches the lifecycle service).
+  if (patch.status && patch.status !== ticket.status) {
+    await import('./reviewQueueSettleService.js')
+      .then(({ default: settle }) => settle.settleOnChange(ticket, { ...ticket, ...patch }, { source: 'workflow' }))
+      .catch(() => {});
+  }
   // Re-opened counter (QA 09-25 #1): same bypass — this write never reaches
   // the lifecycle service, so feed the counter here. Never throws.
   if (patch.status && patch.status !== ticket.status) {

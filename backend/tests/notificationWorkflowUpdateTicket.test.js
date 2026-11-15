@@ -41,12 +41,17 @@ describe('Phase 5: generalized workflow events + update_ticket action', () => {
     // 14 Oct 2026: builder rows, no raw rule. Pending Response reopens too (FreshService
     // used to do that before IT mail moved to Ticket Pulse). Auto-help integration W3 is
     // now a switch: a thank-you or out-of-office after an Auto-help close does not reopen.
+    // MEGA 11-14: the sender is not an agent or a survey answer, both switches on.
     expect(condition.data.rule).toBeUndefined();
     expect(condition.data.conditionGroup).toEqual({
       logic: 'all',
-      conditions: [{ field: 'ticket.status', operator: 'in', value: ['Resolved', 'Closed', 'Pending Response'] }],
+      conditions: [
+        { field: 'event.senderIsAgent', operator: 'is_false' },
+        { field: 'event.isSurveyResponse', operator: 'is_false' },
+        { field: 'ticket.status', operator: 'in', value: ['Resolved', 'Closed', 'Pending Response'] },
+      ],
     });
-    expect(condition.data.ignoreAutoHelpThanks).toBe(true);
+    expect(condition.data).toMatchObject({ ignoreThanks: true, replyLoopGuard: true });
   });
 
   test('action-only workflows (update_ticket, no send_email) are valid now', () => {

@@ -702,7 +702,7 @@ class TeamsAssistantService {
         row = (again.rows || []).find((x) => x.id === checked.confirm.id) || null;
       }
       const only = row ? [{ tool: 'time_away_waiting_for_me', counts: { total: 1 }, rows: [row], link: '/availability/approvals' }] : shown;
-      const a = answerCard(only, { access, lead: 'Approve or deny it on the Availability page; deciding time away from Teams comes next.', turnId, base, title: 'Time away to decide' });
+      const a = answerCard(only, { access, lead: 'Approve or deny it in Vacation Pulse; deciding time away from Teams comes next.', turnId, base, title: 'Time away to decide' });
       return { card: a.card, summary: a.summary, shownIds: [checked.confirm.id] };
     }
     if (checked.kind === 'help') return { card: this._helpCard(), summary: 'What I can help with (examples).', shownIds: [] };

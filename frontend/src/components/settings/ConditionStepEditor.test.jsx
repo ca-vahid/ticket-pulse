@@ -19,7 +19,7 @@ vi.mock('../../contexts/WorkspaceContext', () => ({
 }));
 
 import ConditionStepEditor from './ConditionStepEditor';
-import { conditionStepView, stepRuleConversionPatch } from '../../utils/conditionStepView';
+import { conditionStepView, describeStep, stepRuleConversionPatch } from '../../utils/conditionStepView';
 
 /**
  * Workflow conditions without code (14 Oct 2026): Vahid opened "Reopen on
@@ -34,13 +34,14 @@ const REOPEN_RULE = { and: [{ in: [v('ticket.status'), ['Resolved', 'Closed']] }
 const CODE_RULE = { '===': [v('ticket.status'), 'Closed'] };
 
 describe('a raw-rule step opens as rows', () => {
-  test('the seeded reopen rule shows the sentence, the rows and the Auto-help switch — no code', () => {
+  test('the seeded reopen rule shows the sentence, the rows and the thank-you switch — no code', () => {
     render(<ConditionStepEditor data={{ label: 'Reopen?', rule: REOPEN_RULE }} triggerType="ticket.reply_received" onPatch={() => {}} />);
+    // MEGA 11-14: the old Auto-help guard reads as the new thank-you switch.
     expect(screen.getByTestId('condition-sentence')).toHaveTextContent(
-      'Continues when the ticket status is Resolved or Closed, except a thank-you or out-of-office reply after an Auto-help close.',
+      'Continues when the ticket status is Resolved or Closed, except a thank-you or out-of-office reply.',
     );
     expect(screen.getByRole('button', { name: 'Values: Resolved, Closed' })).toBeInTheDocument();
-    expect(screen.getByRole('switch', { name: /Ignore a thank-you/ })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('switch', { name: /Don't reopen on a thank-you/ })).toHaveAttribute('aria-checked', 'true');
     expect(screen.queryByTestId('rule-as-code-notice')).not.toBeInTheDocument();
     expect(screen.queryByText(/JSONLogic/i)).not.toBeInTheDocument();
   });
@@ -51,7 +52,9 @@ describe('a raw-rule step opens as rows', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Values: Resolved, Closed' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Open' }));
     const patch = onPatch.mock.calls.at(-1)[0];
-    expect(patch).toMatchObject({ ignoreAutoHelpThanks: true, rule: undefined });
+    // The conversion writes the shared module's key (old or new name); the switch reads both.
+    expect(patch).toMatchObject({ rule: undefined });
+    expect(patch.ignoreAutoHelpThanks === true || patch.ignoreThanks === true).toBe(true);
     expect(patch.conditionGroup.conditions[0]).toEqual({ field: 'ticket.status', operator: 'in', value: ['Open', 'Resolved', 'Closed'] });
   });
 
@@ -60,8 +63,9 @@ describe('a raw-rule step opens as rows', () => {
     expect(screen.getByTestId('condition-sentence')).toHaveTextContent('Every ticket continues, except noise or spam.');
     expect(screen.getByRole('switch', { name: 'Skip noise tickets' })).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByText(/No conditions/)).toBeInTheDocument();
-    // Not a reply workflow: the Auto-help switch is not offered.
-    expect(screen.queryByTestId('auto-help-thanks-switch')).not.toBeInTheDocument();
+    // Not a reply workflow: the reply switches are not offered.
+    expect(screen.queryByTestId('thanks-switch')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('loop-guard-switch')).not.toBeInTheDocument();
   });
 });
 
@@ -92,14 +96,65 @@ describe('a rule that can not be rows', () => {
   });
 });
 
-describe('the Auto-help thank-you switch', () => {
-  test('on "Requester replied" steps it is offered and toggles the step flag', () => {
+describe('the reply step switches (MEGA 11-14)', () => {
+  const EMPTY = { conditionGroup: { logic: 'all', conditions: [] } };
+  const thanks = () => screen.getByRole('switch', { name: "Don't reopen on a thank-you or out-of-office reply" });
+  const loop = () => screen.getByRole('switch', { name: 'Stop after 3 reopens by replies in a day' });
+
+  test('on "Requester replied" steps both switches show and write their own keys', () => {
     const onPatch = vi.fn();
-    render(<ConditionStepEditor data={{ conditionGroup: { logic: 'all', conditions: [] } }} triggerType="ticket.reply_received" onPatch={onPatch} />);
-    const sw = screen.getByRole('switch', { name: /Ignore a thank-you/ });
-    expect(sw).toHaveAttribute('aria-checked', 'false');
-    fireEvent.click(sw);
-    expect(onPatch).toHaveBeenCalledWith({ ignoreAutoHelpThanks: true });
+    render(<ConditionStepEditor data={EMPTY} triggerType="ticket.reply_received" onPatch={onPatch} />);
+    expect(thanks()).toHaveAttribute('aria-checked', 'false');
+    expect(loop()).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(thanks());
+    expect(onPatch).toHaveBeenLastCalledWith({ ignoreThanks: true, ignoreAutoHelpThanks: undefined });
+    fireEvent.click(loop());
+    expect(onPatch).toHaveBeenLastCalledWith({ replyLoopGuard: true });
+  });
+
+  test('the legacy ignoreAutoHelpThanks key shows the thank-you switch on; the first toggle writes ignoreThanks and drops the old key', () => {
+    const onPatch = vi.fn();
+    render(<ConditionStepEditor data={{ ...EMPTY, ignoreAutoHelpThanks: true }} triggerType="ticket.reply_received" onPatch={onPatch} />);
+    expect(thanks()).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(thanks());
+    const patch = onPatch.mock.calls.at(-1)[0];
+    expect(patch).toEqual({ ignoreThanks: false, ignoreAutoHelpThanks: undefined });
+    // Saved as JSON, the old key is gone.
+    expect(JSON.parse(JSON.stringify({ ...EMPTY, ignoreAutoHelpThanks: true, ...patch }))).toEqual({ ...EMPTY, ignoreThanks: false });
+  });
+
+  test('the sentence names both switches', () => {
+    render(<ConditionStepEditor data={{ conditionGroup: { logic: 'all', conditions: [{ field: 'ticket.status', operator: 'in', value: ['Resolved', 'Closed'] }] }, ignoreThanks: true, replyLoopGuard: true, skipNoise: true }} triggerType="ticket.reply_received" onPatch={() => {}} />);
+    expect(screen.getByTestId('condition-sentence')).toHaveTextContent(
+      'Continues when the ticket status is Resolved or Closed, except noise or spam and a thank-you or out-of-office reply. Stops after 3 reopens by replies in a day.',
+    );
+    expect(thanks()).toHaveAttribute('aria-checked', 'true');
+    expect(loop()).toHaveAttribute('aria-checked', 'true');
+  });
+
+  test('the new reply fields read as words in the sentence, not codes', () => {
+    render(<ConditionStepEditor data={{ conditionGroup: { logic: 'all', conditions: [
+      { field: 'event.replyVerdict', operator: 'not_in', value: ['new_request', 'auto_reply'] },
+      { field: 'ticket.closedMinutes', operator: 'lt', value: 20160 },
+    ] } }} triggerType="ticket.reply_received" onPatch={() => {}} />);
+    const sentence = screen.getByTestId('condition-sentence').textContent;
+    expect(sentence).toContain('is not new request or out-of-office');
+    expect(sentence).toContain('is less than 14 days');
+    expect(sentence).not.toMatch(/new_request|auto_reply|20160/);
+  });
+
+  test('on another trigger a switch shows only while it is on, so it can be turned off', () => {
+    render(<ConditionStepEditor data={{ ...EMPTY, replyLoopGuard: true }} triggerType="ticket.created" onPatch={() => {}} />);
+    expect(loop()).toHaveAttribute('aria-checked', 'true');
+    expect(screen.queryByTestId('thanks-switch')).not.toBeInTheDocument();
+  });
+});
+
+describe('the step sentence and canvas caption (describeStep)', () => {
+  test('short form for the canvas; null for code', () => {
+    expect(describeStep({ conditionGroup: { logic: 'all', conditions: [] }, ignoreThanks: true }, { short: true })).toBe('All but a thank-you or out-of-office reply');
+    expect(describeStep({ conditionGroup: { logic: 'all', conditions: [] } })).toBe('Every ticket continues.');
+    expect(describeStep({ rule: CODE_RULE })).toBeNull();
   });
 });
 

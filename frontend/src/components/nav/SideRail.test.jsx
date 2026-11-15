@@ -213,22 +213,33 @@ describe('SideRail', () => {
     expect(screen.getByText('4')).toBeInTheDocument();
   });
 
-  // Vahid, 9 Nov 2026: a number on Availability when time away waits for me.
-  test('shows the time-away badge on Availability, and says it to screen readers', () => {
+  // Vahid, 9 Nov 2026: a number on the time-away entry when time away waits for me.
+  // MEGA 11-14 Part J: the entry is now "Vacation Pulse"; the badge carries over.
+  test('shows the time-away badge on Vacation Pulse, and says it to screen readers', () => {
     availabilityCount.mockReturnValue(2);
     renderRail();
     const badge = screen.getByTestId('rail-badge-availability');
     expect(badge).toHaveTextContent('2');
     expect(badge.className).toMatch(/bg-red-600/);
-    const row = screen.getByRole('button', { name: /Availability/ });
-    expect(row).toHaveAttribute('title', expect.stringContaining('2 waiting for you'));
+    const row = screen.getByRole('button', { name: /Vacation Pulse/ });
+    expect(row).toHaveAttribute('title', 'Vacation Pulse — Time away, WFH and site visits (2 waiting for you)');
+    expect(row).toHaveTextContent('Vacation Pulse');
     expect(row).toHaveTextContent('2 waiting for you');
+    expect(row.textContent).not.toMatch(/Availability/);
     expect(screen.queryByTestId('rail-badge-approvals')).not.toBeInTheDocument();
   });
 
-  test('no badge on Availability when nothing waits', () => {
+  test('no badge on Vacation Pulse when nothing waits', () => {
     renderRail();
     expect(screen.queryByTestId('rail-badge-availability')).not.toBeInTheDocument();
+  });
+
+  test('the entry is active on both addresses, /availability and /vacation-pulse', () => {
+    renderRail('/vacation-pulse/approvals');
+    expect(screen.getByRole('button', { name: /Vacation Pulse/ })).toHaveAttribute('aria-current', 'page');
+    cleanup();
+    renderRail('/availability/my-time');
+    expect(screen.getByRole('button', { name: /Vacation Pulse/ })).toHaveAttribute('aria-current', 'page');
   });
 });
 

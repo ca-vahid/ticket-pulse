@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Settings } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { NAV_DESTINATIONS, homePathFor, useCanAccessSettings, useNavDestinations, useWorkspaceRole } from './navDestinations';
+import { NAV_DESTINATIONS, destinationMatches, homePathFor, useCanAccessSettings, useNavDestinations, useWorkspaceRole } from './navDestinations';
 import { useApprovalCount } from '../../hooks/useApprovalCount';
 import { useAvailabilityApprovalCount } from '../../hooks/useAvailabilityApprovalCount';
 import { useAuth } from '../../contexts/AuthContext';
@@ -43,10 +43,10 @@ export default function SideRail() {
   const homePath = homePathFor(user, wsRole);
 
   const matchPath = (path) => location.pathname === path || location.pathname.startsWith(`${path}/`);
-  const activeId = NAV_DESTINATIONS.find((dest) => matchPath(dest.path))?.id
+  const activeId = NAV_DESTINATIONS.find((dest) => destinationMatches(dest, location.pathname))?.id
     || (matchPath('/settings') ? 'settings' : null);
   const destinations = useNavDestinations();
-  // Nov 2026: time-away requests waiting for me, on the Availability entry.
+  // Nov 2026: time-away requests waiting for me, on the Vacation Pulse entry.
   const availabilityCount = useAvailabilityApprovalCount({ enabled: destinations.some((d) => d.badgeKey === 'availability') });
   const badgeFor = (dest) => (dest.badgeKey === 'approvals' ? approvalCount : dest.badgeKey === 'availability' ? availabilityCount : 0);
   const onTickets = matchPath('/tickets');

@@ -703,8 +703,30 @@ router.get('/runs', requireAdmin, asyncHandler(async (req, res) => {
     reboundFromTechIds: parseCsvInt(req.query.reboundFromTechIds),
     ingestSources: parseIngestSources(req.query.ingestSources),
     search: parseSearch(req.query.search),
+    // MEGA 11-14 Part B: settled suggestions are left out unless asked for.
+    includeSettled: req.query.includeSettled === '1' || req.query.includeSettled === 'true',
   });
   res.json({ success: true, ...result });
+}));
+
+// ─── Settled suggestions (MEGA 11-14 Part B) ────────────────────────────
+// The review queue now settles itself when a ticket gets an owner, closes or
+// is removed. These two clear what was left from before: how many there are,
+// and one click that settles them through the same code. Admin only (the
+// whole page is), idempotent: a second click finds nothing to do.
+router.get('/settled-backlog', requireAdmin, asyncHandler(async (req, res) => {
+  const { default: settle } = await import('../services/reviewQueueSettleService.js');
+  const count = await settle.countBacklog(req.workspaceId);
+  res.json({ success: true, data: { count } });
+}));
+
+router.post('/settled-backlog/clear', requireAdmin, asyncHandler(async (req, res) => {
+  const { default: settle } = await import('../services/reviewQueueSettleService.js');
+  const user = req.session?.user ?? req.user;
+  const result = await settle.clearBacklog(req.workspaceId, {
+    actor: user?.email ? { email: user.email, name: user.name || user.email } : null,
+  });
+  res.json({ success: true, data: result });
 }));
 
 router.get('/audit/priority-alerts', requireAdmin, asyncHandler(async (req, res) => {
