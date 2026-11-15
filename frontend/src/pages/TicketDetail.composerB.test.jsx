@@ -322,6 +322,11 @@ describe('Ticket composer, release B', () => {
     renderPage();
     await ready();
     expect(screen.getByTestId('others-writing')).toHaveTextContent('Sam is writing a reply on this ticket right now.');
+    // MEGA 11-14 Part K: the header's eye sits in the action row, count inside.
+    const viewersMark = within(screen.getByTestId('ticket-actions')).getByTestId('ticket-viewers');
+    expect(viewersMark).toHaveAttribute('data-count', '2');
+    expect(within(viewersMark).getByTestId('ticket-viewers-line')).toHaveTextContent('Sam and Kim are here');
+    expect(within(viewersMark).getByTestId('ticket-viewers-writing')).toHaveTextContent('Sam is writing a reply');
     expect(presence.args[2]).toBeNull();
     type('Internal note body', 'checking');
     await waitFor(() => expect(presence.args[2]).toBe('note'));

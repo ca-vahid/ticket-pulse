@@ -88,6 +88,7 @@ import { ticketsAPI, uiPreferencesAPI } from '../services/api';
 import { useSSE } from '../hooks/useSSE';
 import useIsPhone from '../hooks/useIsPhone';
 import { useTicketPresence } from '../hooks/useTicketPresence';
+import TicketViewers from '../components/tickets/TicketViewers';
 import { forgetServerDraft, useServerDraft } from '../hooks/useServerDraft';
 import { useTicketTypes } from '../hooks/useTicketTypes';
 import MergeTicketsModal from '../components/tickets/MergeTicketsModal';
@@ -2929,28 +2930,6 @@ export default function TicketDetail() {
                         <Smile className="w-3 h-3" aria-hidden="true" /> Requester positive
                       </span>
                     )}
-                    {alsoViewing.length > 0 && (
-                      <span
-                        className="inline-flex items-center gap-1.5 pl-1 pr-2 py-0.5 rounded-full bg-violet-50 dark:bg-violet-500/15 border border-violet-200 dark:border-violet-500/30 animate-fadeIn"
-                        title={`Also viewing: ${alsoViewing.map((v) => v.name).join(', ')}`}
-                      >
-                        <span className="flex -space-x-1.5" aria-hidden="true">
-                          {alsoViewing.slice(0, 4).map((v) => (
-                            <span
-                              key={v.email}
-                              className="w-4.5 h-4.5 min-w-[18px] min-h-[18px] rounded-full bg-violet-500 border border-card text-white text-[8px] font-bold flex items-center justify-center uppercase"
-                            >
-                              {(v.name || v.email).trim().split(/\s+/).slice(0, 2).map((p) => p[0]).join('')}
-                            </span>
-                          ))}
-                        </span>
-                        <span className="text-[10px] font-semibold text-violet-700 dark:text-violet-200">
-                          {alsoViewing.length === 1
-                            ? `${(alsoViewing[0].name || alsoViewing[0].email).split(/\s+/)[0]} is also viewing`
-                            : `${alsoViewing.length} also viewing`}
-                        </span>
-                      </span>
-                    )}
                   </div>
 
                   {/* Quick actions (16 Sep 2026, v2): the everyday ones stay in the
@@ -3210,6 +3189,10 @@ export default function TicketDetail() {
                         )}
                       </span>
                     </span>
+                    {/* MEGA 11-14 Part K: who else is here — an eye with the count
+                        and the name, at the right end of the action row (wraps to
+                        its own line, still on the right, when the row is full). */}
+                    <TicketViewers key={ticketId} viewers={alsoViewing} className="ml-auto" />
                   </div>
 
                   {/* QA 10-28 #4: a grouped copy is kept out of the totals the way
