@@ -50,7 +50,8 @@ describe('classifyReply, reader "person"', () => {
     expect(call.attemptTimeoutMs).toBe(5000);
     expect(call.systemPrompt).not.toMatch(/automated first answer/);
     expect(call.systemPrompt).toMatch(/Someone on a helpdesk answered/);
-    expect(call.extra.jsonSchema.properties.verdict.enum).toEqual(['thanks', 'needs_reply', 'unclear']);
+    // MEGA 11-14 (A3): six answers, so a workflow can branch on "Reply reads as".
+    expect(call.extra.jsonSchema.properties.verdict.enum).toEqual(['thanks', 'auto_reply', 'still_broken', 'new_request', 'question', 'unclear']);
   });
 
   test('only an explicit "thanks" stays closed: unclear / needs_reply / odd output → help', async () => {

@@ -61,12 +61,18 @@ async function runReopen(definition, ctx) {
 }
 
 describe('reply_received default template', () => {
-  test('is builder rows + the Auto-help switch, never a raw rule, and validates', () => {
+  test('is builder rows + both reply switches (MEGA 11-14 shape), never a raw rule, and validates', () => {
     const def = buildDefaultWorkflowDefinition('ticket.reply_received');
     const node = def.nodes.find((n) => n.id === 'is-resolved');
     expect(node.data.rule).toBeUndefined();
-    expect(node.data.conditionGroup).toEqual({ logic: 'all', conditions: [{ field: 'ticket.status', operator: 'in', value: ['Resolved', 'Closed', 'Pending Response'] }] });
-    expect(node.data.ignoreAutoHelpThanks).toBe(true);
+    expect(node.data.conditionGroup).toEqual({ logic: 'all', conditions: [
+      { field: 'event.senderIsAgent', operator: 'is_false' },
+      { field: 'event.isSurveyResponse', operator: 'is_false' },
+      { field: 'ticket.status', operator: 'in', value: ['Resolved', 'Closed', 'Pending Response'] },
+    ] });
+    expect(node.data).toMatchObject({ ignoreThanks: true, replyLoopGuard: true });
+    expect(node.data.ignoreAutoHelpThanks).toBeUndefined();
+    expect(def.metadata.shapeVersion).toBe(2);
     expect(validateWorkflowDefinition(def, { triggerType: 'ticket.reply_received' }).errors).toEqual([]);
   });
 
@@ -100,10 +106,13 @@ describe('reply_received default template', () => {
   });
 });
 
-describe('engine: Ignore a thank-you or out-of-office reply after an Auto-help close', () => {
-  const definitionWith = (ignoreAutoHelpThanks) => {
+describe('engine: Don\'t reopen on a thank-you or out-of-office reply', () => {
+  const definitionWith = (on, { legacy = false } = {}) => {
     const def = buildDefaultWorkflowDefinition('ticket.reply_received');
-    def.nodes.find((n) => n.id === 'is-resolved').data.ignoreAutoHelpThanks = ignoreAutoHelpThanks;
+    const data = def.nodes.find((n) => n.id === 'is-resolved').data;
+    delete data.ignoreThanks;
+    if (legacy) data.ignoreAutoHelpThanks = on;
+    else data.ignoreThanks = on;
     return def;
   };
 
@@ -113,8 +122,10 @@ describe('engine: Ignore a thank-you or out-of-office reply after an Auto-help c
   ])('switch on + verdict %s: the step is false and says why', async (verdict, words) => {
     const step = await runReopen(definitionWith(true), replyContext({ verdict }));
     expect(step.output.passed).toBe(false);
-    expect(step.output.explain).toMatchObject({ source: 'auto_help_thanks', autoHelpThanksIgnored: true, verdict });
-    expect(step.output.explain.summary).toBe(`the reply reads as ${words} after an Auto-help close, and this step is set to ignore those`);
+    expect(step.output.explain).toMatchObject({ source: 'reply_thanks', replyThanksIgnored: true, verdict: verdict === 'confirmed' ? 'thanks' : 'auto_reply' });
+    expect(step.output.explain.summary).toBe(`the reply reads as ${words} after an Auto-help close, and this step is set not to reopen on those`);
+    // The older key reads as the same switch.
+    expect((await runReopen(definitionWith(true, { legacy: true }), replyContext({ verdict }))).output.passed).toBe(false);
   });
 
   test('switch on + "help" or no verdict: the conditions decide', async () => {
@@ -129,11 +140,11 @@ describe('engine: Ignore a thank-you or out-of-office reply after an Auto-help c
     expect(step.output.explain.source).toBe('conditions');
   });
 
-  test('the same switch honours the page\'s reading (event.extra.replyVerdict) of a reply to any closed ticket', async () => {
+  test('the same switch honours the reply facts\' reading (event.extra.replyVerdict) of a reply to any closed ticket', async () => {
     const ctx = (replyVerdict) => ({ ...replyContext({}), event: { ...replyContext({}).event, extra: { replyVerdict } } });
     const thanks = await runReopen(definitionWith(true), ctx('thanks'));
     expect(thanks.output.passed).toBe(false);
-    expect(thanks.output.explain.summary).toBe('the reply reads as a thank-you (When a requester replies), and this step is set to ignore those');
+    expect(thanks.output.explain.summary).toBe('the reply reads as a thank-you, and this step is set not to reopen on those');
     expect((await runReopen(definitionWith(true), ctx('auto_reply'))).output.passed).toBe(false);
     expect((await runReopen(definitionWith(true), ctx('reply'))).output.passed).toBe(true);
     expect((await runReopen(definitionWith(false), ctx('thanks'))).output.passed).toBe(true);
@@ -150,6 +161,7 @@ describe('Auto-help guard one-off sets the switch', () => {
     const node = def.nodes.find((n) => n.id === 'is-resolved');
     delete node.data.conditionGroup;
     delete node.data.ignoreAutoHelpThanks;
+    delete node.data.ignoreThanks;
     node.data.rule = { in: [{ var: 'ticket.status' }, ['Resolved', 'Closed']] };
     const first = addReopenGuard(def);
     expect(first.changed).toBe(true);

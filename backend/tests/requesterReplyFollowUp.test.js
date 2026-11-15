@@ -45,13 +45,17 @@ const TICKET = {
   workspace: { name: 'IT', defaultTimezone: 'America/Vancouver' }, requester: { id: 55, name: 'Karen Wong', email: 'kwong@example.com' },
   assignedTech: { id: 7, name: 'Soheil Example', email: 's@example.com' }, internalCategory: null, internalSubcategory: null, tagLinks: [],
 };
+let current = null;
 const flush = async () => { for (let i = 0; i < 6; i += 1) await new Promise((r) => setImmediate(r)); };
 
 beforeEach(() => {
   jest.clearAllMocks();
   rules.invalidateRequesterReplyRulesCache();
-  prismaMock.ticket.findUnique.mockResolvedValue({ ...TICKET });
-  statusServiceMock.resolveBaseStatus.mockResolvedValue('Resolved');
+  current = { ...TICKET };
+  // The hydrate read gets the whole ticket; after the workflows the event door
+  // reads its status again (G7: follow-ups only when it is open).
+  prismaMock.ticket.findUnique.mockImplementation(async (args) => (args?.select ? { id: current.id, status: current.status } : { ...current }));
+  statusServiceMock.resolveBaseStatus.mockImplementation(async (_ws, s) => (String(s) === 'Open' ? 'Open' : 'Resolved'));
   engineMock.executeForEvent.mockResolvedValue({ status: 'completed' });
   ownerAwayMock.afterRequesterReply.mockResolvedValue({ rerouted: false, reason: 'owner_not_away' });
   newRequestMock.afterRequesterReply.mockResolvedValue({ suggested: false, reason: 'not_a_new_request' });
@@ -62,7 +66,7 @@ beforeEach(() => {
 describe('the event door', () => {
   test('a requester reply runs both follow-ups once, AFTER the workflows, with the ticket as it was before them', async () => {
     const order = [];
-    engineMock.executeForEvent.mockImplementation(async () => { order.push('workflows'); return { status: 'completed' }; });
+    engineMock.executeForEvent.mockImplementation(async () => { order.push('workflows'); current = { ...current, status: 'Open' }; return { status: 'completed' }; });
     ownerAwayMock.afterRequesterReply.mockImplementation(async () => { order.push('owner_away'); return { rerouted: false }; });
     newRequestMock.afterRequesterReply.mockImplementation(async () => { order.push('new_request'); return { suggested: false }; });
     const extra = { externalEntryId: 'fs-conversation:1043270001', fromEmail: 'kwong@example.com', via: 'freshservice', senderIsAgent: false, isSurveyResponse: false };
@@ -70,7 +74,7 @@ describe('the event door', () => {
     const result = await emitTicketEvent('ticket.reply_received', 700, { source: 'freshservice_sync', dedupeStamp: 'fs-conversation:1043270001', extra });
     await flush();
 
-    expect(result).toEqual({ status: 'completed' });
+    expect(result).toMatchObject({ status: 'completed', replyOutcome: { openNow: true, wasClosed: true, stillClosed: false, line: null } });
     expect(order).toEqual(['workflows', 'owner_away', 'new_request']);
     expect(ownerAwayMock.afterRequesterReply).toHaveBeenCalledTimes(1);
     expect(ownerAwayMock.afterRequesterReply).toHaveBeenCalledWith(700, 1, { replyStamp: 'fs-conversation:1043270001' });
@@ -82,14 +86,21 @@ describe('the event door', () => {
     });
   });
 
-  test('a workflow failure does not stop the follow-ups; other events never start them', async () => {
+  test('G7: a reply the workflows left closed starts neither follow-up', async () => {
+    await emitTicketEvent('ticket.reply_received', 700, { dedupeStamp: 'reply:9', extra: { entryId: 9, from: 'kwong@example.com' } });
+    await flush();
+    expect(ownerAwayMock.afterRequesterReply).not.toHaveBeenCalled();
+    expect(newRequestMock.afterRequesterReply).not.toHaveBeenCalled();
+  });
+
+  test('a workflow failure does not stop the follow-ups on an open ticket; other events never start them', async () => {
+    current = { ...TICKET, status: 'Open', resolvedAt: null };
     engineMock.executeForEvent.mockRejectedValueOnce(new Error('engine down'));
     expect(await emitTicketEvent('ticket.reply_received', 700, { dedupeStamp: 'reply:1', extra: { entryId: 1 } })).toMatchObject({ status: 'failed' });
     await flush();
     expect(ownerAwayMock.afterRequesterReply).toHaveBeenCalledTimes(1);
 
     jest.clearAllMocks();
-    prismaMock.ticket.findUnique.mockResolvedValue({ ...TICKET });
     engineMock.executeForEvent.mockResolvedValue({ status: 'completed' });
     await emitTicketEvent('ticket.note_added', 700, { dedupeStamp: 'note:1', extra: { entryId: 2 } });
     await emitTicketEvent('ticket.public_reply_added', 700, { dedupeStamp: 'reply:2', extra: { entryId: 3 } });
@@ -118,11 +129,11 @@ describe('afterRequesterReplyEvent', () => {
 });
 
 describe('the switches', () => {
-  // 14 Oct 2026: the page also holds the reopen (statuses), the thank-you
-  // switch and the reply-reading limit — all off until an admin saves.
-  const pageDefaults = { reopenOnReply: false, reopenStatuses: [], ignoreThanks: false, replyCheckMonthlyCapUsd: 10, retiredWorkflows: [] };
+  // The page also holds the reply-reading limit. Reopening moved to Mail
+  // Workflows (MEGA 11-14): the old reopen keys are gone and ignored on read.
+  const pageDefaults = { replyCheckMonthlyCapUsd: 10 };
 
-  test('never saved: owner-away + new-request ON for IT (workspace 1), OFF elsewhere; reopen and thank-you OFF everywhere', async () => {
+  test('never saved: owner-away + new-request ON for IT (workspace 1), OFF elsewhere', async () => {
     expect(await rules.getRequesterReplyRules(1)).toEqual({ rerouteWhenOwnerAway: true, suggestNewRequest: true, ...pageDefaults });
     expect(await rules.getRequesterReplyRules(2)).toEqual({ rerouteWhenOwnerAway: false, suggestNewRequest: false, ...pageDefaults });
     expect(await rules.getRequesterReplyRules(5)).toEqual({ rerouteWhenOwnerAway: false, suggestNewRequest: false, ...pageDefaults });
@@ -130,7 +141,7 @@ describe('the switches', () => {
   });
 
   test('a saved choice wins over the default, one switch at a time', async () => {
-    settingsMock.get.mockResolvedValue(JSON.stringify({ rerouteWhenOwnerAway: false }));
+    settingsMock.get.mockResolvedValue(JSON.stringify({ rerouteWhenOwnerAway: false, reopenOnReply: true, reopenStatuses: ['Closed'], ignoreThanks: true, retiredWorkflows: [{ id: 1 }] }));
     expect(await rules.getRequesterReplyRules(1)).toEqual({ rerouteWhenOwnerAway: false, suggestNewRequest: true, ...pageDefaults });
 
     rules.invalidateRequesterReplyRulesCache();

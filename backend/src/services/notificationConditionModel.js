@@ -15,7 +15,7 @@
  */
 
 import { BUILTIN_CHANGE_FIELDS, EVENT_ACTOR_KINDS } from './ticketChangeRenderer.js';
-import { OPERATOR_WORDS } from './conditionRuleShared.js';
+import { OPERATOR_WORDS, REPLY_VERDICT_OPTIONS, SENT_BY_OPTIONS } from './conditionRuleShared.js';
 
 const MAX_TOTAL_ROWS = 20;
 const MAX_DEPTH = 2; // root group + one nested level
@@ -79,6 +79,10 @@ export const CONDITION_FIELDS = Object.freeze({
   // asks for them (the requester's original request counts as their first word).
   'ticket.lastRequesterReplyMinutes': { label: 'Time since the requester last wrote', type: 'duration', path: 'ticket.lastRequesterReplyMinutes' },
   'ticket.lastAgentReplyMinutes': { label: 'Time since an agent last replied', type: 'duration', path: 'ticket.lastAgentReplyMinutes' },
+  // One reopen path (MEGA 11-14, A2): minutes since the ticket closed (close
+  // time, else resolve time, else its last activity). Empty unless the ticket
+  // is Resolved or Closed. Set on "Requester replied" (replyFacts.js).
+  'ticket.closedMinutes': { label: 'Time since the ticket closed', type: 'duration', path: 'ticket.closedMinutes', triggers: ['ticket.reply_received'] },
   'assignedAgent.email': { label: 'Assigned agent email', type: 'string', path: 'assignedAgent.email', dynamicOptions: 'agent-emails' },
   'assignedAgent.name': { label: 'Assigned agent name', type: 'string', path: 'assignedAgent.name', dynamicOptions: 'agent-names' },
   'requester.email': { label: 'Requester email', type: 'string', path: 'requester.email' },
@@ -117,12 +121,23 @@ export const CONDITION_FIELDS = Object.freeze({
   'event.autoHelpAnswered': { label: 'Auto-help answered the requester', type: 'boolean', path: 'event.extra.autoHelpAnswered' },
   // Reopen-on-reply guard (W3): how a reply after an Auto-help close read.
   'event.autoHelpReplyVerdict': { label: 'Reply after an Auto-help close reads as', type: 'enum', path: 'event.extra.autoHelpReplyVerdict', options: ['confirmed', 'help', 'auto_reply'] },
-  // "When a requester replies" (14 Oct 2026): a reply to a closed ticket, read
-  // where that page's thank-you switch is on.
-  'event.replyVerdict': { label: 'Reply to a closed ticket reads as', type: 'enum', path: 'event.extra.replyVerdict', options: ['thanks', 'auto_reply', 'reply'] },
+  // One reopen path (MEGA 11-14, A2/A3): facts about a reply, worked out once
+  // per reply in emitTicketEvent (replyFacts.js) — the reading only when an
+  // enabled reply workflow uses it or has the thank-you switch on.
+  'event.replyVerdict': {
+    label: 'Reply reads as', type: 'enum', path: 'event.extra.replyVerdict', triggers: ['ticket.reply_received'],
+    options: REPLY_VERDICT_OPTIONS.map((o) => o.value),
+    optionLabels: Object.fromEntries(REPLY_VERDICT_OPTIONS.map((o) => [o.value, o.label])),
+  },
+  'event.sentBy': {
+    label: 'Reply sent by', type: 'enum', path: 'event.extra.sentBy', triggers: ['ticket.reply_received'],
+    options: SENT_BY_OPTIONS.map((o) => o.value),
+    optionLabels: Object.fromEntries(SENT_BY_OPTIONS.map((o) => [o.value, o.label])),
+  },
+  'event.replyReopens24h': { label: 'Reopened by replies in the last 24 hours', type: 'number', path: 'event.extra.replyReopens24h', triggers: ['ticket.reply_received'] },
   // QA 11-12 #2: "Requester replied" to an e-mail a workflow sent (anywhere in
   // the reply's thread). Absent = false, so older workflows read unchanged.
-  'event.replyToWorkflowEmail': { label: 'Reply answers a workflow e-mail', type: 'boolean', path: 'event.extra.replyToWorkflowEmail' },
+  'event.replyToWorkflowEmail': { label: 'Reply answers a workflow e-mail', type: 'boolean', path: 'event.extra.replyToWorkflowEmail', triggers: ['ticket.reply_received'] },
   'event.replyToWorkflow': { label: 'Workflow whose e-mail was answered', type: 'string', path: 'event.extra.replyToWorkflow' },
   'availability.isBusinessHours': { label: 'During business hours', type: 'boolean', path: 'availability.isBusinessHours' },
   'availability.isAfterHours': { label: 'After hours', type: 'boolean', path: 'availability.isAfterHours' },

@@ -135,7 +135,7 @@ describe('ruleToConditionGroup — every shape', () => {
     ['skip noise (11 steps)', NOISE, 'Every ticket continues, except noise or spam.'],
     ['reopen: resolved or closed (3 steps)', { in: [v('ticket.status'), ['Resolved', 'Closed']] }, 'Continues when the ticket status is Resolved or Closed.'],
     ['reopen with the Auto-help guard (IT, before 14 Oct)', { and: [{ in: [v('ticket.status'), ['Resolved', 'Closed']] }, GUARD] },
-      'Continues when the ticket status is Resolved or Closed, except a thank-you or out-of-office reply after an Auto-help close.'],
+      'Continues when the ticket status is Resolved or Closed, except a thank-you or out-of-office reply.'],
   ])('production rule converts and proves the same: %s', (_name, rule, sentence) => {
     const out = expectSameAsRows(rule);
     expect(describeConditionStep({ conditionGroup: out.group, skipNoise: out.skipNoise, ignoreAutoHelpThanks: out.ignoreAutoHelpThanks })).toBe(sentence);
@@ -157,7 +157,17 @@ describe('sentences', () => {
     expect(describeConditionStep({
       conditionGroup: { logic: 'all', conditions: [{ field: 'ticket.status', operator: 'in', value: ['Resolved', 'Closed', 'Pending Response'] }] },
       ignoreAutoHelpThanks: true,
-    })).toBe('Continues when the ticket status is Resolved, Closed or Pending Response, except a thank-you or out-of-office reply after an Auto-help close.');
+    })).toBe('Continues when the ticket status is Resolved, Closed or Pending Response, except a thank-you or out-of-office reply.');
+    // MEGA 11-14: the editor's key and the loop guard read in the same sentence.
+    expect(describeConditionStep({
+      conditionGroup: { logic: 'all', conditions: [{ field: 'ticket.status', operator: 'in', value: ['Resolved', 'Closed'] }] },
+      ignoreThanks: true,
+      replyLoopGuard: true,
+    })).toBe('Continues when the ticket status is Resolved or Closed, except a thank-you or out-of-office reply and a reply after 3 reopens by replies in a day.');
+    expect(describeConditionStep({ conditionGroup: { logic: 'all', conditions: [
+      { field: 'event.sentBy', operator: 'in', value: ['requester', 'cc'] },
+      { field: 'ticket.closedMinutes', operator: 'lt', value: 20160 },
+    ] } })).toBe('Continues when who sent the reply is requester or cc and the time since the ticket closed is less than 14 days.');
     expect(describeConditionStep({ conditionGroup: { logic: 'all', conditions: [] } })).toBe('Every ticket continues.');
     expect(describeConditionStep({ conditionGroup: { logic: 'any', conditions: [
       { field: 'ticket.isParked', operator: 'is_true' },
@@ -176,13 +186,43 @@ describe('sentences', () => {
 });
 
 describe('conditionSwitchStop', () => {
-  test('noise first, then the Auto-help thank-you verdicts', () => {
+  test('noise first, then the thank-you verdicts (Auto-help\'s or the reply facts\'), under either key', () => {
     const scope = (isNoise, verdict) => ({ ticket: { isNoise }, event: { extra: { autoHelpReplyVerdict: verdict } } });
     const both = { skipNoise: true, ignoreAutoHelpThanks: true };
     expect(conditionSwitchStop(both, scope(true, 'confirmed'))).toBe('skip_noise');
-    expect(conditionSwitchStop(both, scope(false, 'confirmed'))).toBe('auto_help_thanks');
-    expect(conditionSwitchStop(both, scope(false, 'auto_reply'))).toBe('auto_help_thanks');
+    expect(conditionSwitchStop(both, scope(false, 'confirmed'))).toBe('reply_thanks');
+    expect(conditionSwitchStop(both, scope(false, 'auto_reply'))).toBe('reply_thanks');
     expect(conditionSwitchStop(both, scope(false, 'help'))).toBeNull();
     expect(conditionSwitchStop({}, scope(true, 'confirmed'))).toBeNull();
+    const reads = (replyVerdict) => ({ event: { extra: { replyVerdict } } });
+    expect(conditionSwitchStop({ ignoreThanks: true }, reads('thanks'))).toBe('reply_thanks');
+    expect(conditionSwitchStop({ ignoreThanks: true }, reads('auto_reply'))).toBe('reply_thanks');
+    for (const v of ['still_broken', 'new_request', 'question', 'reply']) expect(conditionSwitchStop({ ignoreThanks: true }, reads(v))).toBeNull();
+    expect(conditionSwitchStop({ ignoreThanks: false }, reads('thanks'))).toBeNull();
+  });
+
+  test('the loop guard: the 4th reopen by replies in a day takes the False path', () => {
+    const reopens = (n) => ({ event: { extra: { replyReopens24h: n } } });
+    expect(conditionSwitchStop({ replyLoopGuard: true }, reopens(2))).toBeNull();
+    expect(conditionSwitchStop({ replyLoopGuard: true }, reopens(3))).toBe('reply_loop');
+    expect(conditionSwitchStop({ replyLoopGuard: true }, reopens(5))).toBe('reply_loop');
+    expect(conditionSwitchStop({ replyLoopGuard: false }, reopens(9))).toBeNull();
+    expect(conditionSwitchStop({ replyLoopGuard: true }, {})).toBeNull();
+    // A thank-you is named first when both apply.
+    expect(conditionSwitchStop({ replyLoopGuard: true, ignoreThanks: true }, { event: { extra: { replyReopens24h: 4, replyVerdict: 'thanks' } } })).toBe('reply_thanks');
+  });
+
+  test('the editor\'s option lists (contract §1), frozen, in order', async () => {
+    const { SENT_BY_OPTIONS, REPLY_VERDICT_OPTIONS } = await import('../src/services/conditionRuleShared.js');
+    expect(SENT_BY_OPTIONS.map((o) => o.value)).toEqual(['requester', 'cc', 'workflow_recipient', 'other']);
+    expect(SENT_BY_OPTIONS.map((o) => o.label)).toEqual(['Requester', 'Someone Cc\'d', 'Someone a workflow e-mailed', 'Someone else']);
+    expect(REPLY_VERDICT_OPTIONS.map((o) => o.value)).toEqual(['thanks', 'auto_reply', 'still_broken', 'new_request', 'question', 'reply']);
+    expect(REPLY_VERDICT_OPTIONS.map((o) => o.label)).toEqual(['Thanks', 'Out-of-office', 'Still not fixed', 'New request', 'Question', 'Other reply']);
+    expect(Object.isFrozen(SENT_BY_OPTIONS) && Object.isFrozen(REPLY_VERDICT_OPTIONS)).toBe(true);
+    expect(model.CONDITION_FIELDS['event.sentBy']).toMatchObject({ label: 'Reply sent by', type: 'enum', path: 'event.extra.sentBy', options: ['requester', 'cc', 'workflow_recipient', 'other'] });
+    expect(model.CONDITION_FIELDS['ticket.closedMinutes']).toMatchObject({ label: 'Time since the ticket closed', type: 'duration', path: 'ticket.closedMinutes' });
+    expect(model.CONDITION_FIELDS['event.replyReopens24h']).toMatchObject({ label: 'Reopened by replies in the last 24 hours', type: 'number', path: 'event.extra.replyReopens24h' });
+    expect(model.CONDITION_FIELDS['event.replyVerdict']).toMatchObject({ label: 'Reply reads as', type: 'enum', options: REPLY_VERDICT_OPTIONS.map((o) => o.value) });
+    expect(model.CONDITION_FIELDS['event.replyVerdict'].optionLabels.reply).toBe('Other reply');
   });
 });

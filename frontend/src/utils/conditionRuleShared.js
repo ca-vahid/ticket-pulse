@@ -13,7 +13,8 @@
  *     JSONLogic Rule" textarea) turned into builder rows, or null when it can
  *     not be done without changing what the step does.
  *   - conditionSwitchStop(data, scope): the step switches the engine checks
- *     before the conditions (Skip noise, Ignore Auto-help thanks).
+ *     before the conditions (Skip noise, Don't reopen on a thank-you or
+ *     out-of-office reply, Stop after 3 reopens by replies in a day).
  *   - describeConditionStep(data): one plain sentence of what a step checks.
  */
 
@@ -54,6 +55,7 @@ const FIELD_ROWS = [
   ['ticket.frDueInMinutes', 'ticket.frDueInMinutes', 'duration', 'the time until first response is due'],
   ['ticket.lastRequesterReplyMinutes', 'ticket.lastRequesterReplyMinutes', 'duration', 'the time since the requester last wrote'],
   ['ticket.lastAgentReplyMinutes', 'ticket.lastAgentReplyMinutes', 'duration', 'the time since an agent last replied'],
+  ['ticket.closedMinutes', 'ticket.closedMinutes', 'duration', 'the time since the ticket closed'],
   ['assignedAgent.email', 'assignedAgent.email', 'string', 'the assigned agent\'s e-mail'],
   ['assignedAgent.name', 'assignedAgent.name', 'string', 'the assigned agent'],
   ['requester.email', 'requester.email', 'string', 'the requester\'s e-mail'],
@@ -79,6 +81,8 @@ const FIELD_ROWS = [
   ['event.autoHelpAnswered', 'event.extra.autoHelpAnswered', 'boolean', 'Auto-help answered', 'Auto-help answered the requester', 'Auto-help did not answer the requester'],
   ['event.autoHelpReplyVerdict', 'event.extra.autoHelpReplyVerdict', 'enum', 'the reply after an Auto-help close'],
   ['event.replyVerdict', 'event.extra.replyVerdict', 'enum', 'how the reply reads'],
+  ['event.sentBy', 'event.extra.sentBy', 'enum', 'who sent the reply'],
+  ['event.replyReopens24h', 'event.extra.replyReopens24h', 'number', 'the number of reopens by replies in the last 24 hours'],
   ['event.replyToWorkflowEmail', 'event.extra.replyToWorkflowEmail', 'boolean', 'reply to a workflow e-mail', 'the reply answers an e-mail a workflow sent', 'the reply does not answer an e-mail a workflow sent'],
   ['event.replyToWorkflow', 'event.extra.replyToWorkflow', 'string', 'the workflow whose e-mail was answered'],
   ['availability.isBusinessHours', 'availability.isBusinessHours', 'boolean', 'business hours', 'it is business hours', 'it is outside business hours'],
@@ -112,15 +116,33 @@ export const OPERATOR_WORDS = Object.freeze({
   matches_regex: 'matches', has_any: 'has any of', has_all: 'has all of', has_none: 'has none of',
 });
 
-/** Auto-help reply verdicts the "Ignore a thank-you or out-of-office" switch stops. */
+/** Auto-help reply verdicts the "Don't reopen on a thank-you or out-of-office reply" switch stops. */
 export const AUTO_HELP_THANKS_VERDICTS = Object.freeze(['confirmed', 'auto_reply']);
 /**
- * "When a requester replies" (14 Oct 2026): how a reply to a closed ticket
- * reads (event.extra.replyVerdict) — 'thanks', 'auto_reply' or 'reply'. Set
- * only where that page's "A thank-you or out-of-office reply does not reopen"
- * switch is on; the same step switch stops on the first two.
+ * One reopen path (MEGA 11-14, Part A): how a reply reads
+ * (event.extra.replyVerdict), worked out once per reply when an enabled reply
+ * workflow asks for it. The "Don't reopen on a thank-you or out-of-office
+ * reply" step switch stops on the first two.
  */
 export const REPLY_STAYS_CLOSED_VERDICTS = Object.freeze(['thanks', 'auto_reply']);
+/** "Reply sent by" (event.extra.sentBy), in the order the editor lists them. */
+export const SENT_BY_OPTIONS = Object.freeze([
+  Object.freeze({ value: 'requester', label: 'Requester' }),
+  Object.freeze({ value: 'cc', label: 'Someone Cc\'d' }),
+  Object.freeze({ value: 'workflow_recipient', label: 'Someone a workflow e-mailed' }),
+  Object.freeze({ value: 'other', label: 'Someone else' }),
+]);
+/** "Reply reads as" (event.extra.replyVerdict). "Other reply" is stored as 'reply'. */
+export const REPLY_VERDICT_OPTIONS = Object.freeze([
+  Object.freeze({ value: 'thanks', label: 'Thanks' }),
+  Object.freeze({ value: 'auto_reply', label: 'Out-of-office' }),
+  Object.freeze({ value: 'still_broken', label: 'Still not fixed' }),
+  Object.freeze({ value: 'new_request', label: 'New request' }),
+  Object.freeze({ value: 'question', label: 'Question' }),
+  Object.freeze({ value: 'reply', label: 'Other reply' }),
+]);
+/** "Stop after 3 reopens by replies in a day": the reply that would be the 4th takes the False path. */
+export const REPLY_LOOP_LIMIT = 3;
 const AUTO_HELP_VERDICT_PATH = 'event.extra.autoHelpReplyVerdict';
 const MAX_ROWS = 20;
 const CUSTOM_PATH = /^ticket\.customFields\.([a-z][a-z0-9_]{1,59})$/;
@@ -129,15 +151,25 @@ const CUSTOM_PATH = /^ticket\.customFields\.([a-z][a-z0-9_]{1,59})$/;
 const CUSTOM_PLAIN_TYPES = { text: 'string', select: 'enum' };
 
 /**
+ * "Don't reopen on a thank-you or out-of-office reply". `ignoreThanks` is the
+ * key the editor writes; the older `ignoreAutoHelpThanks` means the same.
+ */
+export function ignoresThanks(data) {
+  return data?.ignoreThanks === true || data?.ignoreAutoHelpThanks === true;
+}
+
+/**
  * The switches a condition step checks before its conditions (the engine and
- * the conversion script both call this). Returns null, 'skip_noise' or
- * 'auto_help_thanks'.
+ * the conversion script both call this). Returns null, 'skip_noise',
+ * 'reply_thanks' or 'reply_loop'.
  */
 export function conditionSwitchStop(data, scope) {
+  const extra = scope?.event?.extra || {};
   if (data?.skipNoise === true && scope?.ticket?.isNoise === true) return 'skip_noise';
-  if (data?.ignoreAutoHelpThanks === true
-    && (AUTO_HELP_THANKS_VERDICTS.includes(scope?.event?.extra?.autoHelpReplyVerdict)
-      || REPLY_STAYS_CLOSED_VERDICTS.includes(scope?.event?.extra?.replyVerdict))) return 'auto_help_thanks';
+  if (ignoresThanks(data)
+    && (AUTO_HELP_THANKS_VERDICTS.includes(extra.autoHelpReplyVerdict)
+      || REPLY_STAYS_CLOSED_VERDICTS.includes(extra.replyVerdict))) return 'reply_thanks';
+  if (data?.replyLoopGuard === true && Number(extra.replyReopens24h) >= REPLY_LOOP_LIMIT) return 'reply_loop';
   return null;
 }
 
@@ -470,7 +502,7 @@ function capitalize(text) {
 export function describeConditionStep(data = {}, { fields = null, short = false } = {}) {
   let group = data?.conditionGroup && Array.isArray(data.conditionGroup.conditions) ? data.conditionGroup : null;
   let skipNoise = data?.skipNoise === true;
-  let thanks = data?.ignoreAutoHelpThanks === true;
+  let thanks = ignoresThanks(data);
   if (!group) {
     const rule = data?.rule === undefined || data?.rule === null ? true : data.rule;
     const converted = ruleToConditionGroup(rule);
@@ -481,7 +513,8 @@ export function describeConditionStep(data = {}, { fields = null, short = false 
   }
   const exceptions = [
     ...(skipNoise ? ['noise or spam'] : []),
-    ...(thanks ? ['a thank-you or out-of-office reply after an Auto-help close'] : []),
+    ...(thanks ? ['a thank-you or out-of-office reply'] : []),
+    ...(data?.replyLoopGuard === true ? [`a reply after ${REPLY_LOOP_LIMIT} reopens by replies in a day`] : []),
   ];
   const checks = group.conditions.length ? describeConditionGroup(group, { fields }) : '';
   if (short) {
@@ -527,6 +560,10 @@ export default {
   OPERATOR_WORDS,
   AUTO_HELP_THANKS_VERDICTS,
   REPLY_STAYS_CLOSED_VERDICTS,
+  SENT_BY_OPTIONS,
+  REPLY_VERDICT_OPTIONS,
+  REPLY_LOOP_LIMIT,
+  ignoresThanks,
   conditionSwitchStop,
   ruleToConditionGroup,
   ruleConversionPatch,

@@ -1360,12 +1360,10 @@ router.put('/also-for-settings', asyncHandler(async (req, res) => {
 }));
 
 // ----------------------------- When a requester replies (13 Oct 2026)
-// One page since 14 Oct 2026 (plans/REQUESTER_REPLY_SETTINGS_PLAN.md): which
-// statuses a requester reply reopens, whether a thank-you / out-of-office
-// leaves a closed ticket closed, the monthly limit for reading replies, the
-// owner-away and new-request switches. Stored in app_settings (one
-// workspace-scoped key). Saving the reopen ON archives the Mail Workflows
-// "Reopen on requester reply" copy it replaces (requesterReplyReopenService).
+// The owner-away and new-request switches and the monthly limit for reading
+// replies. Stored in app_settings (one workspace-scoped key). Reopening moved to
+// Mail Workflows → "Reopen on requester reply" (MEGA 11-14, Part A: one reopen
+// path): the reopen switch, the status ticks and the restore route are gone.
 
 const requireReplySettingsAdmin = (req, res) => {
   const actor = req.ticketActor;
@@ -1389,19 +1387,6 @@ router.put('/requester-reply-settings', asyncHandler(async (req, res) => {
     if (typeof req.body[key] !== 'boolean') throw new ValidationError(`${key} must be true or false`);
     patch[key] = req.body[key];
   }
-  if (req.body?.reopenStatuses !== undefined) {
-    const list = req.body.reopenStatuses;
-    if (!Array.isArray(list) || list.some((s) => typeof s !== 'string')) throw new ValidationError('reopenStatuses must be a list of status names');
-    // Only statuses this workspace has, in their registry spelling.
-    const { default: statusService } = await import('../services/statusService.js');
-    const names = [];
-    for (const raw of list) {
-      const name = await statusService.normalizeStatusName(req.workspaceId, raw);
-      if (!name) throw new ValidationError(`"${String(raw).slice(0, 60)}" is not a status in this workspace`);
-      names.push(name);
-    }
-    patch.reopenStatuses = names;
-  }
   if (req.body?.replyCheckMonthlyCapUsd !== undefined) {
     if (!REPLY_CHECK_CAP_CHOICES.includes(Number(req.body.replyCheckMonthlyCapUsd))) {
       throw new ValidationError(`The monthly limit must be one of ${REPLY_CHECK_CAP_CHOICES.map((n) => `$${n}`).join(', ')}`);
@@ -1409,22 +1394,10 @@ router.put('/requester-reply-settings', asyncHandler(async (req, res) => {
     patch.replyCheckMonthlyCapUsd = Number(req.body.replyCheckMonthlyCapUsd);
   }
   if (!Object.keys(patch).length) throw new ValidationError('Nothing to change');
-  let rules;
-  try {
-    rules = await setRequesterReplyRules(req.workspaceId, patch);
-  } catch (err) {
-    if (/^Tick at least one status/.test(err.message)) throw new ValidationError(err.message);
-    throw err;
-  }
-  logger.info(`Requester-reply rules for workspace ${req.workspaceId} set to ${JSON.stringify({ ...rules, retiredWorkflows: undefined })} by ${actor?.email || 'unknown'}`);
-  // Saved with the reopen on: the workflow it replaces is archived now (and
-  // only now — never on deploy, never on a read).
+  const rules = await setRequesterReplyRules(req.workspaceId, patch);
+  logger.info(`Requester-reply rules for workspace ${req.workspaceId} set to ${JSON.stringify(rules)} by ${actor?.email || 'unknown'}`);
   const { default: replyReopen } = await import('../services/requesterReplyReopenService.js');
-  let retirement = null;
-  if (rules.reopenOnReply && (patch.reopenOnReply === true || patch.reopenStatuses)) {
-    retirement = await replyReopen.retireReopenWorkflows(req.workspaceId, actor);
-  }
-  res.json({ success: true, data: await replyReopen.pageContext(req.workspaceId), ...(retirement ? { retirement } : {}) });
+  res.json({ success: true, data: await replyReopen.pageContext(req.workspaceId) });
 }));
 
 // ----------------------------- When a ticket is resolved (17 Oct 2026)
@@ -1457,27 +1430,6 @@ router.put('/auto-close-settings', asyncHandler(async (req, res) => {
   const saved = await autoClose.setSettings(req.workspaceId, patch, actor);
   logger.info(`Auto-close of resolved tickets for workspace ${req.workspaceId} set to ${JSON.stringify({ enabled: saved.enabled, afterHours: saved.afterHours, retireResolved: saved.retireResolved })} by ${actor?.email || 'unknown'}`);
   res.json({ success: true, data: await autoClose.pageContext(req.workspaceId) });
-}));
-
-// Bring back a workflow this page archived — only while the page itself is
-// not reopening (two reopens would race). Never done automatically.
-router.post('/requester-reply-settings/restore-workflow', asyncHandler(async (req, res) => {
-  const actor = requireReplySettingsAdmin(req, res);
-  if (!actor) return;
-  const workflowId = Number(req.body?.workflowId);
-  if (!Number.isInteger(workflowId) || workflowId <= 0) throw new ValidationError('workflowId is required');
-  const { getRequesterReplyRules } = await import('../services/requesterReplyRulesService.js');
-  if ((await getRequesterReplyRules(req.workspaceId)).reopenOnReply) {
-    throw new ValidationError('Turn off "Reopen the ticket" on this page first — otherwise both would reopen tickets.');
-  }
-  const { default: replyReopen } = await import('../services/requesterReplyReopenService.js');
-  try {
-    await replyReopen.restoreRetiredWorkflow(req.workspaceId, workflowId, actor);
-  } catch (err) {
-    if (err.statusCode === 404) return res.status(404).json({ success: false, message: err.message });
-    throw err;
-  }
-  res.json({ success: true, data: await replyReopen.pageContext(req.workspaceId) });
 }));
 
 // "This reply looks like a new request": the suggestion waiting on a ticket,

@@ -331,6 +331,8 @@ class TicketThreadRepository {
             dedupeStamp: entry.externalEntryId,
             extra: {
               externalEntryId: entry.externalEntryId,
+              // The reply facts (replyFacts.js) read `from` (mail intake's name) or `fromEmail`.
+              from: entry.actorEmail || null,
               fromEmail: entry.actorEmail || null,
               fromName: entry.actorName || null,
               via: 'freshservice',
