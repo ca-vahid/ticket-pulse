@@ -3,6 +3,46 @@ import { ChevronDown, Plus, Trash2, X } from 'lucide-react';
 import { notificationWorkflowAPI, ticketsAPI } from '../../services/api';
 import { useTicketTypes } from '../../hooks/useTicketTypes';
 import { useWorkspaceOptional } from '../../contexts/WorkspaceContext';
+import * as conditionShared from '../../utils/conditionRuleShared';
+import { fieldsForTrigger } from '../../utils/conditionFieldTriggers';
+
+/**
+ * Friendly words for stored values (MEGA 11-14, contract §1). The shared
+ * module exports these lists; until that version lands this copy (same order,
+ * same words) keeps the pick-lists readable.
+ */
+const SENT_BY_FALLBACK = [
+  { value: 'requester', label: 'Requester' },
+  { value: 'cc', label: 'Someone Cc\'d' },
+  { value: 'workflow_recipient', label: 'Someone a workflow e-mailed' },
+  { value: 'other', label: 'Someone else' },
+];
+const REPLY_VERDICT_FALLBACK = [
+  { value: 'thanks', label: 'Thanks' },
+  { value: 'auto_reply', label: 'Out-of-office' },
+  { value: 'still_broken', label: 'Still not fixed' },
+  { value: 'new_request', label: 'New request' },
+  { value: 'question', label: 'Question' },
+  { value: 'reply', label: 'Other reply' },
+];
+const listOr = (list, fallback) => (Array.isArray(list) && list.length ? list : fallback);
+export const SENT_BY_CHOICES = listOr(conditionShared.SENT_BY_OPTIONS, SENT_BY_FALLBACK);
+export const REPLY_VERDICT_CHOICES = listOr(conditionShared.REPLY_VERDICT_OPTIONS, REPLY_VERDICT_FALLBACK);
+const OPTION_LABELS = {
+  'event.sentBy': Object.fromEntries(SENT_BY_CHOICES.map((o) => [o.value, o.label])),
+  'event.replyVerdict': Object.fromEntries(REPLY_VERDICT_CHOICES.map((o) => [o.value, o.label])),
+};
+
+/** The words shown for a stored value of `field` (the value itself when none). */
+export function optionLabel(field, value) {
+  return OPTION_LABELS[field]?.[String(value)] ?? String(value);
+}
+
+/** The same words, inside a sentence: "is not new request", "is someone Cc'd". */
+export function sentenceValueLabel(field, value) {
+  const label = OPTION_LABELS[field]?.[String(value)];
+  return label ? label.charAt(0).toLowerCase() + label.slice(1) : value;
+}
 
 /**
  * AND/OR condition-group builder for workflow condition nodes. Edits the
@@ -50,6 +90,8 @@ export const CG_FIELDS = [
   { value: 'ticket.autoHelp.playbook', label: 'Auto-help playbook', type: 'string' },
   { value: 'ticket.autoHelp.outcome', label: 'Auto-help outcome', type: 'enum', options: ['resolved_silence', 'resolved_confirmed', 'help_requested', 'reopened', 'agent_took_over', 'no_reply_left_open', 'loop_stopped', 'withdrawn', 'superseded_by'] },
   { value: 'ticket.ageMinutes', label: 'Ticket age (minutes)', type: 'duration' },
+  // MEGA 11-14 (A2): empty while the ticket is open.
+  { value: 'ticket.closedMinutes', label: 'Time since the ticket closed', type: 'duration' },
   { value: 'ticket.dueInMinutes', label: 'Minutes until due (negative = overdue)', type: 'duration' },
   { value: 'ticket.frDueInMinutes', label: 'Minutes until first-response due', type: 'duration' },
   // QA 09-18 #5: reply clocks (read from the conversation when evaluated).
@@ -72,7 +114,10 @@ export const CG_FIELDS = [
   { value: 'event.intakeNonActionable', label: 'Intake judged not actionable', type: 'boolean' },
   { value: 'event.intakeSource', label: 'Intake settled by', type: 'enum', options: ['pipeline', 'manual'] },
   { value: 'event.autoHelpReplyVerdict', label: 'Reply after an Auto-help close reads as', type: 'enum', options: ['confirmed', 'help', 'auto_reply'] },
-  { value: 'event.replyVerdict', label: 'Reply to a closed ticket reads as', type: 'enum', options: ['thanks', 'auto_reply', 'reply'] },
+  // MEGA 11-14 (A2/A3): who wrote the reply, how it reads, the loop count.
+  { value: 'event.sentBy', label: 'Reply sent by', type: 'enum', options: SENT_BY_CHOICES.map((o) => o.value) },
+  { value: 'event.replyVerdict', label: 'Reply reads as', type: 'enum', options: REPLY_VERDICT_CHOICES.map((o) => o.value) },
+  { value: 'event.replyReopens24h', label: 'Reopened by replies in the last 24 hours', type: 'number' },
   { value: 'event.senderIsAgent', label: 'Reply sender is an agent', type: 'boolean' },
   { value: 'event.isSurveyResponse', label: 'Reply is a survey response', type: 'boolean' },
   // QA 11-12 #2: "Requester replied" to an e-mail a workflow sent.
@@ -255,7 +300,7 @@ const asList = (value) => (Array.isArray(value) ? value : value === undefined ||
  * stored value this workspace no longer offers stays listed, ticked, so it
  * can be seen and unticked.
  */
-export function ValueChecklist({ value, options, onChange }) {
+export function ValueChecklist({ value, options, onChange, labelOf = String }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const rootRef = useRef(null);
@@ -264,8 +309,8 @@ export function ValueChecklist({ value, options, onChange }) {
   const optionKeys = new Set(options.map(String));
   const all = [...options, ...picked.filter((v) => !optionKeys.has(String(v)))];
   const needle = query.trim().toLowerCase();
-  const shown = needle ? all.filter((opt) => String(opt).toLowerCase().includes(needle)) : all;
-  const summary = picked.length ? picked.join(', ') : 'Pick values…';
+  const shown = needle ? all.filter((opt) => `${opt} ${labelOf(opt)}`.toLowerCase().includes(needle)) : all;
+  const summary = picked.length ? picked.map(labelOf).join(', ') : 'Pick values…';
 
   useEffect(() => {
     if (!open) return undefined;
@@ -331,7 +376,7 @@ export function ValueChecklist({ value, options, onChange }) {
                     onChange={() => toggle(opt)}
                     className="h-3.5 w-3.5 flex-shrink-0 accent-[hsl(var(--primary))]"
                   />
-                  <span className="min-w-0 flex-1 truncate">{key}</span>
+                  <span className="min-w-0 flex-1 truncate">{labelOf(opt)}</span>
                   {!optionKeys.has(key) && <span className="text-[11px] text-muted-foreground">not offered here now</span>}
                 </label>
               );
@@ -348,14 +393,74 @@ export function ValueChecklist({ value, options, onChange }) {
   );
 }
 
+/** A field's offered values, as stored values (the server may send { value, label }). */
+function optionValues(spec) {
+  return (Array.isArray(spec.options) ? spec.options : []).map((o) => (o && typeof o === 'object' ? o.value : o));
+}
+
+/** The words for one stored value of `spec`'s field. */
+function labelFor(spec, value) {
+  const hit = (Array.isArray(spec.options) ? spec.options : [])
+    .find((o) => o && typeof o === 'object' && String(o.value) === String(value));
+  return hit?.label ?? optionLabel(spec.value, value);
+}
+
+const DURATION_UNITS = [['minutes', 1, 'min'], ['hours', 60, 'hours'], ['days', 1440, 'days']];
+
+/** The largest unit that shows `minutes` as a whole number. */
+export function durationUnitFor(minutes) {
+  const n = Number(minutes);
+  if (!Number.isFinite(n) || n === 0) return 'minutes';
+  if (n % 1440 === 0) return 'days';
+  if (n % 60 === 0) return 'hours';
+  return 'minutes';
+}
+
+/**
+ * Minutes, typed as a number and a unit (MEGA 11-14: "Time since the ticket
+ * closed" reads as "14 days", not "20160"). Stores minutes, as before.
+ */
+export function DurationInput({ value, onChange, label = 'Duration' }) {
+  const [unit, setUnit] = useState(() => durationUnitFor(value));
+  const factor = DURATION_UNITS.find(([key]) => key === unit)?.[1] || 1;
+  const shown = value === '' || value === null || value === undefined || !Number.isFinite(Number(value))
+    ? ''
+    : Number((Number(value) / factor).toFixed(2));
+  return (
+    <div className="flex min-w-0 items-center gap-1">
+      <input
+        type="number"
+        value={shown}
+        onChange={(e) => onChange(e.target.value === '' ? '' : Math.round(Number(e.target.value) * factor))}
+        placeholder="0"
+        aria-label={`${label} (${unit})`}
+        className="min-w-0 flex-1 rounded-md border border-border bg-card px-2 py-1.5 text-sm text-foreground tabular-nums"
+      />
+      <select
+        value={unit}
+        onChange={(e) => {
+          const nextFactor = DURATION_UNITS.find(([key]) => key === e.target.value)?.[1] || 1;
+          setUnit(e.target.value);
+          if (shown !== '') onChange(Math.round(Number(shown) * nextFactor));
+        }}
+        aria-label={`${label} unit`}
+        className="w-[4.25rem] flex-shrink-0 rounded-md border border-border bg-card px-1 py-1.5 text-sm text-foreground"
+      >
+        {DURATION_UNITS.map(([key, , word]) => <option key={key} value={key}>{word}</option>)}
+      </select>
+    </div>
+  );
+}
+
 function ValueInput({ row, onChange, fields }) {
   const spec = fieldSpecIn(fields, row.field);
   if (VALUELESS.has(row.operator)) return null;
-  const options = Array.isArray(spec.options) ? spec.options : [];
+  const options = optionValues(spec);
+  const labelOf = (v) => labelFor(spec, v);
 
   if (LIST_OPERATORS.has(row.operator)) {
     if (options.length > 0) {
-      return <ValueChecklist value={row.value} options={options} onChange={onChange} />;
+      return <ValueChecklist value={row.value} options={options} onChange={onChange} labelOf={labelOf} />;
     }
     // No known values (subject, tags without a list…): type them.
     const listValue = Array.isArray(row.value) ? row.value.join(', ') : String(row.value ?? '');
@@ -380,7 +485,7 @@ function ValueInput({ row, onChange, fields }) {
         aria-label="Value"
         className="w-full rounded-md border border-border bg-card px-2.5 py-1.5 text-sm text-foreground"
       >
-        {choices.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+        {choices.map((opt) => <option key={opt} value={opt}>{labelOf(opt)}</option>)}
       </select>
     );
   }
@@ -404,16 +509,7 @@ function ValueInput({ row, onChange, fields }) {
     );
   }
   if (spec.type === 'duration') {
-    return (
-      <input
-        type="number"
-        value={row.value ?? ''}
-        onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))}
-        placeholder="minutes (120 = 2h)"
-        aria-label="Minutes"
-        className="w-full rounded-md border border-border bg-card px-2.5 py-1.5 text-sm text-foreground tabular-nums"
-      />
-    );
+    return <DurationInput value={row.value} onChange={onChange} label={String(spec.label || 'Duration').replace(/\s*\(minutes\)$/i, '')} />;
   }
   if (spec.type === 'number') {
     return (
@@ -455,44 +551,54 @@ export function withOperator(row, operator, spec = {}) {
   if (LIST_OPERATORS.has(operator)) return { ...row, operator, value: asList(row.value) };
   if (Array.isArray(row.value)) {
     const first = row.value[0];
-    return { ...row, operator, value: first !== undefined ? first : (spec.type === 'enum' ? spec.options?.[0] : '') };
+    return { ...row, operator, value: first !== undefined ? first : (spec.type === 'enum' ? optionValues(spec)[0] : '') };
   }
   return { ...row, operator };
 }
 
+const NOT_SET_WORDS = 'not set by this trigger';
+
 function ConditionRow({ row, onChange, onRemove, fields }) {
   const spec = fieldSpecIn(fields, row.field);
   const operators = OPERATORS_BY_TYPE[spec.type];
+  const notSet = spec.notSetByTrigger === true && spec.value === row.field;
   return (
-    <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)_minmax(0,1fr)_auto] items-center gap-1.5">
-      <select
-        value={row.field}
-        onChange={(e) => {
-          const next = fieldSpecIn(fields, e.target.value);
-          onChange({ field: next.value, operator: defaultOperator(next), value: next.type === 'enum' ? next.options?.[0] : '' });
-        }}
-        aria-label="Field"
-        className="w-full rounded-md border border-border bg-card px-2.5 py-1.5 text-sm text-foreground"
-      >
-        {fields.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
-      </select>
-      <select
-        value={row.operator}
-        onChange={(e) => onChange(withOperator(row, e.target.value, spec))}
-        aria-label="Operator"
-        className="w-full rounded-md border border-border bg-card px-2.5 py-1.5 text-sm text-foreground"
-      >
-        {operators.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-      </select>
-      <div>{VALUELESS.has(row.operator) ? <span className="text-xs text-muted-foreground/75 pl-1">—</span> : <ValueInput row={row} onChange={(value) => onChange({ ...row, value })} fields={fields} />}</div>
-      <button
-        type="button"
-        onClick={onRemove}
-        aria-label="Remove condition"
-        className="rounded-md p-1.5 text-muted-foreground/75 hover:bg-red-50 dark:hover:bg-red-500/15 hover:text-red-500"
-      >
-        <X className="h-3.5 w-3.5" />
-      </button>
+    <div>
+      <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)_minmax(0,1fr)_auto] items-center gap-1.5">
+        <select
+          value={row.field}
+          onChange={(e) => {
+            const next = fieldSpecIn(fields, e.target.value);
+            onChange({ field: next.value, operator: defaultOperator(next), value: next.type === 'enum' ? optionValues(next)[0] : '' });
+          }}
+          aria-label="Field"
+          className={`w-full rounded-md border bg-card px-2.5 py-1.5 text-sm text-foreground ${notSet ? 'border-amber-300 dark:border-amber-500/40' : 'border-border'}`}
+        >
+          {fields.map((f) => <option key={f.value} value={f.value}>{f.notSetByTrigger ? `${f.label} (${NOT_SET_WORDS})` : f.label}</option>)}
+        </select>
+        <select
+          value={row.operator}
+          onChange={(e) => onChange(withOperator(row, e.target.value, spec))}
+          aria-label="Operator"
+          className="w-full rounded-md border border-border bg-card px-2.5 py-1.5 text-sm text-foreground"
+        >
+          {operators.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
+        <div>{VALUELESS.has(row.operator) ? <span className="text-xs text-muted-foreground/75 pl-1">—</span> : <ValueInput row={row} onChange={(value) => onChange({ ...row, value })} fields={fields} />}</div>
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label="Remove condition"
+          className="rounded-md p-1.5 text-muted-foreground/75 hover:bg-red-50 dark:hover:bg-red-500/15 hover:text-red-500"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      {notSet && (
+        <p className="mt-0.5 pl-1 text-[11px] text-amber-700 dark:text-amber-300" data-testid="field-not-set-by-trigger">
+          This field is {NOT_SET_WORDS}, so it has no value here.
+        </p>
+      )}
     </div>
   );
 }
@@ -570,12 +676,14 @@ function GroupEditor({ group, onChange, onRemove, nested = false, fields }) {
   );
 }
 
-export default function ConditionGroupBuilder({ value, onChange, fields: fieldsProp = null }) {
+export default function ConditionGroupBuilder({ value, onChange, fields: fieldsProp = null, triggerType = null }) {
   // QA 10-06 #2: the step's noise check is its own switch now
   // (conditionNoise.jsx) — this builder only edits conditions.
   const loadedFields = useConditionFields();
-  const fields = fieldsProp || loadedFields;
   const group = isGroup(value) ? value : null;
+  // MEGA 11-14 (A4): only the fields this trigger fills, plus any the rule
+  // already uses (marked "not set by this trigger"). No trigger = all fields.
+  const fields = fieldsForTrigger(fieldsProp || loadedFields, triggerType, group);
 
   if (!group) {
     return (
