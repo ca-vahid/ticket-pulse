@@ -5,7 +5,7 @@ import { PersonAvatar } from '../../tickets/ticketUi';
 import { BTN_PRIMARY, BTN_QUIET, INPUT, nameFromEmail } from '../availabilityUi';
 
 /**
- * Small building blocks for the Availability admin sections: a right-hand
+ * Small building blocks for the Vacation Pulse admin sections: a right-hand
  * edit drawer, a checkbox multi-select, and a people picker (avatar + name
  * rows, never chips).
  */

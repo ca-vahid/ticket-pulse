@@ -77,7 +77,7 @@ export default function LeaveTypesSection({ config, reload, toast }) {
   return (
     <section aria-label="Leave types">
       <SectionTitle
-        hint="What people can book. Availability decides how a type shows on the dashboards; visibility what colleagues see."
+        hint="What people can book. &ldquo;Shows as&rdquo; decides how a type shows on the dashboards; visibility what colleagues see."
         action={<button type="button" className={BTN_LINK} onClick={() => { setDraft(toDraft(BLANK)); setError(null); }}><Plus className="h-4 w-4" aria-hidden="true" />New type</button>}
       >
         Leave types

@@ -92,7 +92,7 @@ test('warns with what the switched-off person still holds', async () => {
   await syncService.syncTechnicians(1);
 
   expect(technicianRepositoryMock.looseEnds).toHaveBeenCalledWith({ id: 42, name: 'Sam Okafor', email: 'sam@example.com' }, 1);
-  expect(loggerMock.warn).toHaveBeenCalledWith('Technician Sam Okafor (42) is switched off but still has: 1 open ticket still assigned; approver in 2 Availability approval groups; 3 pending ticket approvals waiting on them. Reassign these.');
+  expect(loggerMock.warn).toHaveBeenCalledWith('Technician Sam Okafor (42) is switched off but still has: 1 open ticket still assigned; approver in 2 Vacation Pulse approval groups; 3 pending ticket approvals waiting on them. Reassign these.');
   delete technicianRepositoryMock.looseEnds;
 });
 

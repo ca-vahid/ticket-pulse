@@ -230,7 +230,7 @@ export default function BookTimeForm({ me, onBooked, toast, editing = null, onSt
   };
 
   if (!types.length) {
-    return <p className="text-sm text-muted-foreground">No leave types are set up yet — ask an Availability admin.</p>;
+    return <p className="text-sm text-muted-foreground">No leave types are set up yet — ask a Vacation Pulse admin.</p>;
   }
 
   const refused = preview?.outcome === 'refused';

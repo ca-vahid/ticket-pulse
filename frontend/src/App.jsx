@@ -346,10 +346,20 @@ function App() {
                         }
                       />
 
-                      {/* Availability (native Vacation Tracker replacement): every signed-in
-                          person, agents included; the page gates Approvals / Settings itself. */}
+                      {/* Vacation Pulse (was Availability; native Vacation Tracker replacement):
+                          every signed-in person, agents included; the page gates Approvals /
+                          Settings itself. /vacation-pulse is an alias of the same page (MEGA
+                          11-14 Part J); links the app writes stay /availability/... */}
                       <Route
                         path="/availability/:tab?"
+                        element={
+                          <TicketsRoute>
+                            <Availability />
+                          </TicketsRoute>
+                        }
+                      />
+                      <Route
+                        path="/vacation-pulse/:tab?"
                         element={
                           <TicketsRoute>
                             <Availability />

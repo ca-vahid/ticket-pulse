@@ -3,7 +3,7 @@ import { Activity } from 'lucide-react';
 import { Switch } from '../ui/switch';
 
 /**
- * Shared pieces for Availability (native Vacation Tracker replacement).
+ * Shared pieces for Vacation Pulse (was Availability; native Vacation Tracker replacement).
  * Status = a small coloured dot + a word, never a pill (Vahid's taste).
  * Leave-type colours are Tailwind palette names stored on the type
  * (emerald / sky / amber / rose / violet / teal / slate …); the maps below spell

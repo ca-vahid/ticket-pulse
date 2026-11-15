@@ -164,6 +164,73 @@ function eventText(eventKey, ctx) {
   }
 }
 
+// ------------------------------------------------------------ who is blocked (MEGA 11-14 Part C)
+//
+// Production, 14 days to 14 Nov 2026: 68 cards failed for 5 people with "App
+// is blocked by app permission policy" - a Teams admin policy that does not
+// allow the Ticket Pulse app for them. Every attempt costs a Graph look-up
+// and an install call that can never work. After BACKOFF_AFTER blocked sends
+// in a row, sending stops for BACKOFF_MS (a 'skipped' row, reason
+// 'blocked_backoff'); a notice that has an e-mail equivalent goes by e-mail
+// instead (status 'emailed'). The fix itself is the Teams admin's.
+
+export const BLOCKED_POLICY_RE = /blocked by (?:the )?app permission polic/i;
+export const BACKOFF_AFTER = 3;
+export const BACKOFF_MS = 24 * 3600 * 1000;
+const WEEK_MS = 7 * 86400_000;
+// Skipped rows that mean "a card that should have come did not".
+const MISSED_SKIPS = new Set(['disconnected', 'blocked_backoff']);
+
+export const isBlockedByPolicy = (text) => BLOCKED_POLICY_RE.test(String(text || ''));
+
+/**
+ * Is sending to this person paused? rows: their deliveries, newest first (any
+ * statuses; only real attempts - sent / failed - count).
+ * @returns {{ active: boolean, streak: number, until: Date|null }}
+ */
+export function blockedBackoff(rows = [], now = new Date()) {
+  const attempts = (rows || []).filter((r) => r.status === 'sent' || r.status === 'failed');
+  let streak = 0;
+  for (const r of attempts) {
+    if (r.status === 'failed' && isBlockedByPolicy(r.reason)) streak += 1;
+    else break;
+  }
+  if (streak < BACKOFF_AFTER) return { active: false, streak, until: null };
+  const until = new Date(new Date(attempts[0].createdAt).getTime() + BACKOFF_MS);
+  return { active: until > now, streak, until: until > now ? until : null };
+}
+
+/**
+ * One person's Teams state, from their conversation row and their recent
+ * deliveries (newest first; the last 7 days are counted). No schema needed.
+ *   state: connected | disconnected | blocked | not_connected
+ */
+export function deriveTeamsStatus({ conv = null, rows = [], now = new Date() } = {}) {
+  const since = now.getTime() - WEEK_MS;
+  const recent = (rows || []).filter((r) => new Date(r.createdAt).getTime() >= since);
+  const lastBlocked = recent.find((r) => r.status === 'failed' && isBlockedByPolicy(r.reason)) || null;
+  const lastAttempt = (rows || []).find((r) => r.status === 'sent' || r.status === 'failed') || null;
+  const missed7d = recent.filter((r) => r.status === 'failed' || (r.status === 'skipped' && MISSED_SKIPS.has(r.reason))).length;
+  const emailedInstead7d = recent.filter((r) => r.status === 'emailed').length;
+  const backoff = blockedBackoff(rows, now);
+  const hasChat = Boolean(conv?.conversationId);
+  let state;
+  if (conv?.disconnectedAt) state = 'disconnected';
+  else if (lastAttempt?.status === 'failed' && isBlockedByPolicy(lastAttempt.reason)) state = 'blocked';
+  else if (!hasChat && isBlockedByPolicy(conv?.lastError)) state = 'blocked';
+  else if (hasChat) state = 'connected';
+  else state = 'not_connected';
+  return {
+    state,
+    lastBlockedAt: lastBlocked?.createdAt || null,
+    missed7d,
+    emailedInstead7d,
+    backoffUntil: backoff.active ? backoff.until : null,
+    disconnectedAt: conv?.disconnectedAt || null,
+    disconnectedBy: conv?.disconnectedBy || null,
+  };
+}
+
 /** QA 10-01 #4: the person was disconnected by an admin - skip, never re-install. */
 export class TeamsDisconnectedError extends Error {
   constructor(email) {
@@ -281,28 +348,99 @@ class TeamsNotificationService {
     }
   }
 
-  async _send(email, card, { summary, workspaceId = null, technicianId = null, ticketId = null, eventKey = 'test', bell = null, refKey = null } = {}) {
-    let conv;
+  /**
+   * Part C: has this person had BACKOFF_AFTER blocked sends in a row within
+   * the last day? Someone with a live chat (an admin allowed the app and they
+   * connected again) is never paused. Never throws.
+   */
+  async _backoffFor(email) {
     try {
-      conv = await this.ensureConversation(email);
-    } catch (err) {
-      if (!(err instanceof TeamsDisconnectedError)) throw err;
-      await this._record({ workspaceId, email, technicianId, ticketId, eventKey, status: 'skipped', reason: 'disconnected', summary });
-      return null;
+      const key = lc(email);
+      const conv = await prisma.teamsConversation.findUnique({ where: { email: key } });
+      if (!conv || conv.disconnectedAt || conv.conversationId) return { active: false };
+      const rows = await prisma.teamsDelivery.findMany({
+        where: { email: key, status: { in: ['sent', 'failed'] } },
+        orderBy: { id: 'desc' },
+        take: BACKOFF_AFTER,
+        select: { status: true, reason: true, createdAt: true },
+      });
+      return blockedBackoff(rows || []);
+    } catch {
+      return { active: false };
     }
+  }
+
+  /**
+   * One card to one person. Returns the activity id, or null when nothing went
+   * to Teams (disconnected, paused after blocked sends, or sent by e-mail).
+   *
+   * emailFallback (Part C): an async function that sends the same notice by
+   * e-mail and returns false when it could not. Only notices with a real
+   * e-mail equivalent pass one. It is used when the person is disconnected,
+   * paused, or blocked by a Teams policy right now; the row is then 'emailed'
+   * (reason = refKey when given, so once-only keys keep working).
+   * outcome (optional object) is filled with { via: 'teams'|'email', skipped }.
+   */
+  async _send(email, card, { summary, workspaceId = null, technicianId = null, ticketId = null, eventKey = 'test', bell = null, refKey = null, emailFallback = null, outcome = null } = {}) {
+    const base = { workspaceId, email, technicianId, ticketId, eventKey, summary };
+    const viaEmail = async (why) => {
+      if (typeof emailFallback !== 'function') return false;
+      const ok = await Promise.resolve().then(() => emailFallback()).then((r) => r !== false).catch((err) => {
+        logger.warn(`Teams: e-mail instead of a card (${eventKey}) failed for ${lc(email)}: ${err.message}`);
+        return false;
+      });
+      if (ok) {
+        await this._record({ ...base, status: 'emailed', reason: refKey ? String(refKey).slice(0, 120) : why });
+        if (outcome) outcome.via = 'email';
+      }
+      return ok;
+    };
+    const skip = async (why) => {
+      if (await viaEmail(why)) return null;
+      await this._record({ ...base, status: 'skipped', reason: why });
+      if (outcome) outcome.skipped = why;
+      return null;
+    };
+
+    // A test is a person asking; it always tries.
+    if (eventKey !== 'test') {
+      const paused = await this._backoffFor(email);
+      if (paused.active) return skip('blocked_backoff');
+    }
+
+    let conv;
     let activityId = null;
     try {
-      activityId = await bot.sendToConversation(conv, bot.cardActivity(card, { summary }));
-    } catch (err) {
-      // A stale conversation (app removed) — forget it once and retry through a fresh install.
-      if ([403, 404].includes(err.response?.status)) {
-        await prisma.teamsConversation.update({ where: { email: lc(email) }, data: { conversationId: null, lastError: bot.describeError(err) } }).catch(() => {});
-        const fresh = await this.ensureConversation(email);
-        activityId = await bot.sendToConversation(fresh, bot.cardActivity(card, { summary }));
-      } else {
+      try {
+        conv = await this.ensureConversation(email);
+      } catch (err) {
+        if (err instanceof TeamsDisconnectedError) return skip('disconnected');
         throw err;
       }
+      try {
+        activityId = await bot.sendToConversation(conv, bot.cardActivity(card, { summary }));
+      } catch (err) {
+        // A stale conversation (app removed) — forget it once and retry through a fresh install.
+        if ([403, 404].includes(err.response?.status)) {
+          await prisma.teamsConversation.update({ where: { email: lc(email) }, data: { conversationId: null, lastError: bot.describeError(err) } }).catch(() => {});
+          const fresh = await this.ensureConversation(email);
+          activityId = await bot.sendToConversation(fresh, bot.cardActivity(card, { summary }));
+        } else {
+          throw err;
+        }
+      }
+    } catch (err) {
+      // Blocked by a Teams policy right now, and the notice has an e-mail
+      // equivalent: the failed attempt is recorded here (it counts towards the
+      // pause) and the e-mail goes instead. Anything else is the caller's.
+      if (typeof emailFallback === 'function' && isBlockedByPolicy(err?.message || bot.describeError?.(err))) {
+        await this._record({ ...base, status: 'failed', reason: String(err.message || 'blocked').slice(0, 120) });
+        if (!(await viaEmail('blocked')) && outcome) outcome.failed = true;
+        return null;
+      }
+      throw err;
     }
+    if (outcome) outcome.via = 'teams';
     if (bell && conv.aadObjectId) {
       bot.sendActivityFeed(conv.aadObjectId, bell).catch((err) => logger.warn(`Teams bell notification failed for ${email}: ${bot.describeError(err)}`));
     }
@@ -1050,12 +1188,25 @@ class TeamsNotificationService {
     const tickets = mutes.length ? await prisma.ticket.findMany({ where: { id: { in: mutes.map((m) => m.ticketId) } }, select: { id: true, subject: true, freshserviceTicketId: true, nativeNumber: true, origin: true } }) : [];
     const byId = new Map(tickets.map((t) => [t.id, t]));
     const recent = await prisma.teamsDelivery.findMany({ where: { email: lc(tech.email) }, orderBy: { id: 'desc' }, take: 8, select: { eventKey: true, status: true, reason: true, summary: true, createdAt: true } });
+    // Part C: the same status the admin sees (connected / disconnected /
+    // blocked by a Teams policy), from the last week of deliveries.
+    const week = await Promise.resolve().then(() => prisma.teamsDelivery.findMany({
+      where: { email: lc(tech.email), createdAt: { gte: new Date(Date.now() - WEEK_MS) } },
+      orderBy: { id: 'desc' },
+      take: 500,
+      select: { status: true, reason: true, createdAt: true },
+    })).catch(() => []);
+    const health = deriveTeamsStatus({ conv, rows: week || [] });
     return {
       workspace: { id: tech.workspaceId, name: wsRow?.name || null },
       notAgentIn: askedRow ? { id: askedRow.id, name: askedRow.name } : null,
       configured: bot.isTeamsConfigured(),
       enabled: ws.teamsEnabled,
-      connection: { connected: Boolean(conv?.conversationId) && !conv?.disconnectedAt, disconnected: Boolean(conv?.disconnectedAt), installedAt: conv?.installedAt || null, lastError: conv?.lastError || null },
+      connection: {
+        connected: Boolean(conv?.conversationId) && !conv?.disconnectedAt, disconnected: Boolean(conv?.disconnectedAt), installedAt: conv?.installedAt || null, lastError: conv?.lastError || null,
+        status: health.state, lastBlockedAt: health.lastBlockedAt, missed7d: health.missed7d, emailedInstead7d: health.emailedInstead7d, backoffUntil: health.backoffUntil,
+        disconnectedAt: health.disconnectedAt, disconnectedByAdmin: Boolean(conv?.disconnectedAt) && lc(conv?.disconnectedBy) !== lc(tech.email),
+      },
       events: EVENTS.map((e) => ({ key: e.key, label: e.label, group: e.group, mode: events[e.key], workspaceDefault: effectivePrefs(ws.defaults, null).events[e.key] })),
       options,
       mutes: mutes.map((m) => ({ ticketId: m.ticketId, until: m.until, forever: m.until >= MUTE_FOREVER, ref: byId.get(m.ticketId) ? ticketDisplayRef(byId.get(m.ticketId)) : `#${m.ticketId}`, subject: byId.get(m.ticketId)?.subject || null })),
@@ -1106,21 +1257,49 @@ class TeamsNotificationService {
     const since = new Date(Date.now() - 24 * 3600 * 1000);
     const counts = await prisma.teamsDelivery.groupBy({ by: ['status'], where: { workspaceId: Number(workspaceId), createdAt: { gte: since } }, _count: { _all: true } }).catch(() => []);
     const lastFailure = await prisma.teamsDelivery.findFirst({ where: { workspaceId: Number(workspaceId), status: 'failed' }, orderBy: { id: 'desc' }, select: { email: true, reason: true, createdAt: true } });
+    // Part C: each person's last week of deliveries (any workspace - Teams is
+    // per person), read once for the whole list. A failed read only loses the
+    // counts; the list still shows.
+    const week = techs.length ? await Promise.resolve().then(() => prisma.teamsDelivery.findMany({
+      where: { email: { in: [...new Set(techs.map((t) => lc(t.email)))] }, createdAt: { gte: new Date(Date.now() - WEEK_MS) } },
+      orderBy: { id: 'desc' },
+      take: 20000,
+      select: { email: true, status: true, reason: true, createdAt: true },
+    })).catch(() => []) : [];
+    const rowsByEmail = new Map();
+    for (const r of week || []) {
+      const k = lc(r.email);
+      if (!rowsByEmail.has(k)) rowsByEmail.set(k, []);
+      rowsByEmail.get(k).push(r);
+    }
+    const agents = techs.map((t) => {
+      const c = byEmail.get(lc(t.email));
+      const health = deriveTeamsStatus({ conv: c, rows: rowsByEmail.get(lc(t.email)) || [] });
+      return {
+        id: t.id, name: t.name, email: t.email,
+        connected: Boolean(c?.conversationId) && !c?.disconnectedAt,
+        disconnected: Boolean(c?.disconnectedAt),
+        disconnectedAt: c?.disconnectedAt || null,
+        disconnectedBy: c?.disconnectedBy || null,
+        disconnectedBySelf: Boolean(c?.disconnectedAt) && Boolean(c?.disconnectedBy) && lc(c.disconnectedBy) === lc(t.email),
+        lastError: c?.lastError || null,
+        status: health.state,
+        lastBlockedAt: health.lastBlockedAt,
+        missed7d: health.missed7d,
+        emailedInstead7d: health.emailedInstead7d,
+        backoffUntil: health.backoffUntil,
+      };
+    });
     return {
       bot: { ...probe, appId: bot.teamsConfig().appId },
       settings,
       events: EVENTS,
-      agents: techs.map((t) => {
-        const c = byEmail.get(lc(t.email));
-        return {
-          id: t.id, name: t.name, email: t.email,
-          connected: Boolean(c?.conversationId) && !c?.disconnectedAt,
-          disconnected: Boolean(c?.disconnectedAt),
-          disconnectedAt: c?.disconnectedAt || null,
-          disconnectedBy: c?.disconnectedBy || null,
-          lastError: c?.lastError || null,
-        };
-      }),
+      agents,
+      health: {
+        blocked: agents.filter((a) => a.status === 'blocked').length,
+        disconnected: agents.filter((a) => a.status === 'disconnected').length,
+        notConnected: agents.filter((a) => a.status === 'not_connected').length,
+      },
       last24h: Object.fromEntries(counts.map((c) => [c.status, c._count._all])),
       lastFailure,
     };

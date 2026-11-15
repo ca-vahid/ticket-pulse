@@ -221,7 +221,7 @@ class AvailabilityService {
   }
 
   async assertAdmin(user) {
-    if (!(await this.isAdmin(user))) throw new AuthorizationError('Only administrators can change Availability settings', 'availability_admin');
+    if (!(await this.isAdmin(user))) throw new AuthorizationError('Only administrators can change Vacation Pulse settings', 'availability_admin');
   }
 
   /** E-mails of active approvers (incl. delegates active today) of the groups containing `email`. */
@@ -1340,7 +1340,7 @@ class AvailabilityService {
       button: { label: 'Review in Ticket Pulse', url: `${base}/availability/approvals` },
     });
     // One copy each: approvers do not see each other and Reply All goes nowhere.
-    const subject = `Availability: ${person.name} — ${leaveType.name}, ${range}${was ? ' (changed)' : ''}`;
+    const subject = `Vacation Pulse: ${person.name} — ${leaveType.name}, ${range}${was ? ' (changed)' : ''}`;
     const sent = await Promise.allSettled([...new Set(approvers.map(lc).filter(Boolean))].map((to) => sendEmail({ to: [to], subject, html, context: 'availability' })));
     const failed = sent.filter((r) => r.status === 'rejected');
     if (failed.length) logger.warn(`Availability: ${failed.length} of ${sent.length} approver notice(s) failed for request ${request.id}: ${failed[0].reason?.message}`);
@@ -1408,9 +1408,9 @@ class AvailabilityService {
     const html = emailHtml({
       title: `Your ${type?.name?.toLowerCase() || 'request'} was ${verb}`,
       lines: [describeRange(request), `By ${actor?.name || actor?.email || 'an approver'}`, request.decisionNote ? `Note: ${request.decisionNote}` : null],
-      button: { label: 'Open Availability', url: `${base}/availability` },
+      button: { label: 'Open Vacation Pulse', url: `${base}/availability` },
     });
-    await sendEmail({ to: [request.email], subject: `Availability: ${type?.name || 'Request'} ${verb} — ${describeRange(request)}`, html, context: 'availability' });
+    await sendEmail({ to: [request.email], subject: `Vacation Pulse: ${type?.name || 'Request'} ${verb} — ${describeRange(request)}`, html, context: 'availability' });
   }
 
   // ------------------------------------------------------------------ Vacation Tracker import
@@ -1856,13 +1856,14 @@ function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-// Outlook-safe: no gradients, explicit colours, bgcolor on cells.
-function emailHtml({ title, lines = [], button = null }) {
+// Outlook-safe: no gradients, explicit colours, bgcolor on cells. Exported for
+// the approvers' morning list when Teams cannot reach them (MEGA 11-14 Part I).
+export function emailHtml({ title, lines = [], button = null }) {
   const body = lines.filter(Boolean).map((l) => `<p style="margin:0 0 8px;color:#334155;font-size:14px;line-height:1.5">${escapeHtml(l)}</p>`).join('');
   const btn = button
     ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:12px"><tr><td bgcolor="#2563eb" style="background-color:#2563eb;border-radius:8px"><a href="${escapeHtml(button.url)}" style="display:inline-block;padding:10px 16px;color:#ffffff;font-weight:600;font-size:14px;text-decoration:none">${escapeHtml(button.label)}</a></td></tr></table>`
     : '';
-  return `<div style="font-family:Segoe UI,Arial,sans-serif;max-width:560px"><h2 style="margin:0 0 12px;color:#0f172a;font-size:18px">${escapeHtml(title)}</h2>${body}${btn}<p style="margin:16px 0 0;color:#64748b;font-size:12px">Ticket Pulse · Availability</p></div>`;
+  return `<div style="font-family:Segoe UI,Arial,sans-serif;max-width:560px"><h2 style="margin:0 0 12px;color:#0f172a;font-size:18px">${escapeHtml(title)}</h2>${body}${btn}<p style="margin:16px 0 0;color:#64748b;font-size:12px">Ticket Pulse · Vacation Pulse</p></div>`;
 }
 
 export function parseCsv(text) {

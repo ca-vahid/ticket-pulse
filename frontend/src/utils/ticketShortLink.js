@@ -9,7 +9,7 @@ const REF_RE = /^(?:tp[-\s]?|#)?\d{1,12}$/i;
 // Mirrors RESERVED_WORKSPACE_SLUGS in backend services/ticketShortLinkService.js.
 export const RESERVED_FIRST_SEGMENTS = new Set([
   'login', 'auth', 'workspace', 'workspaces', 'dashboard', 'tickets', 'technician', 'timeline', 'analytics',
-  'assignments', 'settings', 'visuals', 'knowledge', 'approval', 'approval-reply', 'approvals', 'availability',
+  'assignments', 'settings', 'visuals', 'knowledge', 'approval', 'approval-reply', 'approvals', 'availability', 'vacation-pulse',
   'onboarding', 'on-call', 'profile', 'mail-alerts', 'notifications', 'my-competencies', 'requesters',
   'workflows', 'feedback', 'summit', 'summit-taxonomy', 'ticket-status', 'ticket-escalation', 'ticket-urgency',
   'api', 'health', 'assets', 'brand', 'branding-mockups', 'demo-avatars', 'downloads', 'feedback-themes',

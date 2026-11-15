@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Navigate, useNavigate, useParams } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { CalendarDays, CalendarPlus, CalendarRange, History, Inbox, LayoutDashboard, Rows3, Settings2 } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
@@ -17,7 +17,11 @@ import AdminSettingsPanel from '../components/availability/AdminSettingsPanel';
 import RequestHistoryPanel from '../components/availability/RequestHistoryPanel';
 
 /**
- * Availability — the native Vacation Tracker replacement.
+ * Vacation Pulse (MEGA 11-14 Part J; the section was called Availability, and
+ * the code, API and /availability URLs keep that name) — the native Vacation
+ * Tracker replacement. /vacation-pulse/:tab is an alias of the same page; the
+ * address bar keeps whichever was opened. Inside, "time away" is the general
+ * word: a sick day or a day working from home is never called "vacation".
  *
  *   /availability/overview   who is out this week, my balance, holidays, coverage (default)
  *   /availability/calendar   wallchart: people by day, grouped by office / approval group
@@ -29,10 +33,12 @@ import RequestHistoryPanel from '../components/availability/RequestHistoryPanel'
  *
  * Open to every signed-in person, agents included — booking your own time is
  * not a coordinator job. Approvals shows only to approvers with something
- * waiting (or admins); Settings only to Availability admins.
+ * waiting (or admins); Settings only to Vacation Pulse admins.
  */
 
 const TAB_IDS = ['overview', 'calendar', 'month', 'my-time', 'approvals', 'history', 'settings'];
+export const SECTION_NAME = 'Vacation Pulse';
+const ALIAS_BASE = '/vacation-pulse';
 
 /** The booking form on My time, once it has rendered (it loads after the tab). */
 function focusBookingForm(tries = 12) {
@@ -69,6 +75,9 @@ export function BookTimeButton({ onClick, className = '' }) {
 export default function Availability() {
   const { tab } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  // Opened as /vacation-pulse: the tabs stay on it.
+  const base = location.pathname === ALIAS_BASE || location.pathname.startsWith(`${ALIAS_BASE}/`) ? ALIAS_BASE : '/availability';
   const { width: layoutWidth } = useLayoutWidth();
   const toast = useToast();
   const [me, setMe] = useState(null);
@@ -79,16 +88,22 @@ export default function Availability() {
   const loadMe = useCallback(() => {
     availabilityAPI.me()
       .then((res) => { setMe(res?.data || null); setError(null); })
-      .catch((err) => setError(err?.message || 'Could not load Availability'));
+      .catch((err) => setError(err?.message || `Could not load ${SECTION_NAME}`));
   }, []);
 
   const loadConfig = useCallback(() => {
     availabilityAPI.adminConfig()
       .then((res) => { setConfig(res?.data || null); setConfigError(null); })
-      .catch((err) => setConfigError(err?.message || 'Could not load Availability settings'));
+      .catch((err) => setConfigError(err?.message || `Could not load ${SECTION_NAME} settings`));
   }, []);
 
   useEffect(() => { loadMe(); }, [loadMe]);
+  // The browser tab says where you are.
+  useEffect(() => {
+    const prev = document.title;
+    document.title = `${SECTION_NAME} — Ticket Pulse`;
+    return () => { document.title = prev; };
+  }, []);
   useEffect(() => { if (me?.isAdmin) loadConfig(); }, [me?.isAdmin, loadConfig]);
 
   const reloadAdmin = useCallback(() => { loadConfig(); loadMe(); }, [loadConfig, loadMe]);
@@ -112,16 +127,16 @@ export default function Availability() {
   const bookTime = () => {
     // A request being changed is left as it was: the button always books anew.
     window.dispatchEvent(new Event(BOOK_NEW_EVENT));
-    if (tab !== 'my-time') navigate('/availability/my-time');
+    if (tab !== 'my-time') navigate(`${base}/my-time`);
     focusBookingForm();
   };
 
-  if (!tab || !TAB_IDS.includes(tab)) return <Navigate to="/availability/overview" replace />;
-  if (me && !tabs.some((t) => t.id === tab)) return <Navigate to="/availability/overview" replace />;
+  if (!tab || !TAB_IDS.includes(tab)) return <Navigate to={`${base}/overview`} replace />;
+  if (me && !tabs.some((t) => t.id === tab)) return <Navigate to={`${base}/overview`} replace />;
 
   let body;
   if (!me && error) body = <ErrorNote>{error}</ErrorNote>;
-  else if (!me) body = <Loading label="Loading Availability…" />;
+  else if (!me) body = <Loading label={`Loading ${SECTION_NAME}…`} />;
   else {
     body = (
       <section role="tabpanel" id={`availability-panel-${tab}`} aria-labelledby={`availability-tab-${tab}`} tabIndex={-1} className="animate-fadeIn focus:outline-none">
@@ -140,7 +155,7 @@ export default function Availability() {
     <div className="tp-tickets-backdrop min-h-screen md:pl-[var(--tp-rail-w,58px)]">
       <AppHeader activePage="availability" />
       <main className={applyWidth('mx-auto max-w-6xl px-4 py-6 pb-24 animate-fadeIn sm:px-6 lg:pb-6', layoutWidth)}>
-        <LightTabBar tabs={tabs} activeId={tab} onSelect={(id) => navigate(`/availability/${id}`)} ariaLabel="Availability sections" idPrefix="availability" className="max-sm:[&>div:nth-child(2)]:hidden">
+        <LightTabBar tabs={tabs} activeId={tab} onSelect={(id) => navigate(`${base}/${id}`)} ariaLabel={`${SECTION_NAME} sections`} idPrefix="availability" className="max-sm:[&>div:nth-child(2)]:hidden">
           <span className="hidden items-center gap-3 sm:inline-flex">
             {me?.person?.name && <span className="text-xs text-muted-foreground">{me.person.name}</span>}
             <BookTimeButton onClick={bookTime} />

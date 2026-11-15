@@ -70,6 +70,55 @@ describe('Teams settings: disconnect an agent', () => {
   });
 });
 
+// MEGA 11-14 Part C: a status per person, and a count of who cannot get cards at the top.
+describe('Teams settings: who is blocked', () => {
+  const WITH_STATUS = {
+    ...STATUS,
+    agents: [
+      { id: 7, name: 'Alex Rivera', email: 'alex@example.com', connected: true, disconnected: false, status: 'connected', missed7d: 0 },
+      { id: 8, name: 'Sam Ortiz', email: 'sam@example.com', connected: false, disconnected: false, status: 'blocked', lastError: 'App is blocked by app permission policy. TenantId: x', lastBlockedAt: '2026-11-13T22:53:12Z', missed7d: 12, backoffUntil: null },
+      { id: 9, name: 'Jo Park', email: 'jo@example.com', connected: false, disconnected: false, status: 'blocked', lastBlockedAt: '2026-11-12T18:54:17Z', missed7d: 3, backoffUntil: '2026-11-13T18:54:17Z' },
+      { id: 10, name: 'Kim Lee', email: 'kim@example.com', connected: false, disconnected: true, disconnectedBy: 'admin@example.com', status: 'disconnected', missed7d: 4 },
+      { id: 11, name: 'Pat Ruiz', email: 'pat@example.com', connected: false, disconnected: false, status: 'not_connected', lastError: 'timeout of 15000ms exceeded' },
+    ],
+    health: { blocked: 2, disconnected: 1, notConnected: 1 },
+  };
+
+  test('the count at the top, and the list behind it', async () => {
+    teamsAdminAPI.status.mockResolvedValue({ data: WITH_STATUS });
+    render(<TeamsSettingsPanel />);
+    const banner = await screen.findByTestId('teams-blocked-count');
+    expect(banner).toHaveTextContent('2 people can’t get Teams cards');
+    expect(banner).toHaveTextContent('Permission policies');
+    expect(banner).toHaveTextContent('1 more is disconnected.');
+    expect(screen.getAllByRole('listitem').filter((li) => li.closest('[aria-label="Agents and their Teams status"]'))).toHaveLength(5);
+    fireEvent.click(screen.getByRole('button', { name: 'Show them' }));
+    const rows = screen.getAllByRole('listitem').filter((li) => li.closest('[aria-label="Agents and their Teams status"]'));
+    expect(rows.map((r) => r.textContent)).toEqual([expect.stringContaining('Sam Ortiz'), expect.stringContaining('Jo Park')]);
+    expect(screen.getByRole('button', { name: 'Show everyone' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('each row says its status: blocked with the last refusal and the cards missed', async () => {
+    teamsAdminAPI.status.mockResolvedValue({ data: WITH_STATUS });
+    render(<TeamsSettingsPanel />);
+    const sam = await screen.findByTestId('teams-status-8');
+    expect(sam).toHaveTextContent('Blocked by Teams policy');
+    expect(sam).toHaveTextContent('Last refused Fri 13 Nov, 2:53 PM · 12 cards missed in 7 days');
+    expect(sam).not.toHaveTextContent('TenantId'); // the raw Graph error is not shown for blocked people
+    expect(screen.getByTestId('teams-status-9')).toHaveTextContent('Ticket Pulse tries again Fri 13 Nov, 10:54 AM');
+    expect(screen.getByTestId('teams-status-7')).toHaveTextContent('Connected');
+    expect(screen.getByTestId('teams-status-10')).toHaveTextContent('Disconnected by admin@example.com4 cards not sent in 7 days');
+    expect(screen.getByTestId('teams-status-11')).toHaveTextContent('Not connected yettimeout of 15000ms exceeded');
+  });
+
+  test('nobody blocked: no count line', async () => {
+    teamsAdminAPI.status.mockResolvedValue({ data: STATUS });
+    render(<TeamsSettingsPanel />);
+    await screen.findByTestId('teams-status-7');
+    expect(screen.queryByTestId('teams-blocked-count')).toBeNull();
+  });
+});
+
 // QA 11-10 #1: the workspace default for "new unassigned ticket in my groups" gets a priority floor.
 describe('Teams settings: priority for new unassigned tickets', () => {
   const GROUP_EVENT = { key: 'group_unassigned', label: 'A new unassigned ticket arrives in my groups', group: 'My team', mode: 'off' };

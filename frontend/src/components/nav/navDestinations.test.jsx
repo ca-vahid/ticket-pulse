@@ -106,7 +106,7 @@ describe('NAV_DESTINATIONS gates', () => {
 describe('hooks', () => {
   const ids = (result) => result.current.map((d) => d.id);
 
-  test.each(['viewer', 'reviewer'])('useNavDestinations: %s → Tickets + Approvals + Availability only', (role) => {
+  test.each(['viewer', 'reviewer'])('useNavDestinations: %s → Tickets + Approvals + Vacation Pulse only', (role) => {
     wsState.availableWorkspaces = [{ id: 1, role }];
     expect(ids(renderHook(() => useNavDestinations()).result)).toEqual(['tickets', 'approvals', 'availability']);
     expect(renderHook(() => useCanAccessSettings()).result.current).toBe(false);
@@ -138,7 +138,7 @@ describe('hooks', () => {
     expect(ids(renderHook(() => useNavDestinations()).result)).toEqual(['tickets', 'approvals', 'availability']);
   });
 
-  test('agents keep Tickets + Approvals (+ Availability) regardless of workspace role label', () => {
+  test('agents keep Tickets + Approvals (+ Vacation Pulse) regardless of workspace role label', () => {
     authState.user = agent;
     wsState.availableWorkspaces = [{ id: 1, role: 'agent' }];
     expect(ids(renderHook(() => useNavDestinations()).result)).toEqual(['tickets', 'approvals', 'availability']);
