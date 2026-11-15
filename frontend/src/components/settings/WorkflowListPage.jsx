@@ -406,6 +406,8 @@ export default function WorkflowListPage({
   onOpenLocalDraft = null,
   onDiscardLocalDraft = null,
   initialFilter = 'all',
+  // A line or two the whole list should see (MEGA 11-14: the reopen check).
+  notice = null,
 }) {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState(initialFilter);
@@ -518,6 +520,7 @@ export default function WorkflowListPage({
               )}
             </span>
           </div>
+          {notice}
           <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
             <div className="settings-scrollbar -mx-1 flex max-w-full items-center gap-4 overflow-x-auto px-1 pt-1 text-[13px]" role="group" aria-label="Filter workflows">
               {FILTERS.map((f) => {

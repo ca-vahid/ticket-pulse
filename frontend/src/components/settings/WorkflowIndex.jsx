@@ -116,15 +116,14 @@ export function workflowMeta(workflow, { isAfterHours = () => false } = {}) {
 }
 
 /**
- * QA 10-26 #1: whether "New variant" is a real option for a workflow. The
- * seeded "Reopen on requester reply" default is not: what a requester reply
- * does is set in Settings → Ticket Ops → When a requester replies, which
- * retires this workflow when it takes the reopen over, so a routed copy of it
- * has nothing to add. An archived workflow is restored before it is copied.
+ * Whether "New variant" is a real option for a workflow. Any live workflow
+ * can be copied; an archived one is restored first. (MEGA 11-14, G9: the
+ * seeded "Reopen on requester reply" default is offered again. Workflows are
+ * now the only thing that reopens a ticket on a reply, so a workspace can
+ * route a second reopen rule, e.g. one group's tickets.)
  */
 export function canAddVariant(workflow) {
-  if (!workflow || workflow.archivedAt) return false;
-  return !(workflow.isDefaultVariant && workflow.triggerType === 'ticket.reply_received');
+  return Boolean(workflow) && !workflow.archivedAt;
 }
 
 /** A row's "⋯" actions (list page and sidebar); an empty list means no "⋯" button. */
@@ -133,8 +132,8 @@ export function rowMenuItems(workflow) {
   const isArchived = Boolean(workflow.archivedAt);
   return [
     ...(canAddVariant(workflow) ? [{ key: 'variant', label: 'New variant…' }] : []),
-    // A default is never archived here; one retired by Ticket Ops → When a
-    // requester replies can still be restored.
+    // A default is never archived here; an archived one (retired by the old
+    // Ticket Ops reopen switch, before 4.3.79) can still be restored.
     ...(workflow.isDefaultVariant && !isArchived ? [] : [{ key: isArchived ? 'restore' : 'archive', label: isArchived ? 'Restore' : 'Archive' }]),
     ...(isArchived && !workflow.isDefaultVariant ? [{ key: 'delete', label: 'Delete permanently', danger: true }] : []),
   ];

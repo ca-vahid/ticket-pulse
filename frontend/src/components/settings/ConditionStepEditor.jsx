@@ -1,23 +1,25 @@
 import { useEffect, useState } from 'react';
-import { Code2, MessageSquareOff } from 'lucide-react';
-import ConditionGroupBuilder from './ConditionGroupBuilder';
+import { Code2, MessageSquareOff, RefreshCwOff } from 'lucide-react';
+import ConditionGroupBuilder, { CG_FIELDS, sentenceValueLabel } from './ConditionGroupBuilder';
 import SkipNoiseSwitch from './SkipNoiseSwitch';
 import { Switch } from '../ui/switch';
 import { conditionGroupPatch, visibleConditionGroup } from '../../utils/conditionNoise';
-import { describeConditionStep, describeRuleReads, ruleConversionPatch } from '../../utils/conditionRuleShared';
-import { REPLY_TRIGGER, conditionStepView } from '../../utils/conditionStepView';
+import { describeRuleReads, ruleConversionPatch } from '../../utils/conditionRuleShared';
+import { REPLY_TRIGGER, conditionStepView, describeStep, stepSwitches, thanksSwitchPatch } from '../../utils/conditionStepView';
 
 /**
  * The condition step's inspector (14 Oct 2026, "rules should be UI oriented").
  *
  *   1. One plain sentence of what the step checks.
  *   2. The step switches: Skip noise, and on "Requester replied" workflows
- *      "Ignore a thank-you or out-of-office reply after an Auto-help close".
- *   3. The conditions as builder rows. A step that still carries a raw
- *      json-logic rule is shown as rows straight away when the rule converts
- *      (the panel writes the conversion into the draft; it is saved on
- *      publish). A rule that can not convert gets a clear notice, the code
- *      read-only, and "Edit as code" — the only place code is still typed.
+ *      (MEGA 11-14) "Don't reopen on a thank-you or out-of-office reply" and
+ *      "Stop after 3 reopens by replies in a day".
+ *   3. The conditions as builder rows, listing only the fields the trigger
+ *      fills. A step that still carries a raw json-logic rule is shown as
+ *      rows straight away when the rule converts (the panel writes the
+ *      conversion into the draft; it is saved on publish). A rule that can
+ *      not convert gets a clear notice, the code read-only, and "Edit as
+ *      code" — the only place code is still typed.
  */
 
 // QA 11-05: the step switches are the app's one switch (components/ui/switch).
@@ -25,22 +27,56 @@ function StepSwitch({ on, label, onToggle }) {
   return <Switch checked={on} aria-label={label} onCheckedChange={() => onToggle()} className="mt-0.5" />;
 }
 
-/** "Ignore a thank-you or out-of-office reply after an Auto-help close" (ignoreAutoHelpThanks). */
-export function AutoHelpThanksSwitch({ data, onPatch }) {
-  const on = data?.ignoreAutoHelpThanks === true;
+/** One switch row: icon, a bold label, one short line, the switch. */
+function StepSwitchRow({ icon: Icon, label, help, on, onToggle, testId }) {
   return (
-    <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5" data-testid="auto-help-thanks-switch">
-      <MessageSquareOff className={`mt-0.5 h-4 w-4 flex-shrink-0 ${on ? 'text-primary' : 'text-muted-foreground/60'}`} aria-hidden="true" />
+    <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5" data-testid={testId}>
+      <Icon className={`mt-0.5 h-4 w-4 flex-shrink-0 ${on ? 'text-primary' : 'text-muted-foreground/60'}`} aria-hidden="true" />
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-semibold text-foreground">Ignore a thank-you or out-of-office reply after an Auto-help close</div>
-        <p className="text-xs text-muted-foreground">
-          {on
-            ? 'Within 7 days of an Auto-help close, a reply that reads as thanks or an automatic out-of-office takes the False path. So does one to any closed ticket when "A thank-you or out-of-office reply does not reopen" is on in Ticket Ops → When a requester replies. Checked before the conditions below.'
-            : 'Every reply goes on to the conditions below, thank-yous after an Auto-help close included.'}
-        </p>
+        <div className="text-sm font-semibold text-foreground">{label}</div>
+        <p className="text-xs text-muted-foreground">{help}</p>
       </div>
-      <StepSwitch on={on} label="Ignore a thank-you or out-of-office reply after an Auto-help close" onToggle={() => onPatch({ ignoreAutoHelpThanks: !on })} />
+      <StepSwitch on={on} label={label} onToggle={onToggle} />
     </div>
+  );
+}
+
+export const THANKS_SWITCH_LABEL = 'Don\'t reopen on a thank-you or out-of-office reply';
+export const LOOP_GUARD_SWITCH_LABEL = 'Stop after 3 reopens by replies in a day';
+
+/**
+ * "Don't reopen on a thank-you or out-of-office reply" (`ignoreThanks`). A
+ * step saved with the older `ignoreAutoHelpThanks` key shows it on; the first
+ * toggle writes `ignoreThanks` and drops the old key.
+ */
+export function ThanksSwitch({ data, onPatch }) {
+  const on = stepSwitches(data).thanks;
+  return (
+    <StepSwitchRow
+      icon={MessageSquareOff}
+      label={THANKS_SWITCH_LABEL}
+      help={on ? 'Such a reply takes the False path, and the ticket says why.' : 'Every reply goes on to the conditions below.'}
+      on={on}
+      onToggle={() => onPatch(thanksSwitchPatch(!on))}
+      testId="thanks-switch"
+    />
+  );
+}
+/** The pre-11-14 name, kept for imports. */
+export const AutoHelpThanksSwitch = ThanksSwitch;
+
+/** "Stop after 3 reopens by replies in a day" (`replyLoopGuard`). */
+export function ReplyLoopGuardSwitch({ data, onPatch }) {
+  const on = stepSwitches(data).loopGuard;
+  return (
+    <StepSwitchRow
+      icon={RefreshCwOff}
+      label={LOOP_GUARD_SWITCH_LABEL}
+      help={on ? 'A 4th reopen within 24 hours takes the False path; the ticket asks a person to look.' : 'Replies can reopen the ticket any number of times.'}
+      on={on}
+      onToggle={() => onPatch({ replyLoopGuard: !on })}
+      testId="loop-guard-switch"
+    />
   );
 }
 
@@ -111,8 +147,14 @@ export default function ConditionStepEditor({ data = {}, triggerType = null, onP
   // Every edit made while the draft still holds the raw rule carries the
   // conversion with it, so the saved step is rows + switches, never both.
   const patch = (p) => onPatch({ ...(conversion || {}), ...p });
-  const sentence = describeConditionStep(view);
-  const showThanks = triggerType === REPLY_TRIGGER || view.ignoreAutoHelpThanks === true;
+  // The static catalog gives the new reply fields their names and types until
+  // the shared module knows them; codes read as words.
+  const sentence = describeStep(data, { fields: CG_FIELDS, valueLabel: sentenceValueLabel });
+  const switches = stepSwitches(view);
+  const isReply = triggerType === REPLY_TRIGGER;
+  // Other triggers show a switch only while it is on, so it can be turned off.
+  const showThanks = isReply || switches.thanks;
+  const showLoopGuard = isReply || switches.loopGuard;
 
   const applyCode = (rule) => {
     const converted = ruleConversionPatch({ rule });
@@ -127,7 +169,8 @@ export default function ConditionStepEditor({ data = {}, triggerType = null, onP
       {/* In code mode the switch shows only its own flag: reading the noise
           test out of a rule it can not convert would let "off" drop the code. */}
       <SkipNoiseSwitch data={mode === 'code' ? { skipNoise: view.skipNoise === true } : view} onPatch={patch} />
-      {showThanks && <AutoHelpThanksSwitch data={view} onPatch={patch} />}
+      {showThanks && <ThanksSwitch data={view} onPatch={patch} />}
+      {showLoopGuard && <ReplyLoopGuardSwitch data={view} onPatch={patch} />}
       {mode === 'code' ? (
         <RuleAsCodeNotice rule={data.rule} onApply={applyCode} />
       ) : (
@@ -136,6 +179,7 @@ export default function ConditionStepEditor({ data = {}, triggerType = null, onP
           <ConditionGroupBuilder
             value={visibleConditionGroup(view)}
             onChange={(group) => patch(conditionGroupPatch(view, group))}
+            triggerType={triggerType}
           />
         </div>
       )}
