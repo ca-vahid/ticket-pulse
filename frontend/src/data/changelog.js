@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.83-preview';
+export const APP_VERSION = '4.3.84-preview';
 
 export const changelog = [
+  {
+    version: '4.3.84-preview',
+    date: 'November 16, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>A second reply to an old closed ticket no longer starts a second new ticket</strong> &mdash; when someone replies again to the same old ticket within 7 days, and the ticket their first reply started is still open, the new reply is added to that ticket instead of starting another one. The old ticket stays closed and says where the reply went.' },
+    ],
+  },
   {
     version: '4.3.83-preview',
     date: 'November 16, 2026',

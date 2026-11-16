@@ -62,6 +62,7 @@ export const WHY_LINES = Object.freeze({
   reopen_failed: ({ reason }) => `Reply received; the reopen failed: ${reason}.`,
   mail_review: ({ person }) => `Added without reopening by ${person}.`,
   new_ticket: ({ ref }) => `Reply opened a new ticket, ${ref}; this one stays closed.`,
+  joined_ticket: ({ ref }) => `Reply added to ${ref}, which an earlier reply to this ticket started; this one stays closed.`,
 });
 export const STAYS_CLOSED_ACTIVITY = 'requester_reply_stays_closed';
 /** Model answers (reader 'person') → replyVerdict. Anything else is 'reply'. */
@@ -273,6 +274,9 @@ class RequesterReplyReopenService {
     const done = (cause, text, more = {}) => ({ cause, text: `${text}${aliasNote}`, ...more });
 
     const created = results.map((r) => r?.state?.replyNewTicket).find((t) => t?.id);
+    if (created?.joined) {
+      return done('joined_ticket', WHY_LINES.joined_ticket({ ref: created.displayRef || `#${created.id}` }), { newTicketId: created.id });
+    }
     if (created) {
       const note = String(created.note || '').trim();
       return done('new_ticket', `${WHY_LINES.new_ticket({ ref: created.displayRef || `#${created.id}` })}${note ? ` ${note}` : ''}`, { newTicketId: created.id });

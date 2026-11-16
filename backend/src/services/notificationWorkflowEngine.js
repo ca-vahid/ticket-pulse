@@ -2734,6 +2734,9 @@ async function executeNode({
     });
     if (output?.created?.id && state && typeof state === 'object') {
       state.replyNewTicket = { id: output.created.id, displayRef: output.created.displayRef || null, note: String(node.data?.note || '').slice(0, 300) || null };
+    } else if (output?.joined?.id && state && typeof state === 'object') {
+      // A second reply from the same person joined the ticket the first one started.
+      state.replyNewTicket = { id: output.joined.id, displayRef: output.joined.displayRef || null, joined: true };
     }
     return output;
   }
