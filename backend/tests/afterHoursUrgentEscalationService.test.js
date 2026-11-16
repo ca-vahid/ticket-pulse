@@ -134,6 +134,14 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
   },
 }));
 
+// 16 Nov 2026: the on-call person is paged too. Nobody on call by default, so
+// the older tests below see exactly the recipients they always did.
+const onCallCurrentMock = jest.fn();
+jest.unstable_mockModule('../src/services/urgentResponse/onCallService.js', () => ({
+  default: { current: onCallCurrentMock },
+}));
+prismaMock.technician.findFirst = jest.fn();
+
 const { default: afterHoursUrgentEscalationService, workspacePeople } = await import('../src/services/afterHoursUrgentEscalationService.js');
 
 describe('afterHoursUrgentEscalationService', () => {
@@ -188,6 +196,79 @@ describe('afterHoursUrgentEscalationService', () => {
     prismaMock.ticketPriorityEvent.findUnique.mockResolvedValue({ id: 70 });
     prismaMock.ticketPriorityEvent.update.mockResolvedValue({});
     directPriorityWritebackMock.mockResolvedValue({ success: true });
+    onCallCurrentMock.mockResolvedValue({ configured: false });
+    prismaMock.technician.findFirst.mockResolvedValue(null);
+  });
+
+  const urgentRun = () => ({
+    id: 77,
+    workspaceId: 5,
+    ticketId: 501,
+    recommendation: { assessedPriority: 'Urgent' },
+    ticket: { id: 501, workspaceId: 5, freshserviceTicketId: 219999n, status: 'Open', assessedPriority: 'Urgent' },
+  });
+  const onCallPerson = (pref = {}) => ({
+    id: 42,
+    name: 'Kim Oncall',
+    email: 'kim@example.com',
+    isActive: true,
+    notificationPreference: {
+      technicianId: 42, emailEnabled: false, smsEnabled: false, whatsappEnabled: false, phoneCallEnabled: false,
+      phoneOverride: '+16045550042', entraMobilePhone: null, entraPhone: null, phoneVerifiedAt: new Date('2026-10-01T18:00:00.000Z'), ...pref,
+    },
+  });
+
+  test('the person on call is paged too, and texted even with their own SMS switch off (16 Nov 2026)', async () => {
+    onCallCurrentMock.mockResolvedValue({ configured: true, technician: { id: 42, name: 'Kim Oncall' } });
+    prismaMock.technician.findFirst.mockResolvedValue(onCallPerson());
+    const result = await afterHoursUrgentEscalationService.queueForPriorityRun(urgentRun());
+    const data = prismaMock.notificationDelivery.createMany.mock.calls[0][0].data;
+    expect(data).toEqual(expect.arrayContaining([
+      expect.objectContaining({ technicianId: 42, channel: 'sms', recipient: '+16045550042' }),
+      expect.objectContaining({ technicianId: 17, channel: 'email' }),
+      expect.objectContaining({ technicianId: 17, channel: 'sms' }),
+    ]));
+    // Their e-mail switch is off and e-mail is not forced: no e-mail to them.
+    expect(data.some((d) => d.technicianId === 42 && d.channel === 'email')).toBe(false);
+    expect(data).toHaveLength(3);
+    expect(result.channels).toEqual(expect.arrayContaining(['email', 'sms']));
+  });
+
+  test('on call but away with nobody covering: not paged (nothing changes)', async () => {
+    onCallCurrentMock.mockResolvedValue({ configured: true, technician: { id: 42 }, onLeaveNoCover: true });
+    prismaMock.technician.findFirst.mockResolvedValue(onCallPerson());
+    await afterHoursUrgentEscalationService.queueForPriorityRun(urgentRun());
+    const data = prismaMock.notificationDelivery.createMany.mock.calls[0][0].data;
+    expect(data.some((d) => d.technicianId === 42)).toBe(false);
+  });
+
+  test('a phone that is not verified never gets the forced text', async () => {
+    onCallCurrentMock.mockResolvedValue({ configured: true, technician: { id: 42 } });
+    prismaMock.technician.findFirst.mockResolvedValue(onCallPerson({ phoneVerifiedAt: null }));
+    await afterHoursUrgentEscalationService.queueForPriorityRun(urgentRun());
+    const data = prismaMock.notificationDelivery.createMany.mock.calls[0][0].data;
+    expect(data.some((d) => d.technicianId === 42)).toBe(false);
+  });
+
+  test('one incident pages once: a second urgent run on the same ticket inside the cooldown pages nobody (API Dev a/b/c)', async () => {
+    onCallCurrentMock.mockResolvedValue({ configured: true, technician: { id: 42 } });
+    prismaMock.technician.findFirst.mockResolvedValue(onCallPerson());
+    prismaMock.urgentEscalationEvent.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 44 });
+    const first = await afterHoursUrgentEscalationService.queueForPriorityRun(urgentRun());
+    const second = await afterHoursUrgentEscalationService.queueForPriorityRun({ ...urgentRun(), id: 78 });
+    expect(first.eventId).toBe(44);
+    expect(second).toMatchObject({ queued: 0, skipped: 'cooldown', previousEventId: 44 });
+    expect(prismaMock.urgentEscalationEvent.create).toHaveBeenCalledTimes(1);
+    expect(prismaMock.notificationDelivery.createMany).toHaveBeenCalledTimes(1);
+    const window = prismaMock.urgentEscalationEvent.findFirst.mock.calls[1][0].where;
+    expect(window.ticketId).toBe(501);
+    expect(Date.now() - window.createdAt.gte.getTime()).toBeGreaterThanOrEqual(60 * 60 * 1000 - 1000);
+  });
+
+  test('the on-call lookup failing changes nothing (the listed people are still paged)', async () => {
+    onCallCurrentMock.mockRejectedValue(new Error('db down'));
+    const result = await afterHoursUrgentEscalationService.queueForPriorityRun(urgentRun());
+    expect(result.queued).toBe(2);
   });
 
   test('queues selected user channels for urgent after-hours priority runs', async () => {
