@@ -15,9 +15,17 @@ import { longNumbers } from '../utils/subjectIdentity.js';
  * the last 120 days, it has
  *   (a) the same normalised subject, with an "N Days" count masked, so
  *       "Reminder: 105 Days Outstanding Invoice - X" and "… 175 Days … - X"
- *       are the same matter; or
+ *       are the same matter, AND one of the mail's people (sender or
+ *       recipients) is the ticket's requester or on its Cc line; or
  *   (b) a long reference number in its subject that the mail's subject also
  *       carries (an invoice, a PO; utils/subjectIdentity.js).
+ *
+ * Why (a) needs a person in common (15 Nov 2026): a subject alone is not a
+ * matter. "Vendor Invoices for Approval" goes to everyone, and each person
+ * replies with their own problem. In its first two days the subject-only rule
+ * held twelve such mails; people turned ten of them into new tickets, which is
+ * what intake would have done anyway. The two they added to a ticket were from
+ * that ticket's requester. Callers that pass no `people` keep the old rule.
  * Never a candidate: deleted and spam tickets, tickets of the onboarding /
  * offboarding process, and tickets whose top-level category is Security.
  *
@@ -73,8 +81,10 @@ async function onboardingIds(tickets) {
  * @param {(status: string) => Promise<boolean>} [args.isOpen]  is this status Open or Pending?
  * @returns {Promise<null | { candidates: {ticketId:number, why:string}[], bestGuessTicketId:number, rules:string[], total:number }>}
  */
-export async function findFollowUpCandidates(workspaceId, { subject, normalize, isOpen = null, now = Date.now() } = {}) {
+export async function findFollowUpCandidates(workspaceId, { subject, normalize, isOpen = null, people = null, now = Date.now() } = {}) {
   try {
+    // The mail's people, lower-cased; null = the caller did not say (the subject alone decides, as before).
+    const who = Array.isArray(people) ? new Set(people.map((a) => String(a || '').trim().toLowerCase()).filter((a) => a.includes('@'))) : null;
     const key = followUpSubjectKey(typeof normalize === 'function' ? normalize(subject) : subject);
     const numbers = longNumbers(subject, { now }).slice(0, MAX_NUMBERS);
     const fragment = key.length >= MIN_SUBJECT_KEY ? searchFragment(key) : '';
@@ -91,7 +101,8 @@ export async function findFollowUpCandidates(workspaceId, { subject, normalize, 
         AND: [{ OR: [{ createdAt: { gte: since } }, { updatedAt: { gte: since } }] }, { OR: or }],
       },
       select: {
-        id: true, subject: true, status: true, createdAt: true, category: true,
+        id: true, subject: true, status: true, createdAt: true, category: true, ccEmails: true,
+        requester: { select: { email: true } },
         internalCategory: { select: { name: true, parent: { select: { name: true } } } },
       },
       orderBy: { createdAt: 'desc' },
@@ -102,14 +113,18 @@ export async function findFollowUpCandidates(workspaceId, { subject, normalize, 
     const matched = [];
     for (const t of rows) {
       if (['Deleted', 'Spam'].includes(t.status) || isSecurity(t)) continue;
-      const sameSubject = fragment.length >= MIN_SUBJECT_KEY && followUpSubjectKey(typeof normalize === 'function' ? normalize(t.subject) : t.subject) === key;
+      const subjectMatches = fragment.length >= MIN_SUBJECT_KEY && followUpSubjectKey(typeof normalize === 'function' ? normalize(t.subject) : t.subject) === key;
+      // The same subject counts only with a person in common (see the note at the top).
+      const onTicket = [t.requester?.email, ...(Array.isArray(t.ccEmails) ? t.ccEmails : [])].map((a) => String(a || '').trim().toLowerCase()).filter(Boolean);
+      const sharedPerson = who ? onTicket.find((a) => who.has(a)) || null : null;
+      const sameSubject = subjectMatches && (!who || Boolean(sharedPerson));
       const theirs = longNumbers(t.subject, { now });
       const shared = numbers.filter((n) => theirs.includes(n));
       if (!sameSubject && !shared.length) continue;
       matched.push({
         ticket: t,
         rules: [...(sameSubject ? ['same_subject'] : []), ...(shared.length ? ['shared_number'] : [])],
-        why: [sameSubject ? 'same subject' : null, shared.length ? `same reference number ${shared.join(', ')}` : null].filter(Boolean).join('; '),
+        why: [sameSubject ? (sharedPerson ? `same subject, and ${sharedPerson} is on the ticket` : 'same subject') : null, shared.length ? `same reference number ${shared.join(', ')}` : null].filter(Boolean).join('; '),
       });
     }
     if (!matched.length) return null;

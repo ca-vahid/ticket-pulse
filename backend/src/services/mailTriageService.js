@@ -161,6 +161,16 @@ export function referenceNumbers(subject, text = '') {
     const n = m[1].replace(/^[A-Z]*-?/i, '');
     if (n.length >= 4) out.add(n);
   }
+  // A number written in groups with dashes ("invoice 2-756-12220") is a reference too (15 Nov 2026:
+  // two paid-invoice notices that differ only there were read as one matter). Eight digits or more
+  // in all; never a date (2026-11-10, 10-11-2026) or a phone number (604-555-0101).
+  for (const m of source.matchAll(/(?<![\w.-])\d{1,6}(?:-\d{2,8}){1,3}(?![\w-]|\.\d)/g)) {
+    const n = m[0];
+    if (n.replace(/-/g, '').length < 8) continue;
+    if (/^(?:19|20)\d{2}-\d{1,2}-\d{1,2}$/.test(n) || /^\d{1,2}-\d{1,2}-(?:19|20)\d{2}$/.test(n)) continue;
+    if (/^(?:1-)?\d{3}-\d{3}-\d{4}$/.test(n)) continue;
+    out.add(n);
+  }
   return [...out].slice(0, 6);
 }
 
@@ -220,7 +230,8 @@ export const SYSTEM_PROMPT = [
   'You sort e-mail for a helpdesk. One e-mail could not be filed automatically. You get that e-mail and a short list of candidate tickets from the same team, found by a search. Decide what the e-mail is.',
   'attach: it continues a matter that already has a ticket in the list (a follow-up, a reminder about the same invoice, a reply in the same thread). Pick that ticket by its id. You may only pick an id from the list.',
   'When several tickets in the list are about the same matter (earlier reminders about the same invoice, each with its own ticket), pick the one with the same subject as the e-mail, and among those the newest; list the others in relatedTicketIds.',
-  'create: it needs work or tracking and no candidate is the same matter. Two different invoices, orders or requests from the same sender are different matters, even with the same wording. A first reminder with no ticket is a new ticket.',
+  'create: it needs work or tracking and no candidate is the same matter. Two different invoices, orders or requests from the same sender are different matters, even with the same wording. A first reminder with no ticket is a new ticket. A number written with dashes (2-756-12220) is a reference number like any other: a different one means a different matter.',
+  'The same subject is not the same matter when a different person writes. An announcement or a standing subject ("Vendor Invoices for Approval") goes to many people and each replies with their own problem: when the sender is not the ticket\'s requester and nothing but the subject links them (no shared thread, no shared reference number), answer create.',
   'no_ticket: nobody needs it as a ticket: a newsletter, an advertisement, or a copy of mail that is already on a ticket. This is rare.',
   'When the e-mail was held because a member of the team sent it and copied the team mailbox, they copied the mailbox to have it tracked. Such mail is never no_ticket merely because it is internal (staff to a colleague) or outbound (staff to a client): attach when a candidate is the same matter, otherwise create, with requesterEmail set to the person it was written to. Two e-mails of the same kind get the same answer.',
   'unsure: you cannot tell. Say what you were unsure about.',

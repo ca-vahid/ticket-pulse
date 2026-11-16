@@ -116,3 +116,42 @@ test('no candidate, and a lookup that fails, are both "none": the mail goes on t
   prismaMock.ticket.findMany.mockRejectedValue(new Error('db down'));
   expect(await find('RE: Statement for October - Northwind')).toBeNull();
 });
+
+// 15 Nov 2026: in its first two days the subject-only rule held twelve mails; people made new tickets for ten.
+describe('the same subject needs a person in common', () => {
+  const broadcast = 'Vendor Invoices for Approval';
+  const mine = () => ticket(`Re: ${broadcast}`, { status: 'Open', requester: { email: 'Robin.Vale@example.org' }, ccEmails: ['lee.marsh@example.org'] });
+
+  test('a reply to a broadcast subject from someone who is not on the ticket is not a follow-up', async () => {
+    prismaMock.ticket.findMany.mockResolvedValue([mine()]);
+    expect(await find(`RE: ${broadcast}`, { people: ['dana.whitlock@example.org', 'ap@example.org'] })).toBeNull();
+    const { select } = prismaMock.ticket.findMany.mock.calls[0][0];
+    expect(select).toMatchObject({ ccEmails: true, requester: { select: { email: true } } });
+  });
+
+  test('the ticket\'s requester, or someone on its Cc line, writing again is a follow-up, and the reason names them', async () => {
+    const t = mine();
+    prismaMock.ticket.findMany.mockResolvedValue([t]);
+    const fromRequester = await find(`RE: ${broadcast}`, { people: ['robin.vale@example.org', 'ap@example.org'] });
+    expect(fromRequester.candidates).toEqual([{ ticketId: t.id, why: 'same subject, and robin.vale@example.org is on the ticket' }]);
+    // An agent writing TO the requester counts too: the people are the sender and the recipients.
+    const toCc = await find(`RE: ${broadcast}`, { people: ['pat.agent@example.org', 'LEE.MARSH@example.org'] });
+    expect(toCc.candidates[0].why).toBe('same subject, and lee.marsh@example.org is on the ticket');
+  });
+
+  test('a shared reference number still holds whoever wrote', async () => {
+    const t = ticket('Reminder: 105 Days Outstanding Invoice - 4053829 - Northwind', { requester: { email: 'client@northwind.example' }, ccEmails: [] });
+    prismaMock.ticket.findMany.mockResolvedValue([t]);
+    const found = await find('RE: Reminder: 175 Days Outstanding Invoice - 4053829 - Northwind', { people: ['someone.else@example.org'] });
+    expect(found.candidates).toEqual([{ ticketId: t.id, why: 'same reference number 4053829' }]);
+    expect(found.rules).toEqual(['shared_number']);
+  });
+
+  test('a caller that passes no people keeps the subject-only rule', async () => {
+    const t = mine();
+    prismaMock.ticket.findMany.mockResolvedValue([t]);
+    expect((await find(`RE: ${broadcast}`)).candidates).toEqual([{ ticketId: t.id, why: 'same subject' }]);
+    // An empty list is "nobody in common", not "not said".
+    expect(await find(`RE: ${broadcast}`, { people: [] })).toBeNull();
+  });
+});

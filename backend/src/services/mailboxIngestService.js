@@ -831,12 +831,28 @@ class MailboxIngestService {
       return await findFollowUpCandidates(connection.workspaceId, {
         subject: ctx?.subjectForMatch || email.subject,
         normalize: normalizeSubjectForMatch,
+        // 15 Nov 2026: the same subject is a follow-up only when one of the mail's people is on the ticket.
+        people: await this._mailPeople(connection, email),
         isOpen: async (status) => ['Open', 'Pending'].includes(await statusService.resolveBaseStatus(connection.workspaceId, status)),
       });
     } catch (err) {
       logger.warn(`Mailbox ingest: follow-up check failed for "${email.subject}" (${err.message}) — continuing`);
       return null;
     }
+  }
+
+  /**
+   * The people on a mail: its sender and its To / Cc recipients, without the
+   * mailbox itself (its address and its also-known-as addresses). Never throws.
+   */
+  async _mailPeople(connection, email) {
+    const own = new Set([String(connection?.address || '').trim().toLowerCase()].filter(Boolean));
+    try {
+      const { getMailboxAliases } = await import('./mailboxAliasService.js');
+      for (const a of await getMailboxAliases(connection.id)) own.add(String(a || '').trim().toLowerCase());
+    } catch { /* the address alone is enough */ }
+    const all = [email?.from, ...(Array.isArray(email?.to) ? email.to : []), ...(Array.isArray(email?.cc) ? email.cc : [])];
+    return [...new Set(all.map((a) => String(a || '').trim().toLowerCase()).filter((a) => a.includes('@') && !own.has(a)))];
   }
 
   /** FreshService closes a merged ticket with a link to the one that survives; the reply belongs there. */

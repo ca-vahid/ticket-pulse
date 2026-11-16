@@ -256,7 +256,7 @@ describe('1. the fourteen held shapes, with the alias set', () => {
 
 // ---------------------------------------------------------------------------
 describe('1b. a follow-up to an existing ticket is held, not made a new ticket', () => {
-  const closed = (id, subject, over = {}) => ({ id, workspaceId: 2, subject, status: 'Closed', createdAt: new Date(Date.now() - 15 * 86400000), category: null, internalCategory: null, ...over });
+  const closed = (id, subject, over = {}) => ({ id, workspaceId: 2, subject, status: 'Closed', createdAt: new Date(Date.now() - 15 * 86400000), category: null, internalCategory: null, requester: { email: COLLEAGUE }, ccEmails: [], ...over });
   // Rung 5 asks for Open/Pending tickets only; the follow-up search asks for everything but deleted and spam.
   const tickets = (rows) => prismaMock.ticket.findMany.mockImplementation(async ({ where }) => (where?.status?.notIn ? rows : rows.filter((r) => where?.status?.in?.includes(r.status))));
   const heldWith = () => holdMock.holdMessage.mock.calls[0][2];
@@ -268,7 +268,7 @@ describe('1b. a follow-up to an existing ticket is held, not made a new ticket',
     expect(heldWith()).toMatchObject({
       reason: 'possible_follow_up',
       bestGuessTicketId: 880,
-      candidates: [{ ticketId: 880, why: 'same subject; same reference number 4053377' }],
+      candidates: [{ ticketId: 880, why: `same subject, and ${COLLEAGUE} is on the ticket; same reference number 4053377` }],
       decision: { rule: 'possible_follow_up', details: { matched: ['same_subject', 'shared_number'], candidateCount: 1, bestGuessOpen: false, insteadOf: 'agent_cc_intake', requester: COLLEAGUE } },
     });
   });
@@ -276,7 +276,8 @@ describe('1b. a follow-up to an existing ticket is held, not made a new ticket',
   test('the day count moved on ("105 Days" then "175 Days", same invoice): still the same matter', async () => {
     tickets([closed(881, 'Reminder: 105 Days Outstanding Invoice - 4051188 - Wingtip')]);
     expect(await ingest.processEmail(front, reply({ subject: 'RE: Reminder: 175 Days Outstanding Invoice - 4051188 - Wingtip', to: [CLIENT] }), new Map())).toBe('held');
-    expect(heldWith().candidates).toEqual([{ ticketId: 881, why: 'same subject; same reference number 4051188' }]);
+    // Written to someone who is not on the ticket: the invoice number alone links them.
+    expect(heldWith().candidates).toEqual([{ ticketId: 881, why: 'same reference number 4051188' }]);
   });
 
   test('a shared invoice number under different words is enough, also for a NEW mail (no reply headers)', async () => {
@@ -324,13 +325,26 @@ describe('1b. a follow-up to an existing ticket is held, not made a new ticket',
   });
 
   test('a requester\u2019s reply that this mailbox would make a ticket (policy = create) gets the same check; their fresh mail does not', async () => {
-    tickets([closed(890, 'Statement for October')]);
+    tickets([closed(890, 'Statement for October', { requester: { email: CLIENT } })]);
     const fromClient = { from: CLIENT, fromName: 'Jo Park', to: [ALIAS], cc: [] };
     expect(await ingest.processEmail(front, reply({ ...fromClient, subject: 'RE: Statement for October' }), new Map())).toBe('held');
     expect(heldWith()).toMatchObject({ reason: 'possible_follow_up', bestGuessTicketId: 890, decision: { details: { insteadOf: 'external_reply_unknown' } } });
     holdMock.holdMessage.mockClear();
     // No reply evidence: a new request, even with a familiar subject (ticket grouping judges those).
     expect(await ingest.processEmail(front, mail({ ...fromClient, subject: 'Statement for October' }), new Map())).toBe('created');
+    expect(holdMock.holdMessage).not.toHaveBeenCalled();
+  });
+
+  // 15 Nov 2026: "Vendor Invoices for Approval" goes to everyone and each person replies with their own problem.
+  test('the same subject from someone who is not on the ticket is a new ticket, not a held follow-up', async () => {
+    const subject = 'Vendor Invoices for Approval';
+    tickets([closed(894, `Re: ${subject}`, { requester: { email: 'somebody.else@example.com' }, ccEmails: ['a.third.person@example.com'] })]);
+    const fromAnother = { from: CLIENT, fromName: 'Jo Park', to: [ALIAS], cc: [] };
+    expect(await ingest.processEmail(front, reply({ ...fromAnother, subject: `RE: ${subject}` }), new Map())).toBe('created');
+    expect(holdMock.holdMessage).not.toHaveBeenCalled();
+    // The mailbox's own address is nobody: a ticket that merely copied the mailbox is not "in common".
+    tickets([closed(895, `Re: ${subject}`, { requester: { email: 'somebody.else@example.com' }, ccEmails: [ALIAS, MAILBOX] })]);
+    expect(await ingest.processEmail(front, reply({ ...fromAnother, subject: `RE: ${subject}` }), new Map())).toBe('created');
     expect(holdMock.holdMessage).not.toHaveBeenCalled();
   });
 

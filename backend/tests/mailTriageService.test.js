@@ -278,6 +278,20 @@ describe('reading a mail without a model', () => {
     expect(referenceNumbers('Hello', `${'line\n'.repeat(14)}Phone 6045550101`)).toEqual([]);
   });
 
+  test('a number written in groups with dashes is a reference; a date or a phone number is not (15 Nov 2026)', () => {
+    expect(referenceNumbers('FW: Your invoice 2-756-12220 was successfully paid')).toEqual(['2-756-12220']);
+    expect(referenceNumbers('FW: Your invoice 2-755-90368 was successfully paid')).toEqual(['2-755-90368']);
+    expect(referenceNumbers('Meeting 2026-11-10 and 10-11-2026', 'Call 604-555-0101 or 1-800-555-0199. Version 1-2-3.')).toEqual([]);
+    expect(referenceNumbers('Order 12-345 shipped')).toEqual([]);
+    // Glued to a word or part of a longer token: left alone.
+    expect(referenceNumbers('Server BGC-01-2345-6789 down')).toEqual([]);
+  });
+
+  test('the prompt: the same subject from a different person is a different matter', () => {
+    expect(SYSTEM_PROMPT).toMatch(/The same subject is not the same matter when a different person writes/);
+    expect(SYSTEM_PROMPT).toMatch(/A number written with dashes \(2-756-12220\) is a reference number/);
+  });
+
   test('the new text leaves the quoted history out', () => {
     const text = newText({ bodyText: 'Any update on this?\n\nFrom: Robin Vale <robin.vale@client.example>\nSent: Monday\nTo: AR\nSubject: Earlier\n\nThe older message with invoice 9999999.' });
     expect(text).toBe('Any update on this?');
