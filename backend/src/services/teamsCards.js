@@ -327,7 +327,8 @@ export function digestCard({ name, counts, rows, queueUrl, held = [] }) {
   const tile = (n, what, color = 'Default') => ({
     type: 'Column',
     width: 'stretch',
-    items: [text(String(n), { size: 'ExtraLarge', weight: 'Bolder', color, spacing: 'None', wrap: false }), label(what)],
+    // Labels wrap: on a phone the column is narrow and "OVERDUE" came out "OVERD…".
+    items: [text(String(n), { size: 'ExtraLarge', weight: 'Bolder', color, spacing: 'None', wrap: false }), text(what, { size: 'Small', isSubtle: true, weight: 'Bolder', spacing: 'None' })],
   });
   const body = [
     banner({ title: `Your tickets today${name ? `, ${name.split(' ')[0]}` : ''}`, url: queueUrl, subline: new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }), icon: '☀️', word: 'Digest' }),
@@ -339,19 +340,32 @@ export function digestCard({ name, counts, rows, queueUrl, held = [] }) {
       items: [{ type: 'ColumnSet', columns: [tile(counts.open, 'OPEN'), tile(counts.overdue, 'OVERDUE', counts.overdue ? 'Attention' : 'Default'), tile(counts.dueToday, 'DUE TODAY', counts.dueToday ? 'Warning' : 'Default')] }],
     },
   ];
-  for (const r of rows.slice(0, 10)) {
-    const [, pc] = PRIORITY[r.priority] || ['', 'Default'];
+  // 16 Nov 2026 (Vahid, on a phone): subject, ref and due date in three side-by-
+  // side columns left the subject at a dozen letters. Each ticket is now two
+  // lines that use the full width: the subject (up to two lines), then a small
+  // line with the priority, the ref and the due date.
+  rows.slice(0, 10).forEach((r, i) => {
+    const [pword, pc] = PRIORITY[r.priority] || ['', 'Default'];
+    const due = r.dueLabel ? (r.overdue ? `🔥 overdue · was due ${r.dueLabel}` : `due ${r.dueLabel}`) : 'no due date';
     body.push({
-      type: 'ColumnSet',
-      spacing: 'Small',
+      type: 'Container',
+      spacing: i === 0 ? 'Medium' : 'Small',
+      separator: i > 0,
       selectAction: { type: 'Action.OpenUrl', url: r.url },
-      columns: [
-        { type: 'Column', width: 'auto', items: [text('●', { color: pc, spacing: 'None', wrap: false })] },
-        { type: 'Column', width: 'stretch', items: [text(`**${mdSafe(clip(r.subject, 70))}**  ${r.ref}`, { spacing: 'None', wrap: false })] },
-        { type: 'Column', width: 'auto', items: [text(r.overdue ? `🔥 ${r.dueLabel}` : r.dueLabel || '', { size: 'Small', spacing: 'None', wrap: false, color: r.overdue ? 'Attention' : 'Default' })] },
+      items: [
+        text(`**${mdSafe(clip(r.subject, 120))}**`, { spacing: 'None', maxLines: 2 }),
+        {
+          type: 'RichTextBlock',
+          spacing: 'None',
+          inlines: [
+            { type: 'TextRun', text: '● ', color: pc, size: 'Small' },
+            { type: 'TextRun', text: `${[pword, r.ref].filter(Boolean).join(' · ')} · `, size: 'Small', isSubtle: true },
+            { type: 'TextRun', text: due, size: 'Small', color: r.overdue ? 'Attention' : 'Default', isSubtle: !r.overdue },
+          ],
+        },
       ],
     });
-  }
+  });
   // "more" counts against the real number of open tickets, not the rows passed in.
   const shown = Math.min(rows.length, 10);
   const more = Math.max(0, (Number.isFinite(Number(counts?.open)) ? Number(counts.open) : rows.length) - shown);

@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.3.82-preview';
+export const APP_VERSION = '4.3.83-preview';
 
 export const changelog = [
+  {
+    version: '4.3.83-preview',
+    date: 'November 16, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Phone: the More menu on a ticket stays on screen</strong> &mdash; on a phone the <strong>&middot;&middot;&middot;</strong> button can wrap to the start of its own row, and its menu then opened off the left edge of the screen. The menu now opens toward whichever side has room.' },
+      { type: 'improvement', html: '<strong>Teams daily digest reads on a phone</strong> &mdash; each ticket in the &ldquo;Your tickets today&rdquo; card used three narrow columns, so on a phone a subject showed only a dozen letters (&ldquo;Customiz&hellip;&rdquo;). Each ticket is now two full-width lines: the subject (up to two lines), then its priority, reference and due date, with overdue ones in red. The count labels (Open, Overdue, Due today) are no longer cut off. Tapping a ticket still opens it.' },
+    ],
+  },
   {
     version: '4.3.82-preview',
     date: 'November 16, 2026',
