@@ -42,6 +42,7 @@ const FIELD_ROWS = [
   ['ticket.urgency', 'ticket.urgency', 'number', 'the urgency'],
   ['ticket.sentiment', 'ticket.sentiment', 'enum', 'the requester sentiment'],
   ['ticket.isNoise', 'ticket.isNoise', 'boolean', 'noise', 'the ticket is noise or spam', 'the ticket is not noise or spam'],
+  ['ticket.isDuplicate', 'ticket.isDuplicate', 'boolean', 'duplicate', 'the ticket was closed as a duplicate or merged', 'the ticket was not closed as a duplicate or merged'],
   ['ticket.isParked', 'ticket.isParked', 'boolean', 'parked', 'the ticket is parked', 'the ticket is not parked'],
   ['ticket.parkKind', 'ticket.parkKind', 'enum', 'the park kind'],
   ['ticket.resolvedByKind', 'ticket.resolvedByKind', 'enum', 'who resolved the ticket'],

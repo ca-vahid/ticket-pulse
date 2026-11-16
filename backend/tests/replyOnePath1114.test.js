@@ -548,4 +548,51 @@ describe('A7 — New ticket from this reply (the executor)', () => {
     expect(out).toMatchObject({ skipped: true, reopenedInstead: true, reason: expect.stringContaining('reopened instead') });
     expect(updateNodeMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'update_ticket', data: expect.objectContaining({ setStatus: 'Open' }) }), expect.any(Object), { workflowId: 9764 });
   });
+
+  // 16 Nov 2026: two replies 8 minutes apart to the same long-closed ticket
+  // started two tickets. The second belongs on the one the first started.
+  describe('a second reply from the same person joins the ticket the first one started', () => {
+    const earlierTicket = (over = {}) => ({
+      id: 803, workspaceId: 1, status: 'Open', origin: 'ticketpulse', nativeNumber: 2106, freshserviceTicketId: null,
+      requester: { id: 56, email: 'alex.rivera@example.com' }, ...over,
+    });
+    const seedWithEarlier = ({ earlier = {}, linkAgeDays = 0 } = {}) => {
+      seed({ entries: [reply(2, 'Still not working after the restart', { actorName: 'Alex Rivera', actorEmail: 'alex.rivera@example.com' })] });
+      db._rows('ticket').push(earlierTicket(earlier));
+      db._rows('ticketLink').push({ id: 1, workspaceId: 1, ticketId: 700, relatedTicketId: 803, kind: 'related_to', createdAt: new Date(NOW - linkAgeDays * 86400e3) });
+    };
+    const ctx2 = () => ({ event: { type: 'ticket.reply_received', extra: { entryId: 2, from: 'alex.rivera@example.com' } }, ticket: { id: 700, workspaceId: 1 }, workspace: { id: 1 } });
+
+    test('the reply is added to the open ticket the earlier reply started; no new ticket', async () => {
+      seedWithEarlier();
+      splitMock.split.mockClear();
+      const out = await executeCreateTicketFromReplyNode({ id: 'n', data: {} }, ctx2(), { workflow: { id: 9764, name: 'Reopen on requester reply' } });
+      expect(out).toEqual({ joined: { id: 803, displayRef: 'TP-2106' } });
+      expect(splitMock.split).not.toHaveBeenCalled();
+      const added = db._rows('ticketThreadEntry').find((e) => e.ticketId === 803);
+      expect(added).toMatchObject({ eventType: 'reply', authorType: 'requester', incoming: true, isPrivate: false, externalEntryId: 'replyjoin:700:2' });
+      expect(added.bodyText).toMatch(/Still not working/);
+      expect(db._rows('ticketActivity').some((a) => a.ticketId === 803 && a.activityType === 'reply_redirected' && a.details?.kind === 'reply_join')).toBe(true);
+      expect(WHY_LINES.joined_ticket({ ref: 'TP-2106' })).toBe('Reply added to TP-2106, which an earlier reply to this ticket started; this one stays closed.');
+    });
+
+    test('someone else replying still gets a ticket of their own', async () => {
+      seedWithEarlier({ earlier: { requester: { id: 57, email: 'sam.ortiz@example.com' } } });
+      splitMock.split.mockResolvedValue({ child: { id: 804, ref: 'TP-2107' }, linkKind: 'related_to' });
+      const out = await executeCreateTicketFromReplyNode({ id: 'n', data: {} }, ctx2(), { workflow: { id: 9764 } });
+      expect(out).toMatchObject({ created: { id: 804 } });
+    });
+
+    test('the earlier ticket is already resolved: a new ticket', async () => {
+      seedWithEarlier({ earlier: { status: 'Resolved' } });
+      splitMock.split.mockResolvedValue({ child: { id: 805, ref: 'TP-2108' }, linkKind: 'related_to' });
+      expect(await executeCreateTicketFromReplyNode({ id: 'n', data: {} }, ctx2(), { workflow: { id: 9764 } })).toMatchObject({ created: { id: 805 } });
+    });
+
+    test('the earlier link is more than 7 days old: a new ticket', async () => {
+      seedWithEarlier({ linkAgeDays: 8 });
+      splitMock.split.mockResolvedValue({ child: { id: 806, ref: 'TP-2109' }, linkKind: 'related_to' });
+      expect(await executeCreateTicketFromReplyNode({ id: 'n', data: {} }, ctx2(), { workflow: { id: 9764 } })).toMatchObject({ created: { id: 806 } });
+    });
+  });
 });

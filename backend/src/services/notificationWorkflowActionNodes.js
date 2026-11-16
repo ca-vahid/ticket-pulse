@@ -225,6 +225,118 @@ function replyDescription(entry, parentRef) {
   return `<p style="color:#5f6b7a;font-size:13px;margin:0 0 6px;">From a reply to ${escapeText(parentRef)}:</p>${body || '<p>(The reply had no text.)</p>'}`;
 }
 
+/** How long a ticket started from a reply takes the same person's next replies to the old ticket. */
+export const REPLY_JOIN_DAYS = 7;
+const JOIN_CLOSED_BASES = new Set(['Resolved', 'Closed']);
+
+/**
+ * A second reply from the same person to the same old ticket (16 Nov 2026:
+ * two replies 8 minutes apart to a ticket closed in October started TP-12464
+ * and TP-12470). When an earlier reply already started a ticket from this one
+ * — a related link made in the last REPLY_JOIN_DAYS days, same requester, not
+ * resolved, closed, deleted or spam — this reply belongs there. Null when
+ * there is none. Never throws.
+ */
+export async function ticketStartedByEarlierReply(parent, requesterEmail) {
+  const email = String(requesterEmail || '').trim().toLowerCase();
+  if (!parent?.id || !email.includes('@')) return null;
+  try {
+    const links = await prisma.ticketLink.findMany({
+      where: { ticketId: parent.id, kind: 'related_to', createdAt: { gte: new Date(Date.now() - REPLY_JOIN_DAYS * 86400000) } },
+      select: { relatedTicketId: true },
+      orderBy: { id: 'desc' },
+      take: 10,
+    });
+    for (const link of links || []) {
+      const t = await prisma.ticket.findUnique({
+        where: { id: link.relatedTicketId },
+        select: { id: true, workspaceId: true, status: true, origin: true, nativeNumber: true, freshserviceTicketId: true, requester: { select: { email: true } } },
+      });
+      if (!t || t.workspaceId !== parent.workspaceId || ['Deleted', 'Spam'].includes(t.status)) continue;
+      if (String(t.requester?.email || '').trim().toLowerCase() !== email) continue;
+      const base = await statusService.resolveBaseStatus(t.workspaceId, t.status).catch(() => null);
+      if (JOIN_CLOSED_BASES.has(base)) continue;
+      return t;
+    }
+  } catch (err) {
+    logger.warn(`New ticket from this reply: earlier-ticket lookup for ticket ${parent.id} failed (non-fatal): ${err.message}`);
+  }
+  return null;
+}
+
+/**
+ * Add the reply to the ticket an earlier reply started: the requester's own
+ * message (incoming, public) with copies of its files, a history row on both
+ * tickets, the FreshService copy queued, and "Requester replied" raised there
+ * (the ticket is open, so nothing reopens; its owner hears about it).
+ */
+async function joinEarlierTicket({ parent, parentRef, target, entry, requesterEmail, workflowName }) {
+  const { ticketDisplayRef } = await import('../utils/ticketOrigin.js');
+  const toRef = ticketDisplayRef(target);
+  const stamp = `replyjoin:${parent.id}:${entry.id}`;
+  let joined;
+  try {
+    joined = await prisma.ticketThreadEntry.create({
+      data: {
+        ticketId: target.id,
+        workspaceId: target.workspaceId,
+        externalEntryId: stamp.slice(0, 191),
+        source: entry.source || 'email_inbound',
+        eventType: 'reply',
+        actorName: entry.actorName || null,
+        actorEmail: entry.actorEmail || requesterEmail || null,
+        authorType: 'requester',
+        incoming: true,
+        isPrivate: false,
+        visibility: 'public',
+        bodyHtml: entry.bodyHtml || null,
+        bodyText: entry.bodyText || entry.content || null,
+        content: entry.content || entry.bodyText || null,
+        occurredAt: entry.occurredAt || new Date(),
+        rawPayload: { joinedFromReply: { fromTicketId: parent.id, fromRef: parentRef, entryId: entry.id } },
+      },
+    });
+  } catch (err) {
+    // P2002: this reply was already added (the same event arrived twice).
+    if (err?.code === 'P2002') return { joined: { id: target.id, displayRef: toRef }, alreadyJoined: true };
+    throw err;
+  }
+  let filesCarried = 0;
+  try {
+    const { carryAttachments } = await import('./attachmentCarryService.js');
+    const carried = await carryAttachments({
+      workspaceId: parent.workspaceId,
+      fromTicketId: parent.id,
+      toTicketId: target.id,
+      attachments: await prisma.ticketAttachment.findMany({ where: { ticketId: parent.id, threadEntryId: entry.id }, orderBy: { id: 'asc' } }),
+      threadEntryId: joined.id,
+      uploadedBy: 'Ticket Pulse',
+    });
+    filesCarried = carried?.copied?.length || 0;
+  } catch (err) {
+    logger.warn(`Joined reply files from ${parentRef} to ${toRef} not copied (non-fatal): ${err.message}`);
+  }
+  const { default: ticketActivityRepository } = await import('./ticketActivityRepository.js');
+  await ticketActivityRepository.create({
+    ticketId: target.id, activityType: 'reply_redirected', performedBy: 'Ticket Pulse',
+    details: { fromTicketId: parent.id, fromRef: parentRef, kind: 'reply_join', entryId: joined.id, filesCarried, note: `Another reply on ${parentRef} added here (${workflowName}).` },
+  }).catch(() => null);
+  if (target.origin === 'ticketpulse') {
+    import('./mirrorService.js')
+      .then(({ default: mirrorService }) => mirrorService.enqueueThreadEntry(target.workspaceId, target.id, joined.id))
+      .catch(() => {});
+  }
+  import('./ticketLifecycleNotificationService.js')
+    .then(({ emitTicketEvent }) => emitTicketEvent('ticket.reply_received', target.id, {
+      source: 'reply_join',
+      dedupeStamp: stamp,
+      extra: { entryId: joined.id, from: requesterEmail || entry.actorEmail || null, via: 'reply_join', joinedFrom: parent.id },
+    }))
+    .catch((err) => logger.warn(`Joined reply event on ${toRef} not raised (non-fatal): ${err.message}`));
+  logger.info(`Workflow "New ticket from this reply": ${parentRef} reply added to ${toRef}, started by an earlier reply`);
+  return { joined: { id: target.id, displayRef: toRef } };
+}
+
 /**
  * "New ticket from this reply" (MEGA 11-14, A7). The reply starts a new
  * Ticket Pulse ticket through the existing split (ticketSplitService.split):
@@ -253,12 +365,24 @@ export async function executeCreateTicketFromReplyNode(node, eventContext, { wor
   if (!parent) return { skipped: true, reason: 'Ticket not found' };
   const { ticketDisplayRef } = await import('../utils/ticketOrigin.js');
   const parentRef = ticketDisplayRef(parent);
-  const select = { id: true, bodyText: true, bodyHtml: true, content: true, actorName: true, actorEmail: true };
+  const select = { id: true, bodyText: true, bodyHtml: true, content: true, actorName: true, actorEmail: true, source: true, occurredAt: true };
   let entry = null;
   if (extra.entryId) entry = await Promise.resolve().then(() => prisma.ticketThreadEntry.findFirst({ where: { id: Number(extra.entryId), ticketId: parentId }, select })).catch(() => null);
   if (!entry && extra.externalEntryId) entry = await Promise.resolve().then(() => prisma.ticketThreadEntry.findFirst({ where: { ticketId: parentId, externalEntryId: String(extra.externalEntryId) }, select })).catch(() => null);
   const requesterEmail = String(extra.from || extra.fromEmail || entry?.actorEmail || '').trim().toLowerCase();
   const actor = { name: `Workflow: ${workflow?.name || 'New ticket from this reply'}`, email: null, role: 'workflow' };
+  // The same person replied again to the same old ticket: their reply joins
+  // the ticket the earlier reply started, instead of starting another one.
+  if (entry?.id) {
+    const earlier = await ticketStartedByEarlierReply(parent, requesterEmail);
+    if (earlier) {
+      try {
+        return await joinEarlierTicket({ parent, parentRef, target: earlier, entry, requesterEmail, workflowName: actor.name });
+      } catch (err) {
+        logger.warn(`Workflow "New ticket from this reply": adding the reply to ${earlier.id} failed (${err.message}) — starting a new ticket instead`);
+      }
+    }
+  }
   try {
     const { default: ticketSplitService } = await import('./ticketSplitService.js');
     const result = await ticketSplitService.split(parent.id, parent.workspaceId, {

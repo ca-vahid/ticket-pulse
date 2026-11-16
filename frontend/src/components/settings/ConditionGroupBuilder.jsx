@@ -80,6 +80,7 @@ export const CG_FIELDS = [
   { value: 'ticket.urgency', label: 'Urgency (1=Low 2=Medium 3=High)', type: 'number' },
   { value: 'ticket.sentiment', label: 'Requester sentiment', type: 'enum', options: ['positive', 'neutral', 'frustrated'] },
   { value: 'ticket.isNoise', label: 'Is noise/spam', type: 'boolean' },
+  { value: 'ticket.isDuplicate', label: 'Closed as a duplicate or merged', type: 'boolean' },
   { value: 'ticket.isParked', label: 'Is parked', type: 'boolean' },
   { value: 'ticket.parkKind', label: 'Park kind', type: 'enum', options: ['until_date', 'waiting_on', 'eta', 'auto_help'] },
   // Auto-help integration W3 (plans/AUTO_HELP_INTEGRATION_PLAN.md D).

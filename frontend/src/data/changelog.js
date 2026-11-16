@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.3.83-preview';
+export const APP_VERSION = '4.3.84-preview';
 
 export const changelog = [
+  {
+    version: '4.3.84-preview',
+    date: 'November 16, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>A second reply to an old closed ticket no longer starts a second new ticket</strong> &mdash; when someone replies again to the same old ticket within 7 days, and the ticket their first reply started is still open, the new reply is added to that ticket instead of starting another one. The old ticket stays closed and says where the reply went.' },
+      { type: 'new', html: '<strong>New workflow condition: Closed as a duplicate or merged</strong> &mdash; true when the ticket was closed as a duplicate of, or merged into, another ticket (by grouping or by a person). Use it to keep the &ldquo;your ticket is resolved&rdquo; e-mail from going to someone whose request continues on another ticket.' },
+    ],
+  },
   {
     version: '4.3.83-preview',
     date: 'November 16, 2026',

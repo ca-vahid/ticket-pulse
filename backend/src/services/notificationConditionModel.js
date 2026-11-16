@@ -61,6 +61,9 @@ export const CONDITION_FIELDS = Object.freeze({
   // Requester sentiment (gap plan 2 P5.1) — the requester's state, team-safe.
   'ticket.sentiment': { label: 'Requester sentiment', type: 'enum', path: 'ticket.sentiment', options: ['positive', 'neutral', 'frustrated'] },
   'ticket.isNoise': { label: 'Is noise/spam', type: 'boolean', path: 'ticket.isNoise' },
+  // 16 Nov 2026: a close made by grouping (or anyone) as a duplicate / merge.
+  // Worked out on demand by the engine (withDuplicateFlag), like the reply clocks.
+  'ticket.isDuplicate': { label: 'Closed as a duplicate or merged', type: 'boolean', path: 'ticket.isDuplicate' },
   // Parked (plans/PARKED_BUILD_PLAN.md)
   'ticket.isParked': { label: 'Is parked', type: 'boolean', path: 'ticket.isParked' },
   'ticket.parkKind': { label: 'Park kind', type: 'enum', path: 'ticket.parkKind', options: ['until_date', 'waiting_on', 'eta', 'auto_help'] },
