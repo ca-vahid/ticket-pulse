@@ -1,6 +1,16 @@
-export const APP_VERSION = '4.3.79-preview';
+export const APP_VERSION = '4.3.81-preview';
 
 export const changelog = [
+  {
+    version: '4.3.81-preview',
+    date: 'November 15, 2026',
+    entries: [
+      { type: 'feature', html: '<strong>Vacation Pulse: a new Overview page</strong> &mdash; the page now ranks people by how much they affect the team. <strong>Away</strong> (off all day) comes first with the day the person is back, then <strong>out for part of the day</strong> (appointments and half days, with the hours). Working from home or on site is a small count at the bottom of each day, because those people are still reachable. Days already past are no longer listed.' },
+      { type: 'feature', html: '<strong>The week as columns</strong> &mdash; one column per day with how many of the team are in. A vacation of several days is one bar across the top instead of a row per day. Arrows move to the week before or after. On a phone the days stack.' },
+      { type: 'feature', html: '<strong>Your time and the team pulse</strong> &mdash; the top of the page shows your next time away, your balances in words (&ldquo;16 over&rdquo;, &ldquo;5 left&rdquo;, never a negative number), and one-click buttons that open the booking form on that leave type. Beside it, a bar per working day for the next four weeks shows how many people are away, with the busiest day named.' },
+      { type: 'improvement', html: '<strong>Waiting for you, and what is coming up</strong> &mdash; approvers see the requests waiting for them on the Overview, each with the reason it needs a person. <em>Away after this week</em> lists the next absences. Vacation Pulse also has its own emblem and pictograms.' },
+    ],
+  },
   {
     version: '4.3.79-preview',
     date: 'November 15, 2026',

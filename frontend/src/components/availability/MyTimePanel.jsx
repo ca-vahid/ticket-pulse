@@ -16,10 +16,12 @@ export const BOOK_NEW_EVENT = 'tp:availability-book-new';
  * "Change" on a waiting request turns the form into "Change your request"
  * (Nov 2026) until it is saved or left as it was.
  */
-export default function MyTimePanel({ me, onChanged, toast }) {
+export default function MyTimePanel({ me, onChanged, toast, bookType = null }) {
   const [requests, setRequests] = useState(null);
   const [error, setError] = useState(null);
   const [editing, setEditing] = useState(null);
+  // Overview's one-click buttons arrive with the leave type to start on.
+  const presetTypeId = Number(bookType) || null;
   const typeById = useMemo(() => new Map((me.leaveTypes || []).map((t) => [t.id, t])), [me.leaveTypes]);
 
   const load = useCallback(() => {
@@ -67,7 +69,8 @@ export default function MyTimePanel({ me, onChanged, toast }) {
       <div className="grid gap-5 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)] lg:items-start">
         <div className={`${CARD} ${editing ? 'ring-2 ring-primary/40' : ''}`}>
           <BookTimeForm
-            key={editing ? `edit-${editing.id}` : 'new'}
+            key={editing ? `edit-${editing.id}` : `new-${presetTypeId || 0}`}
+            presetTypeId={presetTypeId}
             me={me}
             editing={editing}
             onStopEditing={() => setEditing(null)}

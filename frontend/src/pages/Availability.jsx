@@ -124,10 +124,12 @@ export default function Availability() {
   }, [me, pending]);
 
   const nameByEmail = useMemo(() => (config?.people ? new Map(config.people.map((p) => [p.email, p.name])) : null), [config]);
-  const bookTime = () => {
+  // `typeId` (Overview's one-click buttons): the form opens on that leave type.
+  const bookTime = (typeId = null) => {
+    const pick = Number.isInteger(typeId) ? typeId : null;
     // A request being changed is left as it was: the button always books anew.
     window.dispatchEvent(new Event(BOOK_NEW_EVENT));
-    if (tab !== 'my-time') navigate(`${base}/my-time`);
+    if (tab !== 'my-time' || pick) navigate(`${base}/my-time`, pick ? { state: { bookType: pick } } : undefined);
     focusBookingForm();
   };
 
@@ -140,10 +142,10 @@ export default function Availability() {
   else {
     body = (
       <section role="tabpanel" id={`availability-panel-${tab}`} aria-labelledby={`availability-tab-${tab}`} tabIndex={-1} className="animate-fadeIn focus:outline-none">
-        {tab === 'overview' && <OverviewPanel me={me} />}
+        {tab === 'overview' && <OverviewPanel me={me} base={base} onBook={bookTime} />}
         {tab === 'calendar' && <TeamCalendarPanel me={me} />}
         {tab === 'month' && <MonthCalendarPanel me={me} />}
-        {tab === 'my-time' && <MyTimePanel me={me} onChanged={loadMe} toast={toast.show} />}
+        {tab === 'my-time' && <MyTimePanel me={me} onChanged={loadMe} toast={toast.show} bookType={location.state?.bookType ?? null} />}
         {tab === 'approvals' && <ApprovalsPanel me={me} nameByEmail={nameByEmail} toast={toast.show} onChanged={() => { loadMe(); notifyAvailabilityChanged(); }} />}
         {tab === 'history' && <RequestHistoryPanel me={me} config={config} />}
         {tab === 'settings' && <AdminSettingsPanel config={config} error={configError} reload={reloadAdmin} toast={toast.show} />}
@@ -158,11 +160,11 @@ export default function Availability() {
         <LightTabBar tabs={tabs} activeId={tab} onSelect={(id) => navigate(`${base}/${id}`)} ariaLabel={`${SECTION_NAME} sections`} idPrefix="availability" className="max-sm:[&>div:nth-child(2)]:hidden">
           <span className="hidden items-center gap-3 sm:inline-flex">
             {me?.person?.name && <span className="text-xs text-muted-foreground">{me.person.name}</span>}
-            <BookTimeButton onClick={bookTime} />
+            <BookTimeButton onClick={() => bookTime()} />
           </span>
         </LightTabBar>
         {/* Phones: the tab bar hides its right side, so the button gets its own row. */}
-        <BookTimeButton onClick={bookTime} className="mb-4 w-full sm:hidden" />
+        <BookTimeButton onClick={() => bookTime()} className="mb-4 w-full sm:hidden" />
         {me && error && <div className="mb-4"><ErrorNote>{error}</ErrorNote></div>}
         {body}
       </main>
