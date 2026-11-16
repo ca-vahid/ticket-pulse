@@ -775,6 +775,8 @@ export function buildOpenApiSpec(baseUrl) {
         { name: 'createdTo', in: 'query', required: false, schema: { type: 'string', format: 'date-time' } },
         { name: 'updatedFrom', in: 'query', required: false, schema: { type: 'string', format: 'date-time' } },
         { name: 'updatedTo', in: 'query', required: false, schema: { type: 'string', format: 'date-time' } },
+        { name: 'resolvedFrom', in: 'query', required: false, description: 'Resolved on or after (resolvedAt). Also on GET /tickets.', schema: { type: 'string', format: 'date-time' } },
+        { name: 'resolvedTo', in: 'query', required: false, description: 'Resolved on or before (resolvedAt). Also on GET /tickets.', schema: { type: 'string', format: 'date-time' } },
         { name: 'requesterEmail', in: 'query', required: false, description: 'Comma list; exact, case-insensitive. Also on GET /tickets.', schema: { type: 'string' } },
         { name: 'assigneeEmail', in: 'query', required: false, description: 'Comma list of agent e-mails; exact, case-insensitive. Also on GET /tickets.', schema: { type: 'string' } },
       ] }) },
