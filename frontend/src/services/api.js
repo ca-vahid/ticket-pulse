@@ -2077,6 +2077,9 @@ export const notificationWorkflowAPI = {
   // MEGA 11-14 (Part A): reopen on a requester reply.
   replyCandidates: (ticketId) => api.get('/notification-workflows/reply-candidates', { params: { ticketId } }),
   reopenCheck: () => api.get('/notification-workflows/reopen-check'),
+  // "Copy me on workflow e-mails" (16 Nov 2026): observers Bcc'd on every workflow e-mail.
+  getObservers: () => api.get('/notification-workflows/observers'),
+  setObservers: (observers) => api.put('/notification-workflows/observers', { observers }),
   getReopenUpgrade: (id) => api.get(`/notification-workflows/${id}/reopen-upgrade`),
   applyReopenUpgrade: (id) => api.post(`/notification-workflows/${id}/reopen-upgrade`),
   sendTestEmail: (data) => api.post('/notification-workflows/test-email', data),

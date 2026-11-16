@@ -78,6 +78,7 @@ import SenderIdentityCard from './SenderIdentityCard';
 import EmailChipsInput from '../common/EmailChipsInput';
 import FieldCardNote, { FIELD_CARD_ACCENTS } from '../tickets/FieldCardNote';
 import WorkflowListPage from './WorkflowListPage';
+import WorkflowMailObservers from './WorkflowMailObservers';
 import { canAddVariant } from './WorkflowIndex';
 import RunResultView, { formatDuration } from './workflowRun/RunResultView';
 import WorkflowPreviewPage, {
@@ -12025,7 +12026,12 @@ export default function NotificationWorkflowsPanel({
               onDiscardLocalDraft={discardLocalDraftFromList}
               actions={<WorkflowTemplatesMenu saving={saving} onInstalled={loadWorkflows} setMessage={setMessage} />}
               footer={<WorkflowHealthMenu health={health} warnings={healthWarnings} variant="card" />}
-              notice={reopenWarnings.length > 0 ? <ReopenCheckNotice warnings={reopenWarnings} className="rounded-lg border px-3 py-2" /> : null}
+              notice={(
+                <div className="space-y-2">
+                  {reopenWarnings.length > 0 && <ReopenCheckNotice warnings={reopenWarnings} className="rounded-lg border px-3 py-2" />}
+                  <WorkflowMailObservers workflows={workflows} />
+                </div>
+              )}
             />
           </div>
         )}

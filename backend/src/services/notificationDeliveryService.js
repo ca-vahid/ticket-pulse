@@ -61,6 +61,18 @@ async function requesterFacingTicket(delivery, toRecipients, ccRecipients) {
   }
 }
 
+/** Observer Bcc for a workflow e-mail (its workflow read from the run). Never throws. */
+async function observerBccForDelivery(delivery, to, cc, bcc) {
+  try {
+    const run = await prisma.notificationWorkflowRun.findUnique({ where: { id: Number(delivery.workflowRunId) }, select: { workflowId: true } });
+    const { observerBccFor } = await import('./workflowMailObserverService.js');
+    return await observerBccFor({ workspaceId: delivery.workspaceId, workflowId: run?.workflowId ?? null, to, cc, bcc });
+  } catch (err) {
+    logger.debug(`Delivery ${delivery.id}: observer Bcc skipped: ${err.message}`);
+    return [];
+  }
+}
+
 async function sendDelivery(delivery) {
   const message = bodyFromDelivery(delivery);
   const voiceMessage = payloadValue(delivery.payload, 'voiceMessage') || message;
@@ -69,6 +81,14 @@ async function sendDelivery(delivery) {
     const toRecipients = listFromDelivery(delivery, 'toRecipients', delivery.recipient ? [delivery.recipient] : []);
     const ccRecipients = listFromDelivery(delivery, 'ccRecipients');
     const bccRecipients = listFromDelivery(delivery, 'bccRecipients');
+    // "Copy me on workflow e-mails" (16 Nov 2026): an observer set for the
+    // workspace gets a Bcc of every e-mail a workflow sends, without the
+    // workflow knowing. Shadow e-mails never get here.
+    // Only alongside a real recipient: an e-mail whose To came out empty (an
+    // unattended requester) must never become a send to the observer alone.
+    const hasRealTo = toRecipients.some((a) => String(a || '').includes('@'));
+    const observerBcc = delivery.workflowRunId && hasRealTo ? await observerBccForDelivery(delivery, toRecipients, ccRecipients, bccRecipients) : [];
+    if (observerBcc.length) bccRecipients.push(...observerBcc);
     const hasWorkflowBody = delivery.htmlBody || delivery.textBody || payloadValue(delivery.payload, 'htmlBody');
     // Per-workspace From display name (Phase EB); falls back to the global
     // default inside resolveFromName when the workspace has no override.
@@ -106,6 +126,7 @@ async function sendDelivery(delivery) {
       from: result.from,
       replyTo: result.replyTo,
       status: 'accepted',
+      ...(observerBcc.length ? { observerBcc, bccRecipients } : {}),
     };
   }
 
@@ -152,6 +173,11 @@ export async function processDelivery(delivery) {
         // Audit the actual sender when the transport chose one (Graph lane)
         // and the workflow node did not pin a from address.
         ...(result.from && !delivery.fromAddress ? { fromAddress: result.from } : {}),
+        // Who was Bcc'd as an observer is part of the e-mail's own record.
+        ...(result.observerBcc?.length ? {
+          bccRecipients: result.bccRecipients,
+          payload: { ...(delivery.payload && typeof delivery.payload === 'object' ? delivery.payload : {}), observerBcc: result.observerBcc },
+        } : {}),
         sentAt: new Date(),
         error: null,
       },

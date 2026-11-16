@@ -155,9 +155,10 @@ export async function deliverTransactionalEmail({
       try {
         const sent = await graphMailClient.sendMailAsMailbox(connection.address, {
           to: recipients,
-          // Graph drafts carry no bcc field in our client; bcc folds into cc
-          // rather than silently dropping a recipient.
-          cc: [...ccRecipients, ...bccRecipients],
+          // 16 Nov 2026: Bcc travels as Bcc on this lane too (it used to be
+          // folded into Cc, which showed the Bcc'd person to everyone).
+          cc: ccRecipients,
+          bcc: bccRecipients,
           subject,
           html: htmlBody,
           attachments,

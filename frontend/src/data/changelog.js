@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.3.84-preview';
+export const APP_VERSION = '4.3.85-preview';
 
 export const changelog = [
+  {
+    version: '4.3.85-preview',
+    date: 'November 16, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Copy someone on workflow e-mails (Bcc)</strong> &mdash; Settings &rarr; Mail Workflows has a new line at the top: pick a person, how long (1 day to 30 days) and every workflow or chosen ones, and they get a Bcc of every e-mail those workflows actually send in this workspace. No workflow is edited, Shadow e-mails are not copied, and it stops by itself on the date. Each e-mail&rsquo;s record shows who was copied.' },
+      { type: 'fix', html: '<strong>Bcc stays Bcc on the mailbox lane</strong> &mdash; when a workspace sends from its own mailbox, a Bcc on a workflow e-mail used to be sent as a Cc, so everyone on the mail saw it. It is now a real Bcc.' },
+    ],
+  },
   {
     version: '4.3.84-preview',
     date: 'November 16, 2026',
