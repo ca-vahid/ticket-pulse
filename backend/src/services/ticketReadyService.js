@@ -41,6 +41,10 @@ export const READY_ACTIVITY = 'ticket_ready';
 const READY_LOCK_NAMESPACE = 48212;
 const USES_TRIGGER_CACHE_MS = 60 * 1000;
 const SWEEP_LIMIT = 100;
+// 16 Nov 2026 (TP-12557): an agent opened a ticket for a caller and closed it a minute later; at the
+// 3-minute cap "Ticket ready" still fired and the requester was told it was "received and assigned".
+// A ticket that is already finished by the time it is ready runs no ready workflows.
+const FINISHED_STATUSES = new Set(['resolved', 'closed', 'deleted', 'spam']);
 
 const REASON_NOTES = Object.freeze({
   auto_help_answering: 'Ticket ready — Auto-help is answering it',
@@ -136,11 +140,12 @@ class TicketReadyService {
     try {
       const why = READY_REASONS.includes(reason) ? reason : 'auto_help_done';
       const ticket = await Promise.resolve()
-        .then(() => prisma.ticket.findUnique({ where: { id: Number(ticketId) }, select: { id: true, workspaceId: true, createdAt: true } }))
+        .then(() => prisma.ticket.findUnique({ where: { id: Number(ticketId) }, select: { id: true, workspaceId: true, createdAt: true, status: true } }))
         .catch(() => null);
       if (!ticket) return { skipped: 'no_ticket' };
       const ageMs = new Date(now).getTime() - new Date(ticket.createdAt).getTime();
       if (!(ageMs <= READY_NEW_TICKET_WINDOW_MS)) return { skipped: 'not_new' };
+      const finished = FINISHED_STATUSES.has(String(ticket.status || '').toLowerCase());
 
       const claim = await prisma.$transaction(async (tx) => {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(${READY_LOCK_NAMESPACE}::int, ${Number(ticket.id)}::int)`;
@@ -148,6 +153,25 @@ class TicketReadyService {
         if (!row) return { skipped: 'not_arrived' };
         const details = row.details && typeof row.details === 'object' ? row.details : {};
         if (details.firedAt) return { already: true };
+        if (finished) {
+          // Settled once, so the sweep does not come back to it; no workflows run.
+          await tx.ticketActivity.update({
+            where: { id: row.id },
+            data: {
+              performedAt: new Date(now),
+              details: {
+                ...details,
+                pending: false,
+                firedAt: new Date(now).toISOString(),
+                reason: 'already_finished',
+                skippedStatus: ticket.status,
+                note: `Ticket ready — not sent: the ticket was already ${String(ticket.status).toLowerCase()}`,
+                waitedSeconds: Math.max(0, Math.round(ageMs / 1000)),
+              },
+            },
+          });
+          return { skipped: 'already_finished' };
+        }
         const next = {
           ...details,
           pending: false,
