@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.81-preview';
+export const APP_VERSION = '4.3.82-preview';
 
 export const changelog = [
+  {
+    version: '4.3.82-preview',
+    date: 'November 16, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>A ticket whose FreshService copy was marked Spam is no longer pushed to FreshService again and again</strong> &mdash; FreshService refuses any change to a copy in Spam, and Ticket Pulse kept re-sending its own status and agent every hour, each attempt failing. It now leaves such a copy alone, and a refused update stops at the first try.' },
+    ],
+  },
   {
     version: '4.3.81-preview',
     date: 'November 15, 2026',
