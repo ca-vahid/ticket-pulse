@@ -2116,6 +2116,8 @@ export default function TicketDetail() {
   };
 
   const [noiseMenuOpen, setNoiseMenuOpen] = useState(false);
+
+  const [moreMenuAlign, setMoreMenuAlign] = useState('left');
   const noiseMenuRef = useRef(null);
   // "Also for" lives in a popover now (16 Sep 2026) — button + count, editor inside.
   const [alsoForOpen, setAlsoForOpen] = useState(false);
@@ -3065,7 +3067,16 @@ export default function TicketDetail() {
                       <span aria-hidden="true" className="mx-0.5 hidden h-5 w-px bg-border/80 sm:block" />
                       <span ref={noiseMenuRef} className="relative">
                         <button
-                          onClick={() => { setConfirmDelete(false); setNoiseMenuOpen((v) => !v); }}
+                          onClick={(e) => {
+                            setConfirmDelete(false);
+                            // 16 Nov 2026: on a phone More wraps to the start of its own
+                            // row, so a menu pinned to its right edge opened off the left
+                            // of the screen. Open toward whichever side has the room.
+                            const box = e.currentTarget.getBoundingClientRect();
+                            const menuW = Math.min(256, window.innerWidth - 32);
+                            setMoreMenuAlign(box.left + menuW <= window.innerWidth - 16 ? 'left' : 'right');
+                            setNoiseMenuOpen((v) => !v);
+                          }}
                           aria-expanded={noiseMenuOpen}
                           aria-haspopup="menu"
                           aria-label="More actions"
@@ -3077,7 +3088,7 @@ export default function TicketDetail() {
                           <span className="max-sm:sr-only">More</span>
                         </button>
                         {noiseMenuOpen && (
-                          <span className="absolute left-0 max-sm:left-auto max-sm:right-0 top-full mt-1 z-30 w-64 max-w-[calc(100vw-4rem)] tp-card rounded-xl shadow-soft p-1.5 flex flex-col animate-popIn" role="menu" data-testid="more-actions-menu">
+                          <span className={`absolute ${moreMenuAlign === 'right' ? 'right-0' : 'left-0'} top-full mt-1 z-30 w-64 max-w-[calc(100vw-2rem)] tp-card rounded-xl shadow-soft p-1.5 flex flex-col animate-popIn`} role="menu" data-testid="more-actions-menu" data-align={moreMenuAlign}>
                             {/* Phone: the three actions that leave the row live here. */}
                             {/* Below xl, Mark as solution lives here too (QA 11-05: the
                               row then fits at 1024 px without More wrapping alone). */}
