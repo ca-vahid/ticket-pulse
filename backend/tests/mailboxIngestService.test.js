@@ -1458,6 +1458,21 @@ describe('helpdesk mailbox: pictures pasted into the mail', () => {
     expect(uploaded).toEqual(['picture-1-xyz987-image001.png', 'invoice.pdf']);
   });
 
+  test('a real attachment that Outlook gave a content id is kept (FS #251107: the invoice PDF was dropped)', async () => {
+    const withCids = [
+      ...files().slice(0, 3),
+      { name: '381411409 22125-002.pdf', contentType: 'application/pdf', sizeBytes: 278 * 1024, buffer: Buffer.alloc(1024), contentId: 'pdf@01DC', isInline: false },
+      { name: 'damage-photo.jpg', contentType: 'image/jpeg', sizeBytes: big.length, buffer: big, contentId: 'photo@01DC', isInline: false },
+    ];
+    graphMock.getMessageAttachments.mockResolvedValue({ files: withCids, skipped: [] });
+    expect(await mailboxIngestService.processEmail(front, { ...baseEmail, id: 'AAMkAD-pdf001', bodyHtml: body, hasAttachments: true })).toBe('created');
+    const uploaded = attachmentMock.upload.mock.calls.map((c) => c[0].fileName);
+    expect(uploaded).toEqual(['picture-1-pdf001-image001.png', '381411409 22125-002.pdf', 'damage-photo.jpg']);
+    // The unshown inline picture and the tiny logo are still left out.
+    expect(uploaded).not.toContain('orphan.png');
+    expect(uploaded).not.toContain('logo.png');
+  });
+
   test('a side mailbox is untouched: the body is stored as it arrived', async () => {
     graphMock.getMessageAttachments.mockResolvedValue({ files: files(), skipped: [] });
     await mailboxIngestService.processEmail(connection, { ...baseEmail, bodyHtml: body, hasAttachments: false });
