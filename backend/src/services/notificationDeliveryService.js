@@ -84,7 +84,10 @@ async function sendDelivery(delivery) {
     // "Copy me on workflow e-mails" (16 Nov 2026): an observer set for the
     // workspace gets a Bcc of every e-mail a workflow sends, without the
     // workflow knowing. Shadow e-mails never get here.
-    const observerBcc = delivery.workflowRunId ? await observerBccForDelivery(delivery, toRecipients, ccRecipients, bccRecipients) : [];
+    // Only alongside a real recipient: an e-mail whose To came out empty (an
+    // unattended requester) must never become a send to the observer alone.
+    const hasRealTo = toRecipients.some((a) => String(a || '').includes('@'));
+    const observerBcc = delivery.workflowRunId && hasRealTo ? await observerBccForDelivery(delivery, toRecipients, ccRecipients, bccRecipients) : [];
     if (observerBcc.length) bccRecipients.push(...observerBcc);
     const hasWorkflowBody = delivery.htmlBody || delivery.textBody || payloadValue(delivery.payload, 'htmlBody');
     // Per-workspace From display name (Phase EB); falls back to the global

@@ -171,7 +171,7 @@ export default function WorkflowMailObservers({ workflows = [], className = '' }
                 <button type="button" onClick={() => setAdding(false)} className="tp-focus-ring h-7 rounded-md px-2 text-xs text-muted-foreground hover:text-foreground" aria-label="Cancel">
                   <X className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
-                <span className="text-[11px] text-muted-foreground">A private Bcc: requesters never see it. Real e-mails only (not Shadow); it stops by itself on the date.</span>
+                <span className="text-[11px] text-muted-foreground">A private Bcc: requesters never see it. It includes every e-mail those workflows send, HR onboarding/offboarding and security tickets too. Real e-mails only (not Shadow); it stops by itself on the date.</span>
               </div>
             </div>
           ) : (

@@ -95,6 +95,14 @@ describe('sending a workflow e-mail', () => {
     expect(data.payload).toBeUndefined();
   });
 
+  test('no real To (an unattended requester was dropped): never a send to the observer alone (API Dev check)', async () => {
+    await observers.setObservers(1, [{ email: 'alex@example.com', until: inDays(14) }], { now: NOW });
+    await processDelivery(delivery({ toRecipients: [], recipient: null }));
+    expect(prismaMock.notificationWorkflowRun.findUnique).not.toHaveBeenCalled();
+    const sent = deliverMock.mock.calls[0]?.[0];
+    expect(sent?.bcc || []).not.toContain('alex@example.com');
+  });
+
   test('a non-workflow e-mail (no run) never gets an observer', async () => {
     await observers.setObservers(1, [{ email: 'alex@example.com', until: inDays(14) }], { now: NOW });
     await processDelivery(delivery({ workflowRunId: null }));
