@@ -95,6 +95,22 @@ describe('"Ticket ready" follows "Ticket arrived"', () => {
     expect(emitTicketEvent.mock.calls[0][2].extra).not.toHaveProperty('suppressRequesterAck');
   });
 
+  test('a ticket already closed by the time it is ready runs no ready workflows (TP-12557), and is settled once', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValueOnce({ ...ticket(4), status: 'Closed' });
+    prismaMock.ticketActivity.findFirst.mockResolvedValueOnce(pending());
+    expect(await ticketReady.markReady(55, { reason: 'timeout', now: NOW })).toEqual({ skipped: 'already_finished' });
+    expect(emitTicketEvent).not.toHaveBeenCalled();
+    expect(prismaMock.ticketActivity.update.mock.calls[0][0].data.details).toMatchObject({ pending: false, firedAt: NOW.toISOString(), reason: 'already_finished', skippedStatus: 'Closed' });
+    // Resolved too; an open ticket still fires.
+    prismaMock.ticket.findUnique.mockResolvedValueOnce({ ...ticket(4), status: 'Resolved' });
+    prismaMock.ticketActivity.findFirst.mockResolvedValueOnce(pending());
+    expect(await ticketReady.markReady(55, { reason: 'timeout', now: NOW })).toEqual({ skipped: 'already_finished' });
+    prismaMock.ticket.findUnique.mockResolvedValueOnce({ ...ticket(4), status: 'Open' });
+    prismaMock.ticketActivity.findFirst.mockResolvedValueOnce(pending());
+    expect(await ticketReady.markReady(55, { reason: 'timeout', now: NOW })).toEqual({ emitted: true, reason: 'timeout' });
+    expect(emitTicketEvent).toHaveBeenCalledTimes(1);
+  });
+
   test('the sweep: arrivals noted over 3 minutes ago and not fired go ahead ("timeout")', async () => {
     prismaMock.ticketActivity.findMany.mockResolvedValueOnce([{ ticketId: 55, details: { pending: true } }, { ticketId: 56, details: { firedAt: 'x' } }]);
     prismaMock.ticket.findUnique.mockResolvedValueOnce(ticket(4));

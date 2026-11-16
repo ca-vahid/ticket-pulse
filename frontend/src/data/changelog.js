@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.87-preview';
+export const APP_VERSION = '4.3.88-preview';
 
 export const changelog = [
+  {
+    version: '4.3.88-preview',
+    date: 'November 16, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>No &ldquo;we received your ticket&rdquo; e-mail for a ticket that is already closed</strong> &mdash; when an agent opens a ticket for someone and closes it within a few minutes (a call handled on the spot), the &ldquo;Ticket ready&rdquo; workflows no longer run, so the requester is not told it was received and assigned after it was already done.' },
+    ],
+  },
   {
     version: '4.3.87-preview',
     date: 'November 16, 2026',
