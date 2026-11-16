@@ -117,7 +117,7 @@ export default function WorkflowMailObservers({ workflows = [], className = '' }
         <Eye className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
         <div className="min-w-0 flex-1 space-y-1">
           {active.length === 0 ? (
-            <p className="text-xs text-muted-foreground">Nobody gets a Bcc of this workspace&rsquo;s workflow e-mails.</p>
+            <p className="text-xs text-muted-foreground">Nobody gets a Bcc of this workspace&rsquo;s workflow e-mails. A Bcc is private: requesters never see who is copied.</p>
           ) : active.map((o) => (
             <div key={o.email} className="flex flex-wrap items-center gap-x-2 text-xs text-foreground" data-testid="observer-row">
               <span>
@@ -171,7 +171,7 @@ export default function WorkflowMailObservers({ workflows = [], className = '' }
                 <button type="button" onClick={() => setAdding(false)} className="tp-focus-ring h-7 rounded-md px-2 text-xs text-muted-foreground hover:text-foreground" aria-label="Cancel">
                   <X className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
-                <span className="text-[11px] text-muted-foreground">Real e-mails only (not Shadow). It stops by itself on the date.</span>
+                <span className="text-[11px] text-muted-foreground">A private Bcc: requesters never see it. Real e-mails only (not Shadow); it stops by itself on the date.</span>
               </div>
             </div>
           ) : (
