@@ -105,6 +105,19 @@ export function isQueueTimeout(error) {
   return error?.code === 'FS_QUEUE_TIMEOUT' || /FS_QUEUE_TIMEOUT/.test(String(error?.message || ''));
 }
 
+/** FreshService answered 405 "PUT method is not allowed" (a Spam copy takes no writes). */
+export function isPutRefused(error) {
+  return Number(error?.freshserviceStatus ?? error?.response?.status) === 405
+    || /PUT method is not allowed/i.test(String(error?.message || ''));
+}
+
+/** An error no retry can fix: the job is marked dead on the first attempt. */
+export function terminalMirrorError(message) {
+  const err = new Error(message);
+  err.terminal = true;
+  return err;
+}
+
 /**
  * The ticket's "Also for" list as the FS `cc_emails` payload value (Phase
  * MR5): lowercased, deduped, the requester excluded (FS rejects a requester
@@ -518,12 +531,12 @@ class MirrorService {
       });
       return true;
     } catch (err) {
-      await this._markFailed(job, err.message || String(err), { softRetry: isQueueTimeout(err) });
+      await this._markFailed(job, err.message || String(err), { softRetry: isQueueTimeout(err), terminal: err?.terminal === true });
       return false;
     }
   }
 
-  async _markFailed(job, message, { softRetry = false } = {}) {
+  async _markFailed(job, message, { softRetry = false, terminal = false } = {}) {
     // A queue timeout is back-pressure, not a failure: the request never
     // reached FreshService, so it must not burn one of the 8 attempts or earn
     // an hours-long backoff. Re-queue it for the next drain (FR 09-11).
@@ -536,7 +549,8 @@ class MirrorService {
       return;
     }
     const attempts = job.attempts + 1;
-    const dead = attempts >= MAX_ATTEMPTS;
+    // A terminal refusal (a Spam copy's 405) can never succeed: dead at once.
+    const dead = terminal || attempts >= MAX_ATTEMPTS;
     logger.warn(`Mirror job ${job.id} (${job.kind}, ticket ${job.ticketId}) failed${dead ? ' permanently' : ''}: ${message}`);
     await prisma.mirrorJob.update({
       where: { id: job.id },
@@ -717,6 +731,16 @@ class MirrorService {
       } catch (err) {
         out.notes.push(`FS copy deleted in FreshService by ${who}, but deleting here failed: ${err.message}`);
       }
+      return out;
+    }
+    // A copy someone marked Spam in FreshService (16 Nov 2026): FreshService
+    // refuses every PUT on it (405 "PUT method is not allowed"), so re-pushing
+    // our status or agent only failed, about 28 times an hour on four Accounting
+    // tickets. Leave the copy alone; Ticket Pulse keeps its own values.
+    if (fsTicket.spam === true) {
+      out.status = true;
+      out.agent = true;
+      out.notes.push('FS copy is in Spam; left alone');
       return out;
     }
 
@@ -983,6 +1007,11 @@ class MirrorService {
         assigneeNote = groupRefusalNote(ticket.assignedTech?.name);
         logger.warn(`Mirror: FreshService refused assignee ${who} on #${ticket.freshserviceTicketId} (not in the copy's group) — synced the other fields without the assignee`);
         await client.updateTicket(Number(ticket.freshserviceTicketId), { ...payload, responder_id: undefined });
+      } else if (isPutRefused(err)) {
+        // 405 "PUT method is not allowed": FreshService will not take a write on
+        // this copy (it is in Spam). Retrying can never succeed, so the job
+        // ends here instead of burning eight attempts (16 Nov 2026).
+        throw terminalMirrorError(`FreshService copy #${ticket.freshserviceTicketId} refuses updates (${err.message}); it is probably in Spam, so it was left alone`);
       } else {
         throw err;
       }
