@@ -172,6 +172,15 @@ describe('sendMailAsMailbox threading (MB-1b)', () => {
     expect(message).not.toHaveProperty('from');
   });
 
+  test('Bcc travels as bccRecipients, never folded into Cc (16 Nov 2026)', async () => {
+    await graphMailClient.sendMailAsMailbox(MAILBOX, {
+      to: 'rita@example.com', cc: ['boss@example.com'], bcc: ['observer@example.com'], subject: 'We got your request', html: '<p>hi</p>',
+    });
+    const { message } = calls[0].body;
+    expect(message.ccRecipients).toEqual([{ emailAddress: { address: 'boss@example.com' } }]);
+    expect(message.bccRecipients).toEqual([{ emailAddress: { address: 'observer@example.com' } }]);
+  });
+
   test('sendMail 403 → error tagged permission_denied (never ip_blocked), with the operation in the message', async () => {
     failSendMail = true;
     await expect(graphMailClient.sendMailAsMailbox(MAILBOX, { ...baseSend })).rejects.toMatchObject({

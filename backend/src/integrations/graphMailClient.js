@@ -266,7 +266,7 @@ class GraphMailClient {
   }
 
   async sendMailAsMailbox(mailbox, {
-    to, cc = [], subject, html, attachments = [], fromName = null,
+    to, cc = [], bcc = [], subject, html, attachments = [], fromName = null,
     replyTo = null, inReplyTo = null, references = [],
   }) {
     // Paragraph spacing + data: pictures as cid attachments, so the new Outlook reading pane shows both (31 Oct 2026).
@@ -282,6 +282,11 @@ class GraphMailClient {
       toRecipients: recipients,
       ccRecipients: (Array.isArray(cc) ? cc : []).filter(Boolean).map((address) => ({ emailAddress: { address } })),
     };
+    // Bcc (16 Nov 2026): Graph takes bccRecipients on the message like any
+    // other list. Until now a Bcc was folded into Cc on this lane, which showed
+    // a Bcc'd person to everyone on the mail.
+    const bccList = (Array.isArray(bcc) ? bcc : []).filter(Boolean);
+    if (bccList.length) draftPayload.bccRecipients = bccList.map((address) => ({ emailAddress: { address } }));
     // Best-effort sender display name (Phase EB). Graph sends AS the
     // mailbox, and Exchange typically rewrites arbitrary from-names to the
     // directory displayName on delivery — so this is cosmetic-at-best and

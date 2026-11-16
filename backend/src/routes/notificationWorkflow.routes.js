@@ -2238,6 +2238,31 @@ router.get(
   }),
 );
 
+// "Copy me on workflow e-mails" (16 Nov 2026): who gets a Bcc of every e-mail
+// this workspace's workflows send, until when, for which workflows.
+router.get(
+  '/observers',
+  asyncHandler(async (req, res) => {
+    const { getObservers, MAX_DAYS, MAX_OBSERVERS } = await import('../services/workflowMailObserverService.js');
+    const { observers } = await getObservers(req.workspaceId);
+    const now = Date.now();
+    res.json({
+      success: true,
+      data: { observers: observers.map((o) => ({ ...o, active: new Date(o.until).getTime() > now })), maxDays: MAX_DAYS, maxObservers: MAX_OBSERVERS },
+    });
+  }),
+);
+
+router.put(
+  '/observers',
+  asyncHandler(async (req, res) => {
+    if (!Array.isArray(req.body?.observers)) throw new ValidationError('observers must be a list');
+    const { setObservers } = await import('../services/workflowMailObserverService.js');
+    const { observers } = await setObservers(req.workspaceId, req.body.observers, { actorEmail: requestActorEmail(req) });
+    res.json({ success: true, data: { observers: observers.map((o) => ({ ...o, active: true })) } });
+  }),
+);
+
 // "This workflow can be updated": what the upgrade would change.
 router.get(
   '/:id/reopen-upgrade',
