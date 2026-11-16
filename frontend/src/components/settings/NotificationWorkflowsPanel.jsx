@@ -79,6 +79,7 @@ import EmailChipsInput from '../common/EmailChipsInput';
 import FieldCardNote, { FIELD_CARD_ACCENTS } from '../tickets/FieldCardNote';
 import WorkflowListPage from './WorkflowListPage';
 import WorkflowMailObservers from './WorkflowMailObservers';
+import WorkflowMachineSenders from './WorkflowMachineSenders';
 import { canAddVariant } from './WorkflowIndex';
 import RunResultView, { formatDuration } from './workflowRun/RunResultView';
 import WorkflowPreviewPage, {
@@ -12030,6 +12031,7 @@ export default function NotificationWorkflowsPanel({
                 <div className="space-y-2">
                   {reopenWarnings.length > 0 && <ReopenCheckNotice warnings={reopenWarnings} className="rounded-lg border px-3 py-2" />}
                   <WorkflowMailObservers workflows={workflows} />
+                  <WorkflowMachineSenders />
                 </div>
               )}
             />

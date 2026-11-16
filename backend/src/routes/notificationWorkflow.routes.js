@@ -2263,6 +2263,44 @@ router.put(
   }),
 );
 
+// Machine senders (16 Nov 2026): addresses that never get a workflow e-mail
+// (BambooHR notices, Darktrace alerts, no-reply senders).
+router.get(
+  '/machine-senders',
+  asyncHandler(async (req, res) => {
+    const { getMachineSenders, entryKind, DEFAULT_ENTRIES, MAX_ENTRIES } = await import('../services/machineSenderService.js');
+    const list = await getMachineSenders(req.workspaceId);
+    res.json({
+      success: true,
+      data: { entries: list.entries.map((e) => ({ ...e, kind: entryKind(e.value) })), saved: list.saved, defaults: DEFAULT_ENTRIES, maxEntries: MAX_ENTRIES },
+    });
+  }),
+);
+
+router.put(
+  '/machine-senders',
+  asyncHandler(async (req, res) => {
+    if (!Array.isArray(req.body?.entries)) throw new ValidationError('entries must be a list');
+    const { setMachineSenders, cleanEntryValue, entryKind, MAX_ENTRIES } = await import('../services/machineSenderService.js');
+    const bad = req.body.entries.filter((e) => !cleanEntryValue(typeof e === 'string' ? e : e?.value));
+    if (bad.length) throw new ValidationError(`Not an address, domain or word: ${bad.slice(0, 3).map((e) => String(typeof e === 'string' ? e : e?.value)).join(', ')}`);
+    if (req.body.entries.length > MAX_ENTRIES) throw new ValidationError(`At most ${MAX_ENTRIES} entries`);
+    const list = await setMachineSenders(req.workspaceId, req.body.entries, { actorEmail: requestActorEmail(req) });
+    res.json({ success: true, data: { entries: list.entries.map((e) => ({ ...e, kind: entryKind(e.value) })), saved: true } });
+  }),
+);
+
+// What happens to one address (the card's "test an address" box).
+router.get(
+  '/machine-senders/check',
+  asyncHandler(async (req, res) => {
+    const address = String(req.query.address || '').trim();
+    if (!address.includes('@')) throw new ValidationError('address must be an e-mail address');
+    const { machineSenderMatch } = await import('../services/machineSenderService.js');
+    res.json({ success: true, data: { address, matchedBy: await machineSenderMatch(req.workspaceId, address) } });
+  }),
+);
+
 // "This workflow can be updated": what the upgrade would change.
 router.get(
   '/:id/reopen-upgrade',
