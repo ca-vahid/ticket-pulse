@@ -161,10 +161,10 @@ export function DayStrip({ startDate, endDate, counted, color, dayPart }) {
   );
 }
 
-export default function BookTimeForm({ me, onBooked, toast, editing = null, onStopEditing = null }) {
+export default function BookTimeForm({ me, onBooked, toast, editing = null, onStopEditing = null, presetTypeId = null }) {
   const types = useMemo(() => (me.leaveTypes || []).filter((t) => t.isActive !== false).sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)), [me.leaveTypes]);
   const original = useMemo(() => (editing ? formFromRequest(editing) : null), [editing]);
-  const [form, setForm] = useState(() => original || emptyForm(types[0]?.id));
+  const [form, setForm] = useState(() => original || emptyForm((presetTypeId && types.some((t) => t.id === presetTypeId) ? presetTypeId : null) || types[0]?.id));
   const [preview, setPreview] = useState(null);
   const [previewing, setPreviewing] = useState(false);
   const [previewError, setPreviewError] = useState(null);
