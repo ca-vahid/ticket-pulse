@@ -250,6 +250,21 @@ describe('afterHoursUrgentEscalationService', () => {
     expect(data.some((d) => d.technicianId === 42)).toBe(false);
   });
 
+  test('one incident pages once: a second urgent run on the same ticket inside the cooldown pages nobody (API Dev a/b/c)', async () => {
+    onCallCurrentMock.mockResolvedValue({ configured: true, technician: { id: 42 } });
+    prismaMock.technician.findFirst.mockResolvedValue(onCallPerson());
+    prismaMock.urgentEscalationEvent.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 44 });
+    const first = await afterHoursUrgentEscalationService.queueForPriorityRun(urgentRun());
+    const second = await afterHoursUrgentEscalationService.queueForPriorityRun({ ...urgentRun(), id: 78 });
+    expect(first.eventId).toBe(44);
+    expect(second).toMatchObject({ queued: 0, skipped: 'cooldown', previousEventId: 44 });
+    expect(prismaMock.urgentEscalationEvent.create).toHaveBeenCalledTimes(1);
+    expect(prismaMock.notificationDelivery.createMany).toHaveBeenCalledTimes(1);
+    const window = prismaMock.urgentEscalationEvent.findFirst.mock.calls[1][0].where;
+    expect(window.ticketId).toBe(501);
+    expect(Date.now() - window.createdAt.gte.getTime()).toBeGreaterThanOrEqual(60 * 60 * 1000 - 1000);
+  });
+
   test('the on-call lookup failing changes nothing (the listed people are still paged)', async () => {
     onCallCurrentMock.mockRejectedValue(new Error('db down'));
     const result = await afterHoursUrgentEscalationService.queueForPriorityRun(urgentRun());

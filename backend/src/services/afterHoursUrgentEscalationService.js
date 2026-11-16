@@ -998,6 +998,19 @@ class AfterHoursUrgentEscalationService {
     if (!policy.automaticEnabled) {
       return { queued: 0, skipped: 'disabled' };
     }
+    // One incident pages once (16 Nov 2026, with the on-call person now always
+    // texted): a ticket that already paged within the cooldown — a re-run after
+    // a rebound, a flapping alert reopened by its occurrences — pages no one again.
+    // Same window as the requester button.
+    const recent = await Promise.resolve()
+      .then(() => prisma.urgentEscalationEvent.findFirst({
+        where: { ticketId: ticket.id, createdAt: { gte: new Date(Date.now() - policy.cooldownMinutes * 60 * 1000) } },
+        select: { id: true },
+      }))
+      .catch(() => null);
+    if (recent) {
+      return { queued: 0, skipped: 'cooldown', previousEventId: recent.id };
+    }
 
     const event = await prisma.urgentEscalationEvent.create({
       data: {

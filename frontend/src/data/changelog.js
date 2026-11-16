@@ -7,6 +7,7 @@ export const changelog = [
     entries: [
       { type: 'fix', html: '<strong>&ldquo;Request after-hours support&rdquo; now pages the person on call</strong> &mdash; the after-hours e-mail shows the on-call person&rsquo;s number, but pressing the button only alerted the fixed list in Urgent escalation. Whoever is on call at that moment (covers included) is now paged as well. Someone on leave with nobody covering is not.' },
       { type: 'improved', html: '<strong>After-hours alerts always text</strong> &mdash; the people paged for after-hours support get the text message even if their own SMS switch is off, as long as their phone is verified. Business-hours urgency still follows each person&rsquo;s settings.' },
+      { type: 'fix', html: '<strong>One urgent incident pages once</strong> &mdash; an automatic after-hours page for a ticket that already paged in the last hour (the same window as the requester&rsquo;s button) is skipped, so a re-run or a flapping alert does not text the on-call person again and again.' },
     ],
   },
   {
