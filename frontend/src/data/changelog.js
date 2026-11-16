@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.86-preview';
+export const APP_VERSION = '4.3.87-preview';
 
 export const changelog = [
+  {
+    version: '4.3.87-preview',
+    date: 'November 16, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>E-mailed files are no longer dropped when the e-mail also has pictures in it</strong> &mdash; on the helpdesk mailboxes, an e-mail with a picture in its body (often just a signature logo) could lose a real attachment such as an invoice PDF: Outlook marks every attachment in a way Ticket Pulse took for &ldquo;unused inline picture&rdquo;. Every real attachment is kept now; only pictures that sit in the body and are not shown are left out, as before.' },
+    ],
+  },
   {
     version: '4.3.86-preview',
     date: 'November 16, 2026',

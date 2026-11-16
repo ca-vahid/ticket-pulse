@@ -1289,7 +1289,10 @@ class MailboxIngestService {
       const { files: all, skipped } = prefetched || await graphMailClient.getMessageAttachments(connection.address, email.id);
       // With the body's pictures resolved: keep real files and the pictures the body shows; an
       // inline part the body never points at (or a dropped logo) is not an attachment anyone sent.
-      const files = prefetched ? (all || []).filter((f) => (f.isInline || f.contentId ? Boolean(f.inlineName) : true)) : all;
+      // 16 Nov 2026 (FS #251107, TP-11488): the e-mail's own inline flag decides, not the
+      // content id. Outlook gives every attachment a content id, so a 278 KB invoice PDF
+      // (isInline false) was read as an unused inline picture and dropped since 4.2.56.
+      const files = prefetched ? (all || []).filter((f) => (f.isInline === true ? Boolean(f.inlineName) : true)) : all;
       for (const file of files) {
         await attachmentService.upload({
           workspaceId: ticket.workspaceId,
