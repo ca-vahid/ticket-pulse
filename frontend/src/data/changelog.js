@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.3.85-preview';
+export const APP_VERSION = '4.3.86-preview';
 
 export const changelog = [
+  {
+    version: '4.3.86-preview',
+    date: 'November 16, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>&ldquo;Request after-hours support&rdquo; now pages the person on call</strong> &mdash; the after-hours e-mail shows the on-call person&rsquo;s number, but pressing the button only alerted the fixed list in Urgent escalation. Whoever is on call at that moment (covers included) is now paged as well. Someone on leave with nobody covering is not.' },
+      { type: 'improved', html: '<strong>After-hours alerts always text</strong> &mdash; the people paged for after-hours support get the text message even if their own SMS switch is off, as long as their phone is verified. Business-hours urgency still follows each person&rsquo;s settings.' },
+    ],
+  },
   {
     version: '4.3.85-preview',
     date: 'November 16, 2026',

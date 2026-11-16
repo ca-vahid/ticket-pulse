@@ -150,10 +150,17 @@ function normalizeDisabledChannels(value) {
   return normalizeList(value).filter((channel) => ESCALATION_CHANNELS.includes(channel) && channel !== 'email');
 }
 
-function readinessForChannel({ technician, preference }, providerStatus, channel, disabledChannels = []) {
+/**
+ * `alwaysText` (16 Nov 2026, Vahid: "sms alert should go to emergency agents
+ * regardless of their sms on and off status"): when paging the after-hours
+ * contacts, a verified phone gets the text even if the person's own SMS
+ * switch is off. Their phone must still be verified, the workspace must not
+ * have paused SMS, and the provider must be set up.
+ */
+function readinessForChannel({ technician, preference }, providerStatus, channel, disabledChannels = [], { alwaysText = false } = {}) {
   const provider = providerStatus[channel] || { provider: null, configured: false, missing: [] };
   const pausedByWorkspace = normalizeDisabledChannels(disabledChannels).includes(channel);
-  const enabled = channelEnabled(preference, channel);
+  const enabled = channelEnabled(preference, channel) || (alwaysText && channel === 'sms');
   const recipient = channelRecipient({ technician, preference }, channel);
   const phoneVerified = !PHONE_CHANNELS.has(channel) || Boolean(preference?.phoneVerifiedAt);
   const hasRecipient = Boolean(recipient);
@@ -750,7 +757,32 @@ class AfterHoursUrgentEscalationService {
         byTech.set(row.technicianId, row);
       }
     }
+    // After hours the person on call is paged too (16 Nov 2026): the e-mail
+    // showed the requester their number, so they must be the one who hears.
+    // Business-hours urgency keeps its own supervisor list.
+    if (source !== 'business_urgency') {
+      const onCall = await this._onCallRow(workspaceId);
+      if (onCall && !byTech.has(onCall.technicianId)) byTech.set(onCall.technicianId, onCall);
+      else if (onCall) byTech.get(onCall.technicianId).onCall = true;
+    }
     return [...byTech.values()];
+  }
+
+  /** The current on-call person as a recipient row, or null (not set up, nobody, away with no cover). Never throws. */
+  async _onCallRow(workspaceId, at = new Date()) {
+    try {
+      const { default: onCallService } = await import('./urgentResponse/onCallService.js');
+      const current = await onCallService.current(workspaceId, at);
+      if (!current?.configured || !current.technician?.id || current.onLeaveNoCover) return null;
+      const technician = await prisma.technician.findFirst({
+        where: { id: current.technician.id, workspaceId, isActive: true },
+        include: { notificationPreference: true },
+      });
+      return technician ? { technicianId: technician.id, technician, scope: 'on_call', onCall: true } : null;
+    } catch (err) {
+      logger.warn(`Urgent escalation: on-call lookup failed for workspace ${workspaceId} (non-fatal): ${err.message}`);
+      return null;
+    }
   }
 
   async _queueDeliveries({
@@ -779,8 +811,10 @@ class AfterHoursUrgentEscalationService {
         technician: row.technician,
         preference: row.technician.notificationPreference || null,
       };
+      // After-hours contacts are texted whatever their own SMS switch says.
+      const alwaysText = source !== 'business_urgency';
       for (const channel of ESCALATION_CHANNELS) {
-        const readiness = readinessForChannel(context, providerStatus, channel, policy?.disabledChannels);
+        const readiness = readinessForChannel(context, providerStatus, channel, policy?.disabledChannels, { alwaysText });
         if (!readiness.ready) {
           skipped.push({
             technicianId: row.technicianId,
