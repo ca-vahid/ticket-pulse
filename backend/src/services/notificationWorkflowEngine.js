@@ -194,6 +194,37 @@ function groupReferencesReplyClocks(group) {
       : REPLY_CLOCK_FIELDS.has(String(entry?.field || ''))
   ));
 }
+/**
+ * "Closed as a duplicate or merged" (16 Nov 2026): grouping closes a repeat
+ * alert or a person's follow-up into the ticket already open, and the
+ * "Ticket resolved or closed" e-mail told them their ticket was resolved.
+ * True when the ticket links out as duplicate_of / merged_into, or was
+ * resolved with the reason "duplicate". Read on demand, only when a condition
+ * names it; a failed read is null (the condition then fails closed).
+ */
+const DUPLICATE_FIELD = 'ticket.isDuplicate';
+function groupReferencesField(group, field) {
+  if (!group || typeof group !== 'object') return false;
+  const entries = Array.isArray(group.conditions) ? group.conditions : [];
+  return entries.some((entry) => (
+    entry && Array.isArray(entry.conditions) ? groupReferencesField(entry, field) : String(entry?.field || '') === field
+  ));
+}
+async function withDuplicateFlag(scope, eventContext) {
+  const ticketId = Number(eventContext?.ticket?.id);
+  if (!Number.isFinite(ticketId) || ticketId <= 0) return scope;
+  try {
+    const [link, row] = await Promise.all([
+      prisma.ticketLink.findFirst({ where: { ticketId, kind: { in: ['duplicate_of', 'merged_into'] } }, select: { id: true } }),
+      prisma.ticket.findUnique({ where: { id: ticketId }, select: { resolutionReason: true } }),
+    ]);
+    return { ...scope, ticket: { ...scope.ticket, isDuplicate: Boolean(link) || row?.resolutionReason === 'duplicate' } };
+  } catch (err) {
+    logger.warn(`duplicate flag unavailable for ticket ${ticketId} (condition sees null): ${err.message}`);
+    return { ...scope, ticket: { ...scope.ticket, isDuplicate: null } };
+  }
+}
+
 async function withReplyClocks(scope, eventContext) {
   const ticketId = Number(eventContext?.ticket?.id);
   if (!Number.isFinite(ticketId) || ticketId <= 0) return scope;
@@ -2534,6 +2565,7 @@ async function executeNode({
         conditionTypes = customFieldTypes;
         rule = compileConditionGroup(node.data.conditionGroup, { customFieldTypes });
         if (groupReferencesReplyClocks(node.data.conditionGroup)) evalScope = await withReplyClocks(scope, eventContext);
+        if (groupReferencesField(node.data.conditionGroup, DUPLICATE_FIELD)) evalScope = await withDuplicateFlag(evalScope, eventContext);
       } catch (error) {
         compileError = error.message;
         rule = false;
@@ -2639,9 +2671,12 @@ async function executeNode({
     const branchCustomFieldTypes = branchNeedsTypes
       ? await workspaceCustomFieldTypes(eventContext?.workspace?.id ?? eventContext?.ticket?.workspaceId)
       : null;
-    const branchScope = branches.some((b) => b?.conditionGroup && groupReferencesReplyClocks(b.conditionGroup))
+    let branchScope = branches.some((b) => b?.conditionGroup && groupReferencesReplyClocks(b.conditionGroup))
       ? await withReplyClocks(scope, eventContext)
       : scope;
+    if (branches.some((b) => b?.conditionGroup && groupReferencesField(b.conditionGroup, DUPLICATE_FIELD))) {
+      branchScope = await withDuplicateFlag(branchScope, eventContext);
+    }
     for (const candidate of branches) {
       const key = String(candidate?.key || '').trim().toLowerCase();
       if (!key) continue;
