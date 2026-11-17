@@ -2080,6 +2080,10 @@ export const notificationWorkflowAPI = {
   // "Copy me on workflow e-mails" (16 Nov 2026): observers Bcc'd on every workflow e-mail.
   getObservers: () => api.get('/notification-workflows/observers'),
   setObservers: (observers) => api.put('/notification-workflows/observers', { observers }),
+  // Machine senders (16 Nov 2026): addresses that never get a workflow e-mail.
+  getMachineSenders: () => api.get('/notification-workflows/machine-senders'),
+  setMachineSenders: (entries) => api.put('/notification-workflows/machine-senders', { entries }),
+  checkMachineSender: (address) => api.get('/notification-workflows/machine-senders/check', { params: { address } }),
   getReopenUpgrade: (id) => api.get(`/notification-workflows/${id}/reopen-upgrade`),
   applyReopenUpgrade: (id) => api.post(`/notification-workflows/${id}/reopen-upgrade`),
   sendTestEmail: (data) => api.post('/notification-workflows/test-email', data),

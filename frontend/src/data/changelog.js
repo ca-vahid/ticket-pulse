@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.88-preview';
+export const APP_VERSION = '4.3.89-preview';
 
 export const changelog = [
+  {
+    version: '4.3.89-preview',
+    date: 'November 16, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Machine senders: addresses workflows never e-mail</strong> &mdash; Settings &rarr; Mail Workflows has a list of senders that are machines, not people (an HR system&rsquo;s new-hire notices, a security tool&rsquo;s alerts, no-reply addresses). Their tickets still open and get assigned as usual, but no acknowledgement, &ldquo;resolved&rdquo; or reminder e-mail goes to them. An entry is one address, a whole domain, or a word in the address&rsquo;s name (like <em>noreply</em>); a box tests any address against the list. Until a workspace saves its own list, the usual no-reply and mail-daemon names apply.' },
+    ],
+  },
   {
     version: '4.3.88-preview',
     date: 'November 16, 2026',

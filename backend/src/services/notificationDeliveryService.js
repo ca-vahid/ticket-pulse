@@ -73,14 +73,41 @@ async function observerBccForDelivery(delivery, to, cc, bcc) {
   }
 }
 
+/** Machine senders taken off a workflow e-mail's To/Cc (16 Nov 2026). Never throws. */
+async function machineSplitForDelivery(delivery, to, cc) {
+  try {
+    const { splitMachineRecipients } = await import('./machineSenderService.js');
+    return await splitMachineRecipients({ workspaceId: delivery.workspaceId, to, cc });
+  } catch (err) {
+    logger.debug(`Delivery ${delivery.id}: machine-sender check skipped: ${err.message}`);
+    return { to, cc, removed: [] };
+  }
+}
+
 async function sendDelivery(delivery) {
   const message = bodyFromDelivery(delivery);
   const voiceMessage = payloadValue(delivery.payload, 'voiceMessage') || message;
 
   if (delivery.channel === 'email') {
-    const toRecipients = listFromDelivery(delivery, 'toRecipients', delivery.recipient ? [delivery.recipient] : []);
-    const ccRecipients = listFromDelivery(delivery, 'ccRecipients');
+    let toRecipients = listFromDelivery(delivery, 'toRecipients', delivery.recipient ? [delivery.recipient] : []);
+    let ccRecipients = listFromDelivery(delivery, 'ccRecipients');
     const bccRecipients = listFromDelivery(delivery, 'bccRecipients');
+    // Machine senders (16 Nov 2026): BambooHR's new-hire notices, Darktrace's
+    // alerts and no-reply addresses open real tickets, but a workflow e-mail to
+    // them reaches nobody. They come off To/Cc; with nobody left on To the
+    // e-mail is not sent at all (the observer Bcc below never goes out alone).
+    let machineRemoved = [];
+    if (delivery.workflowRunId) {
+      const split = await machineSplitForDelivery(delivery, toRecipients, ccRecipients);
+      if (split.removed.length) {
+        machineRemoved = split.removed;
+        toRecipients = split.to;
+        ccRecipients = split.cc;
+        if (!toRecipients.some((a) => String(a || '').includes('@'))) {
+          return { skipped: 'machine_sender', machineRemoved };
+        }
+      }
+    }
     // "Copy me on workflow e-mails" (16 Nov 2026): an observer set for the
     // workspace gets a Bcc of every e-mail a workflow sends, without the
     // workflow knowing. Shadow e-mails never get here.
@@ -99,7 +126,8 @@ async function sendDelivery(delivery) {
     // the ticket), SendGrid otherwise / on Graph failure. Template + branding
     // are untouched (same subject/html/text/fromName as before); send-health
     // telemetry records on both lanes inside the transport.
-    const rich = hasWorkflowBody || toRecipients.length > 1 || ccRecipients.length > 0 || bccRecipients.length > 0;
+    // A machine sender taken off means To no longer equals delivery.recipient: send the list.
+    const rich = hasWorkflowBody || toRecipients.length > 1 || ccRecipients.length > 0 || bccRecipients.length > 0 || machineRemoved.length > 0;
     const result = await deliverTransactionalEmail({
       workspaceId: delivery.workspaceId ?? null,
       to: rich ? toRecipients : [delivery.recipient],
@@ -127,6 +155,7 @@ async function sendDelivery(delivery) {
       replyTo: result.replyTo,
       status: 'accepted',
       ...(observerBcc.length ? { observerBcc, bccRecipients } : {}),
+      ...(machineRemoved.length ? { machineRemoved, toRecipients, ccRecipients } : {}),
     };
   }
 
@@ -158,6 +187,19 @@ async function sendDelivery(delivery) {
 export async function processDelivery(delivery) {
   try {
     const result = await sendDelivery(delivery);
+    const priorPayload = delivery.payload && typeof delivery.payload === 'object' ? delivery.payload : {};
+    if (result?.skipped === 'machine_sender') {
+      await prisma.notificationDelivery.update({
+        where: { id: delivery.id },
+        data: {
+          status: 'skipped',
+          error: null,
+          payload: { ...priorPayload, skippedReason: 'machine_sender', machineRemoved: result.machineRemoved },
+        },
+      });
+      logger.info(`Delivery ${delivery.id} not sent: every recipient is a machine sender (${result.machineRemoved.map((r) => r.entry).join(', ')})`);
+      return { id: delivery.id, success: true, skipped: 'machine_sender' };
+    }
     await prisma.notificationDelivery.update({
       where: { id: delivery.id },
       data: {
@@ -174,9 +216,15 @@ export async function processDelivery(delivery) {
         // and the workflow node did not pin a from address.
         ...(result.from && !delivery.fromAddress ? { fromAddress: result.from } : {}),
         // Who was Bcc'd as an observer is part of the e-mail's own record.
-        ...(result.observerBcc?.length ? {
-          bccRecipients: result.bccRecipients,
-          payload: { ...(delivery.payload && typeof delivery.payload === 'object' ? delivery.payload : {}), observerBcc: result.observerBcc },
+        ...(result.observerBcc?.length ? { bccRecipients: result.bccRecipients } : {}),
+        // Who actually got it: machine senders taken off are recorded, not silently lost.
+        ...(result.machineRemoved?.length ? { toRecipients: result.toRecipients, ccRecipients: result.ccRecipients } : {}),
+        ...(result.observerBcc?.length || result.machineRemoved?.length ? {
+          payload: {
+            ...priorPayload,
+            ...(result.observerBcc?.length ? { observerBcc: result.observerBcc } : {}),
+            ...(result.machineRemoved?.length ? { machineRemoved: result.machineRemoved } : {}),
+          },
         } : {}),
         sentAt: new Date(),
         error: null,
