@@ -2425,5 +2425,7 @@ export const availabilityAPI = {
   importBalances: (data) => apiLongTimeout.post('/availability/admin/balances/import', data),
   importVacationTracker: (data) => apiLongTimeout.post('/availability/admin/import/vacation-tracker', data),
   vtImportStatus: () => api.get('/availability/admin/import/vacation-tracker/status'),
+  calendarImportStatus: () => api.get('/availability/admin/import/shared-calendar/status'),
+  setCalendarImportMode: (data) => api.put('/availability/admin/import/shared-calendar/mode', data),
   reproject: (data = {}) => apiLongTimeout.post('/availability/admin/reproject', data),
 };

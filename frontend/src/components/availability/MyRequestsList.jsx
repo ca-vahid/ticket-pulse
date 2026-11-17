@@ -23,9 +23,12 @@ function RequestRow({ r, type, onCancel, onEdit, isEditing }) {
   // Leave synced from Vacation Tracker is changed there while people use both,
   // but it can be cancelled here once approved (QA 11-09 #2).
   const fromVt = r.source === 'vacation_tracker';
-  const cancellable = (fromVt ? r.status === 'approved' : (r.status === 'pending' || r.status === 'approved')) && r.endDate >= todayKey();
+  // QA 11-16: imported from the shared calendar; cancel only, never changed here.
+  const fromCal = r.source === 'shared_calendar';
+  const imported = fromVt || fromCal;
+  const cancellable = (imported ? r.status === 'approved' : (r.status === 'pending' || r.status === 'approved')) && r.endDate >= todayKey();
   const stillInVt = fromVt && r.status === 'cancelled' && r.stillInVacationTracker === true;
-  const editable = Boolean(onEdit) && !fromVt && r.status === 'pending' && r.editable !== false;
+  const editable = Boolean(onEdit) && !imported && r.status === 'pending' && r.editable !== false;
   const waitingOn = r.status === 'pending' ? (r.waitingOn || []).map((p) => p.name || p.email).filter(Boolean) : [];
   const reason = r.decision?.reason || null;
   const fired = (r.decision?.fired || []).filter((f) => f.message);
@@ -46,7 +49,10 @@ function RequestRow({ r, type, onCancel, onEdit, isEditing }) {
           {!fromVt && r.inVacationTracker && r.status === 'approved' && <span className="shrink-0 text-xs text-muted-foreground" title="Ticket Pulse added this to Vacation Tracker when it was approved">· also in Vacation Tracker</span>}
         </span>
         <span className="order-3 col-span-2 min-w-0 sm:order-none sm:col-span-1">
-          <span className="block text-sm text-foreground/85">{fmtRange(r)}</span>
+          <span className="block text-sm text-foreground/85">
+            {fmtRange(r)}
+            {fromCal && <span className="text-xs text-muted-foreground" title="Added from the shared calendar; change it there or cancel it here"> · From the shared calendar</span>}
+          </span>
           {waitingOn.length > 0 && <span className="block truncate text-xs text-muted-foreground">Waiting for {waitingOn.join(' or ')}</span>}
           {stillInVt && <span className="block text-xs text-amber-700 dark:text-amber-300" data-testid={`still-in-vt-${r.id}`}>Cancelled in Ticket Pulse. Cancel it in Vacation Tracker too.</span>}
         </span>
@@ -74,6 +80,7 @@ function RequestRow({ r, type, onCancel, onEdit, isEditing }) {
           <span className="mr-auto text-foreground/85">
             Cancel {type?.name?.toLowerCase() || 'this request'} for {fmtRange(r)}?
             {fromVt && <span className="block text-xs text-muted-foreground">It came from Vacation Tracker. Ticket Pulse cancels it there too when it can.</span>}
+            {fromCal && <span className="block text-xs text-muted-foreground">It came from the shared calendar. It stays cancelled here; the calendar entry is not changed.</span>}
           </span>
           <button type="button" className={BTN_QUIET} onClick={() => setConfirming(false)} disabled={busy}>Keep it</button>
           <button

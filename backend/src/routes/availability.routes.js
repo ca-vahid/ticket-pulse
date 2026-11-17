@@ -185,6 +185,9 @@ router.post('/admin/balances/import', asyncHandler(async (req, res) => ok(res, a
 // QA 11-09 #1: when the automatic (15-minute) and the last manual import ran.
 router.get('/admin/import/vacation-tracker/status', asyncHandler(async (req, res) => ok(res, await availabilityService.vtImportStatus(me(req)))));
 router.post('/admin/import/vacation-tracker', asyncHandler(async (req, res) => ok(res, await availabilityService.importFromVacationTracker(me(req), req.body || {}))));
+// QA 11-16: Accounting's shared calendar → Vacation Pulse (Off / Shadow / Live).
+router.get('/admin/import/shared-calendar/status', asyncHandler(async (req, res) => ok(res, await availabilityService.calendarImportStatus(me(req)))));
+router.put('/admin/import/shared-calendar/mode', asyncHandler(async (req, res) => ok(res, await availabilityService.setCalendarImportMode(me(req), req.body || {}))));
 router.post('/admin/reproject', asyncHandler(async (req, res) => ok(res, await availabilityService.reprojectAll(me(req), req.body || {}))));
 
 export default router;

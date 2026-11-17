@@ -7,10 +7,14 @@ import config from '../config/index.js';
 import logger from '../utils/logger.js';
 import providerGateway from './aiProviders/providerGateway.js';
 import vtRepo from './vacationTrackerRepository.js';
+import * as calImport from './availability/calendarImport.js';
 
 const VALID_CATEGORIES = new Set(['OFF', 'WFH', 'OTHER', 'IGNORED']);
 const VALID_HALF_DAY = new Set(['AM', 'PM', 'INFER', null, undefined, '']);
 const CLASSIFICATION_VERSION = 'calendar-v2';
+// QA 11-16: the sync reads the whole window (a year ahead for Vacation Pulse).
+const SYNC_EVENT_CAP = 10000;
+const MAX_EVENT_PAGES = 200;
 
 const DEFAULT_RULES = [
   { name: 'Ignore statutory holidays', priority: 10, pattern: '\\b(stat|holiday|family day|canada day|thanksgiving|christmas|boxing day|new year)\\b', category: 'IGNORED', notes: 'Calendar-wide holidays are not individual technician leave.' },
@@ -97,6 +101,8 @@ function serializeEvent(event) {
     end: event.end || null,
     isAllDay: event.isAllDay === true,
     lastModifiedDateTime: event.lastModifiedDateTime || null,
+    showAs: event.showAs || null,
+    sensitivity: event.sensitivity || null,
   };
 }
 
@@ -318,6 +324,13 @@ class CalendarLeaveService {
     })));
   }
 
+  /**
+   * calendarView, page by page (100 a page, following @odata.nextLink) up to
+   * `top`. The hourly sync asks for up to SYNC_EVENT_CAP, so a year ahead
+   * (≈1,400 events) is read in full; it used to stop at 1000 and silently drop
+   * the latest entries (QA 11-16). `sensitivity` lets the Vacation Pulse import
+   * skip private entries.
+   */
   async fetchEvents(workspaceId, { startDate, endDate, top = 500 } = {}) {
     const cfg = await this.getConfig(workspaceId);
     if (!cfg) throw new Error('Calendar leave source is not configured');
@@ -331,15 +344,21 @@ class CalendarLeaveService {
         startDateTime: `${start}T00:00:00`,
         endDateTime: `${end}T23:59:59`,
         $top: Math.min(top, 100),
-        $select: 'id,subject,start,end,isAllDay,showAs,organizer,categories,type,location,lastModifiedDateTime',
+        $select: 'id,subject,start,end,isAllDay,showAs,sensitivity,organizer,categories,type,location,lastModifiedDateTime',
       });
 
     const events = [];
+    let pages = 0;
     while (request && events.length < top) {
       const response = await request.get();
+      pages += 1;
       events.push(...(response.value || []));
-      request = response['@odata.nextLink'] && events.length < top
-        ? client.api(response['@odata.nextLink'])
+      const next = response['@odata.nextLink'];
+      if (next && events.length >= top) {
+        logger.warn(`Calendar leave: workspace ${workspaceId} has more than ${top} events between ${start} and ${end}; the rest were not read`);
+      }
+      request = next && events.length < top && pages < MAX_EVENT_PAGES
+        ? client.api(next)
         : null;
     }
     return events.slice(0, top);
@@ -829,14 +848,18 @@ class CalendarLeaveService {
     if (!cfg) throw new Error('Calendar leave source is not configured');
     const start = startDate || formatDateUTC(new Date(Date.now() - cfg.lookbackDays * 86400000));
     const end = endDate || formatDateUTC(new Date(Date.now() + cfg.horizonDays * 86400000));
-    const events = await this.fetchEvents(workspaceId, { startDate: start, endDate: end, top: 1000 });
+    const events = await this.fetchEvents(workspaceId, { startDate: start, endDate: end, top: SYNC_EVENT_CAP });
     const { rows } = await this.classifyEvents(workspaceId, events, { useLlm });
     await this._persistRows(workspaceId, rows, 'sync');
     const leaveRows = [];
     const validKeys = new Set();
+    // QA 11-16: an entry imported into Vacation Pulse and cancelled there by a
+    // person stays off the dashboard too (as for Vacation Tracker leave).
+    const cancelledHere = await calImport.cancelledHereExternalIds();
 
     for (const row of rows) {
       if (!row.isLeave || row.requiresReview) continue;
+      if (cancelledHere.size && row.event?.id && cancelledHere.has(calImport.calendarExternalId(row.event.id))) continue;
       const dates = expandDateRange(row.event.start?.dateTime, row.event.end?.dateTime, row.event.isAllDay);
       const minutes = deriveMinutes(row.event, row.halfDayPart);
       for (const date of dates) {
@@ -879,7 +902,17 @@ class CalendarLeaveService {
       data: { lastSyncAt: new Date() },
     });
 
+    // QA 11-16: the same rows, into Vacation Pulse (Off / Shadow / Live per
+    // workspace). Never fails the sync.
+    const vacationPulse = await this.importToVacationPulse(workspaceId, rows, {
+      windowStart: start, windowEnd: end, eventsListed: events.length,
+    }).catch((err) => {
+      logger.warn(`Calendar leave: Vacation Pulse import failed for workspace ${workspaceId}: ${err.message}`);
+      return { ok: false, error: err.message };
+    });
+
     return {
+      vacationPulse: vacationPulse ? { mode: vacationPulse.mode, ok: vacationPulse.ok, counts: vacationPulse.counts } : null,
       eventsProcessed: rows.length,
       total: rows.length,
       matched: rows.filter((r) => r.isLeave && !r.requiresReview).length,
@@ -889,6 +922,17 @@ class CalendarLeaveService {
       ignored: rows.filter((r) => r.category === 'IGNORED').length,
       rows: this._formatRows(rows),
     };
+  }
+
+  /**
+   * Classified rows → Vacation Pulse requests, in the workspace's mode
+   * (app setting calendar_vp_mode_ws<N>: off | shadow | live; default off).
+   */
+  async importToVacationPulse(workspaceId, rows, { mode = null, windowStart = null, windowEnd = null, eventsListed = null } = {}) {
+    const runMode = mode ? calImport.normalizeMode(mode) : await calImport.getCalendarImportMode(workspaceId);
+    if (runMode === 'off') return { mode: 'off' };
+    const { default: av } = await import('./availability/availabilityService.js');
+    return calImport.importCalendarRows(workspaceId, rows, { av, mode: runMode, windowStart, windowEnd, eventsListed });
   }
 }
 
