@@ -270,6 +270,9 @@ const escalationService = {
         techId: t.id, name: t.name, rank: lvl.rank, eligible: !why, why, openCount: openCounts.get(t.id) || 0,
         // A routing note (e.g. "last resort") keeps a person out of the best-available fallback, as in level match.
         routingNote: Boolean(String(t.routingGuidance || '').trim()),
+        // 'subcategory' | 'category' | null: a parent-only rating on a ticket with a subcategory is too broad
+        // for the best-available fallback (level match calls it broad).
+        matchedOn: lvl.matchedOn,
       };
     });
   },
