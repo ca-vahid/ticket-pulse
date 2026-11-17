@@ -108,6 +108,23 @@ describe('rules', () => {
     expect(out).toMatchObject({ outcome: 'best_available', techId: 6 });
   });
 
+  test('best available never falls back to a person with a routing note (last resort)', () => {
+    const base = {
+      escalation: ESC,
+      ranked: [{ techId: 9, techName: 'Sam Lee' }, { techId: 6, techName: 'Eli Park' }],
+    };
+    const out = rules.decideEscalation({
+      ...base,
+      candidates: [
+        { techId: 9, name: 'Sam Lee', rank: 1, eligible: true, routingNote: true },
+        { techId: 6, name: 'Eli Park', rank: 1, eligible: true },
+      ],
+    });
+    expect(out).toMatchObject({ outcome: 'best_available', techId: 6 });
+    const only = rules.decideEscalation({ ...base, candidates: [{ techId: 9, name: 'Sam Lee', rank: 1, eligible: true, routingNote: true }] });
+    expect(only.outcome).toBe('none_higher');
+  });
+
   test('nobody suitable at work at all: keep the pick, suggestion only', () => {
     const out = rules.decideEscalation({
       escalation: ESC,
@@ -210,6 +227,13 @@ describe('escalationService', () => {
     const out = await escalationService.guard({ workspaceId: 1, ticketId: 601, recommendation, escalation: ESC });
     expect(out).toMatchObject({ outcome: 'best_available', techId: 6 });
     expect(out.recommendations[0]).toMatchObject({ techId: 6, rank: 1, escalationPromoted: true });
+  });
+
+  test('a routing note on the only person at work keeps it a suggestion', async () => {
+    prismaMock.technician.findMany.mockResolvedValue(TEAM.map((t) => (t.id === 5 ? { ...t, routingGuidance: 'Last resort only.' } : t)));
+    atWork.mockImplementation((tech) => (tech.id === 5 ? { atWork: true } : { atWork: false, reason: 'off_shift' }));
+    const out = await escalationService.guard({ workspaceId: 1, ticketId: 601, recommendation, escalation: ESC });
+    expect(out).toMatchObject({ outcome: 'none_higher' });
   });
 
   test('nobody at work at all: suggestion only, the AI pick kept', async () => {

@@ -134,10 +134,11 @@ export function decideEscalation({ escalation, ranked = [], candidates = [] } = 
   }
 
   // Nobody more advanced is at work: the next most suitable person the AI ranked who is at work, may hold
-  // the ticket and never handed it back (eligible covers all three) takes it.
+  // the ticket, is not on another team and never handed it back (eligible covers those) and has no routing
+  // note (a "last resort" person is never the fallback - the same never-pick list as level match) takes it.
   const nextBest = ranked
     .map((r) => byId.get(Number(r?.techId)))
-    .find((c) => c && c.eligible === true && Number(c.techId) !== Number(escalation?.fromTechId)) || null;
+    .find((c) => c && c.eligible === true && !c.routingNote && Number(c.techId) !== Number(escalation?.fromTechId)) || null;
   if (nextBest) {
     return {
       ...base,
