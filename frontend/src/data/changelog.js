@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.93-preview';
+export const APP_VERSION = '4.3.94-preview';
 
 export const changelog = [
+  {
+    version: '4.3.94-preview',
+    date: 'November 17, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Escalations only go to someone with the skill</strong> &mdash; when nobody more advanced is at work, an escalated ticket now goes only to a person with at least a recorded skill in the ticket&rsquo;s area (basic or better). If nobody at work has one, it waits for a coordinator as before. 4.3.93 could hand an escalation to someone with no skill there.' },
+    ],
+  },
   {
     version: '4.3.93-preview',
     date: 'November 17, 2026',
