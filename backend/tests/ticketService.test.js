@@ -99,7 +99,7 @@ jest.unstable_mockModule('../src/services/attachmentService.js', () => ({
   MAX_ATTACHMENTS_PER_TICKET: 20,
 }));
 
-const { default: ticketService, deriveQueueState, deriveStateChip, parseDateRange, FIRST_RESPONSE_TRACKED, describeOversizeBody, extractInlineImages, MAX_BODY_CHARS } = await import('../src/services/ticketService.js');
+const { default: ticketService, deriveQueueState, deriveStateChip, parseDateRange, FIRST_RESPONSE_TRACKED, describeOversizeBody, extractInlineImages, MAX_BODY_CHARS, forwardBlockHtml } = await import('../src/services/ticketService.js');
 const { invalidateStatusCache } = await import('../src/services/statusService.js');
 const { ValidationError, ExternalAPIError } = await import('../src/utils/errors.js');
 
@@ -2833,6 +2833,146 @@ describe('ticketService.forwardTicket — two-lane delivery', () => {
 
   test('still refuses without a valid destination', async () => {
     await expect(ticketService.forwardTicket(501, 1, { to: ['not-an-email'] }, actor)).rejects.toThrow(/valid destination/);
+  });
+
+  // QA 11-16 #1b: links in the note and in the forwarded messages survived as bare words.
+  test('the note\'s link and the thread\'s links reach the e-mail; the stored entry keeps the note\'s link', async () => {
+    ticketThreadRepositoryMock.listForTicket.mockResolvedValue([{
+      id: 77, eventType: 'reply', isPrivate: false, actorName: 'Ada Agent', occurredAt: '2026-11-16T15:43:08Z',
+      bodyText: 'the form', bodyHtml: '<a href="https://forms.example.com/play?id=2824&amp;x=1">the form</a><script>alert(1)</script>',
+    }]);
+    const res = await ticketService.forwardTicket(501, 1, {
+      to: ['ops@example.com'],
+      note: 'Please use this link',
+      noteHtml: '<p>Please use <a href="https://docs.example.com/guide">this link</a></p><img src=x onerror="alert(1)">',
+    }, actor);
+    const mail = sendgridMock.sendEmail.mock.calls[0][0];
+    expect(mail.html).toContain('<a href="https://docs.example.com/guide">this link</a>');
+    expect(mail.html).toContain('<a href="https://forms.example.com/play?id=2824&amp;x=1">the form</a>');
+    expect(mail.html).not.toMatch(/<script|onerror/);
+    const stored = prismaMock.ticketThreadEntry.create.mock.calls[0][0].data;
+    expect(stored.eventType).toBe('forward');
+    expect(stored.isPrivate).toBe(true);
+    expect(stored.bodyHtml).toBe('<p>Forwarded to ops@example.com</p><p>Please use <a href="https://docs.example.com/guide">this link</a></p><img src="x" />');
+    expect(stored.bodyText).toBe('Forwarded to ops@example.com — Please use this link');
+    expect(stored.rawPayload).toEqual({ forwardTo: ['ops@example.com'] });
+    expect(res.entry.bodyHtml).toContain('this link');
+  });
+
+  test('a picture pasted into the forward note as data: becomes an attachment, never inline (review)', async () => {
+    attachmentServiceMock.upload.mockClear();
+    await ticketService.forwardTicket(501, 1, {
+      to: ['ops@example.com'],
+      note: 'See screen',
+      noteHtml: '<p>See screen</p><img src="data:image/png;base64,iVBORw0KGgo=">',
+    }, actor);
+    const mail = sendgridMock.sendEmail.mock.calls[0][0];
+    expect(mail.html).not.toContain('data:image');
+    expect(mail.html).toContain('[Pasted image attached: pasted-image-1.png]');
+    expect(attachmentServiceMock.upload.mock.calls.map((c) => c[0].fileName)).toContain('pasted-image-1.png');
+  });
+
+  test('a forward note over the text limit is refused before anything is sent', async () => {
+    await expect(ticketService.forwardTicket(501, 1, { to: ['ops@example.com'], noteHtml: `<p>${'x'.repeat(400001)}</p>` }, actor))
+      .rejects.toThrow(/too long to send/);
+    expect(sendgridMock.sendEmail).not.toHaveBeenCalled();
+  });
+
+  test('a plain-text note (the team forward) still forwards as before', async () => {
+    await ticketService.forwardTicket(501, 1, { to: ['ops@example.com'], note: 'a < b & c' }, actor);
+    expect(sendgridMock.sendEmail.mock.calls[0][0].html).toContain('<p>a &lt; b &amp; c</p><hr/>');
+    expect(prismaMock.ticketThreadEntry.create.mock.calls[0][0].data.bodyHtml).toBeNull();
+  });
+
+  // QA 11-16 #2: Forward takes attachments.
+  test('files ride the forward e-mail and are stored on the forward\'s entry', async () => {
+    const small = { originalname: 'quote.pdf', mimetype: 'application/pdf', size: 4, buffer: Buffer.from('%PDF') };
+    const big = { originalname: 'video.mp4', mimetype: 'video/mp4', size: 4 * 1024 * 1024, buffer: Buffer.alloc(4 * 1024 * 1024) };
+    attachmentServiceMock.upload.mockClear();
+    const res = await ticketService.forwardTicket(501, 1, { to: ['ops@example.com'], note: '' }, actor, [small, big]);
+    const mail = sendgridMock.sendEmail.mock.calls[0][0];
+    // ≤3 MB files are mailed (same rule as a reply); every file is stored.
+    expect(mail.attachments.map((a) => a.name)).toEqual(['quote.pdf']);
+    expect(mail.attachments[0].contentBytes).toBe(Buffer.from('%PDF').toString('base64'));
+    expect(attachmentServiceMock.upload.mock.calls.map(([a]) => [a.fileName, a.threadEntryId])).toEqual([['quote.pdf', 9101], ['video.mp4', 9101]]);
+    expect(res.attachments).toHaveLength(2);
+    expect(res.attachmentsFailed).toBeUndefined();
+    // Stored before the mirror job, so the FreshService copy carries them.
+    expect(mirrorServiceMock.enqueueThreadEntry).toHaveBeenCalledWith(1, 501, 9101);
+  });
+
+  test('a file that cannot be stored is reported back, the forward still stands', async () => {
+    attachmentServiceMock.upload.mockRejectedValueOnce(new Error('blob down'));
+    const file = { originalname: 'a.png', mimetype: 'image/png', size: 1, buffer: Buffer.from('a') };
+    const res = await ticketService.forwardTicket(501, 1, { to: ['ops@example.com'] }, actor, [file]);
+    expect(res.attachmentsFailed).toEqual([{ fileName: 'a.png', reason: 'blob down' }]);
+    expect(res.entry.eventType).toBe('forward');
+  });
+
+  test('a ticket with no room for the files refuses before anything is sent', async () => {
+    prismaMock.ticketAttachment = { count: jest.fn().mockResolvedValue(19) };
+    try {
+      const files = ['a.png', 'b.png'].map((n) => ({ originalname: n, mimetype: 'image/png', size: 1, buffer: Buffer.from('x') }));
+      await expect(ticketService.forwardTicket(501, 1, { to: ['ops@example.com'] }, actor, files))
+        .rejects.toThrow(/holds 19 files and can keep 20, so this message can add 1 more, not 2/);
+      expect(sendgridMock.sendEmail).not.toHaveBeenCalled();
+      expect(prismaMock.ticketThreadEntry.create).not.toHaveBeenCalled();
+    } finally {
+      delete prismaMock.ticketAttachment;
+    }
+  });
+});
+
+describe('forwardBlockHtml (QA 11-16)', () => {
+  test('keeps links, strips script, falls back to escaped text, never cuts inside a tag', () => {
+    expect(forwardBlockHtml('<p>See <a href="https://x.example.com">here</a></p><script>x()</script>', 'See here'))
+      .toBe('<p>See <a href="https://x.example.com">here</a></p>');
+    expect(forwardBlockHtml(null, 'a <b>\nnext')).toBe('a &lt;b&gt;<br/>next');
+    expect(forwardBlockHtml('', '')).toBe('');
+    const cut = forwardBlockHtml(`<p>${'x'.repeat(30)}</p><a href="https://example.com/long">link</a>`, '', 40);
+    expect(cut).toBe(`<p>${'x'.repeat(30)}</p><p>[…]</p>`);
+  });
+});
+
+describe('note / reply files (QA 11-16 #3)', () => {
+  const ticket = {
+    id: 601, workspaceId: 1, origin: 'ticketpulse', nativeNumber: 1050, freshserviceTicketId: null,
+    subject: 'Screens', status: 'Open', requester: { id: 40, name: 'Rita Requester', email: 'rita@example.com' },
+  };
+  const shots = (n) => Array.from({ length: n }, (_, i) => ({ originalname: `pasted-image-${i + 1}.png`, mimetype: 'image/png', size: 10, buffer: Buffer.from(`img${i}`) }));
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...ticket });
+    prismaMock.ticketThreadEntry.create.mockImplementation(({ data }) => Promise.resolve({ id: 9201, ...data }));
+    prismaMock.ticketThreadEntry.findMany = jest.fn().mockResolvedValue([]);
+  });
+  afterEach(() => {
+    delete prismaMock.ticketThreadEntry.findMany;
+    delete prismaMock.ticketAttachment;
+  });
+
+  test('twelve pasted screenshots on a note are all stored on the note', async () => {
+    const res = await ticketService.addPrivateNote(601, 1, { bodyText: 'Screens below' }, actor, shots(12));
+    expect(attachmentServiceMock.upload).toHaveBeenCalledTimes(12);
+    expect(attachmentServiceMock.upload.mock.calls.every(([a]) => a.threadEntryId === 9201)).toBe(true);
+    expect(res.attachments).toHaveLength(12);
+    expect(res.attachmentsFailed).toBeUndefined();
+  });
+
+  test('a file that fails to store is named in the response instead of only logged', async () => {
+    attachmentServiceMock.upload
+      .mockResolvedValueOnce({ id: 1, fileName: 'pasted-image-1.png' })
+      .mockRejectedValueOnce(new Error('A ticket can hold at most 20 attachments'));
+    const res = await ticketService.addPrivateNote(601, 1, { bodyText: 'Two screens' }, actor, shots(2));
+    expect(res.attachments).toHaveLength(1);
+    expect(res.attachmentsFailed).toEqual([{ fileName: 'pasted-image-2.png', reason: 'A ticket can hold at most 20 attachments' }]);
+  });
+
+  test('a ticket already at its file limit refuses the note before it is saved', async () => {
+    prismaMock.ticketAttachment = { count: jest.fn().mockResolvedValue(20) };
+    await expect(ticketService.addPrivateNote(601, 1, { bodyText: 'More screens' }, actor, shots(3)))
+      .rejects.toThrow(/already holds 20 files/);
+    expect(prismaMock.ticketThreadEntry.create).not.toHaveBeenCalled();
   });
 });
 

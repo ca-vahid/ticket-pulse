@@ -7,7 +7,7 @@ import { rememberTicket } from '../../utils/recentSearches';
 import { IntegrationAvatar } from './IntegrationAvatar';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Activity, Bot, CalendarDays, Check, ChevronDown, ChevronUp, ExternalLink, Hand, Inbox,
+  Activity, Bot, CalendarDays, Check, ChevronDown, ChevronUp, ExternalLink, Forward, Hand, Inbox,
   Loader2, Lock, Mail, MapPin, Pencil, Phone, Sparkles, Trash2, VolumeX, X,
 } from 'lucide-react';
 import {
@@ -783,12 +783,14 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
           ) : (
             <ul className="space-y-2.5">
               {conversation.map((e) => (
-                <li key={e.id} className={`rounded-lg border p-2.5 ${e.isPrivate ? 'bg-amber-50/70 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/30' : (e.incoming || e.authorType === 'requester') ? 'bg-indigo-50/60 dark:bg-indigo-500/10 border-indigo-100 dark:border-indigo-500/20' : 'bg-card border-border'}`}>
+                <li key={e.id} className={`rounded-lg border p-2.5 ${e.eventType === 'forward' ? 'bg-violet-50/60 dark:bg-violet-500/10 border-violet-200 dark:border-violet-500/30' : e.isPrivate ? 'bg-amber-50/70 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/30' : (e.incoming || e.authorType === 'requester') ? 'bg-indigo-50/60 dark:bg-indigo-500/10 border-indigo-100 dark:border-indigo-500/20' : 'bg-card border-border'}`}>
                   <div className="flex items-center gap-1.5 mb-1">
                     <span className="text-xs font-semibold text-foreground/85 truncate">{e.actorName || (e.isPrivate ? 'Ticket Pulse' : 'Unknown')}</span>
-                    {e.isPrivate
-                      ? <Lock className="w-2.5 h-2.5 text-amber-600 dark:text-amber-300" aria-label="Internal note" />
-                      : <Mail className="w-2.5 h-2.5 text-blue-500" aria-label="Public reply" />}
+                    {e.eventType === 'forward'
+                      ? <Forward className="w-2.5 h-2.5 text-violet-600 dark:text-violet-300" aria-label="Forwarded" />
+                      : e.isPrivate
+                        ? <Lock className="w-2.5 h-2.5 text-amber-600 dark:text-amber-300" aria-label="Internal note" />
+                        : <Mail className="w-2.5 h-2.5 text-blue-500" aria-label="Public reply" />}
                     <span className="ml-auto flex items-center gap-1 whitespace-nowrap">
                       {e.editedAt && (
                         <span

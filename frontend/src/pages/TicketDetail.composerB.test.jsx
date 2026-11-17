@@ -301,7 +301,7 @@ describe('Ticket composer, release B', () => {
     const file = new File(['x'], 'screenshot.png', { type: 'image/png' });
     fireEvent.dragOver(composer(), { dataTransfer: { types: ['Files'], files: [file] } });
     expect(composer()).toHaveAttribute('data-drag-over', 'true');
-    expect(screen.getByText('Drop to attach (up to 5 files)')).toBeInTheDocument();
+    expect(screen.getByText('Drop to attach (up to 20 files)')).toBeInTheDocument();
     fireEvent.drop(composer(), { dataTransfer: { types: ['Files'], files: [file] } });
     expect(composer()).not.toHaveAttribute('data-drag-over');
     await waitFor(() => expect(screen.getByRole('list', { name: 'Files to attach' })).toBeInTheDocument());

@@ -1140,8 +1140,18 @@ export const ticketsAPI = {
     return await api.get(`/tickets/${id}/solutions`);
   },
 
-  forward: async (id, { to, note }) => {
-    return await api.post(`/tickets/${id}/forward`, { to, note });
+  // QA 11-16: the composer's HTML rides as `noteHtml` (links survive) and files
+  // go multipart, `to` then as one comma-separated field like a reply's Cc.
+  forward: async (id, { to, note, noteHtml, files }) => {
+    if (files && files.length > 0) {
+      const form = new FormData();
+      form.append('to', (to || []).join(','));
+      if (note) form.append('note', note);
+      if (noteHtml) form.append('noteHtml', noteHtml);
+      for (const file of files) form.append('files', file);
+      return await api.post(`/tickets/${id}/forward`, form, { headers: { 'Content-Type': undefined }, timeout: 120000 });
+    }
+    return await api.post(`/tickets/${id}/forward`, { to, note, ...(noteHtml ? { noteHtml } : {}) });
   },
 
   // Reply templates (canned reply snippets)

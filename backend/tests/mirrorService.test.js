@@ -300,6 +300,25 @@ describe('mirrorService job processing', () => {
     expect(clientMock.addNote).toHaveBeenLastCalledWith(90001, expect.stringContaining('internal'), { isPrivate: true, attachments: [] });
   });
 
+  // QA 11-16: a message can carry 20 files; what does not fit one FreshService request is named, not fatal.
+  test('files beyond 15 MB in all are left off the FreshService copy and named in it', async () => {
+    const { default: attachmentServiceMock } = await import('../src/services/attachmentService.js');
+    attachmentServiceMock.buffersForThreadEntry.mockResolvedValueOnce([
+      { filename: 'a.pdf', buffer: Buffer.alloc(8 * 1024 * 1024), contentType: 'application/pdf' },
+      { filename: 'b <big>.mov', buffer: Buffer.alloc(9 * 1024 * 1024), contentType: 'video/quicktime' },
+      { filename: 'c.png', buffer: Buffer.alloc(1024), contentType: 'image/png' },
+    ]);
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, freshserviceTicketId: BigInt(90001) });
+    prismaMock.ticketThreadEntry.findUnique.mockResolvedValue({
+      id: 9010, isPrivate: false, actorName: 'Cora', bodyHtml: '<p>see files</p>', mirrorState: 'pending',
+    });
+    prismaMock.ticketThreadEntry.update.mockResolvedValue({});
+    await mirrorService._processJob({ id: 6, ticketId: 501, workspaceId: 1, kind: 'thread_entry', threadEntryId: 9010, attempts: 0 });
+    const [, body, opts] = clientMock.addNote.mock.calls.at(-1);
+    expect(opts.attachments.map((a) => a.filename)).toEqual(['a.pdf', 'c.png']);
+    expect(body).toContain('Not copied (too large for FreshService): b &lt;big&gt;.mov. Open them in Ticket Pulse.');
+  });
+
   // FR 08-07 #8 — edited notes re-push onto their mirrored FS conversation.
   test('thread_entry_update re-pushes the edited body with the mirror prefix onto the FS conversation', async () => {
     prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, freshserviceTicketId: BigInt(90001) });

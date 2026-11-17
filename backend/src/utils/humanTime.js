@@ -46,6 +46,19 @@ function validZone(zone) {
   }
 }
 
+/**
+ * The zone label people read after a time: "PT" for BC (never "PDT"/"PST",
+ * BC keeps one clock all year since Nov 2026), Intl's short name elsewhere.
+ */
+export function zoneLabel(zone, date = new Date()) {
+  const tz = validZone(zone) || DEFAULT_ZONE;
+  if (ZONE_LABELS[tz]) return ZONE_LABELS[tz];
+  const part = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'short' })
+    .formatToParts(date instanceof Date && !Number.isNaN(date.getTime()) ? date : new Date())
+    .find((p) => p.type === 'timeZoneName');
+  return part?.value || tz;
+}
+
 /** "Wed 28 Oct 2026, 12:34 PM PT", or null when the value is not a time. */
 export function formatHumanTime(value, zone) {
   const date = value instanceof Date ? value : (isIsoTimestamp(value) ? new Date(value.trim()) : null);

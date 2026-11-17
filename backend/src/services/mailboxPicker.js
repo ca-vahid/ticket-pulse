@@ -62,7 +62,46 @@ export async function setPrimaryMailbox(workspaceId, mailboxId, isPrimary = true
   });
 }
 
-export default { pickOutboundMailbox, pickIngestMailbox, setPrimaryMailbox, OUTBOUND_MAILBOX_ORDER };
+/**
+ * The mailbox ONE ticket's mail should use (16 Nov 2026, QA 11-16 #6). A workspace with one
+ * mailbox per team (Accounting: aptickets@ → AP group, artickets@ → AR group) sent every
+ * reply from the primary, so an AR ticket's answer left from aptickets@. Prefer the
+ * connection whose default group is the ticket's group (FreshService or internal), else the
+ * usual pick (primary first, then oldest). `modes`: ['send','both'] for the Graph lane,
+ * ['ingest','both'] for the SendGrid From / Reply-To. Never throws worse than the old picker:
+ * a lookup failure falls back to it.
+ */
+export async function pickMailboxForTicket(ticket, { modes = ['ingest', 'both'] } = {}) {
+  const id = Number(ticket?.workspaceId);
+  if (!Number.isInteger(id) || id <= 0) return null;
+  let rows;
+  try {
+    rows = await prisma.mailboxConnection.findMany({
+      where: { workspaceId: id, isEnabled: true, mode: { in: modes } },
+      orderBy: OUTBOUND_MAILBOX_ORDER,
+      take: 20,
+    });
+  } catch {
+    rows = null;
+  }
+  if (!Array.isArray(rows)) {
+    return modes.includes('send') ? pickOutboundMailbox(id) : pickIngestMailbox(id);
+  }
+  if (rows.length === 0) return null;
+  const group = ticket?.groupId !== null && ticket?.groupId !== undefined ? String(ticket.groupId) : null;
+  const internal = ticket?.internalGroupId !== null && ticket?.internalGroupId !== undefined ? Number(ticket.internalGroupId) : null;
+  const match = rows.find((r) => (group && r.defaultGroupId !== null && r.defaultGroupId !== undefined && String(r.defaultGroupId) === group)
+    || (internal && Number(r.defaultInternalGroupId) === internal));
+  return match || rows[0];
+}
+
+export const pickOutboundMailboxForTicket = (ticket) => pickMailboxForTicket(ticket, { modes: ['send', 'both'] });
+export const pickIngestMailboxForTicket = (ticket) => pickMailboxForTicket(ticket, { modes: ['ingest', 'both'] });
+
+export default {
+  pickOutboundMailbox, pickIngestMailbox, pickMailboxForTicket, pickOutboundMailboxForTicket, pickIngestMailboxForTicket,
+  setPrimaryMailbox, OUTBOUND_MAILBOX_ORDER,
+};
 
 /**
  * The address SendGrid mail should leave FROM for this workspace (FR 09-11 #5).

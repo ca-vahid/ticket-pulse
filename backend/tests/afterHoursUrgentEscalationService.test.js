@@ -142,7 +142,7 @@ jest.unstable_mockModule('../src/services/urgentResponse/onCallService.js', () =
 }));
 prismaMock.technician.findFirst = jest.fn();
 
-const { default: afterHoursUrgentEscalationService, workspacePeople } = await import('../src/services/afterHoursUrgentEscalationService.js');
+const { default: afterHoursUrgentEscalationService, workspacePeople, __testing } = await import('../src/services/afterHoursUrgentEscalationService.js');
 
 describe('afterHoursUrgentEscalationService', () => {
   beforeEach(() => {
@@ -625,11 +625,10 @@ describe('afterHoursUrgentEscalationService', () => {
     });
 
     expect(result.status).toBe('submitted');
-    expect(result.notificationSummary).toEqual(expect.objectContaining({
-      queued: 1,
-      assignedAgent: expect.objectContaining({ queued: 1, channels: ['email'] }),
-      supervisors: expect.objectContaining({ queued: 0, skipped: 'supervisor_notification_disabled' }),
-    }));
+    // The public response carries counts only (QA 11-16 review: it used to name skipped staff);
+    // the full summary is kept on the escalation event for the team.
+    expect(result.notificationSummary).toEqual({ queued: 1, channels: ['email'] });
+    expect(result.writeback).not.toHaveProperty('error');
     expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 502 },
       data: expect.objectContaining({
@@ -826,5 +825,137 @@ describe('urgency page — Teams chat with the assigned agent', () => {
     const result = await afterHoursUrgentEscalationService.startRequesterTeamsChat('tok-chat');
     expect(result.url).toBeNull();
     expect(prismaMock.ticketActivity.create).not.toHaveBeenCalled();
+  });
+});
+
+// QA 11-16: the redesigned after-hours page (/ticket-escalation/:token).
+describe('public after-hours page payload', () => {
+  const { publicSupportPhase, shortNextBusinessLabel } = __testing;
+  const table = {
+    rows: [
+      { label: 'Monday to Friday', businessHours: '5am - 5pm PT', afterHours: '5pm - 10pm PT', lateNight: 'After 10pm PT' },
+      { label: 'Weekends', businessHours: 'N/A', afterHours: '10am - 5pm PT', lateNight: 'After 5pm PT' },
+      { label: 'Holidays', businessHours: 'N/A', afterHours: '10am - 5pm PT', lateNight: 'After 5pm PT' },
+    ],
+  };
+  const off = { isBusinessHours: false, isAfterHours: true, isHoliday: false };
+  // UTC keeps these independent of the machine's tzdata for BC.
+  const phaseAt = (iso, availability = off) => publicSupportPhase({
+    availability, responseTable: table, timezone: 'UTC', at: new Date(iso),
+  });
+
+  const tpLink = (ticket = {}) => ({
+    id: 30,
+    workspaceId: 1,
+    ticketId: 66260,
+    tokenHash: 'hash:tok-page',
+    tokenPrefix: 'tok-page',
+    enabled: true,
+    revokedAt: null,
+    expiresAt: null,
+    ticket: {
+      id: 66260,
+      workspaceId: 1,
+      origin: 'ticketpulse',
+      nativeNumber: 12591,
+      freshserviceTicketId: 252303n,
+      subject: "Laptop won't connect to VPN",
+      status: 'Open',
+      priority: 2,
+      assessedPriority: 'Medium',
+      workspace: { id: 1, name: 'IT', slug: 'it', defaultTimezone: 'America/Vancouver' },
+      requester: { name: 'Robin Requester', email: 'robin@example.com' },
+      assignedTech: { id: 3, name: 'Alex Agent', email: 'alex@example.com', photoUrl: 'data:image/png;base64,AAAA' },
+      ...ticket,
+    },
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prismaMock.urgentEscalationPolicy.upsert.mockResolvedValue({ ...policyRow, workspaceId: 1 });
+    prismaMock.publicTicketStatusSettings.findUnique.mockResolvedValue({ brandName: 'IT Helpdesk' });
+    prismaMock.urgentEscalationEvent.findFirst.mockResolvedValue(null);
+    policyContextMock = {
+      availability: {
+        ...off,
+        checkedAt: '2026-11-17T05:41:00.000Z',
+        nextBusinessTime: '2026-11-17T12:00:00.000Z',
+        nextBusinessTimeLocal: 'Tue, Nov 17, 5:00 AM PT',
+      },
+      notificationPolicy: { afterHoursEnabled: true, holidaysEnabled: true },
+      afterHoursSupport: { enabled: true, message: 'We are out.', activeContact: { name: 'Kim Oncall', phone: '+16045550042' } },
+    };
+  });
+
+  test('carries the ticket\'s own reference and no person', async () => {
+    prismaMock.publicTicketStatusLink.findUnique.mockResolvedValue(tpLink());
+    const result = await afterHoursUrgentEscalationService.getPublicSelfEscalation('tok-page');
+    expect(result.ticket.ref).toBe('TP-12591');
+    const json = JSON.stringify(result);
+    expect(json).not.toMatch(/Alex Agent|Robin Requester|Kim Oncall|6045550042|base64/);
+    expect(result.afterHours.support).toEqual({ enabled: true, message: 'We are out.' });
+    expect(result.afterHours.phase).toMatch(/^(after_hours|late_night)$/);
+    expect(typeof result.afterHours.localHour).toBe('number');
+    expect(result.afterHours.nextBusinessShort).toMatch(/^\d{1,2}(:\d{2})? (AM|PM)$/);
+    expect(result.afterHours.expect.afterHours).toBe('For high-priority issues. We reply within about 2 hours.');
+    expect(result.escalation).toEqual({ sentAt: null, sentAtLocal: null });
+  });
+
+  test('an FS-born ticket keeps its FreshService number as its reference', async () => {
+    prismaMock.publicTicketStatusLink.findUnique.mockResolvedValue(tpLink({ origin: 'freshservice', nativeNumber: null }));
+    const result = await afterHoursUrgentEscalationService.getPublicSelfEscalation('tok-page');
+    expect(result.ticket.ref).toBe('#252303');
+  });
+
+  test('custom response copy from Settings replaces the short lines', async () => {
+    prismaMock.urgentEscalationPolicy.upsert.mockResolvedValue({
+      ...policyRow,
+      workspaceId: 1,
+      afterHoursResponseCopy: { afterHours: 'Text the after-hours line; we answer within an hour.' },
+    });
+    prismaMock.publicTicketStatusLink.findUnique.mockResolvedValue(tpLink());
+    const result = await afterHoursUrgentEscalationService.getPublicSelfEscalation('tok-page');
+    expect(result.afterHours.expect.afterHours).toBe('Text the after-hours line; we answer within an hour.');
+    expect(result.afterHours.expect.lateNight).toBe("We'll still try, but it can take longer than 2 hours.");
+  });
+
+  test('a submitted request says when it was sent', async () => {
+    prismaMock.publicTicketStatusLink.findUnique.mockResolvedValue(tpLink());
+    prismaMock.ticket.update.mockResolvedValue({});
+    prismaMock.urgentEscalationEvent.create.mockResolvedValue({
+      id: 46, workspaceId: 1, ticketId: 66260, createdAt: new Date('2026-11-17T05:41:00.000Z'),
+    });
+    directPriorityWritebackMock.mockResolvedValue({ success: true });
+    const result = await afterHoursUrgentEscalationService.submitPublicSelfEscalation('tok-page', { ip: '127.0.0.1' });
+    expect(result.status).toBe('submitted');
+    expect(result.escalation.sentAt).toBe('2026-11-17T05:41:00.000Z');
+    expect(result.escalation.sentAtLocal).toMatch(/\d{1,2}:41 (AM|PM)$/);
+  });
+
+  test('business hours, after-hours and late night from the policy table', () => {
+    expect(phaseAt('2026-11-17T10:00:00Z', { isBusinessHours: true, isAfterHours: false })).toBe('business');
+    // Tuesday (UTC): 9 PM inside 5pm–10pm, 11 PM and 2 AM after it.
+    expect(phaseAt('2026-11-17T21:00:00Z')).toBe('after_hours');
+    expect(phaseAt('2026-11-17T23:00:00Z')).toBe('late_night');
+    expect(phaseAt('2026-11-18T02:00:00Z')).toBe('late_night');
+    // Saturday: 11 AM inside 10am–5pm, 8 AM and 6 PM outside.
+    expect(phaseAt('2026-11-21T11:00:00Z')).toBe('after_hours');
+    expect(phaseAt('2026-11-21T08:00:00Z')).toBe('late_night');
+    expect(phaseAt('2026-11-21T18:00:00Z')).toBe('late_night');
+    // A holiday on a weekday uses the Holidays row.
+    expect(phaseAt('2026-11-17T21:00:00Z', { ...off, isHoliday: true })).toBe('late_night');
+    // An after-hours cell we cannot read never claims late night.
+    expect(publicSupportPhase({
+      availability: off, responseTable: { rows: [{ label: 'Monday to Friday', afterHours: 'Evenings' }] }, timezone: 'UTC', at: new Date('2026-11-17T23:00:00Z'),
+    })).toBe('after_hours');
+  });
+
+  test('the headline time: time only today or tomorrow, weekday within a week', () => {
+    const now = new Date('2026-11-17T21:41:00Z'); // Tuesday 9:41 PM UTC
+    expect(shortNextBusinessLabel('2026-11-18T05:00:00Z', 'UTC', now)).toBe('5 AM');
+    expect(shortNextBusinessLabel('2026-11-18T05:30:00Z', 'UTC', now)).toBe('5:30 AM');
+    expect(shortNextBusinessLabel('2026-11-20T05:00:00Z', 'UTC', now)).toBe('Friday 5 AM');
+    expect(shortNextBusinessLabel('2026-11-30T05:00:00Z', 'UTC', now)).toBe('Mon, Nov 30, 5 AM');
+    expect(shortNextBusinessLabel(null, 'UTC', now)).toBeNull();
   });
 });

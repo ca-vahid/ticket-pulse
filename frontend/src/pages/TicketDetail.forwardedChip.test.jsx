@@ -98,6 +98,52 @@ describe('ThreadEntry forwarded-intake chips (FW-5)', () => {
   });
 });
 
+// QA 11-16 #1: a forward is stored private (the requester is not on it) and
+// read "Internal note" in the conversation. It is a forward.
+describe('ThreadEntry — outbound forwards (QA 11-16)', () => {
+  afterEach(() => cleanup());
+  const forwardRow = (over = {}) => ({
+    id: 4050926,
+    eventType: 'forward',
+    source: 'ticketpulse_user',
+    actorName: 'Ada Agent',
+    actorEmail: 'ada@example.com',
+    authorType: 'agent',
+    incoming: false,
+    isPrivate: true,
+    visibility: 'private',
+    bodyText: 'Forwarded to ops@example.com, lead@example.com — please have a look',
+    bodyHtml: null,
+    emailMessageId: '<sg-1@example.com>',
+    occurredAt: RECEIVED,
+    rawPayload: null,
+    ...over,
+  });
+
+  test('an existing forward row (private, text only) shows as Forwarded, never as an internal note', () => {
+    const { container } = render(<ul><ThreadEntry entry={forwardRow()} canDelete canEdit onDelete={() => {}} onEdit={() => {}} /></ul>);
+    expect(screen.getByText('Forwarded')).toBeInTheDocument();
+    expect(screen.queryByText('Internal note')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Not visible to the requester')).toBeInTheDocument();
+    expect(container.querySelector('[data-entry-kind="forward"]')).not.toBeNull();
+    expect(screen.getByText(/Forwarded to ops@example.com, lead@example.com/)).toBeInTheDocument();
+    // A forward is not a note: no note edit/delete controls.
+    expect(screen.queryByRole('button', { name: 'Delete note' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit note' })).not.toBeInTheDocument();
+  });
+
+  test('a new forward keeps the note\'s link', () => {
+    render(<ul><ThreadEntry entry={forwardRow({ bodyHtml: '<p>Forwarded to ops@example.com</p><p>Fill in <a href="https://forms.example.com/7">this form</a></p>' })} /></ul>);
+    expect(screen.getByRole('link', { name: 'this form' })).toHaveAttribute('href', 'https://forms.example.com/7');
+  });
+
+  test('internal notes are unchanged', () => {
+    const { container } = render(<ul><ThreadEntry entry={forwardRow({ eventType: 'note', bodyText: 'Checked the logs.', emailMessageId: null })} /></ul>);
+    expect(screen.getByText('Internal note')).toBeInTheDocument();
+    expect(container.querySelector('[data-entry-kind="note"]')).not.toBeNull();
+  });
+});
+
 describe('describeFsEvent (RO-2)', () => {
   test('parses FS status / assignment / group lines', () => {
     expect(describeFsEvent({ eventType: 'status_event', content: 'Dominic Bautista set Status as Closed' })).toEqual({ kind: 'status', value: 'Closed', verb: 'Closed' });

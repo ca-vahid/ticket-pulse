@@ -402,4 +402,36 @@ describe('notification workflow policy routing', () => {
     expect(preview.nextActiveWindow.startsAtLocal).toContain('Mon, Jun 1, 5:00 PM');
     expect(preview.upcomingActiveWindows.length).toBeGreaterThan(1);
   });
+
+  // QA 11-16: the after-hours page said "PDT". BC keeps Pacific time all year:
+  // every local time this service formats ends in "PT", whatever the tzdata says.
+  test('local times say PT, never PDT or PST', async () => {
+    prismaMock.workspace.findUnique.mockResolvedValue({ id: 1, name: 'IT', defaultTimezone: 'America/Vancouver' });
+    prismaMock.notificationWorkflowPolicy.findUnique.mockResolvedValue(null);
+    availabilityServiceMock.getBusinessHours.mockResolvedValue([
+      { dayOfWeek: 1, startTime: '05:00', endTime: '17:00', isEnabled: true, timezone: 'America/Vancouver' },
+      { dayOfWeek: 2, startTime: '05:00', endTime: '17:00', isEnabled: true, timezone: 'America/Vancouver' },
+    ]);
+    availabilityServiceMock.isHoliday.mockResolvedValue({ isHoliday: false, name: null });
+    availabilityServiceMock.isBusinessHours.mockResolvedValue({ isBusinessHours: false, reason: 'Outside business hours' });
+    // One summer date (PDT under old rules) and one winter date (PST).
+    for (const [now, next] of [
+      ['2026-06-02T04:00:00.000Z', '2026-06-02T12:00:00.000Z'],
+      ['2026-11-17T05:00:00.000Z', '2026-11-17T12:00:00.000Z'],
+    ]) {
+      availabilityServiceMock.getNextBusinessTime.mockResolvedValue({ nextBusinessTime: new Date(next) });
+      const preview = await getNotificationWorkflowSchedulePreview(1, { afterHoursEnabled: true }, new Date(now));
+      const labels = [
+        preview.availability.nextBusinessTimeLocal,
+        preview.generatedAtLocal,
+        preview.current?.startsAtLocal,
+        preview.nextActiveWindow?.startsAtLocal,
+      ].filter(Boolean);
+      expect(labels.length).toBeGreaterThan(1);
+      for (const label of labels) {
+        expect(label).toMatch(/^\w{3}, \w{3} \d{1,2}, \d{1,2}:\d{2} (AM|PM) PT$/);
+        expect(label).not.toMatch(/PDT|PST|GMT/);
+      }
+    }
+  });
 });

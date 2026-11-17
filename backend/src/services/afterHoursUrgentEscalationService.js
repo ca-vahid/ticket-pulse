@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { formatInTimeZone } from 'date-fns-tz';
 import prisma from './prisma.js';
 import { getNotificationProviderStatus } from './notificationProviders.js';
 import notificationDeliveryService from './notificationDeliveryService.js';
@@ -105,6 +106,114 @@ function normalizeResponseTable(value) {
       lateNight: cleanText(row?.lateNight, 120) || 'N/A',
     })),
   };
+}
+
+// QA 11-16 public page: the short "What to expect" lines. A workspace that wrote its
+// own response copy in Settings sees its own words instead.
+const PUBLIC_EXPECT_COPY = Object.freeze({
+  businessHours: 'We answer tickets as they come in.',
+  afterHours: 'For high-priority issues. We reply within about 2 hours.',
+  lateNight: "We'll still try, but it can take longer than 2 hours.",
+});
+
+function publicExpectCopy(responseCopy = {}) {
+  const pick = (key) => {
+    const own = cleanText(responseCopy?.[key], 1200);
+    return own && own !== DEFAULT_AFTER_HOURS_RESPONSE_COPY[key] ? own : PUBLIC_EXPECT_COPY[key];
+  };
+  return { businessHours: pick('businessHours'), afterHours: pick('afterHours'), lateNight: pick('lateNight') };
+}
+
+/** "5pm", "5:30 PM", "17:00" → minutes after midnight, or null. */
+function parseClockMinutes(text) {
+  const match = /^(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?$/i.exec(String(text || '').trim());
+  if (!match) return null;
+  let hour = Number(match[1]);
+  const minute = Number(match[2] || 0);
+  const period = String(match[3] || '').toLowerCase().replace(/\./g, '');
+  if (hour > 24 || minute > 59) return null;
+  if (period === 'pm' && hour < 12) hour += 12;
+  if (period === 'am' && hour === 12) hour = 0;
+  return hour * 60 + minute;
+}
+
+/** A policy cell such as "5pm - 10pm PT" → { start, end } in minutes, or null. */
+function parseWindowCell(text) {
+  const parts = String(text || '')
+    .replace(/\b(?:PT|PST|PDT)\b/gi, '')
+    .trim()
+    .split(/\s*(?:-|–|—|\bto\b)\s*/i);
+  if (parts.length !== 2) return null;
+  const start = parseClockMinutes(parts[0]);
+  const end = parseClockMinutes(parts[1]);
+  return start === null || end === null ? null : { start, end };
+}
+
+function responseRowForDay(rows = [], { isHoliday, dayOfWeek }) {
+  const find = (pattern) => rows.find((row) => pattern.test(String(row?.label || '')));
+  if (isHoliday) {
+    const holidayRow = find(/holiday/i);
+    if (holidayRow) return holidayRow;
+  }
+  if (dayOfWeek === 0 || dayOfWeek === 6) return find(/weekend|saturday|sunday/i) || null;
+  return find(/mon|weekday/i) || rows[0] || null;
+}
+
+/**
+ * Which support window applies at `at`: 'business', 'after_hours' or 'late_night'.
+ * Business hours come from the availability check; after-hours vs late night from the
+ * policy's response table (the after-hours cell of today's row), so Settings still
+ * drives it. An after-hours cell we cannot read counts as after-hours (the softer
+ * promise is never made by guessing).
+ */
+function publicSupportPhase({ availability, responseTable, timezone, at }) {
+  if (!availability) return null;
+  if (availability.isBusinessHours === true) return 'business';
+  const tz = timezone || 'America/Vancouver';
+  const when = at instanceof Date && !Number.isNaN(at.getTime()) ? at : new Date();
+  const dayOfWeek = Number(formatInTimeZone(when, tz, 'i')) % 7;
+  const row = responseRowForDay(responseTable?.rows || [], { isHoliday: availability.isHoliday === true, dayOfWeek });
+  const cell = String(row?.afterHours || '').trim();
+  if (/^n\/?a$/i.test(cell)) return 'late_night';
+  const window = parseWindowCell(cell);
+  if (!window) return 'after_hours';
+  const minutes = Number(formatInTimeZone(when, tz, 'H')) * 60 + Number(formatInTimeZone(when, tz, 'm'));
+  const inside = window.start <= window.end
+    ? minutes >= window.start && minutes < window.end
+    : minutes >= window.start || minutes < window.end;
+  return inside ? 'after_hours' : 'late_night';
+}
+
+function clockLabel(date, tz) {
+  return formatInTimeZone(date, tz, 'mm') === '00'
+    ? formatInTimeZone(date, tz, 'h a')
+    : formatInTimeZone(date, tz, 'h:mm a');
+}
+
+/**
+ * The headline's "until …": just the time when it is today or tomorrow ("5 AM"),
+ * the weekday within a week ("Monday 5 AM"), otherwise the date ("Tue, Dec 29, 5 AM").
+ */
+function shortNextBusinessLabel(nextBusinessTime, timezone, now = new Date()) {
+  const next = nextBusinessTime ? new Date(nextBusinessTime) : null;
+  if (!next || Number.isNaN(next.getTime())) return null;
+  const tz = timezone || 'America/Vancouver';
+  const today = formatInTimeZone(now, tz, 'yyyy-MM-dd');
+  const nextDay = formatInTimeZone(next, tz, 'yyyy-MM-dd');
+  const dayGap = Math.round((Date.parse(`${nextDay}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400000);
+  const time = clockLabel(next, tz);
+  if (dayGap <= 1) return time;
+  if (dayGap <= 6) return `${formatInTimeZone(next, tz, 'EEEE')} ${time}`;
+  return `${formatInTimeZone(next, tz, 'EEE, MMM d')}, ${time}`;
+}
+
+/** When the request went to after-hours support: "9:41 PM" today, with the date otherwise. */
+function sentAtLabel(sentAt, timezone, now = new Date()) {
+  const tz = timezone || 'America/Vancouver';
+  const sameDay = formatInTimeZone(sentAt, tz, 'yyyy-MM-dd') === formatInTimeZone(now, tz, 'yyyy-MM-dd');
+  return sameDay
+    ? formatInTimeZone(sentAt, tz, 'h:mm a')
+    : formatInTimeZone(sentAt, tz, 'EEE, MMM d, h:mm a');
 }
 
 function hashText(value) {
@@ -284,6 +393,13 @@ function buildWhatsAppVariables({ ticket, priority, message }) {
     ticketId: escalationTicketRef(ticket) || '',
     link: ticketAppLink(ticket) || freshserviceLink(ticket) || '',
   };
+}
+
+/** What an unauthenticated page may learn about who was alerted: how many, and by which channels. */
+function publicNotificationSummary(summary) {
+  const lists = [summary?.channels, summary?.assignedAgent?.channels, summary?.supervisors?.channels];
+  const channels = [...new Set(lists.flatMap((l) => (Array.isArray(l) ? l : [])).filter((c) => typeof c === 'string'))];
+  return { queued: Number(summary?.queued) || 0, channels };
 }
 
 function isTerminalTicket(ticket) {
@@ -1152,15 +1268,29 @@ class AfterHoursUrgentEscalationService {
       cooldownActive,
       alreadyUrgent,
       alreadyEscalated,
+      lastEscalationAt: lastEvent?.createdAt ? new Date(lastEvent.createdAt) : null,
       terminal,
       reasons,
       available: reasons.length === 0,
     };
   }
 
-  _publicSelfEscalationResponse(state, status = null) {
+  /**
+   * The public after-hours page's payload. No person is named here (QA 11-16): the
+   * assigned agent, the requester and the on-call contact stay out of this
+   * unauthenticated response.
+   */
+  _publicSelfEscalationResponse(state, status = null, { sentAt = null } = {}) {
     const ticket = state.ticket;
     const workspace = ticket.workspace;
+    const timezone = workspace?.defaultTimezone || 'America/Vancouver';
+    const availability = state.policyContext.availability || null;
+    const now = new Date();
+    const checkedAt = availability?.checkedAt ? new Date(availability.checkedAt) : now;
+    const support = { ...(state.policyContext.afterHoursSupport || {}) };
+    delete support.activeContact;
+    const escalationAt = sentAt || state.lastEscalationAt || null;
+    const shownAt = escalationAt && !Number.isNaN(new Date(escalationAt).getTime()) ? new Date(escalationAt) : null;
     return {
       status: status || (state.available ? 'available' : 'unavailable'),
       available: state.available,
@@ -1170,11 +1300,26 @@ class AfterHoursUrgentEscalationService {
       cooldownUntil: state.cooldownUntil?.toISOString?.() || null,
       afterHours: {
         active: state.offHoursActive,
-        availability: state.policyContext.availability || null,
-        support: state.policyContext.afterHoursSupport || null,
-        activeContact: state.policyContext.afterHoursSupport?.activeContact || null,
+        availability,
+        support: state.policyContext.afterHoursSupport ? support : null,
         responseCopy: state.policy.afterHoursResponseCopy,
         responseTable: state.policy.afterHoursResponseTable,
+        // QA 11-16: which row of the hours table applies now, the local hour for the
+        // greeting, and the short "until 5 AM" for the headline (server clock: the
+        // browser's tzdata may still put BC on PST/PDT).
+        phase: publicSupportPhase({
+          availability,
+          responseTable: state.policy.afterHoursResponseTable,
+          timezone,
+          at: checkedAt,
+        }),
+        localHour: Number(formatInTimeZone(checkedAt, timezone, 'H')),
+        nextBusinessShort: shortNextBusinessLabel(availability?.nextBusinessTime, timezone, checkedAt),
+        expect: publicExpectCopy(state.policy.afterHoursResponseCopy),
+      },
+      escalation: {
+        sentAt: shownAt ? shownAt.toISOString() : null,
+        sentAtLocal: shownAt ? sentAtLabel(shownAt, timezone, now) : null,
       },
       confirmation: {
         title: state.policy.confirmationTitle,
@@ -1182,15 +1327,13 @@ class AfterHoursUrgentEscalationService {
       },
       ticket: {
         id: ticket.id,
+        // The ticket's own reference (TP-n for a Ticket Pulse ticket), never the
+        // FreshService copy's number when it has one of its own (QA 11-16).
+        ref: ticketDisplayRef(ticket),
         freshserviceTicketId: ticket.freshserviceTicketId?.toString?.() || String(ticket.freshserviceTicketId || ''),
         subject: ticket.subject || 'Ticket',
         status: ticket.status,
         priority: ticket.assessedPriority || PRIORITY_ID_TO_LABEL[Number(ticket.priority)] || String(ticket.priority || ''),
-        assignedAgent: ticket.assignedTech ? {
-          name: ticket.assignedTech.name,
-          photoUrl: ticket.assignedTech.photoUrl || null,
-        } : null,
-        requesterName: ticket.requester?.name || null,
         publicStatusUrl: buildPublicTicketStatusUrl(state.token),
         raiseUrgencyUrl: buildTicketUrgencyUrl(state.token),
       },
@@ -1291,15 +1434,17 @@ class AfterHoursUrgentEscalationService {
     });
 
     const refreshed = await this._selfEscalationState(token, requestMeta);
+    // Unauthenticated response (QA 11-16 review): counts only. The full summary names the
+    // staff who were skipped and the write-back error can carry FreshService's own text; both
+    // stay on the escalation event for the team.
     return {
-      ...this._publicSelfEscalationResponse(refreshed, 'submitted'),
+      ...this._publicSelfEscalationResponse(refreshed, 'submitted', { sentAt: event.createdAt || new Date() }),
       eventId: event.id,
       writeback: {
         success: writeback.success === true,
         skipped: writeback.skipped === true,
-        error: writeback.error || null,
       },
-      notificationSummary,
+      notificationSummary: publicNotificationSummary(notificationSummary),
     };
   }
 
@@ -1672,9 +1817,8 @@ class AfterHoursUrgentEscalationService {
       writeback: {
         success: writeback.success === true,
         skipped: writeback.skipped === true,
-        error: writeback.error || null,
       },
-      notificationSummary,
+      notificationSummary: publicNotificationSummary(notificationSummary),
     });
   }
 }
@@ -1684,6 +1828,8 @@ export const __testing = {
   buildWhatsAppVariables,
   readinessForChannel,
   normalizePolicy,
+  publicSupportPhase,
+  shortNextBusinessLabel,
 };
 
 export default new AfterHoursUrgentEscalationService();
