@@ -18,6 +18,9 @@ import availabilityTeams from './availabilityTeams.js';
 import {
   cancelledInTicketPulse, scheduledVtImportEnabled, VT_IMPORT_EVERY_MINUTES, VT_IMPORT_DAYS_BACK, VT_IMPORT_DAYS_AHEAD, VT_IMPORT_STATUS_KEY,
 } from './vtImportPolicy.js';
+import {
+  CAL_SOURCE, CAL_IMPORT_MODES, getCalendarImportMode, setCalendarImportMode, calendarImportStatusAll, cancelledByPerson as calCancelledByPerson,
+} from './calendarImport.js';
 import { currentViewAs } from '../viewAsContext.js';
 import { ValidationError, NotFoundError, AuthorizationError } from '../../utils/errors.js';
 import {
@@ -839,8 +842,11 @@ class AvailabilityService {
     // QA 11-09 #2: leave imported from Vacation Tracker can be cancelled here
     // too (it used to say "cancel it there"), while it has not ended yet.
     const fromVt = r.source === 'vacation_tracker';
-    if (fromVt && dayKey(r.endDate) < pacificTodayKey()) throw new ValidationError('This time away is already over, so it can no longer be cancelled');
-    const details = fromVt ? { ...(reason ? { reason } : {}), cancelledIn: 'ticket_pulse' } : (reason ? { reason } : null);
+    // QA 11-16: leave from the shared calendar too; the cancel sticks (the
+    // import never brings it back, the calendar sync drops its dashboard rows).
+    const fromCal = r.source === CAL_SOURCE;
+    if ((fromVt || fromCal) && dayKey(r.endDate) < pacificTodayKey()) throw new ValidationError('This time away is already over, so it can no longer be cancelled');
+    const details = (fromVt || fromCal) ? { ...(reason ? { reason } : {}), cancelledIn: 'ticket_pulse' } : (reason ? { reason } : null);
     const updated = await prisma.avRequest.update({
       where: { id: r.id },
       data: { status: 'cancelled', events: { create: { kind: 'cancelled', actor: lc(user.email), details } } },
@@ -848,7 +854,7 @@ class AvailabilityService {
     await this.unproject(updated).catch((err) => logger.warn(`Availability: unprojection failed for request ${r.id}: ${err.message}`));
     let vacationTracker = null;
     if (fromVt) vacationTracker = await this._cancelImportedLeave(updated, reason);
-    else if (r.status === 'approved') vtWriteBack.pushCancelled(updated.id, reason); // never throws
+    else if (r.status === 'approved' && !fromCal) vtWriteBack.pushCancelled(updated.id, reason); // never throws
     if (!mine) {
       this._notifyRequester(updated, user).catch(() => {});
       this._teamsDecided(updated, user).catch(() => {});
@@ -893,6 +899,7 @@ class AvailabilityService {
         : `This request is already ${r.status}`);
     }
     if (r.source === 'vacation_tracker') throw new ValidationError('This came from Vacation Tracker. Change it there, or cancel it here and book again.');
+    if (r.source === CAL_SOURCE) throw new ValidationError('This came from the shared calendar. Change it there, or cancel it here and book again.');
     return r;
   }
 
@@ -1021,7 +1028,7 @@ class AvailabilityService {
       const out = serializeRequest(r);
       if (r.status === 'pending') {
         out.waitingOn = (Array.isArray(r.decision?.approvers) ? r.decision.approvers : []).map((e) => ({ email: lc(e), name: names.get(lc(e)) || null }));
-        out.editable = r.source !== 'vacation_tracker';
+        out.editable = r.source !== 'vacation_tracker' && r.source !== CAL_SOURCE;
       }
       if (cancelledVt.includes(r.id)) {
         const mineEv = (vtEvents || []).filter((e) => e.requestId === r.id);
@@ -1206,7 +1213,7 @@ class AvailabilityService {
     const [rows, types] = await Promise.all([
       prisma.avRequest.findMany({
         where: { email: { in: emails }, status: { in: ACTIVE }, startDate: { lte: end }, endDate: { gte: start } },
-        select: { id: true, email: true, leaveTypeId: true, startDate: true, endDate: true, dayPart: true, startMinute: true, endMinute: true, status: true, days: true },
+        select: { id: true, email: true, leaveTypeId: true, startDate: true, endDate: true, dayPart: true, startMinute: true, endMinute: true, status: true, days: true, source: true },
         take: 10000,
       }),
       prisma.avLeaveType.findMany(),
@@ -1238,6 +1245,7 @@ class AvailabilityService {
         label: redact ? 'Away' : t.name,
         color: redact ? 'slate' : t.color,
         availability: t.availability,
+        source: r.source || 'app',
       });
     }
     const holidayNames = await this._holidayNames(start, end);
@@ -1256,6 +1264,13 @@ class AvailabilityService {
 
   async _projectionTargets(request) {
     const techs = await prisma.technician.findMany({ where: { email: { equals: request.email, mode: 'insensitive' } }, select: { id: true, workspaceId: true }, take: 20 });
+    // QA 11-16: entries from the shared calendar are already on the dashboard
+    // (the calendar sync's 'graph:' rows) wherever that sync is on.
+    if (request.source === CAL_SOURCE) {
+      const cal = await prisma.calendarLeaveSourceConfig.findMany({ where: { syncEnabled: true }, select: { workspaceId: true } });
+      const synced = new Set(cal.map((c) => c.workspaceId));
+      return techs.filter((t) => !synced.has(t.workspaceId));
+    }
     if (request.source !== 'vacation_tracker') return techs;
     const vt = await prisma.vacationTrackerConfig.findMany({ where: { syncEnabled: true }, select: { workspaceId: true } });
     const synced = new Set(vt.map((v) => v.workspaceId));
@@ -1520,6 +1535,50 @@ class AvailabilityService {
   }
 
   /**
+   * QA 11-16, Settings → Import: the shared calendar import per workspace the
+   * admin administers that has a calendar set up: its mode, window and last run.
+   */
+  async calendarImportStatus(actor) {
+    await this.assertAdmin(actor);
+    const ids = await this._adminWorkspaceIds(actor);
+    const configs = await prisma.calendarLeaveSourceConfig.findMany({
+      where: ids === null ? {} : { workspaceId: { in: ids } },
+      select: { workspaceId: true, syncEnabled: true, lookbackDays: true, horizonDays: true, lastSyncAt: true, workspace: { select: { name: true } } },
+      orderBy: { workspaceId: 'asc' },
+      take: 50,
+    });
+    const status = await calendarImportStatusAll();
+    const workspaces = [];
+    for (const c of configs) {
+      workspaces.push({
+        workspaceId: c.workspaceId,
+        name: c.workspace?.name || `Workspace ${c.workspaceId}`,
+        syncEnabled: c.syncEnabled,
+        lookbackDays: c.lookbackDays,
+        horizonDays: c.horizonDays,
+        lastSyncAt: c.lastSyncAt,
+        mode: await getCalendarImportMode(c.workspaceId),
+        lastRun: status[c.workspaceId] || status[String(c.workspaceId)] || null,
+      });
+    }
+    return { modes: CAL_IMPORT_MODES, everyMinutes: 60, workspaces };
+  }
+
+  /** Off / Shadow / Live for one workspace's shared calendar import (its admins). */
+  async setCalendarImportMode(actor, { workspaceId, mode } = {}) {
+    await this.assertAdmin(actor);
+    const ws = Number(workspaceId);
+    if (!Number.isInteger(ws) || ws <= 0) throw new ValidationError('Pick a workspace');
+    if (!CAL_IMPORT_MODES.includes(String(mode || '').toLowerCase())) throw new ValidationError('Pick Off, Shadow or Live');
+    if (!(await this._privilegedIn(actor, ws))) throw new AuthorizationError('You can change this for the workspaces you administer', 'availability_admin');
+    const config = await prisma.calendarLeaveSourceConfig.findUnique({ where: { workspaceId: ws }, select: { workspaceId: true } });
+    if (!config) throw new NotFoundError('That workspace has no shared calendar set up');
+    const saved = await setCalendarImportMode(ws, mode);
+    logger.info(`Availability: shared calendar import for workspace ${ws} set to ${saved} by ${lc(actor.email)}`);
+    return { workspaceId: ws, mode: saved };
+  }
+
+  /**
    * One-way Vacation Tracker -> Availability sync (Vahid, 3 Oct 2026: people
    * may keep using VT until Availability is ready; like FreshService, either
    * works). Runs every 15 minutes for every workspace with a VT key
@@ -1776,6 +1835,11 @@ function guessAvailability(name) {
  * imported from it, written to it, or why not.
  */
 export function vacationTrackerState(r) {
+  // QA 11-16: imported from Accounting's shared calendar; never sent anywhere.
+  if (r.source === CAL_SOURCE) {
+    if (r.status === 'cancelled' && r.events && calCancelledByPerson(r.events)) return { state: 'cancelled', label: 'From the shared calendar; cancelled here' };
+    return { state: 'imported', label: 'From the shared calendar' };
+  }
   if (r.source === 'vacation_tracker') {
     // QA 11-09 #2: cancelled in Ticket Pulse — and was Vacation Tracker told?
     if (r.status === 'cancelled' && r.events && cancelledInTicketPulse(r.events)) {

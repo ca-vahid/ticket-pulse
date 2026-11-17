@@ -28,7 +28,15 @@ const EVENT_WORDS = {
   vt_write_failed: 'Vacation Tracker refused it',
   vt_cancelled: 'Cancelled in Vacation Tracker',
   vt_cancel_failed: 'Vacation Tracker refused the cancel',
+  synced_update: 'Changed by the import',
 };
+
+/** What an event says; imports name where they came from (QA 11-16). */
+function eventWords(e) {
+  if (e.kind === 'imported' && (e.actor === 'shared_calendar' || e.details?.source === 'shared_calendar')) return 'Imported from the shared calendar';
+  if (e.kind === 'synced_update' && e.actor === 'shared_calendar') return 'Changed in the shared calendar';
+  return EVENT_WORDS[e.kind] || String(e.kind).replace(/_/g, ' ');
+}
 
 const VT_DOT = {
   blue: 'bg-blue-500 dark:bg-blue-400',
@@ -58,6 +66,7 @@ function actorName(actor, nameOf) {
   if (!actor) return null;
   if (actor === 'rules') return 'the rules';
   if (actor === 'vacation_tracker') return 'Vacation Tracker';
+  if (actor === 'shared_calendar') return 'the shared calendar';
   if (String(actor).includes('@')) return nameOf(actor);
   return actor;
 }
@@ -118,8 +127,8 @@ function HistoryRow({ r, type, nameOf }) {
             const by = actorName(e.actor, nameOf);
             return (
               <li key={`${e.kind}-${i}`} className="text-muted-foreground">
-                <span className="font-medium text-foreground/85">{EVENT_WORDS[e.kind] || String(e.kind).replace(/_/g, ' ')}</span>
-                {by && e.kind !== 'imported' && <span> by {by}</span>}
+                <span className="font-medium text-foreground/85">{eventWords(e)}</span>
+                {by && e.kind !== 'imported' && !(e.kind === 'synced_update' && e.actor === 'shared_calendar') && <span> by {by}</span>}
                 <span> · {when(e.createdAt)}</span>
                 {detail && <span className="block text-foreground/75">{detail}</span>}
               </li>

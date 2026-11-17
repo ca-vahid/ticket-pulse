@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.91-preview';
+export const APP_VERSION = '4.3.92-preview';
 
 export const changelog = [
+  {
+    version: '4.3.92-preview',
+    date: 'November 17, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Accounting&rsquo;s shared calendar now fills Vacation Pulse</strong> &mdash; time away on a team&rsquo;s shared calendar (the one Settings &rarr; Shared Calendar already reads every hour) becomes approved Vacation Pulse entries, marked &ldquo;From the shared calendar&rdquo;: vacation, appointments, working from home, with part-day hours kept. Nothing is e-mailed or sent for approval; tentative and private entries are skipped; anything booked in Vacation Pulse itself is never touched, and a cancel made there sticks. Vacation Pulse &rarr; Admin &rarr; Import has an Off / Shadow / Live switch per workspace, the last run&rsquo;s counts and the names on the calendar that don&rsquo;t match anyone. (QA 11-16 #4)' },
+    ],
+  },
   {
     version: '4.3.91-preview',
     date: 'November 16, 2026',
