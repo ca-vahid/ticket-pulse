@@ -102,10 +102,44 @@ describe('rules', () => {
       candidates: [
         { techId: 7, name: 'Alex Doe', rank: 2, eligible: true },
         { techId: 5, name: 'Dana Fox', rank: 1, eligible: false, why: 'handed_back' },
-        { techId: 6, name: 'Eli Park', rank: 0, eligible: true },
+        { techId: 6, name: 'Eli Park', rank: 1, eligible: true },
       ],
     });
     expect(out).toMatchObject({ outcome: 'best_available', techId: 6 });
+  });
+
+  test('best available needs a recorded skill in the scope: the AI\'s no-skill pick is passed over (TP-12695)', () => {
+    const base = { escalation: { ...ESC, rank: 3 }, ranked: [{ techId: 5, techName: 'Dana Fox' }, { techId: 6, techName: 'Eli Park' }] };
+    const out = rules.decideEscalation({
+      ...base,
+      candidates: [
+        { techId: 5, name: 'Dana Fox', rank: 0, eligible: true },
+        { techId: 6, name: 'Eli Park', rank: 1, eligible: true },
+      ],
+    });
+    expect(out).toMatchObject({ outcome: 'best_available', techId: 6 });
+    const none = rules.decideEscalation({ ...base, candidates: [{ techId: 5, name: 'Dana Fox', rank: 0, eligible: true }] });
+    expect(none).toMatchObject({ outcome: 'none_higher', techId: 5 });
+  });
+
+  test('best available on a ticket with a subcategory: a parent-only rating is too broad', () => {
+    const base = { escalation: { ...ESC, rank: 3 }, ranked: [{ techId: 5, techName: 'Dana Fox' }, { techId: 6, techName: 'Eli Park' }] };
+    const out = rules.decideEscalation({
+      ...base,
+      candidates: [
+        { techId: 5, name: 'Dana Fox', rank: 2, eligible: true, matchedOn: 'category' },
+        { techId: 6, name: 'Eli Park', rank: 1, eligible: true, matchedOn: 'subcategory' },
+      ],
+    });
+    expect(out).toMatchObject({ outcome: 'best_available', techId: 6 });
+    const broadOnly = rules.decideEscalation({ ...base, candidates: [{ techId: 5, name: 'Dana Fox', rank: 2, eligible: true, matchedOn: 'category' }] });
+    expect(broadOnly.outcome).toBe('none_higher');
+    // A ticket with only a category: a category rating is the exact scope.
+    const catOnly = rules.decideEscalation({
+      escalation: { ...ESC, rank: 3, subcategoryId: null }, ranked: base.ranked,
+      candidates: [{ techId: 5, name: 'Dana Fox', rank: 2, eligible: true, matchedOn: 'category' }],
+    });
+    expect(catOnly).toMatchObject({ outcome: 'best_available', techId: 5 });
   });
 
   test('best available never falls back to a person with a routing note (last resort)', () => {
