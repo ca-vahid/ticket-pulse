@@ -1559,7 +1559,7 @@ class AssignmentPipelineService {
           });
           if (escalationGuard) {
             recommendation.escalation = escalationGuard.record;
-            if (escalationGuard.outcome === 'swapped') {
+            if (['swapped', 'best_available'].includes(escalationGuard.outcome)) {
               recommendation.recommendations = escalationGuard.recommendations;
               topRec = recommendation.recommendations[0];
               // The person put first never handed this ticket back.
@@ -1776,7 +1776,7 @@ class AssignmentPipelineService {
       let shareRule = null;
       // An escalation (QA 10-16 #1) is a person's explicit ask for someone
       // more advanced: the share rule and Spread's cap never move its pick.
-      const escalationLocked = Boolean(escalationGuard && ['swapped', 'kept'].includes(escalationGuard.outcome));
+      const escalationLocked = Boolean(escalationGuard && ['swapped', 'kept', 'best_available'].includes(escalationGuard.outcome));
       if (recommendation && !isNoise && !groupObserved && !urgentGuardHeld && !urgentGuardRedirected && !escalationGuard
         && ['auto_assigned', 'pending_review'].includes(decision) && topRec?.techId) {
         const before = { assignTechId, recommendations: recommendation.recommendations, share: recommendation.share };
@@ -1870,7 +1870,7 @@ class AssignmentPipelineService {
         }
       }
       const assignmentDecisionNote = [
-        escalationGuard && ['swapped', 'kept'].includes(escalationGuard.outcome) ? escalationGuard.sentence : null,
+        escalationGuard && ['swapped', 'kept', 'best_available'].includes(escalationGuard.outcome) ? escalationGuard.sentence : null,
         urgentGuardRedirected ? urgentGuard.sentence : null,
         shareRuleAssigned ? shareRule.sentence : null,
         levelMatch?.applied ? levelMatch.sentence : null,

@@ -29,7 +29,7 @@ const soft = (fn, fallback = null) => Promise.resolve().then(fn).catch((err) => 
 
 const TECH_SELECT = {
   id: true, name: true, email: true, isActive: true, assignableOnly: true, origin: true, freshserviceId: true,
-  timezone: true, workStartTime: true, workEndTime: true,
+  timezone: true, workStartTime: true, workEndTime: true, routingGuidance: true,
 };
 const LEAVE_SELECT = {
   technicianId: true, leaveDate: true, category: true, status: true, isFullDay: true, halfDayPart: true, startMinute: true, endMinute: true,
@@ -138,7 +138,8 @@ const escalationService = {
       let candidates = [];
       if (scoped.categoryId || scoped.subcategoryId) candidates = await this._candidates(ws, ticketId, scoped, now);
       const decided = decideEscalation({ escalation: scoped, ranked, candidates });
-      const swapped = decided.outcome === OUTCOMES.SWAPPED;
+      const swapped = decided.outcome === OUTCOMES.SWAPPED
+        || (decided.outcome === OUTCOMES.BEST_AVAILABLE && Number(ranked[0]?.techId) !== Number(decided.techId));
       const recommendations = swapped
         ? promote(ranked, decided, decided.sentence)
         : ranked;
@@ -265,7 +266,11 @@ const escalationService = {
         const state = stateOf(t);
         if (!state.atWork) why = state.reason || 'away';
       }
-      return { techId: t.id, name: t.name, rank: lvl.rank, eligible: !why, why, openCount: openCounts.get(t.id) || 0 };
+      return {
+        techId: t.id, name: t.name, rank: lvl.rank, eligible: !why, why, openCount: openCounts.get(t.id) || 0,
+        // A routing note (e.g. "last resort") keeps a person out of the best-available fallback, as in level match.
+        routingNote: Boolean(String(t.routingGuidance || '').trim()),
+      };
     });
   },
 };

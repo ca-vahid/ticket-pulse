@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.92-preview';
+export const APP_VERSION = '4.3.93-preview';
 
 export const changelog = [
+  {
+    version: '4.3.93-preview',
+    date: 'November 17, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Escalated tickets no longer wait for nobody</strong> &mdash; when an agent hands a ticket back with &ldquo;Escalate to Advanced Troubleshooting Team&rdquo; and nobody more advanced in that area is at work, the ticket now goes to the most suitable person who is at work (the AI&rsquo;s best pick among people who didn&rsquo;t hand it back) instead of waiting in Assignment Review as a suggestion. The run and the review card say so. It still waits for a coordinator only when nobody suitable is at work at all.' },
+    ],
+  },
   {
     version: '4.3.92-preview',
     date: 'November 17, 2026',

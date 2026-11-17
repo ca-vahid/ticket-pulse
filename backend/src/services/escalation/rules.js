@@ -20,7 +20,10 @@ export const LEVEL_WORD = Object.freeze({ 0: 'no recorded skill', 1: 'basic', 2:
 export const OUTCOMES = Object.freeze({
   KEPT: 'kept', // the AI's pick is already more advanced
   SWAPPED: 'swapped', // the pick was not; a more advanced person at work was put first
-  NONE_HIGHER: 'none_higher', // nobody more advanced is at work: suggestion only
+  // 17 Nov 2026: nobody more advanced at work -> the AI's most suitable person who IS at work and never
+  // handed it back gets it, instead of a suggestion nobody acted on (one sat four days).
+  BEST_AVAILABLE: 'best_available',
+  NONE_HIGHER: 'none_higher', // nobody more advanced, and nobody else suitable at work: suggestion only
   NO_CATEGORY: 'no_category', // the ticket has no category: the pick stands, unchecked
 });
 
@@ -127,6 +130,23 @@ export function decideEscalation({ escalation, ranked = [], candidates = [] } = 
       techName: chosen.name,
       rank: chosen.rank,
       sentence: `Escalation: ${was} is not above ${fromName} (${levelWord(fromRank)}) in ${scope}, so ${chosen.name} (${levelWord(chosen.rank)}) was put first.`,
+    };
+  }
+
+  // Nobody more advanced is at work: the next most suitable person the AI ranked who is at work, may hold
+  // the ticket, is not on another team and never handed it back (eligible covers those) and has no routing
+  // note (a "last resort" person is never the fallback - the same never-pick list as level match) takes it.
+  const nextBest = ranked
+    .map((r) => byId.get(Number(r?.techId)))
+    .find((c) => c && c.eligible === true && !c.routingNote && Number(c.techId) !== Number(escalation?.fromTechId)) || null;
+  if (nextBest) {
+    return {
+      ...base,
+      outcome: OUTCOMES.BEST_AVAILABLE,
+      techId: nextBest.techId,
+      techName: nextBest.name,
+      rank: nextBest.rank,
+      sentence: `Escalation: no one more advanced than ${fromName} (${levelWord(fromRank)}) in ${scope} is at work, so the most suitable person at work, ${nextBest.name} (${levelWord(nextBest.rank)}), was assigned.`,
     };
   }
 
