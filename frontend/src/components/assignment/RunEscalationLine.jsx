@@ -17,7 +17,9 @@ export default function RunEscalationLine({ run, className = '' }) {
     ? 'Nobody more advanced is at work - your call.'
     : check?.outcome === 'swapped'
       ? `Moved ${check.chosenTechName || 'a more advanced person'} to the top.`
-      : null;
+      : check?.outcome === 'best_available'
+        ? `Nobody more advanced is at work - gave it to ${check.chosenTechName || 'the most suitable person at work'}.`
+        : null;
   return (
     <p
       className={`flex items-start gap-1 text-[11px] leading-snug text-amber-800 dark:text-amber-200 ${className}`}

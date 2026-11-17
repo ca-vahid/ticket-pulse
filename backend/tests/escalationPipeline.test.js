@@ -200,6 +200,19 @@ describe('Escalate in the pipeline', () => {
     expect(finalRunUpdate()).toMatchObject({ assignedTechId: 6 });
   });
 
+  test('nobody more advanced at work: the most suitable person at work is assigned, and the note says so', async () => {
+    const list = [{ techId: 6, techName: 'Eli Park', rank: 1, escalationPromoted: true }, { techId: 5, techName: 'Dana Fox', rank: 2 }];
+    const sentence = 'Escalation: no one more advanced than Alex Doe (intermediate) in Networking / VPN is at work, so the most suitable person at work, Eli Park (basic), was assigned.';
+    escalationGuard.mockResolvedValue(guardResult('best_available', { techId: 6, techName: 'Eli Park', recommendations: list, sentence }));
+    const events = await run();
+    const update = finalRunUpdate();
+    expect(update).toMatchObject({ decision: 'auto_assigned', assignedTechId: 6 });
+    expect(update.decisionNote).toContain(sentence);
+    expect(update.errorMessage ?? null).toBeNull();
+    expect(spreadGuard).toHaveBeenCalledWith(expect.objectContaining({ techId: 6, locked: true }));
+    expect(events).toContainEqual({ type: 'escalation_guard', outcome: 'best_available', message: sentence });
+  });
+
   test('nobody more advanced: a suggestion only - pending_review, nothing written to the ticket', async () => {
     const sentence = 'Escalation: no one more advanced than Alex Doe (intermediate) in Networking / VPN is available. Left for a coordinator - a suggestion only.';
     escalationGuard.mockResolvedValue(guardResult('none_higher', { sentence }));

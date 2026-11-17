@@ -81,12 +81,39 @@ describe('rules', () => {
     expect(out).toMatchObject({ outcome: 'swapped', techId: 9 });
   });
 
-  test('nobody higher and eligible: keep the pick, suggestion only', () => {
+  test('nobody higher at work: the AI\'s most suitable person at work is assigned (TP-12190, 17 Nov 2026)', () => {
+    const out = rules.decideEscalation({
+      escalation: ESC,
+      ranked: [{ techId: 5, techName: 'Dana Fox' }, { techId: 6, techName: 'Eli Park' }],
+      candidates: [
+        { techId: 5, name: 'Dana Fox', rank: 1, eligible: true },
+        { techId: 6, name: 'Eli Park', rank: 2, eligible: true },
+        { techId: 8, name: 'Kim Roe', rank: 4, eligible: false, why: 'on_leave' },
+      ],
+    });
+    expect(out).toMatchObject({ outcome: 'best_available', techId: 5, techName: 'Dana Fox' });
+    expect(out.sentence).toContain('no one more advanced than Alex Doe (intermediate) in Networking / VPN is at work, so the most suitable person at work, Dana Fox (basic), was assigned');
+  });
+
+  test('best available skips people who are away, handed it back, or are the escalating person', () => {
+    const out = rules.decideEscalation({
+      escalation: ESC,
+      ranked: [{ techId: 7, techName: 'Alex Doe' }, { techId: 5, techName: 'Dana Fox' }, { techId: 6, techName: 'Eli Park' }],
+      candidates: [
+        { techId: 7, name: 'Alex Doe', rank: 2, eligible: true },
+        { techId: 5, name: 'Dana Fox', rank: 1, eligible: false, why: 'handed_back' },
+        { techId: 6, name: 'Eli Park', rank: 0, eligible: true },
+      ],
+    });
+    expect(out).toMatchObject({ outcome: 'best_available', techId: 6 });
+  });
+
+  test('nobody suitable at work at all: keep the pick, suggestion only', () => {
     const out = rules.decideEscalation({
       escalation: ESC,
       ranked: [{ techId: 5, techName: 'Dana Fox' }],
       candidates: [
-        { techId: 5, name: 'Dana Fox', rank: 2, eligible: true },
+        { techId: 5, name: 'Dana Fox', rank: 2, eligible: false, why: 'off_shift' },
         { techId: 8, name: 'Kim Roe', rank: 4, eligible: false, why: 'on_leave' },
       ],
     });
@@ -166,8 +193,27 @@ describe('escalationService', () => {
     expect(considered[8]).toBe('no FreshService seat');
   });
 
-  test('nobody more advanced at work: suggestion only, the AI pick kept', async () => {
+  test('nobody more advanced at work: the AI\'s most suitable person at work is assigned', async () => {
     atWork.mockImplementation((tech) => (tech.id === 5 ? { atWork: true } : { atWork: false, reason: 'off_shift' }));
+    const out = await escalationService.guard({ workspaceId: 1, ticketId: 601, recommendation, escalation: ESC });
+    expect(out).toMatchObject({ outcome: 'best_available', techId: 5 });
+    expect(out.record.suggestionOnly).toBe(false);
+    expect(out.recommendations[0]).toMatchObject({ techId: 5 });
+  });
+
+  test('best available who is not the AI\'s first pick is put first', async () => {
+    atWork.mockImplementation((tech) => (tech.id === 6 ? { atWork: true } : { atWork: false, reason: 'off_shift' }));
+    prismaMock.technicianCompetency.findMany.mockResolvedValue([
+      { technicianId: 6, competencyCategoryId: 41, proficiencyLevel: 'basic' },
+      { technicianId: 7, competencyCategoryId: 41, proficiencyLevel: 'intermediate' },
+    ]);
+    const out = await escalationService.guard({ workspaceId: 1, ticketId: 601, recommendation, escalation: ESC });
+    expect(out).toMatchObject({ outcome: 'best_available', techId: 6 });
+    expect(out.recommendations[0]).toMatchObject({ techId: 6, rank: 1, escalationPromoted: true });
+  });
+
+  test('nobody at work at all: suggestion only, the AI pick kept', async () => {
+    atWork.mockReturnValue({ atWork: false, reason: 'off_shift' });
     const out = await escalationService.guard({ workspaceId: 1, ticketId: 601, recommendation, escalation: ESC });
     expect(out).toMatchObject({ outcome: 'none_higher', techId: 5 });
     expect(out.record.suggestionOnly).toBe(true);

@@ -138,7 +138,8 @@ const escalationService = {
       let candidates = [];
       if (scoped.categoryId || scoped.subcategoryId) candidates = await this._candidates(ws, ticketId, scoped, now);
       const decided = decideEscalation({ escalation: scoped, ranked, candidates });
-      const swapped = decided.outcome === OUTCOMES.SWAPPED;
+      const swapped = decided.outcome === OUTCOMES.SWAPPED
+        || (decided.outcome === OUTCOMES.BEST_AVAILABLE && Number(ranked[0]?.techId) !== Number(decided.techId));
       const recommendations = swapped
         ? promote(ranked, decided, decided.sentence)
         : ranked;
