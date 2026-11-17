@@ -22,6 +22,8 @@ import config from '../config/index.js';
 import { AuthorizationError, NotFoundError, ValidationError } from '../utils/errors.js';
 import logger from '../utils/logger.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
+import { ticketLinkUrl } from '../utils/ticketLink.js';
+import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 import { repairCp437Mojibake } from '../utils/mojibake.js';
 
 const ESCALATION_CHANNELS = Object.freeze(['email', 'sms', 'whatsapp', 'phone_call']);
@@ -117,6 +119,24 @@ function freshserviceLink(ticket) {
     ? (domain.includes('.freshservice.com') ? domain : `${domain}.freshservice.com`)
     : null;
   return fsId && host ? `https://${host}/a/tickets/${fsId}` : null;
+}
+
+/**
+ * 16 Nov 2026 (IT cutover): the person on call is paged to the ticket in Ticket Pulse, where IT
+ * now works it, not the FreshService copy. The ticket's own reference (TP-n for a Ticket Pulse
+ * ticket) and the app's short link (/it/TP-n); the FreshService link only if no app link can
+ * be built (a ticket object without an id).
+ */
+function ticketAppLink(ticket) {
+  if (!ticket?.id) return null;
+  return ticketLinkUrl(resolvePublicBaseUrl({ warn: (m) => logger.warn(m) }), ticket);
+}
+
+function escalationTicketRef(ticket) {
+  if (!ticket) return null;
+  const hasNumbers = ticket.nativeNumber !== null && ticket.nativeNumber !== undefined
+    || ticket.freshserviceTicketId !== null && ticket.freshserviceTicketId !== undefined;
+  return hasNumbers ? ticketDisplayRef(ticket) : null;
 }
 
 function preferredPhone(preference = {}) {
@@ -222,8 +242,8 @@ function normalizePolicy(row = {}) {
 }
 
 function buildEscalationMessage({ ticket, priority, source }) {
-  const fsId = ticket?.freshserviceTicketId ? Number(ticket.freshserviceTicketId) : null;
-  const link = freshserviceLink(ticket);
+  const ref = escalationTicketRef(ticket);
+  const link = ticketAppLink(ticket) || freshserviceLink(ticket);
   const prefix = source === 'self_service'
     ? 'Ticket Pulse urgent self-escalation:'
     : source === 'business_urgency'
@@ -231,7 +251,7 @@ function buildEscalationMessage({ ticket, priority, source }) {
       : 'Ticket Pulse after-hours escalation:';
   return [
     prefix,
-    fsId ? `ticket #${fsId}` : 'a ticket',
+    ref ? `ticket ${ref}` : 'a ticket',
     source === 'self_service'
       ? 'was escalated by the requester for immediate after-hours assistance.'
       : source === 'business_urgency'
@@ -243,10 +263,12 @@ function buildEscalationMessage({ ticket, priority, source }) {
 }
 
 function buildVoiceMessage({ ticket, source }) {
-  const fsId = ticket?.freshserviceTicketId ? Number(ticket.freshserviceTicketId) : null;
+  // Read aloud: "T P 12591" for a Ticket Pulse ticket, "number 252303" for a FreshService one.
+  const ref = escalationTicketRef(ticket);
+  const spoken = ref ? ref.replace(/^TP-/, 'T P ').replace(/^#/, 'number ') : null;
   return [
     'Ticket Pulse urgent escalation.',
-    fsId ? `Ticket number ${fsId}` : 'A ticket',
+    spoken ? `Ticket ${spoken}` : 'A ticket',
     source === 'self_service'
       ? 'was escalated by the requester after hours.'
       : source === 'business_urgency'
@@ -256,12 +278,11 @@ function buildVoiceMessage({ ticket, source }) {
 }
 
 function buildWhatsAppVariables({ ticket, priority, message }) {
-  const fsId = ticket?.freshserviceTicketId ? Number(ticket.freshserviceTicketId) : null;
   return {
     message,
     priority: priority || '',
-    ticketId: fsId ? String(fsId) : '',
-    link: freshserviceLink(ticket) || '',
+    ticketId: escalationTicketRef(ticket) || '',
+    link: ticketAppLink(ticket) || freshserviceLink(ticket) || '',
   };
 }
 
@@ -768,6 +789,21 @@ class AfterHoursUrgentEscalationService {
     return [...byTech.values()];
   }
 
+  /** The ticket with the fields its reference and app link need. Never throws: falls back to what it was given. */
+  async _ticketForMessage(ticket) {
+    if (!ticket?.id) return ticket;
+    try {
+      const row = await prisma.ticket.findUnique({
+        where: { id: Number(ticket.id) },
+        select: { id: true, workspaceId: true, origin: true, nativeNumber: true, freshserviceTicketId: true },
+      });
+      return row ? { ...ticket, ...row } : ticket;
+    } catch (err) {
+      logger.debug?.(`Urgent escalation: ticket numbers for the message not read (${err.message})`);
+      return ticket;
+    }
+  }
+
   /** The current on-call person as a recipient row, or null (not set up, nobody, away with no cover). Never throws. */
   async _onCallRow(workspaceId, at = new Date()) {
     try {
@@ -798,9 +834,12 @@ class AfterHoursUrgentEscalationService {
       workspaceId: event.workspaceId,
       source,
     });
-    const message = buildEscalationMessage({ ticket, priority: URGENT_PRIORITY_LABEL, source });
-    const voiceMessage = buildVoiceMessage({ ticket, source });
-    const whatsappVariables = buildWhatsAppVariables({ ticket, priority: URGENT_PRIORITY_LABEL, message });
+    // The callers' ticket objects carry different fields (a public link's include, a pipeline
+    // run's select); read the numbers the reference and the short link need, once.
+    const refTicket = await this._ticketForMessage(ticket);
+    const message = buildEscalationMessage({ ticket: refTicket, priority: URGENT_PRIORITY_LABEL, source });
+    const voiceMessage = buildVoiceMessage({ ticket: refTicket, source });
+    const whatsappVariables = buildWhatsAppVariables({ ticket: refTicket, priority: URGENT_PRIORITY_LABEL, message });
     const deliveries = [];
     const skipped = [];
     const queuedChannels = new Set();

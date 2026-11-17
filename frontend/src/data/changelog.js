@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.89-preview';
+export const APP_VERSION = '4.3.90-preview';
 
 export const changelog = [
+  {
+    version: '4.3.90-preview',
+    date: 'November 16, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>After-hours alerts open the ticket in Ticket Pulse</strong> &mdash; the text (and e-mail, WhatsApp and voice message) that pages the after-hours contacts named the ticket by its FreshService copy&rsquo;s number and linked to FreshService. It now gives the ticket&rsquo;s own reference (TP-12591) and opens it in Ticket Pulse, where the team works it.' },
+    ],
+  },
   {
     version: '4.3.89-preview',
     date: 'November 16, 2026',
