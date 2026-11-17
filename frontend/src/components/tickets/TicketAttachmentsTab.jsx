@@ -37,6 +37,9 @@ export function attachmentKind(a, entryById) {
   if (!a.threadEntryId) return a.source === 'email' ? 'requester' : 'upload';
   const e = entryById.get(a.threadEntryId);
   if (!e) return a.source === 'email' ? 'requester' : 'upload';
+  // A forward's files went out by e-mail like a reply's (QA 11-16 #2); the
+  // entry is private only because the requester is not on it.
+  if (e.eventType === 'forward') return 'reply';
   if (e.isPrivate === true || e.eventType === 'note' || e.eventType === 'private_note') return 'note';
   const agent = e.authorType === 'agent';
   const incoming = !agent && (e.incoming === true || e.authorType === 'requester');

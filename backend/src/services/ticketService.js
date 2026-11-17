@@ -22,7 +22,7 @@ import ticketRollUpService from './ticketRollUpService.js';
 import requesterRepository from './requesterRepository.js';
 import sendgridNotificationService from './sendgridNotificationService.js';
 import { resolveFromName, resolveReplyFromName } from './workspaceEmailIdentityService.js';
-import { pickIngestMailbox, pickOutboundMailbox } from './mailboxPicker.js';
+import { pickOutboundMailbox, pickIngestMailboxForTicket, pickOutboundMailboxForTicket } from './mailboxPicker.js';
 import { plusAddressReplyTo, storeEntryMessageId, threadingHeadersForTicket } from './emailThreadingService.js';
 import { fsConversationEntryId, parseFsConversationId } from '../utils/fsEntryId.js';
 import { isFsReplyAsAgentEnabled } from './fsReplyAsAgentService.js';
@@ -563,6 +563,28 @@ function sanitizeBodyHtml(html) {
   const raw = String(html || '').trim();
   if (!raw) return null;
   return sanitizeHtml(raw, EMAIL_SANITIZE_OPTIONS).trim() || null;
+}
+
+const FORWARD_BLOCK_CAP = 20000;
+const escapeForwardText = (s) => String(s || '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+
+/**
+ * One message of a forwarded thread as e-mail HTML (QA 11-16 #1). The forward
+ * used to flatten every message to plain text, so a link written into a reply
+ * ("click here") arrived as a bare word. The stored HTML is sanitized with the
+ * same allowlist the reply lane uses and capped (never cut inside a tag);
+ * entries with no HTML fall back to escaped text.
+ */
+export function forwardBlockHtml(html, text, cap = FORWARD_BLOCK_CAP) {
+  const clean = html ? sanitizeHtml(String(html), EMAIL_SANITIZE_OPTIONS).trim() : '';
+  if (clean) {
+    if (clean.length <= cap) return clean;
+    let cut = clean.slice(0, cap);
+    if (cut.lastIndexOf('<') > cut.lastIndexOf('>')) cut = cut.slice(0, cut.lastIndexOf('<'));
+    return `${cut}<p>[…]</p>`;
+  }
+  const plain = String(text || '').slice(0, 4000);
+  return plain ? escapeForwardText(plain).replace(/\n/g, '<br/>') : '';
 }
 
 /**
@@ -5748,6 +5770,7 @@ class TicketService {
     for (const file of files) {
       attachmentService.validateUpload({ fileName: file.originalname, sizeBytes: file.size });
     }
+    await this._assertTicketAttachmentRoom(ticket.id, files.length);
 
     const bodyHtml = sanitizeBodyHtml(parsed.data.bodyHtml);
     const bodyText = composerText(parsed.data.bodyText) || stripHtml(bodyHtml);
@@ -5916,25 +5939,11 @@ class TicketService {
       },
     });
 
-    // Store attachments before the outbound email so they can ride along.
-    const storedAttachments = [];
-    for (const file of files) {
-      try {
-        const attachment = await attachmentService.upload({
-          workspaceId,
-          ticketId: ticket.id,
-          threadEntryId: entry.id,
-          fileName: file.originalname,
-          contentType: file.mimetype,
-          buffer: file.buffer,
-          uploadedBy: actor?.email || null,
-          source: 'upload',
-        });
-        storedAttachments.push({ attachment, buffer: file.buffer });
-      } catch (err) {
-        logger.warn(`Reply attachment "${file.originalname}" failed to store (entry ${entry.id}): ${err.message}`);
-      }
-    }
+    // Store attachments before the outbound email so they can ride along. A
+    // file that fails is named in the response (QA 11-16 #3), not only logged.
+    const { stored: storedAttachments, failed: attachmentsFailed } = await this._storeEntryFiles(
+      ticket, entry, files, actor, isPrivate ? 'Note' : 'Reply',
+    );
 
     const ticketPatch = { updatedAt: now, lastRealActivityAt: now };
     // First response (Auto-help integration W4, Vahid 26 Sep 2026): it counts
@@ -6016,6 +6025,7 @@ class TicketService {
     this._broadcast(workspaceId, isPrivate ? 'note' : 'reply', ticket, { entryId: entry.id });
     return {
       entry, email, attachments: storedAttachments.map((s) => s.attachment),
+      ...(attachmentsFailed.length ? { attachmentsFailed } : {}),
       ...(mentioned.length ? { mentioned } : {}),
     };
   }
@@ -6232,8 +6242,13 @@ class TicketService {
    * ingest-only, so the Graph-only gate refused every forward there while
    * replies from the same screen went out fine. Recorded as a PRIVATE thread
    * entry (the requester isn't part of a forward).
+   *
+   * QA 11-16: the note is the composer's HTML (`noteHtml`, sanitized here), so
+   * links survive; the thread's own messages keep their HTML too. Files ride
+   * the e-mail (≤3 MB each, like a reply) and are stored on the forward's
+   * entry, which therefore mirrors them to FreshService as well.
    */
-  async forwardTicket(ticketId, workspaceId, { to, note }, actor) {
+  async forwardTicket(ticketId, workspaceId, { to, note, noteHtml }, actor, files = []) {
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
       include: TICKET_INCLUDE,
@@ -6246,20 +6261,46 @@ class TicketService {
     }
     const recipients = parsedTo.data;
 
+    // Files are checked before anything is sent: a refused file must not leave
+    // a forward out in the world that the ticket does not record.
+    const uploads = Array.isArray(files) ? files : [];
+    if (uploads.length > 0 && !attachmentService.isConfigured()) {
+      throw new ValidationError('Attachment storage is not configured for this environment');
+    }
+    for (const file of uploads) {
+      attachmentService.validateUpload({ fileName: file.originalname, sizeBytes: file.size ?? file.buffer?.length ?? 0 });
+    }
+    await this._assertTicketAttachmentRoom(ticket.id, uploads.length);
+
     const entries = await ticketThreadRepository.listForTicket(ticket.id, { limit: 300 });
     const publicEntries = entries
       .filter((e) => (e.bodyText || e.content || e.bodyHtml) && !e.isPrivate)
       .slice(-5);
     const ref = ticketDisplayRef(ticket);
-    const esc = (s) => String(s || '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-    const noteText = String(note || '').trim();
+    const esc = escapeForwardText;
+    const noteBodyHtml = sanitizeBodyHtml(noteHtml);
+    const noteText = composerText(typeof note === 'string' ? note : '') || stripHtml(noteBodyHtml) || '';
+    const noteBlock = noteBodyHtml || (noteText ? `<p>${esc(noteText).replace(/\n/g, '<br/>')}</p>` : '');
+    const description = ticket.description && looksLikeRealHtml(ticket.description)
+      ? forwardBlockHtml(ticket.description, ticket.descriptionText)
+      : forwardBlockHtml(null, ticket.descriptionText);
     const html = [
-      noteText ? `<p>${esc(noteText).replace(/\n/g, '<br/>')}</p><hr/>` : '',
+      noteBlock ? `${noteBlock}<hr/>` : '',
       `<p><b>${esc(ticket.subject || '(no subject)')}</b> (${ref}) — forwarded from Ticket Pulse by ${esc(actor?.name || actor?.email || '')}</p>`,
       ticket.requester?.name ? `<p>Requester: ${esc(ticket.requester.name)}${ticket.requester.email ? ` &lt;${esc(ticket.requester.email)}&gt;` : ''}</p>` : '',
-      ticket.descriptionText ? `<blockquote>${esc(ticket.descriptionText.slice(0, 4000)).replace(/\n/g, '<br/>')}</blockquote>` : '',
-      ...publicEntries.map((e) => `<hr/><p><b>${esc(e.actorName || 'Unknown')}</b> · ${new Date(e.occurredAt).toLocaleString()}<br/>${esc(String(e.bodyText || e.content || '').slice(0, 4000)).replace(/\n/g, '<br/>')}</p>`),
+      description ? `<blockquote>${description}</blockquote>` : '',
+      ...publicEntries.map((e) => `<hr/><p><b>${esc(e.actorName || 'Unknown')}</b> · ${new Date(e.occurredAt).toLocaleString()}</p>`
+        + `<div>${forwardBlockHtml(e.bodyHtml, e.bodyText || e.content)}</div>`),
     ].join('');
+
+    // Same per-file e-mail limit as a reply; bigger files stay on the ticket only.
+    const mailable = uploads
+      .filter((f) => f.buffer && f.buffer.length <= 3 * 1024 * 1024)
+      .map((f) => ({
+        name: f.originalname,
+        contentType: f.mimetype || 'application/octet-stream',
+        contentBytes: f.buffer.toString('base64'),
+      }));
 
     let sent;
     try {
@@ -6271,6 +6312,7 @@ class TicketService {
         html,
         label: 'ticket forward',
         fromName: await resolveFromName(workspaceId),
+        ...(mailable.length ? { attachments: mailable } : {}),
       });
     } catch (err) {
       logger.warn(`Forward of ticket ${ticket.id} could not be sent: ${err.message}`);
@@ -6281,6 +6323,11 @@ class TicketService {
 
     const now = new Date();
     const summary = `Forwarded to ${recipients.join(', ')}${noteText ? ` — ${noteText}` : ''}`;
+    // The stored entry keeps the note's HTML (its links) under the "Forwarded
+    // to …" line; the plain summary stays the text twin (search, mirror fallback).
+    const entryHtml = noteBodyHtml
+      ? `<p>Forwarded to ${recipients.map((r) => esc(r)).join(', ')}</p>${noteBodyHtml}`
+      : null;
     const entry = await prisma.ticketThreadEntry.create({
       data: {
         ticketId: ticket.id,
@@ -6295,17 +6342,86 @@ class TicketService {
         visibility: 'private',
         content: summary,
         bodyText: summary,
+        bodyHtml: entryHtml,
         emailMessageId: sent?.messageId || null,
         occurredAt: now,
         mirrorState: ticket.origin === TICKET_ORIGIN.TICKETPULSE ? 'pending' : null,
+        rawPayload: { forwardTo: recipients },
       },
     });
+    // Files land on the forward's entry before the mirror job is queued, so the
+    // FreshService copy carries them too. A storage failure never un-sends the
+    // forward: it is reported back so the composer can say which file is missing.
+    const { stored, failed } = await this._storeEntryFiles(ticket, entry, uploads, actor, 'Forward');
     if (ticket.origin === TICKET_ORIGIN.TICKETPULSE) {
       await mirrorService.enqueueThreadEntry(workspaceId, ticket.id, entry.id);
     }
-    await this._audit(ticket.id, 'forwarded', actor, { to: recipients, via, lane: sent?.via || null });
+    await this._audit(ticket.id, 'forwarded', actor, {
+      to: recipients, via, lane: sent?.via || null, ...(uploads.length ? { files: uploads.length } : {}),
+    });
     this._broadcast(workspaceId, 'forward', ticket, { entryId: entry.id });
-    return { entry, to: recipients, from: via, via: sent?.via || null };
+    return {
+      entry,
+      to: recipients,
+      from: via,
+      via: sent?.via || null,
+      attachments: stored.map((s) => s.attachment),
+      ...(failed.length ? { attachmentsFailed: failed } : {}),
+    };
+  }
+
+  /**
+   * Room check before a message stores files (QA 11-16 #3): a ticket holds at
+   * most MAX_ATTACHMENTS_PER_TICKET, and every file past that used to fail one
+   * by one AFTER the message was saved, silently. Refuse up front instead so
+   * the composer keeps the draft. Fail-open on a lookup error.
+   */
+  async _assertTicketAttachmentRoom(ticketId, adding) {
+    if (!adding) return;
+    let count;
+    try {
+      count = await prisma.ticketAttachment.count({ where: { ticketId } });
+    } catch (err) {
+      logger.warn(`Attachment room check skipped for ticket ${ticketId}: ${err.message}`);
+      return;
+    }
+    if (typeof count !== 'number') return;
+    const cap = Number(attachmentService.maxAttachmentsPerTicket) || 20;
+    if (count + adding > cap) {
+      const room = Math.max(0, cap - count);
+      throw new ValidationError(room === 0
+        ? `This ticket already holds ${count} files, the most a ticket can keep (${cap}). Remove the files from this message, or delete files the ticket no longer needs.`
+        : `This ticket holds ${count} files and can keep ${cap}, so this message can add ${room} more, not ${adding}.`);
+    }
+  }
+
+  /**
+   * Store a message's files on its thread entry, one at a time. Returns the
+   * stored rows (with their buffers, for the e-mail) and the names that failed
+   * with the reason, so the caller can tell the person instead of logging only.
+   */
+  async _storeEntryFiles(ticket, entry, files, actor, label = 'Reply') {
+    const stored = [];
+    const failed = [];
+    for (const file of files || []) {
+      try {
+        const attachment = await attachmentService.upload({
+          workspaceId: entry.workspaceId ?? ticket.workspaceId,
+          ticketId: ticket.id,
+          threadEntryId: entry.id,
+          fileName: file.originalname,
+          contentType: file.mimetype,
+          buffer: file.buffer,
+          uploadedBy: actor?.email || null,
+          source: 'upload',
+        });
+        stored.push({ attachment, buffer: file.buffer });
+      } catch (err) {
+        logger.warn(`${label} attachment "${file.originalname}" failed to store (entry ${entry.id}): ${err.message}`);
+        failed.push({ fileName: file.originalname, reason: err.message });
+      }
+    }
+    return { stored, failed };
   }
 
   /**
@@ -6800,7 +6916,8 @@ class TicketService {
     // (centralized picker, MB-1g: primary first, then oldest).
     let replyTo = null;
     try {
-      const connection = await pickOutboundMailbox(ticket.workspaceId);
+      // QA 11-16 #6: the mailbox of the ticket's team (an AR ticket answers from artickets@).
+      const connection = await pickOutboundMailboxForTicket(ticket);
       if (connection) {
         const { default: graphMailClient } = await import('../integrations/graphMailClient.js');
         if (graphMailClient.isConfigured()) {
@@ -6859,7 +6976,7 @@ class TicketService {
       // rung 1 matches replies to SendGrid-sent mail too. Reply-To points
       // at the workspace's INGEST mailbox (if one is connected) so the
       // reply loop survives a Graph outage; null when none / FS-born.
-      const ingestMailbox = await pickIngestMailbox(ticket.workspaceId).catch(() => null);
+      const ingestMailbox = await pickIngestMailboxForTicket(ticket).catch(() => null);
       const sendgridReplyTo = ingestMailbox ? plusAddressReplyTo(ingestMailbox.address, ticket) : null;
       const result = await sendgridNotificationService.sendEmail({
         to: [toAddress],

@@ -1,6 +1,17 @@
-export const APP_VERSION = '4.3.90-preview';
+export const APP_VERSION = '4.3.91-preview';
 
 export const changelog = [
+  {
+    version: '4.3.91-preview',
+    date: 'November 16, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Forwards look like forwards</strong> &mdash; a forwarded ticket appears in the conversation as &ldquo;Forwarded to &hellip;&rdquo; (still hidden from the requester), not as an internal note. Links in the forward, and in the earlier messages it carries, now survive into the e-mail and the ticket. (QA 11-16 #1)' },
+      { type: 'new', html: '<strong>Attach files when forwarding</strong> &mdash; Forward has the same Attach button, drag-and-drop and paste as Reply; the files go with the forwarded e-mail and stay on the ticket. (QA 11-16 #2)' },
+      { type: 'fix', html: '<strong>All your pasted screenshots are kept</strong> &mdash; a message can now carry up to 20 files (was 5, and the rest were silently dropped), a ticket up to 100, and anything that can&rsquo;t be added is shown in red before you send instead of disappearing. (QA 11-16 #3)' },
+      { type: 'fix', html: '<strong>Replies leave from the team&rsquo;s own mailbox</strong> &mdash; in a workspace with one mailbox per team (Accounting: AP and AR), a reply goes out from the mailbox of the ticket&rsquo;s group, so an AR ticket is answered from the AR address. (QA 11-16 #6)' },
+      { type: 'improved', html: '<strong>A friendlier after-hours page</strong> &mdash; the page behind &ldquo;Raise urgency&rdquo; after hours is redesigned: &ldquo;We&rsquo;re out of the office until 5 AM&rdquo;, one question (&ldquo;Is this high priority?&rdquo;) with a clear red &ldquo;Contact after-hours support&rdquo; button and an &ldquo;It can wait until morning&rdquo; choice, and the hours as a plain table with the current row marked. It shows the ticket&rsquo;s own number (TP-&hellip;), says PT instead of PDT, and no longer names any staff.' }
+    ],
+  },
   {
     version: '4.3.90-preview',
     date: 'November 16, 2026',

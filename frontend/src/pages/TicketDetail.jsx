@@ -10,6 +10,7 @@ import ComposerShortcuts, { Keys, MOD } from '../components/tickets/composer/Com
 import EmojiPicker from '../components/tickets/composer/EmojiPicker';
 import useComposerAssist from '../components/tickets/composer/ComposerAssist';
 import { forgetPhrases, ownPhrases, phrasesFor, rememberSentText } from '../utils/composerPhrases';
+import { MAX_COMPOSER_FILES, droppedFilesMessage, failedFilesMessage, mergeComposerFiles } from '../utils/composerFiles';
 // The new editor (early access) loads only for the people who switch it on.
 const TiptapEditor = lazy(() => import('../components/tickets/composer/TiptapEditor'));
 import QuoteSelection from '../components/tickets/composer/QuoteSelection';
@@ -362,6 +363,15 @@ function AttachmentChip({ attachment, onPreview }) {
  * in Cc rides `rawPayload.agentIntake` (kind 'agent_cc') on the agent's own
  * entry - normalised here so the chips read both the same way.
  */
+/**
+ * An agent's forward of the thread by e-mail (POST /tickets/:id/forward):
+ * stored private (eventType 'forward', isPrivate true) because the requester
+ * is not on it, and shown as a forward, never as an internal note.
+ */
+export function isOutboundForward(entry) {
+  return entry?.eventType === 'forward';
+}
+
 export function forwardedMetaOf(entry) {
   const raw = entry?.rawPayload;
   if (!raw || typeof raw !== 'object') return null;
@@ -433,7 +443,11 @@ export function ThreadEntry({ entry, attachments = [], ticketId = null, onPrevie
       setSavingEdit(false);
     }
   };
-  const isNote = entry.eventType === 'note' || entry.isPrivate === true;
+  // A forward is private (the requester never sees it) but it is not a note:
+  // it went out by e-mail to the people named on it. QA 11-16 #1: keyed on
+  // isPrivate alone, every forward read "Internal note".
+  const isForward = isOutboundForward(entry);
+  const isNote = !isForward && (entry.eventType === 'note' || entry.isPrivate === true);
   const body = entry.bodyText || entry.content || '';
   // Identity beats channel: an agent replying by email syncs from FS as
   // "incoming", but the server resolves the author against the roster and
@@ -514,10 +528,13 @@ export function ThreadEntry({ entry, attachments = [], ticketId = null, onPrevie
         className={`min-w-0 rounded-2xl border p-4 shadow-subtle ${
           isNote
             ? 'flex-1 bg-amber-50/80 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/30 rounded-tl-md'
-            : incoming
-              ? 'max-w-[92%] flex-1 bg-card border-indigo-200/70 dark:border-indigo-500/30 rounded-tl-md'
-              : 'max-w-[92%] flex-1 bg-blue-50/60 dark:bg-blue-500/10 border-blue-200/70 dark:border-blue-500/30 rounded-tr-md'
+            : isForward
+              ? 'max-w-[92%] flex-1 bg-violet-50/60 dark:bg-violet-500/10 border-violet-200/70 dark:border-violet-500/30 rounded-tr-md'
+              : incoming
+                ? 'max-w-[92%] flex-1 bg-card border-indigo-200/70 dark:border-indigo-500/30 rounded-tl-md'
+                : 'max-w-[92%] flex-1 bg-blue-50/60 dark:bg-blue-500/10 border-blue-200/70 dark:border-blue-500/30 rounded-tr-md'
         }`}
+        data-entry-kind={isForward ? 'forward' : isNote ? 'note' : incoming ? 'incoming' : 'reply'}
       >
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pb-2.5 mb-3 border-b border-foreground/10">
           {integration ? (
@@ -534,9 +551,13 @@ export function ThreadEntry({ entry, attachments = [], ticketId = null, onPrevie
             <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 dark:text-amber-200 bg-amber-100 dark:bg-amber-500/20 border border-amber-200 dark:border-amber-500/30 rounded-full px-1.5 py-0.5">
               <Lock className="w-2.5 h-2.5" aria-hidden="true" /> Internal note
             </span>
-          ) : entry.eventType === 'forward' ? (
-            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-violet-700 dark:text-violet-200 bg-violet-50 dark:bg-violet-500/15 border border-violet-200 dark:border-violet-500/30 rounded-full px-1.5 py-0.5">
+          ) : isForward ? (
+            <span
+              className="inline-flex items-center gap-1 text-[10px] font-semibold text-violet-700 dark:text-violet-200 bg-violet-50 dark:bg-violet-500/15 border border-violet-200 dark:border-violet-500/30 rounded-full px-1.5 py-0.5"
+              title="E-mailed to the people named here. The requester was not included, and only your team sees this entry."
+            >
               <Forward className="w-2.5 h-2.5" aria-hidden="true" /> Forwarded
+              <Lock className="w-2.5 h-2.5 opacity-70" aria-label="Not visible to the requester" />
             </span>
           ) : (
             <span className={`inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-1.5 py-0.5 border ${
@@ -1371,15 +1392,17 @@ export default function TicketDetail() {
     return ccSourceForReply(ticket).filter((a) => !kept.has(a));
   }, [composerMode, composerCc, ticket]);
 
+  // QA 11-16 #3: files past the cap are refused out loud (they were dropped
+  // silently). Counted from a ref, not state, so twelve screenshots pasted at
+  // once all see the files staged before them in the same paste.
+  const composerFilesRef = useRef(composerFiles);
+  useEffect(() => { composerFilesRef.current = composerFiles; }, [composerFiles]);
   const addComposerFiles = (fileList) => {
-    const incoming = [...fileList];
-    setComposerFiles((prev) => {
-      const merged = [...prev];
-      for (const file of incoming) {
-        if (!merged.some((f) => f.name === file.name && f.size === file.size)) merged.push(file);
-      }
-      return merged.slice(0, 5);
-    });
+    const { merged, dropped } = mergeComposerFiles(composerFilesRef.current, [...(fileList || [])]);
+    composerFilesRef.current = merged;
+    setComposerFiles(merged);
+    if (dropped.length) showToast('red', droppedFilesMessage(dropped), { duration: 6000 });
+    return dropped;
   };
 
   const fetchTicket = useCallback(async ({ silent = false, diff = false } = {}) => {
@@ -2544,14 +2567,25 @@ export default function TicketDetail() {
       }
       setIsSending(true);
       try {
-        await ticketsAPI.forward(ticketId, { to: forwardTo, note: body });
+        // QA 11-16: the note's HTML rides along so its links survive, and the
+        // staged files go with the forward (they were Reply/Note only).
+        const res = await ticketsAPI.forward(ticketId, {
+          to: forwardTo,
+          note: body,
+          ...(isRichContent(composerBody) ? { noteHtml: composerBody } : {}),
+          ...(composerFiles.length ? { files: composerFiles } : {}),
+        });
+        const sentFiles = composerFiles.length;
         setComposerBody('');
         setComposerText('');
         setForwardTo([]);
+        setComposerFiles([]);
         setComposerExpanded(false);
         try { localStorage.removeItem(draftKey); } catch { /* no-op */ }
         await fetchTicket({ silent: true });
-        showToast('emerald', `Thread forwarded to ${forwardTo.join(', ')}`);
+        const failedNote = failedFilesMessage(res?.data?.attachmentsFailed);
+        if (failedNote) showToast('red', `Forwarded to ${forwardTo.join(', ')}. ${failedNote}`, { duration: 8000 });
+        else showToast('emerald', `Thread forwarded to ${forwardTo.join(', ')}${sentFiles ? ` · ${sentFiles} file${sentFiles === 1 ? '' : 's'}` : ''}`);
       } catch (err) {
         showToast('red', err.response?.data?.message || err.message || 'Forward failed');
       } finally {
@@ -2562,6 +2596,7 @@ export default function TicketDetail() {
     if (!body) return;
     setIsSending(true);
     lastLocalMutationRef.current = Date.now();
+    let sendResult = null;
     try {
       const payload = {
         bodyText: body,
@@ -2583,7 +2618,7 @@ export default function TicketDetail() {
         // Only meaningful once the row was actually seeded; otherwise there was
         // nothing on screen to remove.
         const ccRemoved = removedAdditionalRequesters;
-        await ticketsAPI.reply(ticketId, {
+        sendResult = await ticketsAPI.reply(ticketId, {
           ...payload,
           cc: composerCc,
           ...(ccRemoved.length ? { ccRemoved } : {}),
@@ -2595,7 +2630,7 @@ export default function TicketDetail() {
         const mentions = composerMentions
           .filter((p) => lower.includes(`@${String(p.name).toLowerCase()}`))
           .map((p) => p.id);
-        await ticketsAPI.note(ticketId, { ...payload, ...(mentions.length ? { mentions } : {}) });
+        sendResult = await ticketsAPI.note(ticketId, { ...payload, ...(mentions.length ? { mentions } : {}) });
         setComposerMentions([]);
       }
       idemKeyRef.current = newIdempotencyKey();
@@ -2622,7 +2657,9 @@ export default function TicketDetail() {
       }
       const ccNote = composerMode === 'reply' && composerCc.length ? ` (+${composerCc.length} Cc)` : '';
       const fileNote = composerFiles.length ? ` · ${composerFiles.length} file${composerFiles.length === 1 ? '' : 's'}` : '';
-      showToast('emerald', composerMode === 'reply' ? `Reply posted — requester emailed${ccNote}${fileNote}` : `Internal note added${fileNote}`);
+      const failedNote = failedFilesMessage(sendResult?.data?.attachmentsFailed);
+      if (failedNote) showToast('red', `${composerMode === 'reply' ? 'Reply posted' : 'Note added'}. ${failedNote}`, { duration: 8000 });
+      else showToast('emerald', composerMode === 'reply' ? `Reply posted — requester emailed${ccNote}${fileNote}` : `Internal note added${fileNote}`);
     } catch (err) {
       showToast('red', err.response?.data?.message || err.message || 'Send failed');
     } finally {
@@ -3755,13 +3792,13 @@ export default function TicketDetail() {
                         role={composerExpanded && !composerDocked ? 'dialog' : undefined}
                         data-composer-layout={composerDocked ? 'docked' : composerExpanded ? 'full' : 'inline'}
                         data-drag-over={composerDragOver ? 'true' : undefined}
-                        onDragOver={composerMode === 'forward' ? undefined : (e) => {
+                        onDragOver={(e) => {
                           if (![...(e.dataTransfer?.types || [])].includes('Files')) return;
                           e.preventDefault();
                           if (!composerDragOver) setComposerDragOver(true);
                         }}
                         onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setComposerDragOver(false); }}
-                        onDropCapture={composerMode === 'forward' ? undefined : (e) => {
+                        onDropCapture={(e) => {
                           const files = e.dataTransfer?.files;
                           setComposerDragOver(false);
                           if (!files || files.length === 0) return;
@@ -3793,7 +3830,7 @@ export default function TicketDetail() {
                         )}
                         {composerDragOver && (
                           <p className="mb-2 rounded-lg border-2 border-dashed border-primary/60 bg-primary/5 px-3 py-2 text-center text-xs font-medium text-primary" aria-hidden="true">
-                            Drop to attach (up to 5 files)
+                            Drop to attach (up to {MAX_COMPOSER_FILES} files)
                           </p>
                         )}
                         {/* QA 07-06 #10: wraps + compact labels under sm so nothing
@@ -4128,7 +4165,7 @@ export default function TicketDetail() {
                             )}
                             <CcChips value={forwardTo} onChange={setForwardTo} placeholder="Forward to…" label="Forward recipients" />
                             <p className="mt-1 text-[10px] text-muted-foreground/75">
-                          Sends the description + the last public replies from the workspace mailbox; recorded on the ticket as a private entry.
+                              Sends your note, any files you attach, the description and the last public replies. The requester is not included; the forward is kept on the ticket for your team.
                             </p>
                           </div>
                         )}
@@ -4164,10 +4201,13 @@ export default function TicketDetail() {
                             ariaLabel={composerMode === 'reply' ? 'Reply body' : composerMode === 'forward' ? 'Forward note' : 'Internal note body'}
                             minHeight={280}
                             className={composerMode === 'note' ? 'bg-amber-50/25 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/30' : composerMode === 'forward' ? 'bg-violet-50/30 dark:bg-violet-500/10 border-violet-200 dark:border-violet-500/30' : 'bg-card border-input'}
-                            onImagePaste={composerMode === 'forward' ? undefined : (file) => {
+                            onImagePaste={(file) => {
                               const ext = ((file.type || 'image/png').split('/')[1] || 'png').replace('jpeg', 'jpg');
-                              const name = `pasted-image-${++pasteCountRef.current}.${ext}`;
-                              addComposerFiles([new File([file], name, { type: file.type || 'image/png' })]);
+                              const name = `pasted-image-${pasteCountRef.current + 1}.${ext}`;
+                              // A picture the message cannot carry gets no "[Image: …]" in the text
+                              // (QA 11-16 #3: those became chips that opened nothing).
+                              if (addComposerFiles([new File([file], name, { type: file.type || 'image/png' })]).length) return null;
+                              pasteCountRef.current += 1;
                               return name;
                             }}
                             // Phase D: read-only signature — the server appends it
@@ -4191,7 +4231,7 @@ export default function TicketDetail() {
                               <StagedFileChip
                                 key={`${file.name}-${file.size}`}
                                 file={file}
-                                storedOnly={file.size > 3 * 1024 * 1024 && composerMode === 'reply'}
+                                storedOnly={file.size > 3 * 1024 * 1024 && composerMode !== 'note'}
                                 onRemove={() => setComposerFiles((prev) => prev.filter((f) => f !== file))}
                                 onEdit={() => setEditFile(file)}
                               />
@@ -4200,26 +4240,24 @@ export default function TicketDetail() {
                         )}
                         <div className="flex items-center justify-between mt-2 gap-2">
                           <span className="flex items-center gap-2 min-w-0">
-                            {composerMode !== 'forward' && (
-                              <>
-                                <input
-                                  ref={composerFileInputRef}
-                                  type="file"
-                                  multiple
-                                  className="hidden"
-                                  onChange={(e) => { addComposerFiles(e.target.files); e.target.value = ''; }}
-                                />
-                                <button
-                                  onClick={() => composerFileInputRef.current?.click()}
-                                  disabled={composerFiles.length >= 5}
-                                  className="tp-focus-ring inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground bg-card border border-border rounded-lg hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200 disabled:opacity-50"
-                                  title="Attach files (up to 5 · 100 MB each; ≤3 MB files are emailed with the reply)"
-                                >
-                                  <Paperclip className="w-3.5 h-3.5" aria-hidden="true" />
+                            {/* Attach on all three modes (QA 11-16 #2: Forward had none). */}
+                            <input
+                              ref={composerFileInputRef}
+                              type="file"
+                              multiple
+                              className="hidden"
+                              data-testid="composer-file-input"
+                              onChange={(e) => { addComposerFiles(e.target.files); e.target.value = ''; }}
+                            />
+                            <button
+                              onClick={() => composerFileInputRef.current?.click()}
+                              disabled={composerFiles.length >= MAX_COMPOSER_FILES}
+                              className="tp-focus-ring inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground bg-card border border-border rounded-lg hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200 disabled:opacity-50"
+                              title={`Attach files (up to ${MAX_COMPOSER_FILES} · 100 MB each${composerMode === 'note' ? '' : `; files up to 3 MB are e-mailed with the ${composerMode === 'forward' ? 'forward' : 'reply'}`})`}
+                            >
+                              <Paperclip className="w-3.5 h-3.5" aria-hidden="true" />
                               Attach
-                                </button>
-                              </>
-                            )}
+                            </button>
                             {composerMode !== 'forward' && <EmojiPicker onPick={(ch) => composerRef.current?.insertText?.(ch)} />}
                             {assist.menu}
                             <button

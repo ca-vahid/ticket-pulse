@@ -13,7 +13,10 @@ async function streamToBuffer(stream) {
 }
 
 export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024; // 100 MB per file
-export const MAX_ATTACHMENTS_PER_TICKET = 20;
+// 100 since QA 11-16: inbound mail (signature logos, forwarded chains) filled 20 on its own,
+// and a full ticket now refuses the agent's whole message up front (draft kept) instead of
+// silently dropping the files, so 20 would have blocked any file on those tickets.
+export const MAX_ATTACHMENTS_PER_TICKET = 100;
 
 // Executables and scripts are refused outright — everything else is stored
 // as-is and always served with download disposition (never rendered inline).
@@ -42,6 +45,11 @@ function sanitizeFileName(name) {
 class AttachmentService {
   constructor() {
     this._containerClient = null;
+  }
+
+  /** The per-ticket cap, read by callers that check room before a message stores files. */
+  get maxAttachmentsPerTicket() {
+    return MAX_ATTACHMENTS_PER_TICKET;
   }
 
   isConfigured() {

@@ -15,13 +15,47 @@ import prisma from '../services/prisma.js';
 import logger from '../utils/logger.js';
 import { scopeMentions } from '../utils/mentionScope.js';
 
+// Files one reply / note / forward may carry. QA 11-16 #3: it was 5, and the
+// composer dropped every pasted screenshot after the fifth while the text kept
+// its "[Image: pasted-image-6.png]" — 7 of 12 pictures never left the browser.
+// The composer uses the same number (frontend MAX_COMPOSER_FILES).
+export const MAX_FILES_PER_MESSAGE = 20;
+
 const attachmentUpload = multer({
   storage: multer.memoryStorage(),
   // fieldSize: the reply/note text may carry pasted pictures inline; the
   // service lifts them into attachments (30 Sep 2026), so let them arrive
   // (multer's default 1 MB refused them first).
-  limits: { fileSize: MAX_ATTACHMENT_BYTES, files: 5, fieldSize: 8 * 1024 * 1024 },
+  limits: { fileSize: MAX_ATTACHMENT_BYTES, files: MAX_FILES_PER_MESSAGE, fieldSize: 8 * 1024 * 1024 },
 });
+
+/**
+ * multer for a composer message, with its errors as 400s the composer can show
+ * (a raw MulterError has no statusCode, so "too many files" surfaced as a 500).
+ */
+// Files are held in memory while a message is saved: 20 × 100 MB could pin 2 GB in one request
+// (QA 11-16 review). One message may carry 150 MB in all; checked from Content-Length before
+// multer reads anything (browsers always send it for FormData).
+export const MAX_MESSAGE_UPLOAD_BYTES = 150 * 1024 * 1024;
+
+function messageFilesUpload(req, res, next) {
+  const declared = Number(req.headers?.['content-length']);
+  if (Number.isFinite(declared) && declared > MAX_MESSAGE_UPLOAD_BYTES) {
+    return next(new ValidationError(`One message can carry up to ${Math.round(MAX_MESSAGE_UPLOAD_BYTES / 1024 / 1024)} MB of files in all.`));
+  }
+  attachmentUpload.array('files', MAX_FILES_PER_MESSAGE)(req, res, (err) => {
+    if (!err) return next();
+    if (err instanceof multer.MulterError) {
+      const message = err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE'
+        ? `A message can carry up to ${MAX_FILES_PER_MESSAGE} files.`
+        : err.code === 'LIMIT_FILE_SIZE'
+          ? `Attachments are limited to ${Math.round(MAX_ATTACHMENT_BYTES / 1024 / 1024)} MB each.`
+          : err.message;
+      return next(new ValidationError(message));
+    }
+    return next(err);
+  });
+}
 
 /**
  * Native ticketing API.
@@ -2296,11 +2330,16 @@ router.post('/:id/pinned-cards/:cardId/dismiss', asyncHandler(async (req, res) =
 }));
 
 // Forward the public thread to any address, recorded as a private entry.
-router.post('/:id/forward', requireNativeTicketing, asyncHandler(async (req, res) => {
+// JSON, or multipart when files ride along (QA 11-16 #2) — then `to` arrives
+// as one comma-separated field, the same way a reply's Cc does.
+router.post('/:id/forward', requireNativeTicketing, messageFilesUpload, asyncHandler(async (req, res) => {
+  const rawTo = req.body?.to;
+  const to = typeof rawTo === 'string' ? rawTo.split(',').map((s) => s.trim()).filter(Boolean) : rawTo;
   const result = await ticketService.forwardTicket(
     parseTicketId(req), req.workspaceId,
-    { to: req.body?.to, note: req.body?.note },
+    { to, note: req.body?.note, noteHtml: req.body?.noteHtml },
     req.ticketActor,
+    req.files || [],
   );
   res.status(201).json({ success: true, data: result });
 }));
@@ -2340,7 +2379,7 @@ function threadInput(req) {
   return { ...(req.body || {}), ...(idempotencyKey ? { idempotencyKey } : {}) };
 }
 
-router.post('/:id/replies', requireNativeTicketing, attachmentUpload.array('files', 5), asyncHandler(async (req, res) => {
+router.post('/:id/replies', requireNativeTicketing, messageFilesUpload, asyncHandler(async (req, res) => {
   const result = await ticketService.addReply(
     parseTicketId(req), req.workspaceId, threadInput(req), req.ticketActor, req.files || [],
   );
@@ -2348,7 +2387,7 @@ router.post('/:id/replies', requireNativeTicketing, attachmentUpload.array('file
   res.status(result.deduped ? 200 : 201).json({ success: true, data: result });
 }));
 
-router.post('/:id/notes', requireNativeTicketing, attachmentUpload.array('files', 5), asyncHandler(async (req, res) => {
+router.post('/:id/notes', requireNativeTicketing, messageFilesUpload, asyncHandler(async (req, res) => {
   const result = await ticketService.addPrivateNote(
     parseTicketId(req), req.workspaceId, threadInput(req), req.ticketActor, req.files || [],
   );

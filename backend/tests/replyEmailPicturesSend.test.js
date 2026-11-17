@@ -24,7 +24,10 @@ jest.unstable_mockModule('../src/routes/sse.routes.js', () => ({ default: {}, ss
 jest.unstable_mockModule('../src/services/sendgridNotificationService.js', () => ({
   MAX_ATTACHMENT_PAYLOAD_BYTES: 30 * 1024 * 1024, sendEmail, sendAssignmentEmail: jest.fn(), default: { sendEmail, sendAssignmentEmail: jest.fn() },
 }));
-const picker = { OUTBOUND_MAILBOX_ORDER: [], pickOutboundMailbox: jest.fn(async () => null), pickIngestMailbox: jest.fn(async () => null), setPrimaryMailbox: jest.fn(), sendgridFromAddress: jest.fn(async () => null) };
+const picker = {
+  OUTBOUND_MAILBOX_ORDER: [], pickOutboundMailbox: jest.fn(async () => null), pickIngestMailbox: jest.fn(async () => null), setPrimaryMailbox: jest.fn(), sendgridFromAddress: jest.fn(async () => null),
+  pickMailboxForTicket: jest.fn(async () => null), pickOutboundMailboxForTicket: jest.fn(async () => null), pickIngestMailboxForTicket: jest.fn(async () => null),
+};
 jest.unstable_mockModule('../src/services/mailboxPicker.js', () => ({ ...picker, default: picker }));
 const threading = {
   THREADING_REFERENCE_LIMIT: 10, DEFAULT_MESSAGE_ID_DOMAIN: 'x', normalizeMessageId: (v) => v, domainOfAddress: () => 'x', buildOutboundMessageId: () => '<m@x>',

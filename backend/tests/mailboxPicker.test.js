@@ -2,6 +2,7 @@ import { jest } from '@jest/globals';
 
 const prismaMock = {
   mailboxConnection: {
+    findMany: jest.fn(),
     findFirst: jest.fn(),
     updateMany: jest.fn(),
     update: jest.fn(),
@@ -13,7 +14,38 @@ jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMo
 
 const {
   pickOutboundMailbox, pickIngestMailbox, setPrimaryMailbox, OUTBOUND_MAILBOX_ORDER, sendgridFromAddress,
+  pickIngestMailboxForTicket, pickOutboundMailboxForTicket,
 } = await import('../src/services/mailboxPicker.js');
+
+// QA 11-16 #6: one mailbox per team in a workspace (AP@ → AP group, AR@ → AR group).
+describe('mailboxPicker for one ticket', () => {
+  const ap = { id: 5, address: 'ap@example.com', isPrimary: true, defaultGroupId: 1001n, defaultInternalGroupId: null };
+  const ar = { id: 6, address: 'ar@example.com', isPrimary: false, defaultGroupId: 1002n, defaultInternalGroupId: 77 };
+  beforeEach(() => { jest.clearAllMocks(); prismaMock.mailboxConnection.findMany.mockResolvedValue([ap, ar]); });
+
+  test('an AR ticket answers from the AR mailbox (FreshService group or internal group)', async () => {
+    expect((await pickIngestMailboxForTicket({ workspaceId: 2, groupId: 1002n })).address).toBe('ar@example.com');
+    expect((await pickIngestMailboxForTicket({ workspaceId: 2, groupId: null, internalGroupId: 77 })).address).toBe('ar@example.com');
+    expect(prismaMock.mailboxConnection.findMany.mock.calls[0][0].where).toMatchObject({ workspaceId: 2, isEnabled: true, mode: { in: ['ingest', 'both'] } });
+  });
+
+  test('no group match (or no group): the primary, exactly as before', async () => {
+    expect((await pickIngestMailboxForTicket({ workspaceId: 2, groupId: 9999n })).address).toBe('ap@example.com');
+    expect((await pickIngestMailboxForTicket({ workspaceId: 2 })).address).toBe('ap@example.com');
+  });
+
+  test('the Graph lane asks for send-capable mailboxes; none → null', async () => {
+    prismaMock.mailboxConnection.findMany.mockResolvedValueOnce([]);
+    expect(await pickOutboundMailboxForTicket({ workspaceId: 2, groupId: 1002n })).toBeNull();
+    expect(prismaMock.mailboxConnection.findMany.mock.calls[0][0].where.mode).toEqual({ in: ['send', 'both'] });
+  });
+
+  test('a lookup failure falls back to the old picker', async () => {
+    prismaMock.mailboxConnection.findMany.mockRejectedValueOnce(new Error('db down'));
+    prismaMock.mailboxConnection.findFirst.mockResolvedValueOnce(ap);
+    expect((await pickIngestMailboxForTicket({ workspaceId: 2, groupId: 1002n })).address).toBe('ap@example.com');
+  });
+});
 
 // Mega 08-31 Phase MB-1g: ONE centralized outbound picker replacing five
 // ad-hoc `findFirst` call sites — primary first, then oldest id.

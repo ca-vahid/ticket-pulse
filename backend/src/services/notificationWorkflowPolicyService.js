@@ -2,13 +2,16 @@ import { formatInTimeZone } from 'date-fns-tz';
 import prisma from './prisma.js';
 import { AFTER_HOURS_WORKFLOW_KEY } from './notificationWorkflowDefinition.js';
 import { resolveAfterHoursActiveContact } from './urgentEscalationContactService.js';
+import { zoneLabel } from '../utils/humanTime.js';
 
 const DEFAULT_EMERGENCY_LABEL = 'Request after-hours support';
 const DEFAULT_OFF_HOURS_MESSAGE = 'Our team is currently outside regular business hours. We will review your request when business hours resume.';
 const DEFAULT_HOLIDAY_MESSAGE = 'Our team is currently observing a holiday. We will review your request when business hours resume.';
 const ROUTING_PREVIEW_LOOKBACK_DAYS = 14;
 const ROUTING_PREVIEW_LOOKAHEAD_DAYS = 35;
-const DISPLAY_DATE_FORMAT = 'EEE, MMM d, h:mm a zzz';
+// No `zzz`: Intl's short name for BC is "PDT"/"PST"/"GMT-7" depending on the
+// tzdata; the label comes from zoneLabel ("PT") instead (QA 11-16).
+const DISPLAY_DATE_FORMAT = 'EEE, MMM d, h:mm a';
 
 const DAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -61,7 +64,7 @@ function localDayEndUtc(dateStr, timezone) {
 }
 
 function formatLocal(date, timezone) {
-  return date ? formatInTimeZone(date, timezone, DISPLAY_DATE_FORMAT) : null;
+  return date ? `${formatInTimeZone(date, timezone, DISPLAY_DATE_FORMAT)} ${zoneLabel(timezone, date)}` : null;
 }
 
 function durationLabel(startAt, endAt) {
@@ -204,9 +207,7 @@ async function availabilityForContext(context = {}, policy = null) {
     timezone,
     checkedAt: checkedAt.toISOString(),
     nextBusinessTime: nextBusiness?.nextBusinessTime?.toISOString?.() || null,
-    nextBusinessTimeLocal: nextBusiness?.nextBusinessTime
-      ? formatInTimeZone(nextBusiness.nextBusinessTime, timezone, 'EEE, MMM d, h:mm a zzz')
-      : null,
+    nextBusinessTimeLocal: formatLocal(nextBusiness?.nextBusinessTime || null, timezone),
   };
 }
 
