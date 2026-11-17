@@ -234,6 +234,29 @@ describe('afterHoursUrgentEscalationService', () => {
     expect(result.channels).toEqual(expect.arrayContaining(['email', 'sms']));
   });
 
+  test('the text links to the ticket in Ticket Pulse with its own reference, not the FreshService copy (16 Nov 2026)', async () => {
+    prismaMock.ticket.findUnique = jest.fn().mockResolvedValue({ id: 501, workspaceId: 5, origin: 'ticketpulse', nativeNumber: 12591, freshserviceTicketId: 252303n });
+    await afterHoursUrgentEscalationService.queueForPriorityRun(urgentRun());
+    const sms = prismaMock.notificationDelivery.createMany.mock.calls[0][0].data.find((d) => d.channel === 'sms');
+    expect(sms.payload.message).toContain('ticket TP-12591');
+    // The app's own address (production sets PUBLIC_APP_URL; a test run falls back to the local one).
+    expect(sms.payload.message).toMatch(/Open: https?:\/\/\S+\/(tickets\/501|[a-z0-9-]+\/TP-12591)$/);
+    expect(sms.payload.message).not.toContain('freshservice.com');
+    expect(sms.payload.message).not.toContain('252303');
+    expect(sms.payload.voiceMessage).toContain('Ticket T P 12591');
+    expect(sms.payload.whatsappVariables).toMatchObject({ ticketId: 'TP-12591' });
+    delete prismaMock.ticket.findUnique;
+  });
+
+  test('a FreshService-born ticket keeps its FreshService number, and still links into Ticket Pulse', async () => {
+    prismaMock.ticket.findUnique = jest.fn().mockResolvedValue({ id: 501, workspaceId: 5, origin: 'freshservice', nativeNumber: null, freshserviceTicketId: 219999n });
+    await afterHoursUrgentEscalationService.queueForPriorityRun(urgentRun());
+    const sms = prismaMock.notificationDelivery.createMany.mock.calls[0][0].data.find((d) => d.channel === 'sms');
+    expect(sms.payload.message).toContain('ticket #219999');
+    expect(sms.payload.message).not.toContain('freshservice.com');
+    delete prismaMock.ticket.findUnique;
+  });
+
   test('on call but away with nobody covering: not paged (nothing changes)', async () => {
     onCallCurrentMock.mockResolvedValue({ configured: true, technician: { id: 42 }, onLeaveNoCover: true });
     prismaMock.technician.findFirst.mockResolvedValue(onCallPerson());
