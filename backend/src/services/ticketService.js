@@ -6248,7 +6248,17 @@ class TicketService {
    * the e-mail (≤3 MB each, like a reply) and are stored on the forward's
    * entry, which therefore mirrors them to FreshService as well.
    */
-  async forwardTicket(ticketId, workspaceId, { to, note, noteHtml }, actor, files = []) {
+  async forwardTicket(ticketId, workspaceId, { to, note, noteHtml: rawNoteHtml }, actor, files = []) {
+    // Same as a reply (QA 11-16 review): a picture pasted into the note as data: becomes an
+    // attachment with an "[Pasted image attached: …]" line (Outlook's reading pane blocks
+    // data: images), and the note is held to the reply text limit.
+    const inline = extractInlineImages(rawNoteHtml);
+    const noteHtml = inline.html;
+    files = [...(Array.isArray(files) ? files : []), ...inline.files];
+    if (typeof noteHtml === 'string' && noteHtml.length > MAX_BODY_CHARS) {
+      logOversizeBody(noteHtml, { ticketId, kind: 'forward' });
+      throw new ValidationError('This message is too long to send — shorten the text or attach it as a file.');
+    }
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
       include: TICKET_INCLUDE,

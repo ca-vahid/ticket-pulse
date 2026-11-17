@@ -2859,6 +2859,25 @@ describe('ticketService.forwardTicket — two-lane delivery', () => {
     expect(res.entry.bodyHtml).toContain('this link');
   });
 
+  test('a picture pasted into the forward note as data: becomes an attachment, never inline (review)', async () => {
+    attachmentServiceMock.upload.mockClear();
+    await ticketService.forwardTicket(501, 1, {
+      to: ['ops@example.com'],
+      note: 'See screen',
+      noteHtml: '<p>See screen</p><img src="data:image/png;base64,iVBORw0KGgo=">',
+    }, actor);
+    const mail = sendgridMock.sendEmail.mock.calls[0][0];
+    expect(mail.html).not.toContain('data:image');
+    expect(mail.html).toContain('[Pasted image attached: pasted-image-1.png]');
+    expect(attachmentServiceMock.upload.mock.calls.map((c) => c[0].fileName)).toContain('pasted-image-1.png');
+  });
+
+  test('a forward note over the text limit is refused before anything is sent', async () => {
+    await expect(ticketService.forwardTicket(501, 1, { to: ['ops@example.com'], noteHtml: `<p>${'x'.repeat(400001)}</p>` }, actor))
+      .rejects.toThrow(/too long to send/);
+    expect(sendgridMock.sendEmail).not.toHaveBeenCalled();
+  });
+
   test('a plain-text note (the team forward) still forwards as before', async () => {
     await ticketService.forwardTicket(501, 1, { to: ['ops@example.com'], note: 'a < b & c' }, actor);
     expect(sendgridMock.sendEmail.mock.calls[0][0].html).toContain('<p>a &lt; b &amp; c</p><hr/>');

@@ -9,6 +9,8 @@ import logger from '../utils/logger.js';
 import settingsRepository from './settingsRepository.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
 import attachmentService from './attachmentService.js';
+// One FreshService conversation request carries at most this much in files (QA 11-16).
+const FS_THREAD_ATTACHMENT_CAP_BYTES = 15 * 1024 * 1024;
 import { createFreshServiceClient } from '../integrations/freshservice.js';
 import { TICKET_ORIGIN, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { cleanDisplayName } from '../utils/textEncoding.js';
@@ -1097,10 +1099,25 @@ class MirrorService {
     if (!entry) return; // deleted — nothing to mirror
     if (entry.mirrorState === 'mirrored') return; // idempotent
 
-    const body = this._threadEntryMirrorBody(ticket, entry);
+    let body = this._threadEntryMirrorBody(ticket, entry);
 
-    // Re-attach any files staged on this entry so the FS copy carries them too.
-    const attachments = await attachmentService.buffersForThreadEntry(entry.id);
+    // Re-attach any files staged on this entry so the FS copy carries them too — as many as fit
+    // one FreshService request (QA 11-16: a message can now carry 20 files; one over FreshService's
+    // limit used to fail the whole copy). Files that don't fit are named in the note instead.
+    const all = await attachmentService.buffersForThreadEntry(entry.id);
+    const attachments = [];
+    const leftOut = [];
+    let bytes = 0;
+    for (const file of all) {
+      const size = file.buffer?.length || 0;
+      if (bytes + size > FS_THREAD_ATTACHMENT_CAP_BYTES) { leftOut.push(file.filename); continue; }
+      bytes += size;
+      attachments.push(file);
+    }
+    if (leftOut.length) {
+      const esc = (s) => String(s || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+      body += `<p>Not copied (too large for FreshService): ${leftOut.map(esc).join(', ')}. Open them in Ticket Pulse.</p>`;
+    }
 
     // Public replies mirror as PUBLIC NOTES (portal-visible, no requester email —
     // Ticket Pulse already emailed them). Internal notes mirror privately.
