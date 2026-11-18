@@ -115,7 +115,7 @@ export default function ApprovalTicketBrief({ approval: a, note: noteOverride = 
   const asker = firstName(a.requestedByName) || 'The agent';
   const category = [ticket?.internalCategory?.name, ticket?.internalSubcategory?.name].filter(Boolean).join(' › ') || ticket?.category || null;
   const requester = ticket?.requester;
-  const requesterBits = [requester?.jobTitle, requester?.entraOfficeLocation || requester?.entraCity].filter(Boolean).join(', ');
+  const requesterBits = [requester?.entraJobTitle || requester?.jobTitle, requester?.entraOfficeLocation || requester?.entraCity].filter(Boolean).join(', ');
   const ticketLink = `/tickets/${a.ticketId}`;
 
   return (

@@ -100,6 +100,7 @@ import {
 import { requiresResolutionReason } from './resolutionReasonService.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { otherTicketRefs, resolveOtherTicketNumbers, ticketLikeNumbers } from './autoHelpTicketRefGuard.js';
+import { requesterTitle } from '../utils/requesterTitle.js';
 
 export const AUTO_HELP_OPERATION = 'auto_help';
 export const RUN_BUDGET = Object.freeze({
@@ -2460,7 +2461,7 @@ class AutoHelpRunner {
         where: { id: run.ticketId, workspaceId: Number(workspaceId) },
         select: {
           subject: true, description: true, descriptionText: true, createdAt: true, priority: true, category: true, subCategory: true,
-          requester: { select: { name: true, email: true, jobTitle: true, department: true } },
+          requester: { select: { name: true, email: true, jobTitle: true, entraJobTitle: true, department: true } },
           assignedTech: { select: { name: true } },
         },
       }))
@@ -2474,7 +2475,7 @@ class AutoHelpRunner {
       priority: t.priority ?? null,
       category: t.category || null,
       subCategory: t.subCategory || null,
-      requester: t.requester ? { name: t.requester.name || null, email: t.requester.email || null, jobTitle: t.requester.jobTitle || null, department: t.requester.department || null } : null,
+      requester: t.requester ? { name: t.requester.name || null, email: t.requester.email || null, jobTitle: requesterTitle(t.requester), department: t.requester.department || null } : null,
       assigneeName: t.assignedTech?.name || null,
     });
   }

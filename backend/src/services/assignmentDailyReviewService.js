@@ -24,6 +24,7 @@ import { normalizeAiModel, providerForModel } from '../utils/aiProviders.js';
 import { isCanonicalCategoryWorkspace } from '../utils/workspaceFeatureFlags.js';
 import providerGateway from './aiProviders/providerGateway.js';
 import { TOOL_SCHEMAS as ASSIGNMENT_TOOL_SCHEMAS } from './assignmentTools.js';
+import { requesterTitle } from '../utils/requesterTitle.js';
 
 const ACTIVE_STATUSES = ['running', 'collecting', 'analyzing'];
 const STALE_RUNNING_MS = 30 * 60 * 1000;
@@ -2269,7 +2270,7 @@ class AssignmentDailyReviewService {
               name: item.requester.name || null,
               email: item.requester.email || null,
               department: item.requester.department || null,
-              jobTitle: item.requester.jobTitle || null,
+              jobTitle: requesterTitle(item.requester),
               timeZone: item.requester.timeZone || null,
             }
             : null,

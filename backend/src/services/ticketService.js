@@ -1,3 +1,4 @@
+import { requesterTitle } from '../utils/requesterTitle.js';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import sanitizeHtml from 'sanitize-html';
@@ -3841,11 +3842,13 @@ class TicketService {
       },
       select: {
         id: true, name: true, email: true, department: true,
-        entraOfficeLocation: true, entraCity: true, jobTitle: true,
+        entraOfficeLocation: true, entraCity: true, jobTitle: true, entraJobTitle: true,
       },
       orderBy: { name: 'asc' },
       take: 8,
     });
+    // Entra's title wins over the hand-typed FreshService one (requesterTitle).
+    for (const r of requesters) { r.jobTitle = requesterTitle(r); delete r.entraJobTitle; }
 
     const knownEmails = new Set(requesters.map((r) => (r.email || '').toLowerCase()).filter(Boolean));
     let directory = [];

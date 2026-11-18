@@ -13,6 +13,7 @@ import { normalizeFreshServiceGroupMemberIds } from './freshServiceGroupGuard.js
 import ticketTypeService from './ticketTypeService.js';
 import statusService from './statusService.js';
 import { countsForAgentMetrics, withAgentMetricTickets } from '../utils/autoHelpMetrics.js';
+import { requesterTitle } from '../utils/requesterTitle.js';
 
 // Workload scans historically match legacy row variants too (lowercase labels
 // and raw FS status ints from very old syncs). Phase 8b: the canonical pair is
@@ -1190,6 +1191,7 @@ async function getRequesterSiteContext(workspaceId, ticketId) {
           email: true,
           department: true,
           jobTitle: true,
+          entraJobTitle: true,
           timeZone: true,
         },
       },
@@ -1221,7 +1223,7 @@ async function getRequesterSiteContext(workspaceId, ticketId) {
   const ticketLocationSignals = extractLocationSignals(ticket.subject, ticket.descriptionText);
   const requesterLocationSignals = extractLocationSignals(
     ticket.requester?.department,
-    ticket.requester?.jobTitle,
+    requesterTitle(ticket.requester),
     ticket.requester?.timeZone,
     graphProfile?.officeLocation,
     graphProfile?.city,
