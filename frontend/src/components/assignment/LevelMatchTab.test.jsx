@@ -9,6 +9,8 @@ import LevelMatchTab from './LevelMatchTab';
 const { getSpy, saveSpy } = vi.hoisted(() => ({ getSpy: vi.fn(), saveSpy: vi.fn() }));
 vi.mock('../../services/api', () => ({
   assignmentLevelMatchAPI: { get: (...a) => getSpy(...a), saveSettings: (...a) => saveSpy(...a) },
+  // QA 11-17 item 1: the Time zone fit switch sits in this tab (its own test covers it).
+  assignmentTimezoneFitAPI: { get: () => Promise.reject(new Error('not here')), saveSettings: vi.fn() },
 }));
 
 const RUNS = [

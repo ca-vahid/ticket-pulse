@@ -1123,6 +1123,8 @@ class AssignmentPipelineService {
     let llmFallbackReason = null;
     let llmAttemptCount = 0;
     let stepCounter = 0;
+    // The AI matched agents to a place (preferred_location): Time-zone fit stays out of site work.
+    let siteBoundRouting = false;
     let fullTranscript = '';
     let lastHeartbeatAt = Date.now();
     let heartbeatPromise = Promise.resolve();
@@ -1310,6 +1312,7 @@ class AssignmentPipelineService {
               continue;
             }
 
+            if (String(block.input?.preferred_location || '').trim()) siteBoundRouting = true;
             const toolStep = await runRepo.createPipelineStep({
               pipelineRunId: runId,
               stepNumber: stepCounter,
@@ -1840,6 +1843,38 @@ class AssignmentPipelineService {
         }
       }
 
+      // Time-zone fit (QA 11-17 item 1, services/assignmentTimezoneFit): for
+      // work not tied to a site, when the pick is 3 h or more from the
+      // requester, someone the AI listed with close skill and at least 2 h
+      // closer goes first. Shadow records only. Never after the urgent,
+      // escalation, share or level-match rule chose the person.
+      let timezoneFit = null;
+      const timezonePickId = assignTechId || topRec?.techId || null;
+      if (recommendation && !isNoise && !groupObserved && !urgentGuardHeld && timezonePickId
+        && ['auto_assigned', 'pending_review'].includes(decision)) {
+        try {
+          const { default: timezoneFitService } = await import('./assignmentTimezoneFit/timezoneFitService.js');
+          timezoneFit = await timezoneFitService.guard({
+            workspaceId, ticketId, runId, techId: timezonePickId, decision, recommendation,
+            siteBound: siteBoundRouting,
+            locked: urgentGuardRedirected || shareRuleAssigned || escalationLocked || levelMatch?.applied === true,
+            dryRun: assignmentConfig?.dryRunMode ?? true,
+          });
+          if (timezoneFit?.record) recommendation.timezoneFit = timezoneFit.record;
+          if (timezoneFit?.applied && timezoneFit.techId && decision === 'auto_assigned') assignTechId = timezoneFit.techId;
+          if (timezoneFit?.step) {
+            stepCounter++;
+            await assignmentRepository.createPipelineStep({ ...timezoneFit.step, pipelineRunId: runId, stepNumber: stepCounter }).catch((stepError) => {
+              logger.warn('Pipeline: failed to record timezone_fit step', { runId, error: stepError.message });
+            });
+            emit({ type: 'timezone_fit', applied: timezoneFit.applied === true, message: timezoneFit.record?.sentence || null });
+          }
+        } catch (timezoneError) {
+          timezoneFit = null;
+          logger.warn('Pipeline: time-zone fit failed - assignment unchanged', { runId, ticketId, error: timezoneError.message });
+        }
+      }
+
       // Assignment spread (QA 10-13 item 17, services/assignmentSpread): no
       // more than N automatic assignments to one person in M minutes, and a
       // new hire's Workstation + Laptop stay with one person. Every decision
@@ -1852,8 +1887,9 @@ class AssignmentPipelineService {
           spreadGuard = await assignmentSpreadService.guardAutoAssignment({
             workspaceId, ticketId, runId, techId: assignTechId, recommendation, reboundFrom,
             techName: shareRuleAssigned ? (shareRule.techName || null)
-              : levelMatch?.applied ? (levelMatch.record?.to?.techName || null)
-                : assignTechId === topRec.techId ? (topRec.techName || null) : (urgentGuard?.techName || null),
+              : timezoneFit?.applied ? (timezoneFit.record?.to?.techName || null)
+                : levelMatch?.applied ? (levelMatch.record?.to?.techName || null)
+                  : assignTechId === topRec.techId ? (topRec.techName || null) : (urgentGuard?.techName || null),
             // Either/or: a ticket the share rule gave out is counted by Spread, never moved by its cap.
             locked: urgentGuardRedirected || shareRuleAssigned || escalationLocked,
             dryRun: assignmentConfig?.dryRunMode ?? true,
@@ -1874,6 +1910,7 @@ class AssignmentPipelineService {
         urgentGuardRedirected ? urgentGuard.sentence : null,
         shareRuleAssigned ? shareRule.sentence : null,
         levelMatch?.applied ? levelMatch.sentence : null,
+        timezoneFit?.applied ? timezoneFit.sentence : null,
         spreadGuard?.sentence || null,
       ].filter(Boolean).join(' ');
 

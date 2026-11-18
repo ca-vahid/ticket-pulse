@@ -33,7 +33,8 @@ export default function TeamsEventGrid({ events = [], onChange, disabled = false
                   {extra?.(e)}
                 </div>
                 <div role="radiogroup" aria-label={e.label} className="inline-flex flex-shrink-0 overflow-hidden rounded-md border border-input">
-                  {MODES.map((m) => {
+                  {/* QA 11-17 #3: a row may offer fewer choices (e.g. Teams / Off, no Digest). */}
+                  {(Array.isArray(e.modes) && e.modes.length ? MODES.filter((m) => e.modes.includes(m.key)) : MODES).map((m, i) => {
                     const on = e.mode === m.key;
                     return (
                       <button
@@ -45,7 +46,7 @@ export default function TeamsEventGrid({ events = [], onChange, disabled = false
                         onClick={() => !on && onChange(e.key, m.key)}
                         className={`tp-focus-ring px-2.5 py-1 text-xs font-semibold transition-colors disabled:opacity-50 ${on
                           ? (m.key === 'off' ? 'bg-muted text-foreground' : 'bg-primary text-primary-foreground')
-                          : 'bg-card text-muted-foreground hover:bg-muted hover:text-foreground'} ${m.key !== 'teams' ? 'border-l border-input' : ''}`}
+                          : 'bg-card text-muted-foreground hover:bg-muted hover:text-foreground'} ${i > 0 ? 'border-l border-input' : ''}`}
                       >
                         {m.label}
                       </button>

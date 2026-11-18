@@ -2347,6 +2347,12 @@ export const assignmentLevelMatchAPI = {
   saveSettings: (patch) => api.put('/assignment-level-match/settings', patch),
 };
 
+// QA 11-17 item 1 — Time-zone fit: the switch beside Level match.
+export const assignmentTimezoneFitAPI = {
+  get: (days = 14) => api.get('/assignment-level-match/timezone-fit', { params: { days } }),
+  saveSettings: (patch) => api.put('/assignment-level-match/timezone-fit', patch),
+};
+
 // Ticket shares (QA 10-16 item 4, proof of concept): Assignment Review → Shares.
 export const assignmentSharesAPI = {
   get: (days = 14) => api.get('/assignment-shares', { params: { days } }),

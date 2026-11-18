@@ -4,6 +4,8 @@ import { agentAPI } from '../../services/api';
 import TeamsEventGrid from './TeamsEventGrid';
 import TeamsAssistantPersonal from './TeamsAssistantPersonal';
 import { TEAMS_ADMIN_STEPS, blockedDetail, statusOf } from './teamsStatus';
+import { SwitchRow } from '../ui/switch';
+import { digestTimeLabel } from './digestTimes';
 
 /**
  * My Teams notifications (plans/TEAMS_NOTIFICATIONS_PLAN.md): connection,
@@ -17,6 +19,7 @@ const REASON = {
   muted: 'ticket muted',
   disconnected: 'disconnected',
   blocked_backoff: 'paused after Teams blocked the last cards',
+  nothing_new: 'nothing new since your earlier digest',
 };
 const EVENT_WORD = {
   assigned: 'Assigned to you', requester_replied: 'Requester replied', teammate_update: 'New note or reply',
@@ -24,7 +27,9 @@ const EVENT_WORD = {
   unassigned_from_me: 'Reassigned away', sla_pre_breach: 'SLA about to breach', sla_breach: 'SLA breached',
   approval_waiting: 'Approval waiting', survey_response: 'Survey response', group_unassigned: 'New unassigned ticket', test: 'Test message', digest: 'Daily digest', agent_alert: 'My alert',
   av_submitted: 'Time away booked', av_decided: 'Time away decided', av_reminder: 'Time away reminder', av_approval_waiting: 'Time-away approval waiting',
+  survey_result: 'Survey result', on_call_start: 'On call this week',
 };
+const SCOPES = [{ key: 'mine', label: 'Mine' }, { key: 'all', label: 'Everyone’s' }];
 const PRIORITIES = [{ v: 4, l: 'Urgent only' }, { v: 3, l: 'High and above' }, { v: 2, l: 'Medium and above' }, { v: 1, l: 'Any priority' }];
 
 const ago = (d) => {
@@ -91,6 +96,9 @@ export default function TeamsNotificationsPanel({ workspaceId }) {
 
   const setMode = (key, mode) => persist({ ...data, events: data.events.map((e) => (e.key === key ? { ...e, mode } : e)) });
   const setOpt = (patch) => persist({ ...data, options: { ...data.options, ...patch } });
+  // QA 11-17 #2: the first workspace time is the daily digest; the rest are opt-in.
+  const extraTimes = Array.isArray(data?.digestTimes) ? data.digestTimes.slice(1) : [];
+  const slots = Array.isArray(data?.options?.digestSlots) ? data.options.digestSlots : [];
   const connected = data?.connection?.connected;
   // Part C: the server's status; older servers only send the two flags.
   const status = data?.connection?.status || (data?.connection?.disconnected ? 'disconnected' : connected ? 'connected' : 'not_connected');
@@ -173,14 +181,54 @@ export default function TeamsNotificationsPanel({ workspaceId }) {
             <TeamsEventGrid
               events={data.events}
               onChange={setMode}
-              extra={(e) => (e.key === 'group_unassigned' && e.mode !== 'off' ? (
-                <label className="mt-1 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  Priority
-                  <select value={data.options.groupMinPriority} onChange={(ev) => setOpt({ groupMinPriority: Number(ev.target.value) })} className="tp-focus-ring rounded border border-input bg-card px-1.5 py-0.5 text-[11px] text-foreground">
-                    {PRIORITIES.map((p) => <option key={p.v} value={p.v}>{p.l}</option>)}
-                  </select>
-                </label>
-              ) : null)}
+              extra={(e) => {
+                if (e.key === 'group_unassigned' && e.mode !== 'off') {
+                  return (
+                    <label className="mt-1 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                      Priority
+                      <select value={data.options.groupMinPriority} onChange={(ev) => setOpt({ groupMinPriority: Number(ev.target.value) })} className="tp-focus-ring rounded border border-input bg-card px-1.5 py-0.5 text-[11px] text-foreground">
+                        {PRIORITIES.map((p) => <option key={p.v} value={p.v}>{p.l}</option>)}
+                      </select>
+                    </label>
+                  );
+                }
+                // QA 11-17 #3: what this one message does differently.
+                if (e.key === 'on_call_start') {
+                  return <div className="text-[11px] text-muted-foreground/75">One message when your on-call period starts. It comes through quiet hours and outside your work hours.</div>;
+                }
+                // QA 11-17 #4: admins and reviewers choose whose results.
+                if (e.key === 'survey_result' && e.mode !== 'off') {
+                  const scope = data.options.surveyScope === 'all' && data.surveyScopeChoice ? 'all' : 'mine';
+                  return (
+                    <div className="mt-1 space-y-1">
+                      <div className="text-[11px] text-muted-foreground/75">One result per message, from the Ticket Pulse survey or FreshService CSAT{data.surveyScopeChoice ? '' : ', for tickets you handled'}.</div>
+                      {data.surveyScopeChoice && (
+                        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                          <span id="teams-survey-scope-label">Whose results</span>
+                          <div role="radiogroup" aria-labelledby="teams-survey-scope-label" className="inline-flex overflow-hidden rounded-md border border-input">
+                            {SCOPES.map((s, i) => {
+                              const on = scope === s.key;
+                              return (
+                                <button
+                                  key={s.key}
+                                  type="button"
+                                  role="radio"
+                                  aria-checked={on}
+                                  onClick={() => !on && setOpt({ surveyScope: s.key })}
+                                  className={`tp-focus-ring px-2 py-0.5 text-[11px] font-semibold ${on ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:bg-muted hover:text-foreground'} ${i > 0 ? 'border-l border-input' : ''}`}
+                                >
+                                  {s.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
+                return null;
+              }}
             />
           </div>
 
@@ -200,6 +248,21 @@ export default function TeamsNotificationsPanel({ workspaceId }) {
               <input type="time" value={data.options.digestTime} onChange={(e) => setOpt({ digestTime: e.target.value })} className="tp-focus-ring rounded border border-input bg-card px-1.5 py-0.5 text-xs text-foreground" />
               <span className="text-xs text-muted-foreground">(weekdays; anything set to Digest is listed there too)</span>
             </label>
+            {/* QA 11-17 #2: the workspace's extra digest times, each one a personal switch. */}
+            {extraTimes.length > 0 && (
+              <div className="ml-6 border-l border-border pl-3" data-testid="teams-extra-digests">
+                {extraTimes.map((t) => (
+                  <SwitchRow
+                    key={t}
+                    className="py-1.5"
+                    label={`Also send my digest at ${digestTimeLabel(t)}`}
+                    checked={slots.includes(t)}
+                    onCheckedChange={(on) => setOpt({ digestSlots: on ? [...new Set([...slots, t])].sort() : slots.filter((x) => x !== t) })}
+                  />
+                ))}
+                <p className="pb-1 text-xs text-muted-foreground">A later digest lists only what&apos;s new since your earlier one that day, and isn&apos;t sent when nothing is new. It goes out when your daily digest is on or anything is set to Digest.</p>
+              </div>
+            )}
           </div>
 
           {/* QA 10-15 #5: a plain Teams chat link, not the bot, so it works without connecting. */}

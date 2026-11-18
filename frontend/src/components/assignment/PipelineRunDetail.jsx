@@ -9,7 +9,7 @@ import {
   Loader2, Brain, MapPin, Calendar, BarChart3, Award, MessageSquare,
   ExternalLink, AlertCircle, User, FileText, Mail, Building2, Tag, Sparkles,
   RotateCcw, OctagonAlert, ShieldCheck, UserCog, Search, X, PhoneCall,
-  Webhook, RefreshCw, Play, ChevronsUp,
+  Webhook, RefreshCw, Play, ChevronsUp, Globe,
 } from 'lucide-react';
 import { escalationLine } from '../../utils/handBack';
 import { CopyBadge, prepareRunTranscriptMarkdown, transcriptMdComponents } from './StreamingComponents';
@@ -119,6 +119,7 @@ const STEP_ICONS = {
   recommendation: MessageSquare,
   noise_veto: ShieldCheck,
   noise_close_guard: ShieldCheck,
+  timezone_fit: Globe,
 };
 
 // Per-step icon tint. Unknown step types fall back to the neutral default,
@@ -162,6 +163,16 @@ function StepCard({ step }) {
           {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
         </div>
       </button>
+
+      {step.output?.kind === 'timezone_fit' && step.output.sentence ? (
+        <p className="px-3 pb-2 -mt-1 pl-11 text-xs text-foreground/85" data-testid="timezone-fit-step-sentence">
+          {step.output.sentence}
+          {step.output.mode === 'shadow' ? <span className="text-muted-foreground"> (shadow)</span> : null}
+          {step.output.mode === 'live' && !step.output.applied && step.output.notAppliedReason
+            ? <span className="text-muted-foreground"> (not applied: {step.output.notAppliedReason})</span>
+            : null}
+        </p>
+      ) : null}
 
       {expanded && (
         <div className="px-3 pb-3 space-y-3">

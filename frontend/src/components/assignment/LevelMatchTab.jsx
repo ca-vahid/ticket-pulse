@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Activity, Gauge, RefreshCw } from 'lucide-react';
 import { assignmentLevelMatchAPI } from '../../services/api';
 import { formatDateTimeInTimezone } from '../../utils/dateHelpers';
+import TimezoneFitSetting from './TimezoneFitSetting';
 
 /**
  * Assignment Review → Level match (26 Oct 2026). The AI judges the level a
@@ -137,6 +138,8 @@ export default function LevelMatchTab({ workspaceTimezone = 'America/Vancouver' 
           <span>It never overrides an urgent ticket, an escalation, a share, or a person on leave, off shift, or with a routing note.</span>
         </div>
       </section>
+
+      <TimezoneFitSetting workspaceTimezone={workspaceTimezone} />
 
       <section aria-labelledby="level-match-results">
         <h4 id="level-match-results" className="mb-2 text-xs font-medium text-muted-foreground">Last {days} days</h4>

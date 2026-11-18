@@ -155,7 +155,7 @@ export function AgendaList({ days, entries, byEmail, holidayNames = {}, emptyTex
 }
 
 /** A quiet segmented control (text only, the pressed option tinted). */
-export function Segmented({ value, onChange, options, label }) {
+export function Segmented({ value, onChange, options, label, disabled = false }) {
   return (
     <div role="group" aria-label={label} className="inline-flex overflow-hidden rounded-md border border-border text-xs">
       {options.map((o) => (
@@ -163,8 +163,9 @@ export function Segmented({ value, onChange, options, label }) {
           key={o.value}
           type="button"
           aria-pressed={value === o.value}
+          disabled={disabled}
           onClick={() => onChange(o.value)}
-          className={`tp-focus-ring px-2.5 py-1.5 ${value === o.value ? 'bg-primary/10 font-semibold text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
+          className={`tp-focus-ring px-2.5 py-1.5 disabled:cursor-not-allowed ${value === o.value ? 'bg-primary/10 font-semibold text-primary' : 'text-muted-foreground enabled:hover:bg-muted enabled:hover:text-foreground disabled:opacity-60'}`}
         >
           {o.label}
         </button>
