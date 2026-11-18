@@ -267,7 +267,7 @@ export default function RequesterDetail() {
                     {!r.isActive && <span className="text-[11px] font-semibold text-muted-foreground">inactive</span>}
                     {r.unattended && <span className="text-[11px] font-semibold text-amber-800 dark:text-amber-200" title="An automation's mailbox — nobody reads replies sent here">unattended mailbox</span>}
                   </div>
-                  {(title || department) && <p className="mt-0.5 text-sm text-muted-foreground">{[title, department].filter(Boolean).join(' · ')}</p>}
+                  {(title || department) && <p className="mt-0.5 text-sm text-muted-foreground">{[...new Set([title, department].filter(Boolean))].join(' · ')}</p>}
                   <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
                     {r.email && (
                       <button type="button" onClick={copyEmail} className="tp-focus-ring inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2 py-1 text-muted-foreground hover:text-foreground" title="Copy e-mail address">

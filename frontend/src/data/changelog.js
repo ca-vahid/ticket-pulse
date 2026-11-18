@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.95-preview';
+export const APP_VERSION = '4.3.96-preview';
 
 export const changelog = [
+  {
+    version: '4.3.96-preview',
+    date: 'November 18, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Job titles come from Entra everywhere.</strong> Search results, Teams ticket cards, approvals and the requester picker showed the old FreshService title after a promotion, while the requester page showed the new one. Entra&rsquo;s title now wins wherever a title is shown, and a department that only repeats the title is shown once.' },
+    ],
+  },
   {
     version: '4.3.95-preview',
     date: 'November 17, 2026',

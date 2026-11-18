@@ -468,8 +468,8 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                   </p>
                   {(ticket.requester?.entraJobTitle || ticket.requester?.jobTitle || ticket.requester?.entraDepartment || ticket.requester?.department) && (
                     <p className="text-muted-foreground truncate">
-                      {[ticket.requester.entraJobTitle || ticket.requester.jobTitle, ticket.requester.entraDepartment || ticket.requester.department]
-                        .filter(Boolean).join(' · ')}
+                      {[...new Set([ticket.requester.entraJobTitle || ticket.requester.jobTitle, ticket.requester.entraDepartment || ticket.requester.department]
+                        .filter(Boolean))].join(' · ')}
                     </p>
                   )}
                   {ticket.requester?.email && (

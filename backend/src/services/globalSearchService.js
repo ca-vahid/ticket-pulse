@@ -1,6 +1,7 @@
 import prisma from './prisma.js';
 import ticketService from './ticketService.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
+import { requesterTitle } from '../utils/requesterTitle.js';
 
 /**
  * Multi-entity search behind GET /api/search (QA 08-04 #2, Phase 7).
@@ -281,7 +282,7 @@ class GlobalSearchService {
           { email: { contains: q, mode: 'insensitive' } },
         ],
       },
-      select: { id: true, name: true, email: true, department: true, entraDepartment: true, jobTitle: true },
+      select: { id: true, name: true, email: true, department: true, entraDepartment: true, jobTitle: true, entraJobTitle: true },
       orderBy: { name: 'asc' },
       take: SECTION_TAKE * 3,
     });
@@ -290,7 +291,7 @@ class GlobalSearchService {
       const fuzzy = await this._fuzzyPeople('requesters', q, 'is_active = true');
       if (fuzzy.length) {
         fuzzyIds = new Map(fuzzy.map((f, i) => [Number(f.id), i]));
-        rows = await prisma.requester.findMany({ where: { id: { in: [...fuzzyIds.keys()] } }, select: { id: true, name: true, email: true, department: true, entraDepartment: true, jobTitle: true } });
+        rows = await prisma.requester.findMany({ where: { id: { in: [...fuzzyIds.keys()] } }, select: { id: true, name: true, email: true, department: true, entraDepartment: true, jobTitle: true, entraJobTitle: true } });
       }
     }
     let counts = new Map();
@@ -319,7 +320,7 @@ class GlobalSearchService {
         name: r.name,
         email: r.email,
         department: r.department || r.entraDepartment || null,
-        jobTitle: r.jobTitle || null,
+        jobTitle: requesterTitle(r),
         ticketCount: counts.get(r.id) || 0,
         ...(fuzzyIds ? { fuzzy: true } : {}),
       }))

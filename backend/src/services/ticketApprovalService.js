@@ -1,3 +1,4 @@
+import { requesterTitle } from '../utils/requesterTitle.js';
 import crypto from 'node:crypto';
 import sanitizeHtml from 'sanitize-html';
 import prisma from './prisma.js';
@@ -751,7 +752,7 @@ class TicketApprovalService {
         requester: requester ? {
           name: requester.name || null,
           email: showEmail ? (requester.email || null) : null,
-          title: requester.jobTitle || requester.entraJobTitle || null,
+          title: requesterTitle(requester),
           department: requester.department || requester.entraDepartment || null,
           location: requester.entraOfficeLocation || requester.entraCity || null,
           photoUrl: requester.email ? photoUrl('requester') : null,
@@ -2251,7 +2252,7 @@ class TicketApprovalService {
 
     const requesterFacts = {
       name: requester.name || null,
-      title: requester.jobTitle || requester.entraJobTitle || null,
+      title: requesterTitle(requester),
       department: requester.department || requester.entraDepartment || null,
       location: requester.entraOfficeLocation || requester.entraCity || null,
     };

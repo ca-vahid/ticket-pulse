@@ -20,6 +20,7 @@ import { resolveCategoryNames } from '../services/categoryNameResolver.js';
 import ticketResubmissionService, { normalizeExternalRef } from '../services/ticketResubmissionService.js';
 import { buildOpenApiSpec, renderDocsPage } from './apiV1.openapi.js';
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
+import { requesterTitle } from '../utils/requesterTitle.js';
 
 /**
  * Public integration API (/api/v1) — key-authenticated, workspace-scoped,
@@ -251,7 +252,7 @@ function contactShape(r) {
     id: r.id, name: r.name, email: r.email || null, phone: r.phone || null,
     department: r.department || r.entraDepartment || null, location: r.entraOfficeLocation || null,
     // ContinuIT C3: the title, from FreshService or Entra — whichever is filled.
-    jobTitle: r.jobTitle || r.entraJobTitle || null,
+    jobTitle: requesterTitle(r),
     // Simorgh A4: an unattended mailbox never receives requester-facing mail.
     unattended: r.unattended === true,
   };

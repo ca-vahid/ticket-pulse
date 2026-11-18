@@ -15,6 +15,7 @@
  *  - agent + admin APIs            ← routes/teams.routes.js
  * Nothing here ever throws into the ticket pipeline.
  */
+import { requesterTitle } from '../utils/requesterTitle.js';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import bot from '../integrations/teamsBotClient.js';
@@ -825,7 +826,7 @@ class TeamsNotificationService {
         id: true, workspaceId: true, subject: true, priority: true, dueBy: true, freshserviceTicketId: true, nativeNumber: true, origin: true,
         assignedTechId: true, category: true, subCategory: true, description: true, descriptionText: true,
         internalCategory: { select: { name: true } }, internalSubcategory: { select: { name: true } },
-        requester: { select: { name: true, jobTitle: true, entraOfficeLocation: true, entraCity: true } },
+        requester: { select: { name: true, jobTitle: true, entraJobTitle: true, entraOfficeLocation: true, entraCity: true } },
         workspace: { select: { defaultTimezone: true } },
       },
     });
@@ -846,7 +847,7 @@ class TeamsNotificationService {
       dueLabel: fmtDue(t.dueBy, t.workspace?.defaultTimezone),
       overdue: Boolean(t.dueBy && t.dueBy < new Date()),
       requesterName: r.name || null,
-      requesterPlace: [r.jobTitle, r.entraOfficeLocation || r.entraCity].filter(Boolean).join(' · ') || null,
+      requesterPlace: [requesterTitle(r), r.entraOfficeLocation || r.entraCity].filter(Boolean).join(' · ') || null,
       descriptionMd: t.description ? htmlToCardMarkdown(t.description) : textToCardMarkdown(t.descriptionText),
     };
   }

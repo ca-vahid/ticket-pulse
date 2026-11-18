@@ -3318,10 +3318,10 @@ export default function TicketDetail() {
                               : ticket.requester.name}
                           </p>
                           {(() => {
-                            const role = [
+                            const role = [...new Set([
                               ticket.requester.entraJobTitle || ticket.requester.jobTitle,
                               ticket.requester.entraDepartment || ticket.requester.department,
-                            ].filter(Boolean).join(' · ');
+                            ].filter(Boolean))].join(' · ');
                             return role ? <p className="text-xs text-muted-foreground truncate" title={role}>{role}</p> : null;
                           })()}
                           {ticket.requesterId && (related?.sameRequesterCount || 0) > 0 && (

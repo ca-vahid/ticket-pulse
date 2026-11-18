@@ -2,6 +2,7 @@ import prisma from './prisma.js';
 import azureAdService from './azureAdService.js';
 import graphMailClient from '../integrations/graphMailClient.js';
 import logger from '../utils/logger.js';
+import { requesterTitle } from '../utils/requesterTitle.js';
 
 const PROFILE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -383,7 +384,7 @@ export function requesterContextFromSource(requester, ticket = null) {
     mobile: requester.mobile || null,
     department: freshserviceDepartment,
     freshserviceDepartment,
-    jobTitle: requester.jobTitle || requester.entraJobTitle || null,
+    jobTitle: requesterTitle(requester),
     freshserviceJobTitle: requester.jobTitle || null,
     entraDepartment: requester.entraDepartment || null,
     entraJobTitle: requester.entraJobTitle || null,
