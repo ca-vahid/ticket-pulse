@@ -1077,6 +1077,12 @@ export async function notifyTicketFeedback(ticketId, { score, label = null, comm
     // who answers their own survey from being told about it.
     eventContext.event.extra = { score, label, comment, updated, byEmail: requesterEmail || ticket.requester?.email || null };
     await dispatchTeamsNotifications(eventContext);
+    // QA 11-17 #4: "A survey result comes in" (the handler, and admins who chose everyone's).
+    import('./teamsExtraNotices.js')
+      .then(({ default: extras }) => extras.notifySurveyResult({
+        ticketId: ticket.id, source: 'ticketpulse', score, outOf: 5, ratingLabel: label, comment, updated, resultKey: `${score}:${stamp.split(':').pop()}`,
+      }))
+      .catch((err) => logger.warn(`Survey result notice skipped for ticket ${ticketId}: ${err.message}`));
     return { status: 'dispatched' };
   } catch (err) {
     logger.warn(`Survey response notice skipped for ticket ${ticketId}: ${err.message}`);

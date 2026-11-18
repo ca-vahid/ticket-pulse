@@ -25,8 +25,16 @@ import { isOnCallNow } from './urgentResponse/onCallNow.js';
 import { findNoteImages, noteImagePath, noteTextForPreview, noteTextWithoutMarkers, tokenFromDecisionUrl } from './approvalNoteImages.js';
 import { closeReasonLabel } from '../utils/approvalCloseReasons.js';
 import { myOpenTickets, openTicketScopes } from './myOpenTickets.js';
+import {
+  cleanTimes, digestSlotsFor, isDigestTime, optedExtraTimes, planDigest, sinceSummary, workspaceDigestTimes,
+} from './teamsDigestSlots.js';
 
-/** What an agent can choose from. mode: 'teams' | 'digest' | 'off'. */
+/**
+ * What an agent can choose from. mode: 'teams' | 'digest' | 'off'.
+ * modes (optional): the only choices that row offers. offeredBy (optional):
+ * the workspace switch (Settings → Teams) that must be on for the row to show
+ * and for anything to be sent.
+ */
 export const EVENTS = [
   { key: 'assigned', label: 'A ticket is assigned to me', group: 'My tickets', mode: 'teams' },
   { key: 'requester_replied', label: 'The requester replies on my ticket', group: 'My tickets', mode: 'teams' },
@@ -46,9 +54,21 @@ export const EVENTS = [
   { key: 'av_decided', label: 'My time-away request is approved, denied or cancelled by someone else', group: 'Time away', mode: 'teams' },
   { key: 'av_reminder', label: 'A reminder the working day before my time away starts', group: 'Time away', mode: 'teams' },
   { key: 'av_approval_waiting', label: 'A time-away request is waiting for my approval', group: 'Time away', mode: 'teams' },
+  // QA 11-17 #4: survey results (Ticket Pulse survey and FreshService CSAT), mine or everyone's.
+  { key: 'survey_result', label: 'A survey result comes in', group: 'Surveys', mode: 'off', offeredBy: 'surveyResults' },
+  // QA 11-17 #3: once, when my on-call period starts. No Digest: a digest would be late.
+  { key: 'on_call_start', label: "I'm on call this week", group: 'On call', mode: 'teams', modes: ['teams', 'off'], offeredBy: 'onCallNotice' },
 ];
 const EVENT_KEYS = new Set(EVENTS.map((e) => e.key));
 const MODES = new Set(['teams', 'digest', 'off']);
+const EVENT_MODES = new Map(EVENTS.map((e) => [e.key, new Set(e.modes || MODES)]));
+const modeOk = (key, v) => Boolean(EVENT_MODES.get(key)?.has(v));
+export const SURVEY_SCOPES = ['mine', 'all'];
+
+/** The rows a person sees in this workspace: the ones its switches offer. */
+export function offeredEvents(ws = {}) {
+  return EVENTS.filter((e) => !e.offeredBy || ws?.[e.offeredBy] === true);
+}
 
 export const DEFAULT_OPTIONS = {
   respectAway: true, // silent on leave / outside work hours (urgent still comes)
@@ -59,8 +79,12 @@ export const DEFAULT_OPTIONS = {
   // QA 10-15 #5: the urgency page offers requesters a Teams chat with me.
   // Personal opt-in only: a workspace default can never turn it on.
   requesterTeamsChat: false,
+  // QA 11-17 #2: the extra workspace digest times this person switched on.
+  digestSlots: [],
+  // QA 11-17 #4: whose survey results; 'all' only counts for admins and reviewers.
+  surveyScope: 'mine',
 };
-const PERSONAL_ONLY_OPTIONS = ['requesterTeamsChat'];
+const PERSONAL_ONLY_OPTIONS = ['requesterTeamsChat', 'digestSlots', 'surveyScope'];
 
 /** Ticket event type → [preference key, recipient kind]. Shared with webPushService. */
 export const EVENT_MAP = {
@@ -114,7 +138,7 @@ export function effectivePrefs(wsDefaults = null, row = null) {
   for (const e of EVENTS) {
     const own = row?.events?.[e.key];
     const ws = wsDefaults?.events?.[e.key];
-    events[e.key] = MODES.has(own) ? own : (MODES.has(ws) ? ws : e.mode);
+    events[e.key] = modeOk(e.key, own) ? own : (modeOk(e.key, ws) ? ws : e.mode);
   }
   const wsOptions = { ...(wsDefaults?.options || {}) };
   for (const k of PERSONAL_ONLY_OPTIONS) delete wsOptions[k];
@@ -250,18 +274,42 @@ class TeamsNotificationService {
 
   async workspaceSettings(workspaceId) {
     const row = await prisma.notificationWorkspaceSetting.findUnique({ where: { workspaceId: Number(workspaceId) } }).catch(() => null);
+    const defaults = row?.defaults || { events: {}, options: {} };
+    // QA 11-17: workspace-only switches ride in the same row, under
+    // defaults.extras (never merged into anybody's own options).
+    const extras = defaults.extras || {};
     return {
       workspaceId: Number(workspaceId),
       teamsEnabled: row?.teamsEnabled === true,
-      defaults: row?.defaults || { events: {}, options: {} },
+      defaults,
       channelWebhookUrl: row?.channelWebhookUrl || null,
       channelMinPriority: row?.channelMinPriority ?? 3,
+      // #2: the daily digest time first (the workspace default), then the extra Pacific times.
+      digestTimes: workspaceDigestTimes(defaults.options?.digestTime, extras.digestTimes),
+      // #3: tell the on-call person when their on-call period starts.
+      onCallNotice: extras.onCallNotice === true,
+      // #4: offer "A survey result comes in".
+      surveyResults: extras.surveyResults === true,
     };
   }
 
   async saveWorkspaceSettings(workspaceId, input = {}, actorEmail = null) {
     const cur = await this.workspaceSettings(workspaceId);
     const defaults = cleanPrefs(input.defaults ?? cur.defaults);
+    const extras = { ...(cur.defaults?.extras || {}) };
+    if (input.digestTimes !== undefined) {
+      const list = Array.isArray(input.digestTimes) ? input.digestTimes : [];
+      if (!list.length || !isDigestTime(list[0])) throw Object.assign(new Error('Give the daily digest time as HH:MM'), { statusCode: 400 });
+      if (list.some((t) => !isDigestTime(t))) throw Object.assign(new Error('Digest times are HH:MM, e.g. 15:00'), { statusCode: 400 });
+      if (cleanTimes(list, 99).length > 4) throw Object.assign(new Error('A workspace can have at most 4 digest times'), { statusCode: 400 });
+      defaults.options = { ...defaults.options, digestTime: list[0] };
+      extras.digestTimes = cleanTimes(list.slice(1)).filter((t) => t !== list[0]).slice(0, 3);
+    } else if (cur.defaults?.extras?.digestTimes) {
+      extras.digestTimes = cleanTimes(cur.defaults.extras.digestTimes).slice(0, 3);
+    }
+    if (typeof input.onCallNotice === 'boolean') extras.onCallNotice = input.onCallNotice;
+    if (typeof input.surveyResults === 'boolean') extras.surveyResults = input.surveyResults;
+    if (Object.keys(extras).length) defaults.extras = extras;
     const url = input.channelWebhookUrl === undefined ? cur.channelWebhookUrl : (String(input.channelWebhookUrl || '').trim() || null);
     if (url && !/^https:\/\/[^\s]+$/i.test(url)) throw Object.assign(new Error('The channel webhook must be an https:// URL'), { statusCode: 400 });
     const data = {
@@ -1091,27 +1139,51 @@ class TeamsNotificationService {
 
   start() {
     if (this.digestTimer || !bot.isTeamsConfigured()) return;
-    this.digestTimer = setInterval(() => this.runDigests().catch((err) => logger.warn(`Teams digest run failed: ${err.message}`)), 10 * 60 * 1000);
+    this.digestTimer = setInterval(() => {
+      this.runDigests().catch((err) => logger.warn(`Teams digest run failed: ${err.message}`));
+      // QA 11-17 #3: the on-call start notice rides the same 10-minute tick.
+      import('./teamsExtraNotices.js')
+        .then(({ default: extras }) => extras.runOnCallNotices())
+        .catch((err) => logger.warn(`Teams on-call notices failed: ${err.message}`));
+    }, 10 * 60 * 1000);
     this.digestTimer.unref?.();
   }
 
+  /** True inside the running app (start() was called); scripts never start it. */
+  isRunning() {
+    return Boolean(this.digestTimer);
+  }
+
+  /**
+   * Digests. QA 11-17 #2: up to four times a day. The person's own daily
+   * digest time (their zone) as before, plus the extra workspace times
+   * (Pacific) they switched on. One digest per time per day: a time is due
+   * when it has passed and last_digest_at is older than it (durable across
+   * restarts). A later digest the same day lists only what is new since the
+   * earlier one; with nothing new it is not sent.
+   */
   async runDigests(now = new Date()) {
     const rows = await prisma.notificationPreference.findMany({});
     for (const row of rows) {
       const ws = await this.workspaceSettings(row.workspaceId);
       if (!ws.teamsEnabled) continue;
       const prefs = effectivePrefs(ws.defaults, row);
-      const wantsDigest = prefs.options.dailyDigest || Object.values(prefs.events).includes('digest');
+      const wantsDigest = prefs.options.dailyDigest || offeredEvents(ws).some((e) => prefs.events[e.key] === 'digest');
       if (!wantsDigest) continue;
       const tech = await prisma.technician.findUnique({ where: { id: row.technicianId }, select: { id: true, name: true, email: true, timezone: true } });
       if (!tech?.email) continue;
       const tz = tech.timezone || 'America/Vancouver';
-      if (localHHMM(tz, now) < (prefs.options.digestTime || '08:00')) continue;
-      if (row.lastDigestAt && localDay(tz, row.lastDigestAt) === localDay(tz, now)) continue;
-      if (['Sat', 'Sun'].includes(localWeekday(tz, now))) continue;
+      // Weekends are judged per slot, in the slot's own zone (digestSlotsFor).
+      const slots = digestSlotsFor({ now, firstTime: prefs.options.digestTime || '08:00', firstTz: tz, extras: optedExtraTimes(ws.digestTimes, prefs.options.digestSlots) });
+      const plan = planDigest({ slots, lastDigestAt: row.lastDigestAt, now });
+      // already_today: the daily digest went out today before the person moved their time.
+      if (!plan || plan.skip) continue;
+      const { due, sinceLabel } = plan;
+      const base = { workspaceId: row.workspaceId, email: tech.email, technicianId: tech.id, eventKey: 'digest' };
       try {
-        const card = await this._digestCardFor(tech.email, { workspaceId: row.workspaceId, since: row.lastDigestAt });
-        if (card) await this._send(tech.email, card, { summary: 'Your tickets today', workspaceId: row.workspaceId, technicianId: tech.id, eventKey: 'digest' });
+        const card = await this._digestCardFor(tech.email, { workspaceId: row.workspaceId, since: row.lastDigestAt, sinceLabel });
+        if (card) await this._send(tech.email, card, { summary: sinceLabel || 'Your tickets today', workspaceId: row.workspaceId, technicianId: tech.id, eventKey: 'digest' });
+        else if (sinceLabel) await this._record({ ...base, status: 'skipped', reason: 'nothing_new', summary: `${due.label} digest` });
       } catch (err) {
         logger.warn(`Teams digest for ${tech.email} failed: ${err.message}`);
       }
@@ -1119,9 +1191,15 @@ class TeamsNotificationService {
     }
   }
 
-  async _digestCardFor(email, { workspaceId = null, since = null } = {}) {
+  /**
+   * The digest card. sinceLabel (a later digest the same day): only what is
+   * new since `since` - the notices held for the digest and the tickets
+   * assigned to the person since then; null when there is nothing new.
+   */
+  async _digestCardFor(email, { workspaceId = null, since = null, sinceLabel = null } = {}) {
     const techs = await prisma.technician.findMany({ where: { email: { equals: lc(email), mode: 'insensitive' }, ...(workspaceId ? { workspaceId } : {}) }, select: { id: true, name: true, workspaceId: true, timezone: true } });
     if (!techs.length) return null;
+    if (sinceLabel && since) return this._sinceDigestCard(email, techs, { since, sinceLabel });
     // Open = an Open- or Pending-base status, noise left out, real counts (7 Oct
     // 2026); the rule lives in myOpenTickets.js, shared with the Teams assistant.
     const now = new Date();
@@ -1144,6 +1222,43 @@ class TeamsNotificationService {
       rows,
       held,
       queueUrl: `${baseUrl()}/tickets?view=mine`,
+    });
+  }
+
+  /** QA 11-17 #2: a later digest the same day - what is new since the earlier one. */
+  async _sinceDigestCard(email, techs, { since, sinceLabel }) {
+    const now = new Date();
+    const tz = techs[0].timezone || 'America/Vancouver';
+    const held = await Promise.resolve().then(() => prisma.teamsDelivery.findMany({
+      where: { email: lc(email), status: 'digest', createdAt: { gt: since } },
+      orderBy: { id: 'desc' }, take: 50, select: { eventKey: true, summary: true },
+    })).catch(() => []) || [];
+    const scopes = await openTicketScopes(techs);
+    const where = { AND: [{ OR: scopes }, { OR: [{ assignedAt: { gt: since } }, { createdAt: { gt: since } }] }], isNoise: false };
+    const [fresh, freshCount] = await Promise.all([
+      Promise.resolve().then(() => prisma.ticket.findMany({
+        where,
+        select: { id: true, workspaceId: true, subject: true, dueBy: true, priority: true, status: true, freshserviceTicketId: true, nativeNumber: true, origin: true },
+        orderBy: [{ dueBy: { sort: 'asc', nulls: 'last' } }, { id: 'desc' }],
+        take: DIGEST_ROWS,
+      })).catch(() => []),
+      Promise.resolve().then(() => prisma.ticket.count({ where })).catch(() => 0),
+    ]);
+    const newCount = Math.max(Number(freshCount) || 0, (fresh || []).length);
+    if (!newCount && !held.length) return null;
+    const mine = await myOpenTickets(techs, { take: 0, now, tz }).catch(() => null);
+    const today = localDay(tz, now);
+    return digestCard({
+      name: techs[0].name,
+      counts: { open: mine?.counts?.open ?? 0, overdue: mine?.counts?.overdue ?? 0, dueToday: mine?.counts?.dueToday ?? 0, waiting: 0 },
+      rows: (fresh || []).map((t) => ({
+        ref: ticketDisplayRef(t), subject: t.subject, url: this._ticketUrl(t.id), priority: t.priority,
+        overdue: Boolean(t.dueBy && t.dueBy < now), dueLabel: t.dueBy ? fmtDue(t.dueBy, tz) : '',
+        dueToday: Boolean(t.dueBy && localDay(tz, t.dueBy) === today),
+      })),
+      held,
+      queueUrl: `${baseUrl()}/tickets?view=mine`,
+      since: { label: sinceLabel, summary: sinceSummary({ held, newCount }), total: newCount },
     });
   }
 
@@ -1197,6 +1312,9 @@ class TeamsNotificationService {
       select: { status: true, reason: true, createdAt: true },
     })).catch(() => []);
     const health = deriveTeamsStatus({ conv, rows: week || [] });
+    const wsDefaultEvents = effectivePrefs(ws.defaults, null).events;
+    // QA 11-17 #4: admins and reviewers may choose everyone's survey results.
+    const surveyScopeChoice = ws.surveyResults ? await this._canSeeAllSurveys(tech.email, tech.workspaceId) : false;
     return {
       workspace: { id: tech.workspaceId, name: wsRow?.name || null },
       notAgentIn: askedRow ? { id: askedRow.id, name: askedRow.name } : null,
@@ -1207,8 +1325,15 @@ class TeamsNotificationService {
         status: health.state, lastBlockedAt: health.lastBlockedAt, missed7d: health.missed7d, emailedInstead7d: health.emailedInstead7d, backoffUntil: health.backoffUntil,
         disconnectedAt: health.disconnectedAt, disconnectedByAdmin: Boolean(conv?.disconnectedAt) && lc(conv?.disconnectedBy) !== lc(tech.email),
       },
-      events: EVENTS.map((e) => ({ key: e.key, label: e.label, group: e.group, mode: events[e.key], workspaceDefault: effectivePrefs(ws.defaults, null).events[e.key] })),
+      events: offeredEvents(ws).map((e) => ({
+        key: e.key, label: e.label, group: e.group, mode: events[e.key], workspaceDefault: wsDefaultEvents[e.key], ...(e.modes ? { modes: e.modes } : {}),
+      })),
+      // The stored scope as it is (the panel shows the choice only with
+      // surveyScopeChoice; sending a forced 'mine' back would overwrite 'all').
       options,
+      // QA 11-17 #2: every digest time of the workspace; the first is the daily digest.
+      digestTimes: ws.digestTimes,
+      surveyScopeChoice,
       mutes: mutes.map((m) => ({ ticketId: m.ticketId, until: m.until, forever: m.until >= MUTE_FOREVER, ref: byId.get(m.ticketId) ? ticketDisplayRef(byId.get(m.ticketId)) : `#${m.ticketId}`, subject: byId.get(m.ticketId)?.subject || null })),
       recent,
     };
@@ -1217,12 +1342,50 @@ class TeamsNotificationService {
   async saveMyPrefs(email, workspaceId, input = {}) {
     const tech = await this._tech(email, workspaceId);
     const clean = cleanPrefs(input, { personal: true });
+    // QA 11-17 fix: a save MERGES. The panel only sends the rows it shows
+    // (rows behind a workspace switch that is off are hidden), so a stored
+    // choice for a key not in the request is kept, never wiped.
+    const row = await prisma.notificationPreference.findUnique({ where: { workspaceId_technicianId: { workspaceId: tech.workspaceId, technicianId: tech.id } } }).catch(() => null);
+    const stored = cleanPrefs({ events: row?.events || {}, options: row?.options || {} }, { personal: true });
+    const events = { ...stored.events, ...clean.events };
+    const options = { ...stored.options, ...clean.options };
+    // The survey scope changes only when the person can choose it right now
+    // (survey results offered here, and they are an admin or reviewer). Any
+    // other save keeps what is stored: a hidden choice or a failed role check
+    // never turns an admin's "Everyone's" into "Mine".
+    if (clean.options.surveyScope !== undefined) {
+      const ws = await this.workspaceSettings(tech.workspaceId);
+      const canChoose = ws.surveyResults && await this._canSeeAllSurveys(tech.email, tech.workspaceId).catch(() => false);
+      if (!canChoose) {
+        if (stored.options.surveyScope !== undefined) options.surveyScope = stored.options.surveyScope;
+        else delete options.surveyScope;
+      }
+    }
     await prisma.notificationPreference.upsert({
       where: { workspaceId_technicianId: { workspaceId: tech.workspaceId, technicianId: tech.id } },
-      update: { events: clean.events, options: clean.options },
-      create: { workspaceId: tech.workspaceId, technicianId: tech.id, events: clean.events, options: clean.options },
+      update: { events, options },
+      create: { workspaceId: tech.workspaceId, technicianId: tech.id, events, options },
     });
     return this.myStatus(email, tech.workspaceId);
+  }
+
+  /**
+   * QA 11-17 #4: may this person choose everyone's survey results? Super
+   * admins, and the workspace's admins and reviewers (workspace_access.role).
+   * Never throws: false when it cannot tell.
+   */
+  async _canSeeAllSurveys(email, workspaceId) {
+    try {
+      const key = lc(email);
+      if (!key) return false;
+      const { getAdminEmails } = await import('../routes/auth.routes.js');
+      if ((await getAdminEmails()).map(lc).includes(key)) return true;
+      const { default: workspaceRepository } = await import('./workspaceRepository.js');
+      const role = await workspaceRepository.getAccessRole(key, Number(workspaceId));
+      return role === 'admin' || role === 'reviewer';
+    } catch {
+      return false;
+    }
   }
 
   async connectMe(email, workspaceId) {
@@ -1374,10 +1537,13 @@ class TeamsNotificationService {
  */
 export function cleanPrefs(input = {}, { personal = false } = {}) {
   const events = {};
-  for (const [k, v] of Object.entries(input?.events || {})) if (EVENT_KEYS.has(k) && MODES.has(v)) events[k] = v;
+  for (const [k, v] of Object.entries(input?.events || {})) if (EVENT_KEYS.has(k) && modeOk(k, v)) events[k] = v;
   const o = input?.options || {};
   const options = {};
   if (personal && typeof o.requesterTeamsChat === 'boolean') options.requesterTeamsChat = o.requesterTeamsChat;
+  // QA 11-17 #2 / #4: personal only (a workspace default never opts anyone in).
+  if (personal && Array.isArray(o.digestSlots)) options.digestSlots = cleanTimes(o.digestSlots).slice(0, 3);
+  if (personal && SURVEY_SCOPES.includes(o.surveyScope)) options.surveyScope = o.surveyScope;
   if (typeof o.respectAway === 'boolean') options.respectAway = o.respectAway;
   if (typeof o.urgentBypassesQuiet === 'boolean') options.urgentBypassesQuiet = o.urgentBypassesQuiet;
   if (typeof o.dailyDigest === 'boolean') options.dailyDigest = o.dailyDigest;

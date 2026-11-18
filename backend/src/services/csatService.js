@@ -92,6 +92,21 @@ class CSATService {
       });
 
       logger.info(`Updated CSAT for ticket ${ticketId}: Score ${csatData.csatScore}/${csatData.csatTotalScore}`);
+      // QA 11-17 #4: "A survey result comes in" in Teams. Fire-and-forget; it
+      // only speaks inside the running app, for results from the last 3 days,
+      // once per CSAT response (teamsExtraNotices.js).
+      import('./teamsExtraNotices.js')
+        .then(({ default: extras }) => extras.notifySurveyResult({
+          freshserviceTicketId: ticketId,
+          source: 'freshservice',
+          score: csatData.csatScore,
+          outOf: csatData.csatTotalScore,
+          ratingLabel: csatData.csatRatingText,
+          comment: csatData.csatFeedback,
+          submittedAt: csatData.csatSubmittedAt,
+          resultKey: csatData.csatResponseId ? String(csatData.csatResponseId) : null,
+        }))
+        .catch((err) => logger.warn(`Survey result notice skipped for FreshService ticket ${ticketId}: ${err.message}`));
       return true;
     } catch (error) {
       // Simplified error logging to avoid circular reference issues

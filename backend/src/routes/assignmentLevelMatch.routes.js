@@ -9,6 +9,7 @@ import { ValidationError } from '../utils/errors.js';
  *
  *   GET  /            reviewers — the mode and what the rule did (7 / 14 / 30 days)
  *   PUT  /settings    admins    — { mode: 'off' | 'shadow' | 'live' }
+ *   GET/PUT /timezone-fit        — Time-zone fit, the same shape (below)
  */
 const router = express.Router();
 
@@ -40,6 +41,29 @@ router.put('/settings', requireAdmin, asyncHandler(async (req, res) => {
   const user = sessionUser(req) || {};
   const levelMatch = await service();
   const out = await levelMatch.saveSettings(req.workspaceId, { mode }, { by: user.name || user.email || null });
+  if (out.errors.length) throw new ValidationError(out.errors.join('. '));
+  res.json({ success: true, data: { settings: out.settings, changes: out.changes } });
+}));
+
+/**
+ * Time-zone fit (QA 11-17 item 1), the switch beside Level match.
+ *   GET  /timezone-fit   reviewers — the mode and what the rule did lately
+ *   PUT  /timezone-fit   admins    — { mode: 'off' | 'shadow' | 'live' }
+ */
+const timezoneFit = async () => (await import('../services/assignmentTimezoneFit/timezoneFitService.js')).default;
+
+router.get('/timezone-fit', requireReviewer, asyncHandler(async (req, res) => {
+  const fit = await timezoneFit();
+  const data = await fit.results(req.workspaceId, { days: Number(req.query.days) || 14 });
+  res.json({ success: true, data: { ...data, canManage: await canManage(req) } });
+}));
+
+router.put('/timezone-fit', requireAdmin, asyncHandler(async (req, res) => {
+  const mode = req.body?.mode;
+  if (mode === undefined) throw new ValidationError('Nothing to change.');
+  const user = sessionUser(req) || {};
+  const fit = await timezoneFit();
+  const out = await fit.saveSettings(req.workspaceId, { mode }, { by: user.name || user.email || null });
   if (out.errors.length) throw new ValidationError(out.errors.join('. '));
   res.json({ success: true, data: { settings: out.settings, changes: out.changes } });
 }));

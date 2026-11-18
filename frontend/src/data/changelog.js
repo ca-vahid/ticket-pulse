@@ -1,6 +1,16 @@
-export const APP_VERSION = '4.3.94-preview';
+export const APP_VERSION = '4.3.95-preview';
 
 export const changelog = [
+  {
+    version: '4.3.95-preview',
+    date: 'November 17, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Closer time zones break near-ties in assignment</strong> &mdash; when the AI&rsquo;s pick is 3 or more hours from the requester and someone with nearly the same skill and score is at least 2 hours closer, that person can be put first. The requester&rsquo;s time zone comes from their office city (not FreshService&rsquo;s default &ldquo;Pacific&rdquo;). Off / Shadow / Live per workspace in Assignment Review &rarr; Level match; it never moves a pick made by an escalation, urgent-response or share rule, and never on site work. (QA 11-17 #1)' },
+      { type: 'new', html: '<strong>More than one digest a day</strong> &mdash; Settings &rarr; Teams can now hold up to four digest times (for example 9:00 AM and 3:00 PM PT). Each person turns on the extra times they want in their own Teams notifications; a later digest lists only what&rsquo;s new since the earlier one, and nothing is sent when nothing is new. (QA 11-17 #2)' },
+      { type: 'new', html: '<strong>&ldquo;You&rsquo;re on call this week&rdquo;</strong> &mdash; with the new switch in Settings &rarr; Teams on, the person on call gets one Teams message when their on-call week starts, with the dates and times. Someone covering part of a week is told about their stretch. Each person can turn it off. (QA 11-17 #3)' },
+      { type: 'new', html: '<strong>Survey results in Teams</strong> &mdash; a new row, &ldquo;A survey result comes in&rdquo; (Teams / Digest / Off), shows the rating, the comment, the ticket and who handled it. Everyone gets results for their own tickets; admins and reviewers can choose everyone&rsquo;s. Ticket Pulse surveys and FreshService CSAT both count. Offered once the workspace switch in Settings &rarr; Teams is on. (QA 11-17 #4)' },
+    ],
+  },
   {
     version: '4.3.94-preview',
     date: 'November 17, 2026',
@@ -30,7 +40,7 @@ export const changelog = [
       { type: 'new', html: '<strong>Attach files when forwarding</strong> &mdash; Forward has the same Attach button, drag-and-drop and paste as Reply; the files go with the forwarded e-mail and stay on the ticket. (QA 11-16 #2)' },
       { type: 'fix', html: '<strong>All your pasted screenshots are kept</strong> &mdash; a message can now carry up to 20 files (was 5, and the rest were silently dropped), a ticket up to 100, and anything that can&rsquo;t be added is shown in red before you send instead of disappearing. (QA 11-16 #3)' },
       { type: 'fix', html: '<strong>Replies leave from the team&rsquo;s own mailbox</strong> &mdash; in a workspace with one mailbox per team (Accounting: AP and AR), a reply goes out from the mailbox of the ticket&rsquo;s group, so an AR ticket is answered from the AR address. (QA 11-16 #6)' },
-      { type: 'improved', html: '<strong>A friendlier after-hours page</strong> &mdash; the page behind &ldquo;Raise urgency&rdquo; after hours is redesigned: &ldquo;We&rsquo;re out of the office until 5 AM&rdquo;, one question (&ldquo;Is this high priority?&rdquo;) with a clear red &ldquo;Contact after-hours support&rdquo; button and an &ldquo;It can wait until morning&rdquo; choice, and the hours as a plain table with the current row marked. It shows the ticket&rsquo;s own number (TP-&hellip;), says PT instead of PDT, and no longer names any staff.' }
+      { type: 'improved', html: '<strong>A friendlier after-hours page</strong> &mdash; the page behind &ldquo;Raise urgency&rdquo; after hours is redesigned: &ldquo;We&rsquo;re out of the office until 5 AM&rdquo;, one question (&ldquo;Is this high priority?&rdquo;) with a clear red &ldquo;Contact after-hours support&rdquo; button and an &ldquo;It can wait until morning&rdquo; choice, and the hours as a plain table with the current row marked. It shows the ticket&rsquo;s own number (TP-&hellip;), says PT instead of PDT, and no longer names any staff.' },
     ],
   },
   {

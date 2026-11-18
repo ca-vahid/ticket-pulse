@@ -4,6 +4,8 @@ import { teamsAdminAPI } from '../../services/api';
 import TeamsEventGrid from '../agent/TeamsEventGrid';
 import TeamsAssistantSettings from './TeamsAssistantSettings';
 import { TEAMS_ADMIN_STEPS, blockedDetail, statusOf } from '../agent/teamsStatus';
+import { SwitchRow } from '../ui/switch';
+import { MAX_DIGEST_TIMES, digestTimeLabel, isDigestTime } from '../agent/digestTimes';
 
 /**
  * Settings → Teams (plans/TEAMS_NOTIFICATIONS_PLAN.md): is the bot healthy,
@@ -56,6 +58,9 @@ export default function TeamsSettingsPanel() {
   const [confirmDisconnect, setConfirmDisconnect] = useState(null);
   // Part C: "Show them" narrows the list to the people a Teams policy blocks.
   const [onlyBlocked, setOnlyBlocked] = useState(false);
+  // QA 11-17 #2: adding a digest time, and changing the first (daily) one.
+  const [newTime, setNewTime] = useState('15:00');
+  const [firstDraft, setFirstDraft] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -123,7 +128,12 @@ export default function TeamsSettingsPanel() {
 
   const s = data?.settings;
   const defaults = s?.defaults || { events: {}, options: {} };
-  const gridEvents = (data?.events || []).map((e) => ({ ...e, mode: defaults.events?.[e.key] || e.mode }));
+  // QA 11-17: rows behind a workspace switch show only while it is on.
+  const gridEvents = (data?.events || [])
+    .filter((e) => !e.offeredBy || s?.[e.offeredBy] === true)
+    .map((e) => ({ ...e, mode: defaults.events?.[e.key] || e.mode }));
+  const digestTimes = Array.isArray(s?.digestTimes) && s.digestTimes.length ? s.digestTimes : [defaults.options?.digestTime || '08:00'];
+  const saveTimes = (list, label) => save({ digestTimes: [list[0], ...[...new Set(list.slice(1))].sort()] }, label);
   const connectedCount = data?.agents?.filter((a) => a.connected).length || 0;
   const blockedCount = data?.health?.blocked ?? (data?.agents || []).filter((a) => a.status === 'blocked').length;
   const disconnectedCount = data?.health?.disconnected ?? (data?.agents || []).filter((a) => a.disconnected).length;
@@ -268,6 +278,94 @@ export default function TeamsSettingsPanel() {
                 </div>
               ) : null)}
             />
+          </section>
+
+          {/* QA 11-17 #2: up to four digest times a day, Pacific. */}
+          <section aria-labelledby="teams-digest-times-heading">
+            <h3 id="teams-digest-times-heading" className="mb-1 text-sm font-semibold text-foreground">Digest times</h3>
+            <p className="mb-2 text-xs text-muted-foreground">When digests go out on weekdays, in Pacific time. The first is everyone&apos;s daily digest, and each person can move theirs. People turn the other times on for themselves; a later digest lists only what&apos;s new since the earlier one.</p>
+            <ul className="divide-y divide-border border-y border-border" aria-label="Digest times" data-testid="teams-digest-times">
+              {digestTimes.map((t, i) => (
+                <li key={t} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-1.5 text-sm">
+                  <span className="min-w-0">
+                    <span className="font-medium text-foreground">{digestTimeLabel(t)}</span>
+                    <span className="text-xs text-muted-foreground"> · {i === 0 ? 'daily digest, the default for everyone' : 'people opt in'}</span>
+                  </span>
+                  {i === 0 && firstDraft === null && (
+                    <button type="button" disabled={busy === 'save'} onClick={() => setFirstDraft(t)} className="tp-focus-ring rounded px-2 py-0.5 text-xs font-semibold text-primary hover:bg-muted disabled:opacity-50">Change</button>
+                  )}
+                  {i === 0 && firstDraft !== null && (
+                    <span className="flex items-center gap-1.5 text-xs">
+                      <input type="time" aria-label="Daily digest time" value={firstDraft} onChange={(e) => setFirstDraft(e.target.value)} className="tp-focus-ring rounded border border-input bg-card px-1.5 py-0.5 text-xs text-foreground" />
+                      <button
+                        type="button"
+                        aria-label="Save the daily digest time"
+                        disabled={busy === 'save' || !isDigestTime(firstDraft) || digestTimes.slice(1).includes(firstDraft)}
+                        onClick={() => { saveTimes([firstDraft, ...digestTimes.slice(1)], `Daily digest now at ${digestTimeLabel(firstDraft)}`); setFirstDraft(null); }}
+                        className="tp-focus-ring rounded px-2 py-0.5 font-semibold text-primary hover:bg-muted disabled:opacity-50"
+                      >
+                        Save
+                      </button>
+                      <button type="button" onClick={() => setFirstDraft(null)} className="tp-focus-ring rounded px-2 py-0.5 font-semibold text-muted-foreground hover:bg-muted">Cancel</button>
+                    </span>
+                  )}
+                  {i > 0 && (
+                    <button
+                      type="button"
+                      disabled={busy === 'save'}
+                      aria-label={`Remove ${digestTimeLabel(t)}`}
+                      onClick={() => saveTimes(digestTimes.filter((x) => x !== t), `${digestTimeLabel(t)} removed`)}
+                      className="tp-focus-ring rounded px-2 py-0.5 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+            {digestTimes.length < MAX_DIGEST_TIMES ? (
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                <label className="inline-flex items-center gap-1.5 text-muted-foreground">
+                  Add a time
+                  <input type="time" aria-label="New digest time" value={newTime} onChange={(e) => setNewTime(e.target.value)} className="tp-focus-ring rounded border border-input bg-card px-1.5 py-0.5 text-xs text-foreground" />
+                  <span>PT</span>
+                </label>
+                <button
+                  type="button"
+                  disabled={busy === 'save' || !isDigestTime(newTime) || digestTimes.includes(newTime)}
+                  onClick={() => saveTimes([...digestTimes, newTime], `Digest at ${digestTimeLabel(newTime)} added`)}
+                  className="tp-focus-ring rounded-lg border border-input bg-card px-3 py-1 font-semibold text-foreground hover:bg-muted disabled:opacity-50"
+                >
+                  Add
+                </button>
+                {digestTimes.includes(newTime) && <span className="text-muted-foreground">{digestTimeLabel(newTime)} is already on the list.</span>}
+              </div>
+            ) : (
+              <p className="mt-2 text-xs text-muted-foreground">That&apos;s the most: {MAX_DIGEST_TIMES} times a day.</p>
+            )}
+          </section>
+
+          {/* QA 11-17 #3 and #4: notices a workspace offers. */}
+          <section aria-labelledby="teams-more-notices-heading">
+            <h3 id="teams-more-notices-heading" className="text-sm font-semibold text-foreground">More notices</h3>
+            <div className="divide-y divide-border">
+              <SwitchRow
+                testId="teams-oncall-notice"
+                label="Tell the person on call when their on-call week starts"
+                description="One Teams message when their on-call period starts (the handover in Settings → Urgent Response → On-call, e.g. Mon 5:00 PM PT), with the dates. It comes through quiet hours and outside work hours. People can turn it off for themselves."
+                checked={s.onCallNotice === true}
+                disabled={busy === 'save'}
+                onCheckedChange={(on) => save({ onCallNotice: on }, on ? 'The on-call person will be told when their week starts' : 'On-call start messages are off')}
+              />
+              <SwitchRow
+                testId="teams-survey-results"
+                label="Offer survey result notices"
+                description="Adds “A survey result comes in” to each person’s Teams choices, off until they turn it on. Agents hear about tickets they handled; admins and reviewers can choose everyone’s. One result per message, never totals or rankings."
+                checked={s.surveyResults === true}
+                disabled={busy === 'save'}
+                onCheckedChange={(on) => save({ surveyResults: on }, on ? 'Survey result notices are offered in this workspace' : 'Survey result notices are no longer offered')}
+              />
+            </div>
           </section>
 
           <TeamsAssistantSettings />

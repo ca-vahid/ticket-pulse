@@ -27,6 +27,9 @@ export const EVENT_META = {
   sla_breach: { icon: '🔥', word: 'Overdue', heading: 'SLA breached', banner: 'attention' },
   approval_waiting: { icon: '✅', word: 'Approval', heading: 'Approval waiting for you', banner: 'accent' },
   survey_response: { icon: '⭐', word: 'Survey', heading: 'Survey response', banner: 'accent' },
+  // QA 11-17 #4 and #3.
+  survey_result: { icon: '⭐', word: 'Survey', heading: 'Survey result', banner: 'accent' },
+  on_call_start: { icon: '📟', word: 'On call', heading: 'Your on-call week starts', banner: 'accent' },
   group_unassigned: { icon: '🆕', word: 'New', heading: 'New unassigned ticket', banner: 'accent' },
   test: { icon: '👋', word: 'Test', heading: 'Test message', banner: 'accent' },
   av_submitted: { icon: '🗓️', word: 'Vacation Pulse', heading: 'Time away', banner: 'accent' },
@@ -322,8 +325,14 @@ export function approvalCard(a, stage = 'ask', { error = null } = {}) {
   return wrapCard(body, actions);
 }
 
-/** Daily digest. rows: [{ ref, subject, dueLabel, overdue, priority, url }]; counts: { open, overdue, dueToday } */
-export function digestCard({ name, counts, rows, queueUrl, held = [] }) {
+/**
+ * Daily digest. rows: [{ ref, subject, dueLabel, overdue, priority, url }]; counts: { open, overdue, dueToday }
+ * since (QA 11-17 #2, a later digest in the day): { label, summary, total }:
+ *   label   'Since your 9:00 AM PT digest' (the banner title)
+ *   summary '3 new unassigned tickets · 2 tickets assigned to you'
+ *   total   how many tickets were assigned since (rows are those; "more" counts against it)
+ */
+export function digestCard({ name, counts, rows, queueUrl, held = [], since = null }) {
   const tile = (n, what, color = 'Default') => ({
     type: 'Column',
     width: 'stretch',
@@ -331,7 +340,14 @@ export function digestCard({ name, counts, rows, queueUrl, held = [] }) {
     items: [text(String(n), { size: 'ExtraLarge', weight: 'Bolder', color, spacing: 'None', wrap: false }), text(what, { size: 'Small', isSubtle: true, weight: 'Bolder', spacing: 'None' })],
   });
   const body = [
-    banner({ title: `Your tickets today${name ? `, ${name.split(' ')[0]}` : ''}`, url: queueUrl, subline: new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }), icon: '☀️', word: 'Digest' }),
+    banner({
+      title: since ? since.label : `Your tickets today${name ? `, ${name.split(' ')[0]}` : ''}`,
+      url: queueUrl,
+      subline: new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'America/Vancouver' }),
+      icon: since ? '🕒' : '☀️',
+      word: 'Digest',
+    }),
+    ...(since ? [text(`**${since.label}:** ${since.summary}`, { spacing: 'Medium' })] : []),
     {
       type: 'Container',
       showBorder: true,
@@ -344,6 +360,7 @@ export function digestCard({ name, counts, rows, queueUrl, held = [] }) {
   // side columns left the subject at a dozen letters. Each ticket is now two
   // lines that use the full width: the subject (up to two lines), then a small
   // line with the priority, the ref and the due date.
+  if (since && rows.length) body.push(label('ASSIGNED TO YOU SINCE THEN'));
   rows.slice(0, 10).forEach((r, i) => {
     const [pword, pc] = PRIORITY[r.priority] || ['', 'Default'];
     const due = r.dueLabel ? (r.overdue ? `🔥 overdue · was due ${r.dueLabel}` : `due ${r.dueLabel}`) : 'no due date';
@@ -368,11 +385,13 @@ export function digestCard({ name, counts, rows, queueUrl, held = [] }) {
   });
   // "more" counts against the real number of open tickets, not the rows passed in.
   const shown = Math.min(rows.length, 10);
-  const more = Math.max(0, (Number.isFinite(Number(counts?.open)) ? Number(counts.open) : rows.length) - shown);
+  const totalRows = since ? Number(since.total) : Number(counts?.open);
+  const more = Math.max(0, (Number.isFinite(totalRows) ? totalRows : rows.length) - shown);
   if (more > 0) body.push(text(`…and ${more} more`, { size: 'Small', isSubtle: true, spacing: 'Small' }));
   if (held.length) {
     const lines = held.slice(0, 8).map((h) => `- ${EVENT_META[h.eventKey]?.icon || '•'} ${EVENT_META[h.eventKey]?.heading || 'Update'} — ${clip(h.summary, 110)}`).join('\n');
-    body.push({ type: 'Container', style: 'emphasis', showBorder: true, roundedCorners: true, spacing: 'Medium', items: [label('HELD FOR THIS DIGEST'), text(lines, { spacing: 'Small' })] });
+    const extra = held.length > 8 ? `\n\n…and ${held.length - 8} more` : '';
+    body.push({ type: 'Container', style: 'emphasis', showBorder: true, roundedCorners: true, spacing: 'Medium', items: [label(since ? 'HELD SINCE THEN' : 'HELD FOR THIS DIGEST'), text(lines + extra, { spacing: 'Small' })] });
   }
   return wrapCard(body, [{ type: 'Action.OpenUrl', title: 'Open my tickets', url: queueUrl }]);
 }
@@ -385,7 +404,64 @@ export function textCard(title, lines = [], actions = [], { icon = '👋', word 
   ], actions);
 }
 
-export default { EVENT_META, OUTCOMES, ticketCard, approvalCard, digestCard, textCard, htmlToCardMarkdown, textToCardMarkdown, splitLong };
+/**
+ * QA 11-17 #3: the on-call person, once, at the start of their on-call period.
+ * o: { sentence, rangeLabel, url }
+ *   sentence   "You're on call for after-hours support this week, Mon 16 Nov 5:00 PM PT to Mon 23 Nov 5:00 PM PT."
+ *   url        the on-call page (optional)
+ */
+export function onCallStartCard({ sentence, url = null } = {}) {
+  const meta = EVENT_META.on_call_start;
+  return wrapCard([
+    banner({ title: "You're on call", url, icon: meta.icon, word: meta.word }),
+    text(sentence || "You're on call for after-hours support.", { spacing: 'Medium' }),
+  ], url ? [{ type: 'Action.OpenUrl', title: 'Open the on-call page', url }] : []);
+}
+
+/**
+ * QA 11-17 #4: one survey result. Team-safe: a single result, never a total,
+ * an average or a ranking.
+ * s: { ratingLabel, score, outOf, comment, ref, subject, url, agentName, requesterName, source, updated }
+ *   source 'ticketpulse' | 'freshservice' (the line under the banner says which survey)
+ */
+export function surveyResultCard(s = {}) {
+  const meta = EVENT_META.survey_result;
+  const score = Number(s.score);
+  const outOf = Number(s.outOf) || 5;
+  const rating = Number.isFinite(score) && score > 0
+    ? `${s.ratingLabel ? `${s.ratingLabel} · ` : ''}${score} of ${outOf}`
+    : (s.ratingLabel || 'Answered');
+  const comment = clip(s.comment, 400);
+  const body = [
+    banner({
+      title: s.subject || 'Ticket',
+      url: s.url,
+      subline: [s.ref, s.requesterName ? `👤 ${s.requesterName}` : null].filter(Boolean).join(' · '),
+      icon: meta.icon,
+      word: meta.word,
+    }),
+    {
+      type: 'Container',
+      showBorder: true,
+      roundedCorners: true,
+      spacing: 'Medium',
+      items: [{
+        type: 'ColumnSet',
+        columns: [
+          { type: 'Column', width: 'stretch', items: [label(s.updated ? 'RATING (CHANGED)' : 'RATING'), text(`⭐ ${mdSafe(rating)}`, { spacing: 'None', weight: 'Bolder' })] },
+          { type: 'Column', width: 'stretch', items: [label('HANDLED BY'), text(mdSafe(s.agentName || 'Nobody assigned'), { spacing: 'None' })] },
+        ],
+      }],
+    },
+  ];
+  if (comment) {
+    body.push({ type: 'Container', style: 'emphasis', showBorder: true, roundedCorners: true, spacing: 'Medium', items: [label('COMMENT'), text(`"${mdSafe(comment)}"`, { spacing: 'Small' })] });
+  }
+  body.push(text(s.source === 'freshservice' ? 'From the FreshService satisfaction survey.' : 'From the Ticket Pulse "How did we do?" survey.', { size: 'Small', isSubtle: true, spacing: 'Small' }));
+  return wrapCard(body, s.url ? [{ type: 'Action.OpenUrl', title: 'Open ticket', url: s.url }] : []);
+}
+
+export default { EVENT_META, OUTCOMES, ticketCard, approvalCard, digestCard, textCard, onCallStartCard, surveyResultCard, htmlToCardMarkdown, textToCardMarkdown, splitLong };
 
 // ---------------------------------------------------------------- Autofill (QA 10-01 #3)
 

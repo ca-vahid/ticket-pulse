@@ -156,6 +156,8 @@ class LevelMatchService {
           rejectedThisTicket: rejected.has(r.techId),
           routingNote: t.routingGuidance || null,
           assignableOnly: t.assignableOnly === true,
+          // Read by Time-zone fit (services/assignmentTimezoneFit), which reuses this list.
+          timezone: t.timezone || null,
         };
       });
   }
