@@ -40,7 +40,8 @@ export default function EmailChipsInput({
     const seen = new Set(value.map((e) => String(e).toLowerCase()));
     const fresh = [];
     for (const raw of emails) {
-      const email = String(raw).trim().toLowerCase();
+      // "Dana Fox <dana@example.com>" pasted: the chip keeps the bare address.
+      const email = String(raw).trim().replace(/^<|>$/g, '').trim().toLowerCase();
       if (!EMAIL_RE.test(email) || seen.has(email)) continue;
       seen.add(email);
       fresh.push(email);

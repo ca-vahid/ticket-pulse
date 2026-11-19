@@ -90,7 +90,12 @@ export default function WorkflowsPage() {
       activePage="workflows"
       fillViewport
       contentClassName="flex w-full flex-col px-2 py-2 sm:px-3"
-      headerProps={{ titleAddon: <WorkflowSectionTabs activeTab={activeTab} onChange={handleTabChange} className="ml-3 border-l border-border pl-3" /> }}
+      headerProps={{
+        titleAddon: <WorkflowSectionTabs activeTab={activeTab} onChange={handleTabChange} className="ml-3 border-l border-border pl-3" />,
+        // QA 11-18 #4: the section tabs take ~430 px of the bar, so the search
+        // folds to an icon below xl instead of lg here.
+        searchCollapseBelow: 'xl',
+      }}
     >
       {/* Below lg the header has no title row, so the tabs get a slim row here. */}
       <div className="flex-shrink-0 pb-2 lg:hidden">

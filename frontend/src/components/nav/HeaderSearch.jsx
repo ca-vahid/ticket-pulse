@@ -8,7 +8,10 @@ import TicketSearchBox, { viewAllSearch } from '../tickets/TicketSearchBox';
 // (keeping the other filters when you are already there). "View all N in the
 // list" is the exception (QA 10-20 #1): it drops every other filter, so the N
 // it promised are all there.
-export default function HeaderSearch({ className = '' }) {
+// QA 11-18 #4: below the header's breakpoint the same box opens in an overlay;
+// `inputRef` lets the header focus it there, `shortcut` stays on (the overlay
+// only mounts once "/" or the icon opened it).
+export default function HeaderSearch({ className = '', inputRef = null }) {
   const navigate = useNavigate();
   const location = useLocation();
   const onQueue = /^\/tickets\/?$/.test(location.pathname);
@@ -38,6 +41,7 @@ export default function HeaderSearch({ className = '' }) {
   return (
     <TicketSearchBox
       className={className}
+      inputRef={inputRef}
       size="sm"
       value={value}
       onChange={setValue}

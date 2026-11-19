@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Eye,
   Award,
@@ -10,11 +10,14 @@ import {
   ChevronDown,
   LogOut,
   RefreshCw,
+  Search,
   Settings,
   Sparkles,
   Wifi,
   WifiOff,
+  X,
 } from 'lucide-react';
+import useMediaQuery from '../hooks/useMediaQuery';
 import { useAuth } from '../contexts/AuthContext';
 import { useDashboard } from '../contexts/DashboardContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
@@ -50,6 +53,10 @@ export default function AppHeader({
   // Quiet in-title navigation (Mail Workflows, 22 Sep 2026): a page can put
   // its section tabs right after the title instead of a band of its own.
   titleAddon = null,
+  // QA 11-18 #4: below this breakpoint the search folds to an icon that opens
+  // an overlay. 'lg' (1024 px) by default; a page with a wide titleAddon (Mail
+  // Workflows' section tabs) passes 'xl' (1280 px) so the box is never squeezed.
+  searchCollapseBelow = 'lg',
   backgroundSyncRunning = false,
   backgroundSyncStep = null,
   killingSync = false,
@@ -58,6 +65,7 @@ export default function AppHeader({
   isColdLoading = false,
 }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, logout } = useAuth();
   const {
     currentWorkspace, availableWorkspaces, switchWorkspace,
@@ -123,6 +131,62 @@ export default function AppHeader({
       root.style.removeProperty('--tp-app-header-h');
     };
   }, []);
+
+  // ---- search: full box, or an icon + overlay (QA 11-18 #4) ----------------
+  // What gives way, in order: the search box shrinks to its floor (12rem),
+  // then the workspace name truncates; the status pill and the account
+  // button never shrink. Below the breakpoint the box is not squeezed at all —
+  // it becomes a 32 px icon, and "/" or a click opens the SAME HeaderSearch
+  // over the left and middle of the row. Without matchMedia (tests, old
+  // browsers) the full box shows, as before.
+  const searchWide = useMediaQuery(
+    searchCollapseBelow === 'xl' ? '(min-width: 1280px)' : '(min-width: 1024px)',
+    { fallback: true },
+  );
+  // The bar itself only shows from md up; phones never get the "/" overlay.
+  const headerShown = useMediaQuery('(min-width: 768px)', { fallback: true });
+  const searchCollapsed = !searchWide;
+  const [searchOverlayOpen, setSearchOverlayOpen] = useState(false);
+  const searchInputRef = useRef(null);
+  const searchToggleRef = useRef(null);
+  const searchOverlayRef = useRef(null);
+
+  useEffect(() => { if (!searchCollapsed) setSearchOverlayOpen(false); }, [searchCollapsed]);
+  // A result was opened or applied (the address changed): the overlay has done its job.
+  const routeKey = `${location.pathname}${location.search}`;
+  useEffect(() => { setSearchOverlayOpen(false); }, [routeKey]);
+
+  const closeSearchOverlay = ({ restoreFocus = true } = {}) => {
+    setSearchOverlayOpen(false);
+    if (restoreFocus) searchToggleRef.current?.focus();
+  };
+
+  // "/" opens the overlay while the box is folded (TicketSearchBox's own "/"
+  // covers the full box). Same editable-target rule as the box.
+  useEffect(() => {
+    if (!searchCollapsed || searchOverlayOpen || !headerShown) return undefined;
+    const onKey = (e) => {
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target;
+      if (t && typeof t.closest === 'function' && t.closest('input, textarea, select, [contenteditable="true"], [contenteditable=""], [role="textbox"]')) return;
+      e.preventDefault();
+      setSearchOverlayOpen(true);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [searchCollapsed, searchOverlayOpen, headerShown]);
+
+  // Open: focus the field. A press outside the overlay (and its toggle) closes it.
+  useEffect(() => {
+    if (!searchOverlayOpen) return undefined;
+    searchInputRef.current?.focus();
+    const onDown = (e) => {
+      if (searchOverlayRef.current?.contains(e.target) || searchToggleRef.current?.contains(e.target)) return;
+      setSearchOverlayOpen(false);
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  }, [searchOverlayOpen]);
 
   // Server broadcast: someone's "Sync now" hit the already-running guard.
   const lastSkipSeenRef = useRef(null);
@@ -261,21 +325,23 @@ export default function AppHeader({
 
     if (!multi) {
       return (
-        <span className="inline-flex min-w-0 max-w-[15rem] items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 dark:border-blue-400/30 dark:bg-blue-500/15 dark:text-blue-200">
+        <span title={workspaceName} className="inline-flex min-w-[3rem] max-w-[15rem] items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 dark:border-blue-400/30 dark:bg-blue-500/15 dark:text-blue-200">
           {pillInner}
         </span>
       );
     }
 
     return (
-      <div className="relative flex-shrink-0" data-tp-header-popup>
+      // QA 11-18 #4: the one thing on the left that may truncate when the row
+      // runs out of room (full name in the tooltip).
+      <div className="relative min-w-[3rem] max-w-[15rem]" data-tp-header-popup>
         <button
           type="button"
           onClick={() => { setWorkspaceMenuOpen((o) => !o); setUserMenuOpen(false); setStatusOpen(false); }}
           aria-haspopup="menu"
           aria-expanded={workspaceMenuOpen}
-          title="Switch workspace"
-          className="inline-flex min-w-0 max-w-[15rem] items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-400/30 dark:bg-blue-500/15 dark:text-blue-200 dark:hover:bg-blue-500/25 tp-focus-ring"
+          title={`Switch workspace (${workspaceName})`}
+          className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-400/30 dark:bg-blue-500/15 dark:text-blue-200 dark:hover:bg-blue-500/25 tp-focus-ring"
         >
           {pillInner}
         </button>
@@ -416,8 +482,10 @@ export default function AppHeader({
         }}
         aria-haspopup="dialog"
         aria-expanded={statusOpen}
-        title={statusTone === 'offline' && canRetrySse ? 'Realtime feed offline — click to reconnect' : 'Data status & sync'}
-        className={`inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition-colors tp-focus-ring ${STATUS_PILL[statusTone]}`}
+        title={statusTone === 'offline' && canRetrySse
+          ? 'Realtime feed offline — click to reconnect'
+          : `Data status & sync${timeLabel ? ` · refreshed ${timeLabel}` : ''}`}
+        className={`inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-xs font-semibold transition-colors tp-focus-ring ${STATUS_PILL[statusTone]}`}
       >
         {statusTone === 'sync' ? (
           <span className="relative flex h-4 w-4 items-center justify-center">
@@ -448,13 +516,15 @@ export default function AppHeader({
         <span>
           {STATUS_LABEL[statusTone] || (canRetrySse ? 'Offline — Reconnect' : 'Offline')}
         </span>
-        {timeLabel && statusTone !== 'offline' && (
-          <span className="hidden font-medium opacity-70 lg:inline">· {timeLabel}</span>
+        {/* The time drops whenever the search is folded (QA 11-18 #4); it stays
+            in the tooltip and in the popover's "Data refreshed" row. */}
+        {timeLabel && statusTone !== 'offline' && !searchCollapsed && (
+          <span className="hidden font-medium opacity-70 lg:inline" data-testid="status-pill-time">· {timeLabel}</span>
         )}
       </button>
 
       {statusOpen && (
-        <div className="absolute right-0 top-full z-50 mt-2 w-72 rounded-lg border border-border bg-card p-3.5 text-xs text-foreground shadow-xl shadow-slate-900/10 dark:shadow-black/50 animate-popIn">
+        <div data-testid="status-popover" className="absolute right-0 top-full z-50 mt-2 w-72 whitespace-normal rounded-lg border border-border bg-card p-3.5 text-xs text-foreground shadow-xl shadow-slate-900/10 dark:shadow-black/50 animate-popIn">
           <div className="flex items-center justify-between py-1">
             <span className="text-muted-foreground">Realtime feed</span>
             <span className={`inline-flex items-center gap-1.5 font-semibold ${
@@ -649,7 +719,7 @@ export default function AppHeader({
         {userMenuOpen && (
           <div
             role="menu"
-            className="settings-scrollbar absolute right-0 top-full z-50 mt-2 max-h-[calc(100dvh-4.5rem)] w-60 overflow-y-auto overscroll-contain rounded-lg border border-border bg-card py-1 shadow-xl shadow-slate-900/10 dark:shadow-black/50 animate-popIn"
+            className="settings-scrollbar absolute right-0 top-full z-50 mt-2 max-h-[calc(100dvh-4.5rem)] w-60 whitespace-normal overflow-y-auto overscroll-contain rounded-lg border border-border bg-card py-1 shadow-xl shadow-slate-900/10 dark:shadow-black/50 animate-popIn"
           >
             {/* QA 09-22 #7: the name opens the profile page (photo, contact, links). */}
             <button
@@ -770,31 +840,85 @@ export default function AppHeader({
 
       {/* Desktop bar — phones get no top chrome (MobileTabBar is the nav). */}
       <header ref={headerRef} className="sticky top-0 z-40 hidden border-b border-border bg-card shadow-sm md:block">
-        <div className="flex items-center gap-3 px-4 py-2 lg:px-6">
-          <div className="flex min-w-0 items-center gap-3">
-            {renderWorkspaceControl()}
-            <button
-              type="button"
-              onClick={() => setShowChangelog(true)}
-              title="What's new — view changelog"
-              className="flex-none rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 transition-colors hover:bg-blue-100 dark:border-blue-400/30 dark:bg-blue-500/15 dark:text-blue-300 dark:hover:bg-blue-500/25 tp-focus-ring"
-            >
-              v{APP_VERSION}
-            </button>
-            {pageTitle && (
-              <h1 className="hidden truncate text-sm font-bold tracking-tight text-foreground lg:block">{pageTitle}</h1>
-            )}
-            {titleAddon && <div className="hidden min-w-0 items-center lg:flex">{titleAddon}</div>}
-          </div>
+        {/* QA 11-18 #4: nothing overlaps. The left+middle block takes what is
+            left after the right cluster; inside it the search box grows into
+            the spare room (floor 12rem, cap max-w-xl) and the workspace name is
+            the last thing to truncate. overflow-x-clip is the final guard
+            against a horizontal scroll (popovers drop DOWN, so they are not cut). */}
+        <div className="flex items-center gap-3 overflow-x-clip px-4 py-2 lg:px-6" data-testid="header-row">
+          <div className="relative flex min-w-0 flex-1 items-center gap-3">
+            {/* No overflow clip here: the workspace menu (w-64) drops from inside
+                this block and must never be cut. Shrinking is min-w-0 + the
+                workspace name's truncation; only the title addon clips itself. */}
+            <div className="flex min-w-0 items-center gap-3" data-testid="header-left">
+              {renderWorkspaceControl()}
+              <button
+                type="button"
+                onClick={() => setShowChangelog(true)}
+                title="What's new — view changelog"
+                data-testid="header-version"
+                className="hidden flex-none rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 transition-colors hover:bg-blue-100 dark:border-blue-400/30 dark:bg-blue-500/15 dark:text-blue-300 dark:hover:bg-blue-500/25 tp-focus-ring xl:inline-flex"
+              >
+                v{APP_VERSION}
+              </button>
+              {pageTitle && (
+                <h1 className="hidden max-w-[14rem] flex-none truncate text-sm font-bold tracking-tight text-foreground lg:block">{pageTitle}</h1>
+              )}
+              {/* Shrinks last (0.1 against the workspace name's 1) and clips
+                  only itself, sideways; it holds no popups. */}
+              {titleAddon && <div className="hidden min-w-0 shrink-[0.1] items-center overflow-x-clip px-1 lg:flex" data-testid="header-title-addon">{titleAddon}</div>}
+            </div>
 
-          {/* Search everywhere (16 Sep 2026): tickets, people, tasks, conversations. */}
-          <div className="flex min-w-0 flex-1 justify-center px-2">
-            <HeaderSearch className="w-full max-w-[clamp(480px,48vw,1200px)]" />
+            {/* Search everywhere (16 Sep 2026): tickets, people, tasks, conversations. */}
+            {searchWide ? (
+              <div className="flex min-w-0 flex-[1_1_12rem] justify-center px-2" data-testid="header-search-slot">
+                <HeaderSearch className="w-full max-w-xl" />
+              </div>
+            ) : (
+              <div className="flex-1" aria-hidden="true" />
+            )}
+
+            {/* Folded search, opened: covers the left and middle of the row
+                (never the status pill or the account button). Same component,
+                same results — only the frame differs. */}
+            {searchCollapsed && searchOverlayOpen && (
+              <div
+                ref={searchOverlayRef}
+                role="search"
+                aria-label="Search"
+                data-testid="header-search-overlay"
+                onKeyDown={(e) => {
+                  if (e.key !== 'Escape') return;
+                  e.stopPropagation();
+                  closeSearchOverlay();
+                }}
+                className="absolute inset-y-0 left-0 right-0 z-10 flex animate-fadeIn items-center bg-card"
+              >
+                <HeaderSearch className="w-full" inputRef={searchInputRef} />
+              </div>
+            )}
           </div>
 
           {extraActions && <div className="flex min-w-0 items-center gap-2">{extraActions}</div>}
-          {renderStatusPill()}
-          {renderUserMenu()}
+          <div className="flex flex-shrink-0 items-center gap-3" data-testid="header-right">
+            {searchCollapsed && (
+              <button
+                ref={searchToggleRef}
+                type="button"
+                onClick={() => (searchOverlayOpen ? closeSearchOverlay() : setSearchOverlayOpen(true))}
+                aria-label={searchOverlayOpen ? 'Close search' : 'Search'}
+                aria-expanded={searchOverlayOpen}
+                aria-keyshortcuts="/"
+                title={searchOverlayOpen ? 'Close search (Esc)' : 'Search (/)'}
+                data-testid="header-search-toggle"
+                className="tp-focus-ring inline-flex h-8 w-8 flex-none items-center justify-center rounded-lg border border-input bg-muted/40 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                {searchOverlayOpen ? <X className="h-4 w-4" aria-hidden="true" /> : <Search className="h-4 w-4" aria-hidden="true" />}
+              </button>
+            )}
+            {renderStatusPill()}
+            {renderUserMenu()}
+          </div>
         </div>
       </header>
 

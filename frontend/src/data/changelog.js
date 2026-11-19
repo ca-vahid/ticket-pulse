@@ -1,6 +1,16 @@
-export const APP_VERSION = '4.3.97-preview';
+export const APP_VERSION = '4.3.98-preview';
 
 export const changelog = [
+  {
+    version: '4.3.98-preview',
+    date: 'November 18, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Custom e-mail addresses in Cc and Bcc</strong> &mdash; a workflow&rsquo;s Recipients step now has its own custom-address box under To, Cc and Bcc, so a fixed address can be copied or blind-copied, not only sent to. Existing workflows send exactly as before; up to 25 custom addresses in all, with a running total, and &ldquo;Name &lt;address&gt;&rdquo; pastes are cleaned. (QA 11-18 #1)' },
+      { type: 'new', html: '<strong>Paste a list into Tasks</strong> &mdash; pasting several lines into the task box offers to add one task per line, with a preview. Bullets and numbering are stripped, and headings like &ldquo;Floor 6:&rdquo; are kept in front of the lines under them. The assignee, due date and reminder apply to every task; up to 50 at a time, and a run can be stopped. (QA 11-18 #3)' },
+      { type: 'fix', html: '<strong>The header search no longer collides with the Live status on laptops</strong> &mdash; on narrower screens the search folds into an icon (or press /) that opens a full-width search over the header, the Live status keeps its place and drops the clock, and nothing overlaps or scrolls sideways. (QA 11-18 #4)' },
+      { type: 'improved', html: '<strong>One look for Shadow switches</strong> &mdash; on Assignment Review &rarr; Level match, Level match and Time zone fit now use the same Off / Shadow / Live switch, the same one-line status under it and the same &ldquo;would have moved&rdquo; list.' },
+    ],
+  },
   {
     version: '4.3.97-preview',
     date: 'November 18, 2026',

@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
 import { formatDayTime } from './ticketUi';
+import { countNonEmptyLines, MAX_PASTED_TASKS, parsePastedTasks } from './taskPaste';
 
 const STATUS_META = {
   open: { label: 'Open', cls: 'bg-muted text-muted-foreground border-border', Icon: Circle },
@@ -61,6 +62,20 @@ function splitDue(dueAt) {
   };
 }
 
+const EMPTY_DRAFT = { title: '', assignedTechId: '', dueDate: '', dueTime: DEFAULT_DUE_TIME, remindBefore: '', notifyAgent: true };
+
+/** The add form's fields every new task shares (assignee, due, reminder, e-mail). */
+function sharedTaskFields(draft) {
+  return {
+    assignedTechId: draft.assignedTechId ? Number(draft.assignedTechId) : null,
+    dueAt: toDueIso(draft.dueDate, draft.dueTime),
+    remindBeforeMinutes: draft.dueDate && draft.remindBefore ? Number(draft.remindBefore) : null,
+    notifyAgent: draft.notifyAgent,
+  };
+}
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
 function isOverdue(task) {
   return Boolean(task.dueAt) && task.status !== 'done' && new Date(task.dueAt).getTime() < Date.now();
 }
@@ -107,9 +122,18 @@ export default function TicketTasksTab({ ticketId, technicians = [], canWrite = 
   const [error, setError] = useState(null);
   const [busyId, setBusyId] = useState(null);
   const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState({ title: '', assignedTechId: '', dueDate: '', dueTime: DEFAULT_DUE_TIME, remindBefore: '', notifyAgent: true });
+  const [draft, setDraft] = useState(EMPTY_DRAFT);
   const [editingId, setEditingId] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
+  // QA 11-18 #3: a multi-line paste waits here for "Add N tasks" / Cancel.
+  const [pasted, setPasted] = useState(null); // { tasks, headings, total, truncated }
+  const [bulkProgress, setBulkProgress] = useState(null); // { done, total, stopping }
+  const [notice, setNotice] = useState(null);
+  // The bulk run's in-flight flag lives in a ref no other handler clears, so
+  // Enter, a second click or a new paste can never start a second run.
+  const bulkRunRef = useRef(null); // { stop: boolean } while a run is going
+  const bulkRunning = bulkProgress !== null;
+  const titleInputRef = useRef(null);
   const popoverRef = useRef(null);
   const countRef = useRef(onCountChange);
   countRef.current = onCountChange;
@@ -147,21 +171,90 @@ export default function TicketTasksTab({ ticketId, technicians = [], canWrite = 
 
   const doAdd = async () => {
     const title = draft.title.trim();
-    if (!title) return;
-    setAdding(true); setError(null);
+    if (!title || adding || bulkRunRef.current) return;
+    setAdding(true); setError(null); setNotice(null);
     try {
-      await ticketsAPI.addTask(ticketId, {
-        title,
-        assignedTechId: draft.assignedTechId ? Number(draft.assignedTechId) : null,
-        dueAt: toDueIso(draft.dueDate, draft.dueTime),
-        remindBeforeMinutes: draft.dueDate && draft.remindBefore ? Number(draft.remindBefore) : null,
-        notifyAgent: draft.notifyAgent,
-      });
-      setDraft({ title: '', assignedTechId: '', dueDate: '', dueTime: DEFAULT_DUE_TIME, remindBefore: '', notifyAgent: true });
+      await ticketsAPI.addTask(ticketId, { title, ...sharedTaskFields(draft) });
+      setDraft(EMPTY_DRAFT);
       await load();
     } catch (err) {
       setError(err.response?.data?.message || err.message);
     }
+    setAdding(false);
+  };
+
+  // QA 11-18 #3: a paste with more than one non-empty line is a list — every
+  // line becomes a task, after a confirmation. A single line pastes as before.
+  const onTitlePaste = (e) => {
+    // A run is going: the list on screen is what is being added — ignore the paste.
+    if (bulkRunRef.current) { e.preventDefault(); return; }
+    const text = e.clipboardData?.getData('text/plain') || e.clipboardData?.getData('text') || '';
+    if (countNonEmptyLines(text) < 2) return;
+    e.preventDefault();
+    const parsed = parsePastedTasks(text);
+    if (parsed.tasks.length === 0) return;
+    if (parsed.tasks.length === 1) {
+      // "Floor 6:" + one line folds into one task: drop it into the box like a normal paste.
+      const el = e.currentTarget;
+      const start = el?.selectionStart ?? draft.title.length;
+      const end = el?.selectionEnd ?? start;
+      setDraft((d) => ({ ...d, title: `${d.title.slice(0, start)}${parsed.tasks[0]}${d.title.slice(end)}` }));
+      return;
+    }
+    setError(null); setNotice(null);
+    setPasted(parsed);
+  };
+
+  // Cancel before a run hides the list; during a run it stops after the
+  // task being added now (that one cannot be called back).
+  const cancelPasted = () => {
+    if (bulkRunRef.current) {
+      bulkRunRef.current.stop = true;
+      setBulkProgress((p) => (p ? { ...p, stopping: true } : p));
+      return;
+    }
+    setPasted(null);
+    titleInputRef.current?.focus();
+  };
+
+  // One create call per line, in order, through the same endpoint as Add.
+  // Sequential on purpose: FS-born tasks go through the FreshService API, so
+  // they are paced and the run stops at the first error.
+  const addPasted = async () => {
+    if (!pasted || adding || bulkRunRef.current || pasted.tasks.length === 0) return;
+    const run = { stop: false };
+    bulkRunRef.current = run;
+    const titles = pasted.tasks;
+    const shared = sharedTaskFields(draft);
+    setAdding(true); setError(null); setNotice(null);
+    let added = 0;
+    let failure = null;
+    for (const title of titles) {
+      if (run.stop) break;
+      setBulkProgress((p) => ({ done: added, total: titles.length, stopping: Boolean(p?.stopping) }));
+      try {
+        await ticketsAPI.addTask(ticketId, { title, ...shared });
+        added += 1;
+      } catch (err) {
+        failure = { title, message: err.response?.data?.message || err.message || 'Could not add the task' };
+        break;
+      }
+    }
+    if (failure) {
+      setError(`Added ${plural(added, 'task')} of ${titles.length}. Stopped at “${failure.title}”: ${failure.message}`);
+      // Keep the lines not yet added, so "Add" can try them again.
+      setPasted((p) => (p ? { ...p, tasks: titles.slice(added), truncated: false } : p));
+    } else if (run.stop && added < titles.length) {
+      setNotice(`Stopped after ${plural(added, 'task')} of ${titles.length}. The rest were not added.`);
+      setPasted(null);
+    } else {
+      setPasted(null);
+      // The shared fields reset like a single Add; whatever was typed in the box stays.
+      setDraft((d) => ({ ...EMPTY_DRAFT, title: d.title }));
+    }
+    await load();
+    bulkRunRef.current = null;
+    setBulkProgress(null);
     setAdding(false);
   };
 
@@ -442,10 +535,14 @@ export default function TicketTasksTab({ ticketId, technicians = [], canWrite = 
               <label htmlFor="new-task-title" className={fieldLabel}>Task Description</label>
               <input
                 id="new-task-title"
+                ref={titleInputRef}
                 value={draft.title}
                 onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
                 onKeyDown={(e) => { if (e.key === 'Enter') doAdd(); }}
+                onPaste={onTitlePaste}
+                disabled={bulkRunning}
                 placeholder="What needs to be done?"
+                title="Paste a list to add one task per line"
                 className="tp-focus-ring w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-sm"
               />
             </div>
@@ -508,6 +605,70 @@ export default function TicketTasksTab({ ticketId, technicians = [], canWrite = 
             <input type="checkbox" checked={draft.notifyAgent} onChange={(e) => setDraft((d) => ({ ...d, notifyAgent: e.target.checked }))} className="tp-focus-ring" />
             {isFsBorn ? 'Notify the assignee (via FreshService)' : 'Email the assignee that they were assigned'}
           </label>
+          {notice && <p role="status" className="mt-2 text-xs text-muted-foreground">{notice}</p>}
+          {pasted && (
+            <div
+              role="group"
+              aria-labelledby="paste-tasks-title"
+              data-testid="paste-tasks-confirm"
+              onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); cancelPasted(); } }}
+              className="mt-3 animate-fadeIn rounded-lg border border-border bg-card p-3"
+            >
+              <p id="paste-tasks-title" className="text-sm font-semibold text-foreground">
+                Add {plural(pasted.tasks.length, 'task')}, one per line?
+              </p>
+              <div className="mt-0.5 space-y-0.5 text-xs text-muted-foreground">
+                {pasted.headings.length > 0 && (
+                  <p>Headings like ‘{pasted.headings[0]}’ are kept in front of their lines.</p>
+                )}
+                {pasted.truncated && (
+                  <p>Only the first {MAX_PASTED_TASKS} are added; the paste had {pasted.total}. Paste the rest again afterwards.</p>
+                )}
+                <p>
+                  The assignee, due date, reminder and e-mail choice above apply to every task.
+                  {draft.notifyAgent && draft.assignedTechId ? ' The assignee gets one e-mail per task.' : ''}
+                </p>
+              </div>
+              <ol
+                aria-label="Tasks to add"
+                className="settings-scrollbar mt-2 max-h-48 overflow-y-auto rounded-md border border-border/60 bg-muted/30 py-1 text-xs"
+              >
+                {pasted.tasks.map((t, i) => (
+                  <li key={`${i}-${t}`} className="flex gap-2 px-2.5 py-0.5 text-foreground/85">
+                    <span className="w-5 flex-none text-right tabular-nums text-muted-foreground/75" aria-hidden="true">{i + 1}</span>
+                    <span className="min-w-0 break-words">{t}</span>
+                  </li>
+                ))}
+              </ol>
+              <div className="mt-2.5 flex flex-wrap items-center justify-end gap-1.5">
+                {bulkProgress && (
+                  <span role="status" className="mr-auto text-xs text-muted-foreground">
+                    {bulkProgress.stopping
+                      ? 'Stopping after this task…'
+                      : `Adding ${Math.min(bulkProgress.done + 1, bulkProgress.total)} of ${bulkProgress.total}…`}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={cancelPasted}
+                  disabled={Boolean(bulkProgress?.stopping)}
+                  title={bulkRunning ? 'Stop after the task being added now' : undefined}
+                  className="tp-focus-ring rounded-md px-2.5 py-1 text-xs font-semibold text-muted-foreground hover:bg-muted disabled:opacity-50"
+                >
+                  {bulkRunning ? 'Stop' : 'Cancel'}
+                </button>
+                <button
+                  type="button"
+                  onClick={addPasted}
+                  disabled={adding}
+                  className="tp-focus-ring inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {adding ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Plus className="h-3.5 w-3.5" aria-hidden="true" />}
+                  Add {plural(pasted.tasks.length, 'task')}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </section>

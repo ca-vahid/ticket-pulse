@@ -1170,6 +1170,74 @@ function upstreamNodeIds(nodeId, incoming) {
   return seen;
 }
 
+/**
+ * Custom e-mail addresses per section of a recipient_resolver (QA 11-18 #1).
+ *
+ *   customEmails     To  — the original key; still gated by the `custom_emails`
+ *                          token in `to`, exactly as before
+ *   ccCustomEmails   Cc  — added when present, no token needed
+ *   bccCustomEmails  Bcc — added when present, no token needed
+ *
+ * Valid addresses only, and at most 25 custom addresses across To (when its
+ * `custom_emails` box is ticked), Cc and Bcc together: an e-mail goes to at
+ * most 25 people in all (the engine's MAX_EMAIL_RECIPIENTS), so a bigger list
+ * would save and then fail on every run.
+ */
+export const RECIPIENT_CUSTOM_EMAIL_KEYS = Object.freeze({ to: 'customEmails', cc: 'ccCustomEmails', bcc: 'bccCustomEmails' });
+export const RECIPIENT_CUSTOM_EMAILS_MAX = 25;
+const RECIPIENT_EMAIL_RE = /^[^\s@,;<>()]+@[^\s@,;<>()]+\.[^\s@,;<>()]+$/;
+
+/** One typed address, cleaned: trimmed, "<a@b.c>" unwrapped, lower-case; null when not an address. */
+function cleanRecipientEmail(raw) {
+  const email = String(raw ?? '').trim().replace(/^<|>$/g, '').trim().toLowerCase();
+  return RECIPIENT_EMAIL_RE.test(email) ? email : null;
+}
+
+/** Lower-case, valid, de-duplicated, capped list for a Cc/Bcc custom-address key. */
+export function normalizeRecipientCustomEmails(value) {
+  const out = [];
+  for (const raw of Array.isArray(value) ? value : []) {
+    const email = cleanRecipientEmail(raw);
+    if (!email || out.includes(email)) continue;
+    out.push(email);
+    if (out.length >= RECIPIENT_CUSTOM_EMAILS_MAX) break;
+  }
+  return out;
+}
+
+function recipientCustomEmailErrors(node) {
+  const errors = [];
+  const counted = new Set();
+  const toList = node.data?.[RECIPIENT_CUSTOM_EMAIL_KEYS.to];
+  const toUsed = Array.isArray(node.data?.to) && node.data.to.includes('custom_emails');
+  if (toUsed && Array.isArray(toList)) {
+    for (const entry of toList) {
+      const email = cleanRecipientEmail(entry);
+      if (email) counted.add(email);
+    }
+  }
+  for (const [section, key] of [['Cc', RECIPIENT_CUSTOM_EMAIL_KEYS.cc], ['Bcc', RECIPIENT_CUSTOM_EMAIL_KEYS.bcc]]) {
+    const value = node.data?.[key];
+    if (value === undefined || value === null) continue;
+    if (!Array.isArray(value)) {
+      errors.push(`Recipients node ${node.id}: ${section} custom e-mails must be a list of addresses`);
+      continue;
+    }
+    const bad = value.find((entry) => !cleanRecipientEmail(entry));
+    if (bad !== undefined) {
+      errors.push(`Recipients node ${node.id}: "${String(bad).slice(0, 80)}" in ${section} custom e-mails is not an e-mail address`);
+    }
+    for (const entry of value) {
+      const email = cleanRecipientEmail(entry);
+      if (email) counted.add(email);
+    }
+  }
+  if (counted.size > RECIPIENT_CUSTOM_EMAILS_MAX) {
+    errors.push(`Recipients node ${node.id} has ${counted.size} custom e-mail addresses across To, Cc and Bcc; an e-mail can go to at most ${RECIPIENT_CUSTOM_EMAILS_MAX} people in all`);
+  }
+  return errors;
+}
+
 function validateGraph(definition, triggerType) {
   const errors = [];
   const ids = new Set();
@@ -1269,6 +1337,10 @@ function validateGraph(definition, triggerType) {
       if (!Number.isFinite(minutes) || minutes < 1 || minutes > 7 * 24 * 60) {
         errors.push(`Delay node ${node.id} must wait between 1 minute and 7 days`);
       }
+    }
+
+    if (node.type === 'recipient_resolver' && reachable.has(node.id)) {
+      errors.push(...recipientCustomEmailErrors(node));
     }
 
     if (node.type === 'update_ticket' && reachable.has(node.id)) {

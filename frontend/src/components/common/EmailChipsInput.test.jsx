@@ -99,6 +99,17 @@ describe('EmailChipsInput', () => {
     expect(screen.getByPlaceholderText('Max 2 addresses')).toBeDisabled();
   });
 
+  // QA 11-18 #1 review: a pasted "Name <address>" made a "<address>" chip the
+  // workflow save then refused.
+  test('an angle-bracketed address becomes a clean chip', () => {
+    const onListChange = vi.fn();
+    render(<Harness onListChange={onListChange} />);
+    fireEvent.paste(input(), { clipboardData: { getData: () => 'Dana Fox <Dana.Fox@example.com>, <eli@example.com>' } });
+    expect(onListChange).toHaveBeenLastCalledWith(['dana.fox@example.com', 'eli@example.com']);
+    expect(screen.getByText('dana.fox@example.com')).toBeInTheDocument();
+    expect(screen.queryByText('<dana.fox@example.com>')).not.toBeInTheDocument();
+  });
+
   test('no typeahead combobox semantics unless a search fn is provided (opt-in)', () => {
     render(<Harness />);
     expect(input()).not.toHaveAttribute('role', 'combobox');
