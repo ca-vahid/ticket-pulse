@@ -88,6 +88,10 @@ export function plusAddressApprovalKey(email, mailboxAddress = null) {
   return null;
 }
 
+export const UNATTENDED_ASK = 'The requester is an unattended mailbox (an alert or integration sender) and is never e-mailed. Ask the approvers or the agent instead';
+// Never address an unattended requester (QA 11-11 audit, after the workflow-engine gap).
+export const mailable = (p) => Boolean(p && p.unattended !== true);
+
 class ApprovalConversationService {
   // ------------------------------------------------------------ participants
   /**
@@ -96,7 +100,7 @@ class ApprovalConversationService {
    */
   async participants(approval) {
     const [ticket, rows] = await Promise.all([
-      prisma.ticket.findUnique({ where: { id: approval.ticketId }, select: { id: true, subject: true, workspaceId: true, origin: true, nativeNumber: true, freshserviceTicketId: true, requester: { select: { name: true, email: true } } } }),
+      prisma.ticket.findUnique({ where: { id: approval.ticketId }, select: { id: true, subject: true, workspaceId: true, origin: true, nativeNumber: true, freshserviceTicketId: true, requester: { select: { name: true, email: true, unattended: true } } } }),
       approval.requestGroupId
         ? prisma.ticketApproval.findMany({ where: { requestGroupId: approval.requestGroupId, workspaceId: approval.workspaceId }, orderBy: { id: 'asc' }, select: { id: true, approverEmail: true, approverName: true, tier: true, status: true } })
         : Promise.resolve([{ id: approval.id, approverEmail: approval.approverEmail, approverName: approval.approverName, tier: approval.tier || 1, status: approval.status }]),
@@ -104,7 +108,11 @@ class ApprovalConversationService {
     const nameOf = async (email, fallback = null) => fallback || (await resolvePersonName(email)) || String(email || '').split('@')[0];
     const requesterEmail = lc(ticket?.requester?.email);
     const agentEmail = lc(approval.requestedBy);
-    const requester = looksLikeEmail(requesterEmail) ? { role: 'requester', email: requesterEmail, name: ticket?.requester?.name || await nameOf(requesterEmail) } : null;
+    // An unattended requester (an alert or integration mailbox) stays on the
+    // request for display, flagged, and is never e-mailed (see mailable()).
+    const requester = looksLikeEmail(requesterEmail)
+      ? { role: 'requester', email: requesterEmail, name: ticket?.requester?.name || await nameOf(requesterEmail), ...(ticket?.requester?.unattended === true ? { unattended: true } : {}) }
+      : null;
     const agent = looksLikeEmail(agentEmail) ? { role: 'agent', email: agentEmail, name: await nameOf(agentEmail) } : null;
     const seen = new Set();
     const approvers = [];
@@ -183,6 +191,7 @@ class ApprovalConversationService {
     if (!cleanText) throw new ValidationError(kind === 'question' ? 'Type your question first' : 'Type your message first');
 
     const parts = await this.participants(approval);
+    if (mode === 'requester' && parts.requester?.unattended) throw new ValidationError(UNATTENDED_ASK);
     const authorEmail = lc(author?.email || approval.approverEmail);
     const authorName = author?.name || approval.approverName || (await resolvePersonName(authorEmail)) || authorEmail.split('@')[0];
     const authorRole = this.roleOf(parts, authorEmail) || (lc(approval.approverEmail) === authorEmail ? 'approver' : 'agent');
@@ -276,6 +285,7 @@ class ApprovalConversationService {
     if (!approval) throw new ValidationError('This request is already decided');
     const parts = await this.participants(approval);
     if (!parts.requester) throw new ValidationError('This ticket has no requester to ask');
+    if (parts.requester.unattended) throw new ValidationError(UNATTENDED_ASK);
     const actorEmail = lc(actor?.email);
     const allowed = actor?.role === 'admin' || actor?.workspaceRole === 'admin'
       || [lc(q.authorEmail), ...(q.toEmails || []).map(lc), ...(q.ccEmails || []).map(lc)].includes(actorEmail)
@@ -522,6 +532,7 @@ class ApprovalConversationService {
    * for an approver who now has to decide. Never throws.
    */
   async _sendInternal(approval, parts, message, person, { from, signatureHtml, history, ingest, copied = [], decideUrl = null, webLink = false }) {
+    if (!mailable(person)) return;
     const ticket = parts.ticket;
     try {
       const token = newToken();
@@ -570,8 +581,13 @@ class ApprovalConversationService {
    * under the ticket's mail; the plus-address Reply-To brings every reply
    * back to this approval. Never throws.
    */
-  async _emailAsReply(approval, parts, message, { toList, ccList, from, relayed = false, decideUrl = null }) {
+  async _emailAsReply(approval, parts, message, { toList: rawTo, ccList: rawCc, from, relayed = false, decideUrl = null }) {
     if (process.env.TP_SUPPRESS_APPROVAL_EMAIL === '1') return null;
+    // An unattended requester is never addressed; when that empties To, the
+    // first Cc'd person takes its place, as an agent reply does.
+    let toList = (rawTo || []).filter(mailable);
+    let ccList = (rawCc || []).filter(mailable);
+    if (!toList.length && ccList.length) [toList, ccList] = [[ccList[0]], ccList.slice(1)];
     const ticket = parts.ticket;
     if (!ticket || !toList.length) return null;
     try {
@@ -683,7 +699,7 @@ class ApprovalConversationService {
     for (const e of wanted) {
       if (!e || seen.has(e) || people.some((p) => p.email === e)) continue;
       const p = known.get(e) || (e === lc(question.authorEmail) && looksLikeEmail(e) ? { role: question.authorRole || 'approver', email: e, name: question.authorName || null } : null);
-      if (p) people.push(p);
+      if (p && mailable(p)) people.push(p);
     }
     if (!people.length) return null;
     // An approver who now has to decide gets the answer on their own, with a

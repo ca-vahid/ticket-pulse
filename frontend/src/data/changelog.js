@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.3.96-preview';
+export const APP_VERSION = '4.3.97-preview';
 
 export const changelog = [
+  {
+    version: '4.3.97-preview',
+    date: 'November 18, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Alert and integration senders are never e-mailed</strong> &mdash; approval questions, answers and verdict copies skip a requester marked unattended (BST, Simorgh, Sentinel and other monitoring senders), and a FreshService-lane reply to one is refused with a hint to add a private note instead. The old auto-response skips them too.' },
+    ],
+  },
   {
     version: '4.3.96-preview',
     date: 'November 18, 2026',
