@@ -87,6 +87,20 @@ describe('sending a workflow e-mail', () => {
     }));
   });
 
+  test('QA 11-18 #1: a workflow\'s own Cc/Bcc custom addresses stay, and the observer is still added after them', async () => {
+    await observers.setObservers(1, [{ email: 'alex@example.com', until: inDays(14) }], { now: NOW });
+    await processDelivery(delivery({ ccRecipients: ['lead@example.com'], bccRecipients: ['audit@example.com'] }));
+    expect(deliverMock).toHaveBeenCalledWith(expect.objectContaining({
+      to: ['rita@example.com'], cc: ['lead@example.com'], bcc: ['audit@example.com', 'alex@example.com'],
+    }));
+  });
+
+  test('QA 11-18 #1: an observer already on the workflow\'s Bcc is not added twice', async () => {
+    await observers.setObservers(1, [{ email: 'alex@example.com', until: inDays(14) }], { now: NOW });
+    await processDelivery(delivery({ bccRecipients: ['Alex@example.com'] }));
+    expect(deliverMock).toHaveBeenCalledWith(expect.objectContaining({ bcc: ['Alex@example.com'] }));
+  });
+
   test('no observer: the e-mail and its record are exactly as before', async () => {
     await processDelivery(delivery());
     expect(deliverMock).toHaveBeenCalledWith(expect.objectContaining({ bcc: [] }));

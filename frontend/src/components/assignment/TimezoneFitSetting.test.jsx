@@ -54,7 +54,9 @@ describe('TimezoneFitSetting', () => {
       },
     });
     mount();
-    expect(await screen.findByTestId('timezone-fit-tally')).toHaveTextContent('Last 14 days: 1 of 12 tickets would have moved.');
+    expect(await screen.findByTestId('timezone-fit-tally')).toHaveTextContent('1 of 12 tickets would have moved.');
+    expect(screen.getByRole('heading', { name: 'Last 14 days' })).toBeInTheDocument();
+    expect(screen.getByTestId('timezone-fit-status')).toHaveTextContent('Shadow: writes who would go first on each run; nobody’s tickets change.');
     expect(screen.getByText('TP-100')).toBeInTheDocument();
     expect(screen.getByText(/so Dana would be put first/)).toBeInTheDocument();
     expect(screen.getByText('(shadow)')).toBeInTheDocument();
@@ -74,7 +76,7 @@ describe('TimezoneFitSetting', () => {
       },
     });
     mount();
-    expect(await screen.findByTestId('timezone-fit-tally')).toHaveTextContent('Last 14 days: 1 of 12 tickets moved.');
+    expect(await screen.findByTestId('timezone-fit-tally')).toHaveTextContent('1 of 12 tickets moved.');
     expect(screen.getByText('(not applied: an earlier rule chose the person)')).toBeInTheDocument();
     expect(screen.getAllByText('(shadow)')).toHaveLength(1);
   });

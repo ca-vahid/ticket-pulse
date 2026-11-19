@@ -36,6 +36,7 @@ describe('Auto-help shadow-only imports', () => {
     expect(specs.sort()).toEqual([
       '../utils/errors.js',
       '../utils/logger.js',
+      '../utils/requesterTitle.js',
       '../utils/ticketOrigin.js',
       './aiProviders/providerGateway.js',
       './autoHelpDeliveryService.js',

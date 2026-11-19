@@ -139,3 +139,144 @@ describe('TicketTasksTab due time + reminders (QA 08-04 #8)', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 });
+
+describe('TicketTasksTab paste a list (QA 11-18 #3)', () => {
+  afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+  const paste = (el, text) => fireEvent.paste(el, { clipboardData: { getData: (type) => (type === 'text/plain' || type === 'text' ? text : '') } });
+  const QA_LIST = '- Floor 6:\n    ◦ 11-652 - Keyboard and Mouse\n    ◦ 2-636 - Keyboard and Mouse\n    ◦ 4-210 - Monitor';
+
+  async function mountForm(origin = 'ticketpulse') {
+    ticketsAPI.tasks.mockResolvedValue({ data: [] });
+    render(<TicketTasksTab ticketId={1} technicians={[{ id: 9, name: 'Dana Fox' }]} canWrite ticketOrigin={origin} />);
+    await waitFor(() => expect(screen.getByText('No tasks yet.')).toBeInTheDocument());
+    return screen.getByLabelText('Task Description');
+  }
+
+  test('a multi-line paste asks first, then adds one task per line with the shared fields', async () => {
+    ticketsAPI.addTask.mockResolvedValue({});
+    const input = await mountForm();
+    fireEvent.change(screen.getByLabelText('Assign To'), { target: { value: '9' } });
+    fireEvent.change(screen.getByLabelText('Due Date'), { target: { value: '2099-03-05' } });
+    fireEvent.change(screen.getByLabelText('Time'), { target: { value: '09:15' } });
+    fireEvent.change(screen.getByLabelText('Notify Before'), { target: { value: '60' } });
+
+    paste(input, QA_LIST);
+    expect(input).toHaveValue(''); // not dumped into the one-line box
+    const confirm = screen.getByTestId('paste-tasks-confirm');
+    expect(within(confirm).getByText('Add 3 tasks, one per line?')).toBeInTheDocument();
+    expect(within(confirm).getByText(/Headings like ‘Floor 6’ are kept in front of their lines/)).toBeInTheDocument();
+    expect(within(confirm).getByText(/one e-mail per task/)).toBeInTheDocument();
+    const preview = within(confirm).getByRole('list', { name: 'Tasks to add' });
+    expect(within(preview).getAllByRole('listitem')).toHaveLength(3);
+    expect(within(preview).getByText('Floor 6 · 2-636 - Keyboard and Mouse')).toBeInTheDocument();
+
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Add 3 tasks' }));
+    await waitFor(() => expect(ticketsAPI.addTask).toHaveBeenCalledTimes(3));
+    const shared = {
+      assignedTechId: 9,
+      dueAt: new Date('2099-03-05T09:15').toISOString(),
+      remindBeforeMinutes: 60,
+      notifyAgent: true,
+    };
+    expect(ticketsAPI.addTask).toHaveBeenNthCalledWith(1, 1, { title: 'Floor 6 · 11-652 - Keyboard and Mouse', ...shared });
+    expect(ticketsAPI.addTask).toHaveBeenNthCalledWith(2, 1, { title: 'Floor 6 · 2-636 - Keyboard and Mouse', ...shared });
+    expect(ticketsAPI.addTask).toHaveBeenNthCalledWith(3, 1, { title: 'Floor 6 · 4-210 - Monitor', ...shared });
+    await waitFor(() => expect(screen.queryByTestId('paste-tasks-confirm')).not.toBeInTheDocument());
+    expect(ticketsAPI.tasks).toHaveBeenCalledTimes(2); // reloaded once, after the run
+  });
+
+  test('Cancel drops the list and creates nothing; Escape does too', async () => {
+    const input = await mountForm();
+    paste(input, 'Order dock\nImage laptop');
+    fireEvent.click(within(screen.getByTestId('paste-tasks-confirm')).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByTestId('paste-tasks-confirm')).not.toBeInTheDocument();
+
+    paste(input, 'Order dock\nImage laptop');
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Add 2 tasks' }), { key: 'Escape' });
+    expect(screen.queryByTestId('paste-tasks-confirm')).not.toBeInTheDocument();
+    expect(ticketsAPI.addTask).not.toHaveBeenCalled();
+  });
+
+  test('a single-line paste behaves as before (no confirmation)', async () => {
+    const input = await mountForm();
+    const ev = paste(input, 'Order dock\n');
+    expect(ev).toBe(true); // default not prevented: the browser pastes the line
+    expect(screen.queryByTestId('paste-tasks-confirm')).not.toBeInTheDocument();
+  });
+
+  test('FreshService errors stop the run and say how many were added; the rest stay to retry', async () => {
+    ticketsAPI.addTask
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce({ response: { data: { message: 'FreshService said no' } } });
+    const input = await mountForm('freshservice');
+    paste(input, '1. Order dock\n2. Image laptop\n3. Set up printer');
+    fireEvent.click(screen.getByRole('button', { name: 'Add 3 tasks' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Added 1 task of 3. Stopped at “Image laptop”: FreshService said no'));
+    expect(ticketsAPI.addTask).toHaveBeenCalledTimes(2); // stopped at the first error
+    expect(screen.getByRole('button', { name: 'Add 2 tasks' })).toBeInTheDocument();
+  });
+
+  // A controllable addTask: each call waits until the test releases it.
+  function deferredAddTask() {
+    const pending = [];
+    ticketsAPI.addTask.mockImplementation(() => new Promise((resolve) => { pending.push(resolve); }));
+    return {
+      calls: () => ticketsAPI.addTask.mock.calls.length,
+      releaseNext: async () => { const r = pending.shift(); r?.({}); await Promise.resolve(); },
+    };
+  }
+
+  test('during a run: Enter, a second click and a paste cannot start anything else', async () => {
+    const api = deferredAddTask();
+    const input = await mountForm();
+    paste(input, 'Order dock\nImage laptop\nSet up printer');
+    const addAll = screen.getByRole('button', { name: 'Add 3 tasks' });
+    fireEvent.click(addAll);
+    await waitFor(() => expect(api.calls()).toBe(1));
+
+    expect(input).toBeDisabled();
+    expect(addAll).toBeDisabled();
+    fireEvent.click(addAll);
+    fireEvent.change(input, { target: { value: 'Typed meanwhile' } });
+    fireEvent.keyDown(input, { key: 'Enter' }); // doAdd is guarded
+    paste(input, 'Other\nList');
+    const preview = screen.getByRole('list', { name: 'Tasks to add' });
+    expect(within(preview).getByText('Order dock')).toBeInTheDocument();
+    expect(within(preview).queryByText('Other')).not.toBeInTheDocument();
+    expect(api.calls()).toBe(1);
+
+    await api.releaseNext();
+    await waitFor(() => expect(api.calls()).toBe(2));
+    await api.releaseNext();
+    await waitFor(() => expect(api.calls()).toBe(3));
+    await api.releaseNext();
+    await waitFor(() => expect(screen.queryByTestId('paste-tasks-confirm')).not.toBeInTheDocument());
+    expect(api.calls()).toBe(3);
+    expect(ticketsAPI.addTask.mock.calls.map((c) => c[1].title)).toEqual(['Order dock', 'Image laptop', 'Set up printer']);
+    expect(input).not.toBeDisabled();
+  });
+
+  test('Stop during a run ends it after the task being added now', async () => {
+    const api = deferredAddTask();
+    const input = await mountForm();
+    paste(input, 'Order dock\nImage laptop\nSet up printer');
+    fireEvent.click(screen.getByRole('button', { name: 'Add 3 tasks' }));
+    await waitFor(() => expect(api.calls()).toBe(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    expect(screen.getByText('Stopping after this task…')).toBeInTheDocument();
+    await api.releaseNext();
+    await waitFor(() => expect(screen.getByText('Stopped after 1 task of 3. The rest were not added.')).toBeInTheDocument());
+    expect(api.calls()).toBe(1);
+    expect(screen.queryByTestId('paste-tasks-confirm')).not.toBeInTheDocument();
+  });
+
+  test('more than 50 lines: only the first 50, and it says so', async () => {
+    const input = await mountForm();
+    paste(input, Array.from({ length: 60 }, (_, i) => `- Item ${i + 1}`).join('\n'));
+    const confirm = screen.getByTestId('paste-tasks-confirm');
+    expect(within(confirm).getByText('Add 50 tasks, one per line?')).toBeInTheDocument();
+    expect(within(confirm).getByText(/Only the first 50 are added; the paste had 60/)).toBeInTheDocument();
+  });
+});

@@ -118,6 +118,84 @@ describe('WebhookNodeEditor — insert at the cursor once placed', () => {
   });
 });
 
+// QA 11-18 #1: "Allow custom emails to be added as BCC recipients or CC recipients."
+describe('RecipientsNodeEditor — custom emails per section', () => {
+  test('Cc and Bcc each have their own box inside their section; To shows its box only when ticked', () => {
+    render(<RecipientsNodeEditor data={{ to: ['requester'] }} onChange={vi.fn()} />);
+    expect(screen.queryByTestId('recipients-custom-emails-to')).toBeNull();
+    expect(within(screen.getByTestId('recipients-custom-emails-cc')).getByRole('textbox', { name: 'Cc custom email recipients' })).toBeInTheDocument();
+    expect(within(screen.getByTestId('recipients-custom-emails-bcc')).getByRole('textbox', { name: 'Bcc custom email recipients' })).toBeInTheDocument();
+  });
+
+  test('typing into Cc saves ccCustomEmails', () => {
+    const onChange = vi.fn();
+    render(<RecipientsNodeEditor data={{ to: ['requester'] }} onChange={onChange} />);
+    const input = screen.getByRole('textbox', { name: 'Cc custom email recipients' });
+    fireEvent.change(input, { target: { value: 'Priya.Nair@example.com' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onChange).toHaveBeenCalledWith({ ccCustomEmails: ['priya.nair@example.com'] });
+  });
+
+  test('pasting into Bcc saves bccCustomEmails, split on commas, semicolons and spaces', () => {
+    const onChange = vi.fn();
+    render(<RecipientsNodeEditor data={{ to: ['requester'], bccCustomEmails: ['audit@example.com'] }} onChange={onChange} />);
+    const input = screen.getByRole('textbox', { name: 'Bcc custom email recipients' });
+    fireEvent.paste(input, { clipboardData: { getData: () => 'sam.okafor@example.com; eli.park@example.com dana.fox@example.com' } });
+    expect(onChange).toHaveBeenCalledWith({
+      bccCustomEmails: ['audit@example.com', 'sam.okafor@example.com', 'eli.park@example.com', 'dana.fox@example.com'],
+    });
+  });
+
+  test('old data (customEmails + the Custom emails tick) renders in the To section and still saves customEmails', () => {
+    const onChange = vi.fn();
+    render(<RecipientsNodeEditor data={{ to: ['requester', 'custom_emails'], customEmails: ['ops@example.com'] }} onChange={onChange} />);
+    const toBox = screen.getByTestId('recipients-custom-emails-to');
+    expect(within(toBox).getByText('ops@example.com')).toBeInTheDocument();
+    expect(within(screen.getByTestId('recipients-custom-emails-cc')).queryByText('ops@example.com')).toBeNull();
+    const input = within(toBox).getByRole('textbox', { name: 'Custom email recipients' });
+    fireEvent.change(input, { target: { value: 'lead@example.com' } });
+    fireEvent.keyDown(input, { key: ',' });
+    expect(onChange).toHaveBeenCalledWith({ customEmails: ['ops@example.com', 'lead@example.com'] });
+  });
+
+  test('review fix: a running total of custom addresses across To (when ticked), Cc and Bcc', () => {
+    const { unmount } = render(<RecipientsNodeEditor
+      data={{ to: ['requester', 'custom_emails'], customEmails: ['ops@example.com'], ccCustomEmails: ['lead@example.com', 'OPS@example.com'], bccCustomEmails: ['audit@example.com'] }}
+      onChange={vi.fn()}
+    />);
+    expect(screen.getByTestId('recipients-custom-emails-total')).toHaveTextContent('3 of 25 custom addresses');
+    unmount();
+    // The To list does not count while its box is unticked (it is not sent).
+    render(<RecipientsNodeEditor data={{ to: ['requester'], customEmails: ['ops@example.com'], ccCustomEmails: ['lead@example.com'] }} onChange={vi.fn()} />);
+    expect(screen.getByTestId('recipients-custom-emails-total')).toHaveTextContent('1 of 25 custom addresses');
+  });
+
+  test('review fix: with the budget used up the boxes take no more, and an over-budget list says what to remove', () => {
+    const list = (n, p) => Array.from({ length: n }, (_, i) => `${p}${i}@example.com`);
+    const onChange = vi.fn();
+    const { unmount } = render(<RecipientsNodeEditor data={{ to: ['requester'], ccCustomEmails: list(20, 'c'), bccCustomEmails: list(4, 'b') }} onChange={onChange} />);
+    const bcc = screen.getByRole('textbox', { name: 'Bcc custom email recipients' });
+    fireEvent.paste(bcc, { clipboardData: { getData: () => 'x1@example.com x2@example.com' } });
+    expect(onChange).toHaveBeenCalledWith({ bccCustomEmails: [...list(4, 'b'), 'x1@example.com'] });
+    unmount();
+    render(<RecipientsNodeEditor data={{ to: ['requester'], ccCustomEmails: list(20, 'c'), bccCustomEmails: list(7, 'b') }} onChange={vi.fn()} />);
+    expect(screen.getByTestId('recipients-custom-emails-total')).toHaveTextContent('27 of 25 custom addresses — remove 2 before saving');
+  });
+
+  test('review fix: "Dana Fox <dana@example.com>" pasted into Cc saves the bare address', () => {
+    const onChange = vi.fn();
+    render(<RecipientsNodeEditor data={{ to: ['requester'] }} onChange={onChange} />);
+    fireEvent.paste(screen.getByRole('textbox', { name: 'Cc custom email recipients' }), { clipboardData: { getData: () => 'Dana Fox <Dana.Fox@example.com>' } });
+    expect(onChange).toHaveBeenCalledWith({ ccCustomEmails: ['dana.fox@example.com'] });
+  });
+
+  test('saved Cc/Bcc addresses render in their own sections', () => {
+    render(<RecipientsNodeEditor data={{ to: ['requester'], ccCustomEmails: ['lead@example.com'], bccCustomEmails: ['audit@example.com'] }} onChange={vi.fn()} />);
+    expect(within(screen.getByTestId('recipients-custom-emails-cc')).getByText('lead@example.com')).toBeInTheDocument();
+    expect(within(screen.getByTestId('recipients-custom-emails-bcc')).getByText('audit@example.com')).toBeInTheDocument();
+  });
+});
+
 // QA 10-05 #3: the custom-field list is collapsed until something is picked.
 describe('RecipientsNodeEditor — custom fields collapse', () => {
   const defs = [{ key: 'approver_email', label: 'Approver e-mail' }, { key: 'site_contact', label: 'Site contact' }];

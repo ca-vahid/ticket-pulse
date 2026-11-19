@@ -11,8 +11,10 @@ import notificationWorkflowRepository from './notificationWorkflowRepository.js'
 import {
   ADD_NOTE_MAX_PER_RUN,
   DEFAULT_LLM_OUTPUT_SCHEMA,
+  RECIPIENT_CUSTOM_EMAIL_KEYS,
   assertValidWorkflowDefinition,
   normalizeLlmOutputSchema,
+  normalizeRecipientCustomEmails,
   sampleEventContext,
   validateLlmOutputSchema,
 } from './notificationWorkflowDefinition.js';
@@ -2895,8 +2897,13 @@ async function executeNode({
     // suppressRequesterAck (agent already replied — no duplicate ack).
     const exclusions = recipientExclusions(eventContext);
     const dropExcluded = (list) => (exclusions.emails.length ? excludeExistingEmails(list, exclusions.emails) : list);
+    // QA 11-18 #1: typed addresses for Cc and Bcc (ccCustomEmails /
+    // bccCustomEmails) join their own list with no token needed. The To list
+    // keeps its old key and its `custom_emails` gate. To wins over Cc, Cc over Bcc.
+    const ccCustom = normalizeRecipientCustomEmails(node.data?.[RECIPIENT_CUSTOM_EMAIL_KEYS.cc]);
+    const bccCustom = normalizeRecipientCustomEmails(node.data?.[RECIPIENT_CUSTOM_EMAIL_KEYS.bcc]);
     const to = dropExcluded(resolveWithGroups(node.data?.to || ['requester']));
-    let cc = dropExcluded(excludeExistingEmails(resolveWithGroups(node.data?.cc || []), to));
+    let cc = dropExcluded(excludeExistingEmails(uniqueEmails([resolveWithGroups(node.data?.cc || []), ccCustom]), to));
     // "Also notify additional requesters" (Phase MR6): when the workspace
     // toggle is ON and this mail is requester-facing (the requester is in
     // To), the ticket's "Also for" list joins the cc — so status/resolution
@@ -2912,7 +2919,7 @@ async function executeNode({
       }
       if (alsoFor.length) cc = uniqueEmails([cc, alsoFor]);
     }
-    const bcc = dropExcluded(excludeExistingEmails(resolveWithGroups(node.data?.bcc || []), [...to, ...cc]));
+    const bcc = dropExcluded(excludeExistingEmails(uniqueEmails([resolveWithGroups(node.data?.bcc || []), bccCustom]), [...to, ...cc]));
     const recipients = {
       to,
       cc,
@@ -3480,7 +3487,18 @@ async function executeNode({
       };
     }
 
-    if (toRecipients.length + ccRecipients.length + bccRecipients.length > MAX_EMAIL_RECIPIENTS) {
+    const recipientCount = toRecipients.length + ccRecipients.length + bccRecipients.length;
+    if (recipientCount > MAX_EMAIL_RECIPIENTS) {
+      // QA 11-18 #1 review: Preview says what a live run would hit instead of
+      // throwing; a live run still fails loudly (nobody gets a partial list).
+      if (executionMode === EXECUTION_MODE_PREVIEW) {
+        return {
+          ...output,
+          skipped: true,
+          recipientLimitExceeded: true,
+          reason: `A live run would fail: ${recipientCount} recipients across To, Cc and Bcc, and an e-mail can go to at most ${MAX_EMAIL_RECIPIENTS}`,
+        };
+      }
       throw new Error(`Email recipient count exceeds the ${MAX_EMAIL_RECIPIENTS} recipient limit`);
     }
 

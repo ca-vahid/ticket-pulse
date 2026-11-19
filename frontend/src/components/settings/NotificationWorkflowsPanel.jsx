@@ -2582,6 +2582,9 @@ function addNoteSampleValue(definition) {
  * The "Recipients" step inspector (extracted 1 Oct 2026 so it can be tested
  * on its own). QA 10-01 #7 added To/Cc/Bcc "From custom fields".
  */
+// Mirrors the backend's RECIPIENT_CUSTOM_EMAILS_MAX (notificationWorkflowDefinition.js).
+const RECIPIENT_CUSTOM_EMAILS_MAX = 25;
+
 export function RecipientsNodeEditor({ data = {}, onChange, customFieldDefs = [], groups = [] }) {
   const setRecipientList = (field, value, checked) => {
     const current = Array.isArray(data?.[field]) ? data[field] : [];
@@ -2591,7 +2594,20 @@ export function RecipientsNodeEditor({ data = {}, onChange, customFieldDefs = []
   const to = data.to || [];
   const cc = data.cc || [];
   const bcc = data.bcc || [];
-  const customEmails = data.customEmails || [];
+  // QA 11-18 #1: each section has its own typed addresses. To keeps the
+  // original `customEmails` key (still switched on by the "Custom emails"
+  // box); Cc and Bcc use `ccCustomEmails` / `bccCustomEmails`, empty = none.
+  const customEmails = Array.isArray(data.customEmails) ? data.customEmails : [];
+  const ccCustomEmails = Array.isArray(data.ccCustomEmails) ? data.ccCustomEmails : [];
+  const bccCustomEmails = Array.isArray(data.bccCustomEmails) ? data.bccCustomEmails : [];
+  // One budget for all three boxes: an e-mail goes to at most 25 people, so
+  // the save refuses more than 25 custom addresses across To (when ticked),
+  // Cc and Bcc. Each box can only take what is left.
+  const customTotal = new Set(
+    [...(to.includes('custom_emails') ? customEmails : []), ...ccCustomEmails, ...bccCustomEmails]
+      .map((e) => String(e).trim().toLowerCase()),
+  ).size;
+  const customLeft = Math.max(0, RECIPIENT_CUSTOM_EMAILS_MAX - customTotal);
   // QA 10-01 #7: addresses kept in ticket custom fields (to_recipients,
   // cc_recipients, bcc_recipients, and any field added later) — read at
   // send time as a comma-separated list. Every field the workspace
@@ -2622,6 +2638,7 @@ export function RecipientsNodeEditor({ data = {}, onChange, customFieldDefs = []
         ['approval_requester', 'Approval requester (approval events)'],
         ['custom_emails', 'Custom emails'],
       ],
+      custom: { key: 'customEmails', list: customEmails, show: showCustomEmailInput, label: 'Custom email recipients' },
     },
     {
       key: 'cc',
@@ -2630,12 +2647,14 @@ export function RecipientsNodeEditor({ data = {}, onChange, customFieldDefs = []
       options: [
         ['original_ccs', 'Original CCs'],
       ],
+      custom: { key: 'ccCustomEmails', list: ccCustomEmails, show: true, label: 'Cc custom email recipients' },
     },
     {
       key: 'bcc',
       label: 'Bcc Recipients',
       values: bcc,
       options: [],
+      custom: { key: 'bccCustomEmails', list: bccCustomEmails, show: true, label: 'Bcc custom email recipients' },
     },
   ];
   return (
@@ -2713,25 +2732,38 @@ export function RecipientsNodeEditor({ data = {}, onChange, customFieldDefs = []
                 <span className="mt-1 block text-[11px] text-muted-foreground/75">Reads the ticket&apos;s value when the e-mail is sent — addresses separated by commas, semicolons or spaces; anything that is not an address is skipped.</span>
               </details>
             )}
+            {group.custom.show && (
+              // QA 11-18 #1: the typed addresses sit inside their own section
+              // so it is plain whether an address goes on To, Cc or Bcc.
+              <div className="rounded-md border border-border px-3 py-2" data-testid={`recipients-custom-emails-${group.key}`}>
+                <span className="text-sm">Custom emails</span>
+                {/* QA 08-18 #1: chips input — the old controlled join/split
+                    round-trip ate the comma on every keystroke. Persistence
+                    contract: each key stays a string array. */}
+                <EmailChipsInput
+                  value={group.custom.list}
+                  onChange={(list) => onChange({ [group.custom.key]: list })}
+                  max={group.custom.list.length + customLeft}
+                  placeholder="ops@example.com, lead@example.com"
+                  label={group.custom.label}
+                  className="mt-1.5"
+                />
+                <span className="mt-1 block text-[11px] text-muted-foreground/75">Type or paste addresses — commas, semicolons and spaces all separate.</span>
+              </div>
+            )}
           </div>
         </div>
       ))}
-      {showCustomEmailInput && (
-        <div>
-          <label className="text-xs font-medium uppercase text-muted-foreground">Custom Emails</label>
-          {/* QA 08-18 #1: chips input — the old controlled join/split
-              round-trip ate the comma on every keystroke. Persistence
-              contract unchanged: customEmails stays a string array. */}
-          <EmailChipsInput
-            value={customEmails}
-            onChange={(list) => onChange({ customEmails: list })}
-            placeholder="ops@example.com, lead@example.com"
-            label="Custom email recipients"
-            className="mt-1"
-          />
-          <p className="mt-1 text-[11px] text-muted-foreground/75">Type or paste addresses — commas, semicolons and spaces all separate.</p>
-        </div>
-      )}
+      <p
+        className={`text-[11px] ${customTotal > RECIPIENT_CUSTOM_EMAILS_MAX ? 'text-destructive' : 'text-muted-foreground'}`}
+        data-testid="recipients-custom-emails-total"
+        aria-live="polite"
+      >
+        {customTotal} of {RECIPIENT_CUSTOM_EMAILS_MAX} custom addresses
+        {customTotal > RECIPIENT_CUSTOM_EMAILS_MAX
+          ? ` — remove ${customTotal - RECIPIENT_CUSTOM_EMAILS_MAX} before saving; an e-mail can go to at most ${RECIPIENT_CUSTOM_EMAILS_MAX} people in all.`
+          : ' (To, Cc and Bcc together).'}
+      </p>
     </div>
   );
 }
@@ -3142,7 +3174,12 @@ function summarizePreviewStep(step) {
   }
   if (step?.nodeType === 'recipient_resolver') {
     const recipients = output.recipients || {};
-    return `To: ${(recipients.to || []).join(', ') || 'none'}`;
+    // QA 11-18 #1: Cc / Bcc (custom addresses included) show when there are any.
+    return [
+      `To: ${(recipients.to || []).join(', ') || 'none'}`,
+      (recipients.cc || []).length ? `Cc: ${recipients.cc.join(', ')}` : null,
+      (recipients.bcc || []).length ? `Bcc: ${recipients.bcc.join(', ')}` : null,
+    ].filter(Boolean).join(' · ');
   }
   if (step?.nodeType === 'llm_generate') {
     if (output.failed) return output.error || 'LLM generation returned an issue';
