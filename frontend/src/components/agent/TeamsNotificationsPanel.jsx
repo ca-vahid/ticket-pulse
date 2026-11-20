@@ -30,6 +30,10 @@ const EVENT_WORD = {
   survey_result: 'Survey result', on_call_start: 'On call this week',
 };
 const SCOPES = [{ key: 'mine', label: 'Mine' }, { key: 'all', label: 'Everyone’s' }];
+// QA 11-19 #1: rows that are gone ("The requester rates my ticket in the
+// survey" is now "A survey result comes in"). Hidden even if a server that
+// has not been updated yet still lists them; their history still reads.
+const RETIRED_ROWS = new Set(['survey_response']);
 const PRIORITIES = [{ v: 4, l: 'Urgent only' }, { v: 3, l: 'High and above' }, { v: 2, l: 'Medium and above' }, { v: 1, l: 'Any priority' }];
 
 const ago = (d) => {
@@ -179,7 +183,7 @@ export default function TeamsNotificationsPanel({ workspaceId }) {
 
           <div className="mt-5">
             <TeamsEventGrid
-              events={data.events}
+              events={data.events.filter((e) => !RETIRED_ROWS.has(e.key))}
               onChange={setMode}
               extra={(e) => {
                 if (e.key === 'group_unassigned' && e.mode !== 'off') {
@@ -196,7 +200,8 @@ export default function TeamsNotificationsPanel({ workspaceId }) {
                 if (e.key === 'on_call_start') {
                   return <div className="text-[11px] text-muted-foreground/75">One message when your on-call period starts. It comes through quiet hours and outside your work hours.</div>;
                 }
-                // QA 11-17 #4: admins and reviewers choose whose results.
+                // QA 11-17 #4 / 11-19 #1: admins choose whose results; everyone
+                // else (and a stored "Everyone's" that no longer counts) sees Mine.
                 if (e.key === 'survey_result' && e.mode !== 'off') {
                   const scope = data.options.surveyScope === 'all' && data.surveyScopeChoice ? 'all' : 'mine';
                   return (

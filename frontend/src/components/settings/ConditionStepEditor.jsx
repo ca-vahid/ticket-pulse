@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Code2, MessageSquareOff, RefreshCwOff } from 'lucide-react';
+import { useEffect, useId, useState } from 'react';
+import { CheckCheck, Code2, MessageSquareOff, RefreshCwOff } from 'lucide-react';
 import ConditionGroupBuilder, { CG_FIELDS, sentenceValueLabel } from './ConditionGroupBuilder';
 import SkipNoiseSwitch from './SkipNoiseSwitch';
 import { Switch } from '../ui/switch';
@@ -12,8 +12,10 @@ import { REPLY_TRIGGER, conditionStepView, describeStep, stepSwitches, thanksSwi
  *
  *   1. One plain sentence of what the step checks.
  *   2. The step switches: Skip noise, and on "Requester replied" workflows
- *      (MEGA 11-14) "Don't reopen on a thank-you or out-of-office reply" and
- *      "Stop after 3 reopens by replies in a day".
+ *      (MEGA 11-14) "Don't reopen on a thank-you or out-of-office reply",
+ *      "Resolve when the requester confirms it's done (waiting tickets)"
+ *      (Off / Shadow / Live, 19 Nov 2026) and "Stop after 3 reopens by
+ *      replies in a day".
  *   3. The conditions as builder rows, listing only the fields the trigger
  *      fills. A step that still carries a raw json-logic rule is shown as
  *      rows straight away when the rule converts (the panel writes the
@@ -77,6 +79,53 @@ export function ReplyLoopGuardSwitch({ data, onPatch }) {
       onToggle={() => onPatch({ replyLoopGuard: !on })}
       testId="loop-guard-switch"
     />
+  );
+}
+
+export const CONFIRMED_DONE_LABEL = 'Resolve when the requester confirms it\'s done (waiting tickets)';
+/** Off / Shadow / Live, worded for this step (the workflow editor's state dots). */
+const CONFIRMED_DONE_CHOICES = Object.freeze([
+  { value: 'off', label: 'Off', dot: 'bg-muted-foreground/40', help: 'A reply to a waiting ticket goes on to the conditions below, as before.' },
+  { value: 'shadow', label: 'Shadow', dot: 'bg-amber-500', help: 'Waiting tickets still reopen. The ticket history records each one it would have resolved.' },
+  { value: 'live', label: 'Live', dot: 'bg-emerald-500', help: 'When the requester says it\'s done, the ticket is resolved with a private note and the workflow stops here. No e-mail goes to the requester. FreshService-born tickets are only recorded.' },
+]);
+
+/**
+ * "Resolve when the requester confirms it's done (waiting tickets)"
+ * (`resolveConfirmedDone`, 19 Nov 2026). Off / Shadow / Live as the workflow
+ * editor's own segmented control; a step saved before it existed is Off.
+ */
+export function ConfirmedDoneSwitch({ data, onPatch }) {
+  const mode = stepSwitches(data).confirmedDone;
+  const labelId = useId();
+  const shown = CONFIRMED_DONE_CHOICES.find((c) => c.value === mode) || CONFIRMED_DONE_CHOICES[0];
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5" data-testid="confirmed-done-switch" data-mode={mode}>
+      <CheckCheck className={`mt-0.5 h-4 w-4 flex-shrink-0 ${mode === 'off' ? 'text-muted-foreground/60' : 'text-primary'}`} aria-hidden="true" />
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-semibold text-foreground" id={labelId}>{CONFIRMED_DONE_LABEL}</div>
+        <p className="text-xs text-muted-foreground">{shown.help}</p>
+        <div role="radiogroup" aria-labelledby={labelId} className="mt-2 grid w-full max-w-[16rem] grid-cols-3 gap-1 rounded-lg bg-muted/60 p-1">
+          {CONFIRMED_DONE_CHOICES.map((c) => {
+            const active = c.value === mode;
+            return (
+              <button
+                key={c.value}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => { if (!active) onPatch({ resolveConfirmedDone: c.value }); }}
+                className={`tp-focus-ring inline-flex h-7 items-center justify-center gap-1.5 rounded-md text-xs font-semibold ${active ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                data-testid={`confirmed-done-${c.value}`}
+              >
+                <span className={`h-2 w-2 rounded-full ${c.dot}`} aria-hidden="true" />
+                {c.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -155,6 +204,7 @@ export default function ConditionStepEditor({ data = {}, triggerType = null, onP
   // Other triggers show a switch only while it is on, so it can be turned off.
   const showThanks = isReply || switches.thanks;
   const showLoopGuard = isReply || switches.loopGuard;
+  const showConfirmedDone = isReply || switches.confirmedDone !== 'off';
 
   const applyCode = (rule) => {
     const converted = ruleConversionPatch({ rule });
@@ -170,6 +220,7 @@ export default function ConditionStepEditor({ data = {}, triggerType = null, onP
           test out of a rule it can not convert would let "off" drop the code. */}
       <SkipNoiseSwitch data={mode === 'code' ? { skipNoise: view.skipNoise === true } : view} onPatch={patch} />
       {showThanks && <ThanksSwitch data={view} onPatch={patch} />}
+      {showConfirmedDone && <ConfirmedDoneSwitch data={view} onPatch={patch} />}
       {showLoopGuard && <ReplyLoopGuardSwitch data={view} onPatch={patch} />}
       {mode === 'code' ? (
         <RuleAsCodeNotice rule={data.rule} onApply={applyCode} />

@@ -72,7 +72,7 @@ import {
   groupReferencesCustomFields,
   registerWorkflowConditionOps,
 } from './notificationConditionModel.js';
-import { AUTO_HELP_THANKS_VERDICTS, REPLY_LOOP_LIMIT, conditionSwitchStop } from './conditionRuleShared.js';
+import { AUTO_HELP_THANKS_VERDICTS, REPLY_LOOP_LIMIT, conditionSwitchStop, confirmedDoneEffect } from './conditionRuleShared.js';
 import { bulletproofButtons, withBaseFont } from '../utils/emailHtmlHardening.js';
 import { DEFAULT_ZONE, formatHumanTime, isIsoTimestamp } from '../utils/humanTime.js';
 import { refPositionFor, ticketMailSubject } from './mailSubjectService.js';
@@ -2495,6 +2495,15 @@ export function explainSwitchStop(kind, evalScope = {}) {
     return { source: 'skip_noise', noiseSkipped: true, summary: 'Skip noise tickets is on and this ticket is marked as noise' };
   }
   const extra = evalScope?.event?.extra || {};
+  if (kind === 'reply_confirmed_done') {
+    return {
+      source: 'reply_confirmed_done',
+      confirmedDone: true,
+      runStopped: true,
+      verdict: 'confirmed_done',
+      summary: 'the requester confirmed it\'s done, and this step resolves a waiting ticket instead of reopening it; the run stops here, no further step runs',
+    };
+  }
   if (kind === 'reply_loop') {
     return {
       source: 'reply_loop',
@@ -2533,6 +2542,7 @@ async function executeNode({
   workflowScheduleMode = null,
   signal = null,
   workflowRunTimeoutMs = NOTIFICATION_WORKFLOW_RUN_TIMEOUT_MS,
+  resumed = false, // a run resumed after a wait (not its first, synchronous pass)
 }) {
   throwIfWorkflowAborted(signal, workflowRunTimeoutMs);
 
@@ -2580,20 +2590,46 @@ async function executeNode({
     // a day" (replyLoopGuard) — all checked before the conditions
     // (conditionRuleShared.conditionSwitchStop).
     const switchStop = conditionSwitchStop(node.data, evalScope);
-    const passed = switchStop || compileError ? false : Boolean(jsonLogic.apply(rule, evalScope));
+    const conditionsPassed = switchStop || compileError ? false : Boolean(jsonLogic.apply(rule, evalScope));
+    // 19 Nov 2026: "Resolve when the requester confirms it's done (waiting
+    // tickets)" — checked only where the step would have reopened. Live stops
+    // the run right here (no further step, so nothing on the False branch can
+    // e-mail anyone) and requesterReplyReopenService.afterConfirmedDone
+    // resolves the ticket after this first pass. A FreshService-born ticket
+    // or a resumed run behaves as Shadow: passes as before, only marked.
+    const effect = conditionsPassed ? confirmedDoneEffect(node.data, evalScope, { resumed }) : null;
+    const confirmedDone = effect?.mode || null;
+    const passed = confirmedDone === 'live' ? false : conditionsPassed;
     // QA 10-05 #5: say what was checked and what the ticket had, so a stop is
     // never explained by the Stop step's fixed note alone.
-    const explain = switchStop
-      ? explainSwitchStop(switchStop, evalScope)
-      : explainConditionStep(node, { passed, compileError, evalScope, customFieldTypes: conditionTypes });
+    let explain;
+    if (switchStop) explain = explainSwitchStop(switchStop, evalScope);
+    else if (confirmedDone === 'live') explain = explainSwitchStop('reply_confirmed_done', evalScope);
+    else explain = explainConditionStep(node, { passed, compileError, evalScope, customFieldTypes: conditionTypes });
     if (state && typeof state === 'object') {
       // `source` / `verdict`: the reply's "why it didn't reopen" line (MEGA 11-14, A6).
       state.lastCondition = {
         nodeId: node.id, label: node.data?.label || node.id, passed, summary: explain.summary,
         source: explain.source || null, ...(explain.verdict ? { verdict: explain.verdict } : {}),
       };
+      if (effect) {
+        state.replyConfirmedDone = {
+          ...effect,
+          nodeId: node.id,
+          dryRun: dryRun === true || executionMode === EXECUTION_MODE_MOCK || executionMode === EXECUTION_MODE_PREVIEW,
+        };
+      }
     }
-    return { passed, rule, explain, ...(compileError ? { compileError } : {}) };
+    return {
+      passed,
+      rule,
+      explain,
+      ...(confirmedDone ? { confirmedDone } : {}),
+      ...(effect?.fsBorn ? { confirmedDoneFsBorn: true } : {}),
+      // executeDefinition: no further node runs in this run.
+      ...(confirmedDone === 'live' ? { haltRun: true } : {}),
+      ...(compileError ? { compileError } : {}),
+    };
   }
 
   if (node.type === 'update_ticket') {
@@ -3816,6 +3852,7 @@ export async function executeDefinition({
           workflowScheduleMode,
           signal: workflowAbort.signal,
           workflowRunTimeoutMs: workflowAbort.timeoutMs,
+          resumed: Boolean(resume),
         }), workflowAbort.signal, workflowAbort.timeoutMs);
         // Delay node in live mode: park the run for durable resume instead of
         // blocking the process. The step completes (the wait STARTED); the run
@@ -3863,7 +3900,11 @@ export async function executeDefinition({
         await finishStep(step, 'completed', output);
         executed.push({ nodeId: node.id, nodeType: node.type, output });
 
-        if (node.type !== 'stop') {
+        if (output?.haltRun === true) {
+          // A step that ends the run (Live "the requester confirmed it's
+          // done"): nothing queued runs, not even a parallel branch.
+          queue.length = 0;
+        } else if (node.type !== 'stop') {
           queue.push(...nextNodeIds(normalizedDefinition, node, output));
         }
       } catch (stepError) {

@@ -60,14 +60,20 @@ export function previewOutcome({ steps = [], state = {}, asTerminal = true, repl
   if (ran('create_ticket_from_reply').some((s) => s.output?.wouldCreate || s.output?.created)) {
     return { outcome: 'new_ticket', why: 'Would open a new ticket from this reply; this one stays closed.' };
   }
+  // "Resolve when the requester confirms it's done (waiting tickets)".
+  const confirmedDone = state?.replyConfirmedDone?.mode || null;
+  if (confirmedDone === 'live') {
+    return { outcome: 'resolve', why: 'Would resolve the ticket: the requester confirmed it\'s done. No e-mail to the requester.' };
+  }
+  const shadowNote = confirmedDone === 'shadow' ? ' Shadow: would have resolved, the requester confirmed it\'s done.' : '';
   const reopenStep = ran('update_ticket').find((s) => {
     const status = String(s.output?.wouldSet?.status || '').trim().toLowerCase();
     return status && status !== 'resolved' && status !== 'closed';
   });
   if (reopenStep) {
     return asTerminal
-      ? { outcome: 'reopen', why: 'Would reopen the ticket.' }
-      : { outcome: 'reopen', why: `Would set the status to ${reopenStep.output.wouldSet.status}.` };
+      ? { outcome: 'reopen', why: `Would reopen the ticket.${shadowNote}` }
+      : { outcome: 'reopen', why: `Would set the status to ${reopenStep.output.wouldSet.status}.${shadowNote}` };
   }
   const last = state?.lastCondition;
   let reason = null;

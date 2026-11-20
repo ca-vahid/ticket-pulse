@@ -6,6 +6,7 @@ import TeamsAssistantSettings from './TeamsAssistantSettings';
 import { TEAMS_ADMIN_STEPS, blockedDetail, statusOf } from '../agent/teamsStatus';
 import { SwitchRow } from '../ui/switch';
 import { MAX_DIGEST_TIMES, digestTimeLabel, isDigestTime } from '../agent/digestTimes';
+import { effectiveDefault } from './teamsEffectiveDefault';
 
 /**
  * Settings → Teams (plans/TEAMS_NOTIFICATIONS_PLAN.md): is the bot healthy,
@@ -131,7 +132,7 @@ export default function TeamsSettingsPanel() {
   // QA 11-17: rows behind a workspace switch show only while it is on.
   const gridEvents = (data?.events || [])
     .filter((e) => !e.offeredBy || s?.[e.offeredBy] === true)
-    .map((e) => ({ ...e, mode: defaults.events?.[e.key] || e.mode }));
+    .map((e) => ({ ...e, mode: effectiveDefault(e, defaults, s?.effectiveDefaults) }));
   const digestTimes = Array.isArray(s?.digestTimes) && s.digestTimes.length ? s.digestTimes : [defaults.options?.digestTime || '08:00'];
   const saveTimes = (list, label) => save({ digestTimes: [list[0], ...[...new Set(list.slice(1))].sort()] }, label);
   const connectedCount = data?.agents?.filter((a) => a.connected).length || 0;
@@ -359,11 +360,11 @@ export default function TeamsSettingsPanel() {
               />
               <SwitchRow
                 testId="teams-survey-results"
-                label="Offer survey result notices"
-                description="Adds “A survey result comes in” to each person’s Teams choices, off until they turn it on. Agents hear about tickets they handled; admins and reviewers can choose everyone’s. One result per message, never totals or rankings."
+                label="Let admins get everyone’s survey results"
+                description="Agents always get “A survey result comes in” for tickets they handled, in Teams unless they change it. With this on, workspace admins can also choose everyone’s results. One result per message, never totals or rankings."
                 checked={s.surveyResults === true}
                 disabled={busy === 'save'}
-                onCheckedChange={(on) => save({ surveyResults: on }, on ? 'Survey result notices are offered in this workspace' : 'Survey result notices are no longer offered')}
+                onCheckedChange={(on) => save({ surveyResults: on }, on ? 'Admins can now choose everyone’s survey results' : 'Survey results now go only to the agent who handled the ticket')}
               />
             </div>
           </section>

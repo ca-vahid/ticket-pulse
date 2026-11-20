@@ -266,10 +266,12 @@ describe('digest times: the runner', () => {
 // ------------------------------------------------------------------ #2/#3/#4 prefs and settings
 
 describe('prefs and workspace settings', () => {
-  test('new rows: survey results off by default, on-call Teams/Off only; both behind a workspace switch', () => {
-    expect(EVENTS.find((e) => e.key === 'survey_result')).toMatchObject({ mode: 'off', offeredBy: 'surveyResults' });
+  test('new rows: on-call Teams/Off only, behind a workspace switch; survey results always offered (QA 11-19 #1)', () => {
+    expect(EVENTS.find((e) => e.key === 'survey_result')).toMatchObject({ mode: 'teams' });
+    expect(EVENTS.find((e) => e.key === 'survey_result').offeredBy).toBeUndefined();
     expect(EVENTS.find((e) => e.key === 'on_call_start')).toMatchObject({ mode: 'teams', modes: ['teams', 'off'], offeredBy: 'onCallNotice' });
-    expect(offeredEvents({}).map((e) => e.key)).not.toEqual(expect.arrayContaining(['survey_result']));
+    expect(offeredEvents({}).map((e) => e.key)).toContain('survey_result');
+    expect(offeredEvents({}).map((e) => e.key)).not.toContain('on_call_start');
     expect(offeredEvents({ onCallNotice: true, surveyResults: true }).map((e) => e.key)).toEqual(expect.arrayContaining(['survey_result', 'on_call_start']));
   });
 
@@ -304,7 +306,7 @@ describe('prefs and workspace settings', () => {
     expect(prismaMock.notificationWorkspaceSetting.upsert.mock.calls[0][0].update.defaults.extras).toEqual({ digestTimes: ['15:00'], onCallNotice: true });
   });
 
-  test('"Everyone\'s" survey results are kept only for admins and reviewers', async () => {
+  test('"Everyone\'s" survey results are kept only for those who may choose them', async () => {
     prismaMock.notificationWorkspaceSetting.findUnique.mockResolvedValue(wsRow({ surveyResults: true }));
     const techSpy = jest.spyOn(svc, '_tech').mockResolvedValue({ ...DANA });
     const statusSpy = jest.spyOn(svc, 'myStatus').mockResolvedValue({ ok: true });
@@ -351,12 +353,13 @@ describe('prefs and workspace settings', () => {
     expect(me.digestTimes).toEqual(['09:00', '15:00']);
     expect(me.surveyScopeChoice).toBe(true);
     expect(me.events.find((e) => e.key === 'on_call_start')).toMatchObject({ mode: 'teams', modes: ['teams', 'off'] });
-    expect(me.events.find((e) => e.key === 'survey_result')).toMatchObject({ mode: 'off' });
+    expect(me.events.find((e) => e.key === 'survey_result')).toMatchObject({ mode: 'teams', workspaceDefault: 'teams' });
     prismaMock.notificationWorkspaceSetting.findUnique.mockResolvedValue(wsRow({}, {}));
     roleSpy.mockClear();
     const plain = await svc.myStatus(DANA.email, 3);
     expect(plain.events.map((e) => e.key)).not.toEqual(expect.arrayContaining(['on_call_start']));
-    expect(plain.events.map((e) => e.key)).not.toEqual(expect.arrayContaining(['survey_result']));
+    // QA 11-19 #1: the survey row stays (own tickets); only the choice goes.
+    expect(plain.events.map((e) => e.key)).toContain('survey_result');
     expect(plain.surveyScopeChoice).toBe(false);
     expect(roleSpy).not.toHaveBeenCalled();
     techSpy.mockRestore(); roleSpy.mockRestore();
@@ -489,7 +492,8 @@ describe('survey results', () => {
       { technicianId: 12, prefs: prefs({ survey_result: 'digest' }, { surveyScope: 'all' }), privileged: true },
       { technicianId: 13, prefs: prefs({ survey_result: 'teams' }, { surveyScope: 'all' }), privileged: false },
       { technicianId: 14, prefs: prefs({ survey_result: 'teams' }, { surveyScope: 'mine' }), privileged: true },
-      { technicianId: 15, prefs: prefs({}, { surveyScope: 'all' }), privileged: true },
+      // QA 11-19 #1: the row is Teams by default now; Off is a choice.
+      { technicianId: 15, prefs: prefs({ survey_result: 'off' }, { surveyScope: 'all' }), privileged: true },
     ];
     expect(surveyAudience({ people, assignedTechId: 7 })).toEqual([
       { technicianId: 7, why: 'mine', mode: 'teams' },
@@ -550,11 +554,11 @@ describe('survey results', () => {
       expect(botMock.sendToConversation.mock.calls[0][0].conversationId).toBe(`conv-${DANA.email}`);
     });
 
-    test('a handler already told under "The requester rates my ticket" is not told twice', async () => {
-      prismaMock.notificationPreference.findUnique.mockResolvedValue({ events: { survey_result: 'teams' }, options: {} });
+    test('QA 11-19 #1: a handler with the old row on gets this card (it is the only one now)', async () => {
+      prismaMock.notificationPreference.findUnique.mockResolvedValue({ events: { survey_result: 'teams', survey_response: 'teams' }, options: { respectAway: false } });
       const out = await extras._notifySurveyResult({ ticketId: 1201, source: 'ticketpulse', score: 4, resultKey: '4:1' });
-      expect(out.skipped).toEqual([{ technicianId: 7, why: 'told_as_survey_response' }]);
-      expect(out.sent).toBe(1);
+      expect(out.skipped).toEqual([]);
+      expect(out.sent).toBe(2);
     });
 
     test('FreshService CSAT: found by the ticket\'s FS id, once per response, only recent', async () => {
@@ -576,13 +580,15 @@ describe('survey results', () => {
       expect((await extras._notifySurveyResult({ freshserviceTicketId: 244501, source: 'freshservice', score: 3 })).off).toBe('not_in_app');
     });
 
-    test('Digest holds it; the workspace switch off sends nothing', async () => {
+    test('Digest holds it; the workspace switch off sends no "everyone\'s"; Teams off sends nothing', async () => {
       prismaMock.notificationPreference.findMany.mockResolvedValue([{ workspaceId: 3, technicianId: 12, events: { survey_result: 'digest' }, options: { surveyScope: 'all' } }]);
       prismaMock.ticket.findFirst.mockResolvedValue({ ...TICKET, assignedTechId: null });
       const out = await extras._notifySurveyResult({ ticketId: 1201, source: 'ticketpulse', score: 5, resultKey: '5:2' });
       expect(out).toMatchObject({ sent: 0, held: 1 });
       expect(prismaMock.teamsDelivery.create).toHaveBeenCalledWith({ data: expect.objectContaining({ status: 'digest', eventKey: 'survey_result', technicianId: 12 }) });
       prismaMock.notificationWorkspaceSetting.findUnique.mockResolvedValue(wsRow({ surveyResults: false }));
+      expect(await extras._notifySurveyResult({ ticketId: 1201, source: 'ticketpulse', score: 5, resultKey: '5:3' })).toEqual({ sent: 0, held: 0, skipped: [] });
+      prismaMock.notificationWorkspaceSetting.findUnique.mockResolvedValue({ ...wsRow({ surveyResults: true }), teamsEnabled: false });
       expect((await extras._notifySurveyResult({ ticketId: 1201, source: 'ticketpulse', score: 5 })).off).toBe('off');
     });
   });

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ValidationError } from '../utils/errors.js';
 import { formatHumanTime, isIsoTimestamp } from '../utils/humanTime.js';
+import { CONFIRMED_DONE_MODES } from './conditionRuleShared.js';
 
 /**
  * Registered workflow trigger events and WHERE each one is emitted. Keep this
@@ -1313,6 +1314,24 @@ function validateGraph(definition, triggerType) {
       const handles = new Set(edges.map((edge) => normalizedSourceHandle(edge)));
       if (!handles.has('true')) errors.push(`Condition node ${node.id} must define a true branch`);
       if (!handles.has('false')) errors.push(`Condition node ${node.id} must define a false branch`);
+      // "Resolve when the requester confirms it's done (waiting tickets)" (19 Nov 2026).
+      const confirmDone = node.data?.resolveConfirmedDone;
+      if (confirmDone !== undefined && confirmDone !== null) {
+        if (!CONFIRMED_DONE_MODES.includes(confirmDone)) {
+          errors.push(`Condition node ${node.id}: "Resolve when the requester confirms it's done" must be off, shadow or live`);
+        } else if (confirmDone !== 'off' && triggerType !== 'ticket.reply_received') {
+          errors.push(`Condition node ${node.id}: "Resolve when the requester confirms it's done" only works on the "Requester replied" trigger`);
+        } else if (confirmDone === 'live') {
+          // Live resolves right after the run's first pass. A wait before or
+          // beside this step would park the run first, and the reply would
+          // never be acted on: only waits after this step are allowed.
+          const after = reachableNodeIds(node, outgoing);
+          const wait = definition.nodes.find((n) => n.type === 'delay' && reachable.has(n.id) && !after.has(n.id));
+          if (wait) {
+            errors.push(`Condition node ${node.id}: "Resolve when the requester confirms it's done" can be Live only when no wait step runs before or beside it (${wait.id}); use Shadow, or move the wait after this step`);
+          }
+        }
+      }
     }
 
     if (node.type === 'branch' && reachable.has(node.id)) {

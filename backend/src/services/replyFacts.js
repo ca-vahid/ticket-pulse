@@ -14,6 +14,10 @@
  *   event.extra.replyVerdict    how the reply reads (requesterReplyReopenService
  *                               .readReply), only when an enabled reply workflow
  *                               has the thank-you switch on or uses it
+ *   event.extra.replyConfirmedDone  true when, on a waiting (Pending-base)
+ *                               ticket, the reply confirmed the request is done
+ *                               (only asked when a reply workflow's condition
+ *                               step has resolveConfirmedDone Shadow or Live)
  *
  * Cheap facts are always worked out; the costly two only when a workflow in
  * the workspace uses them: the Entra alias lookup (event.sentBy named in a
@@ -23,7 +27,7 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { ticketEndedAt } from '../utils/ticketEndedAt.js';
-import { ignoresThanks } from './conditionRuleShared.js';
+import { confirmedDoneMode, ignoresThanks } from './conditionRuleShared.js';
 
 export const SENT_BY = Object.freeze({ REQUESTER: 'requester', CC: 'cc', WORKFLOW_RECIPIENT: 'workflow_recipient', OTHER: 'other' });
 export const ALIAS_TIMEOUT_MS = 3000;
@@ -63,6 +67,25 @@ export function replyWorkflowNeeds(workflows = []) {
     if (nodes.some((n) => n?.type === 'condition' && ignoresThanks(n.data))) needs.reading = true;
   }
   return needs;
+}
+
+/**
+ * "Resolve when the requester confirms it's done (waiting tickets)": the
+ * strongest mode any enabled reply workflow's condition step sets — 'live',
+ * 'shadow' or 'off'. Pure. (Kept out of replyWorkflowNeeds so its shape stays.)
+ */
+export function confirmDoneNeed(workflows = []) {
+  let need = 'off';
+  for (const workflow of workflows || []) {
+    const nodes = Array.isArray(workflow?.publishedDefinition?.nodes) ? workflow.publishedDefinition.nodes : [];
+    for (const n of nodes) {
+      if (n?.type !== 'condition') continue;
+      const mode = confirmedDoneMode(n.data);
+      if (mode === 'live') return 'live';
+      if (mode === 'shadow') need = 'shadow';
+    }
+  }
+  return need;
 }
 
 // ---------------------------------------------------------------- aliases
@@ -217,7 +240,10 @@ export async function computeReplyFacts({
 
   let read = null;
   const requesterReply = extra?.isSurveyResponse !== true && extra?.senderIsAgent !== true;
-  if (needs.reading && requesterReply) {
+  // A waiting ticket and a workflow that resolves on "the requester confirmed
+  // it's done" (Shadow or Live): the stricter question, never on an agent's forward.
+  const confirmDone = !cheapOnly && statusBase === 'Pending' && !extra?.forwardedBy && confirmDoneNeed(list) !== 'off';
+  if ((needs.reading || confirmDone) && requesterReply) {
     const { default: replyReopen, autoHelpVerdictAsReply } = await import('./requesterReplyReopenService.js');
     const fromAutoHelp = autoHelpVerdictAsReply(autoHelpVerdict);
     if (fromAutoHelp) read = { verdict: fromAutoHelp, via: 'auto_help' };
@@ -228,10 +254,18 @@ export async function computeReplyFacts({
       read = await replyReopen.readReply(ticket, extra || {}, {
         allowThanks: closed && !extra?.forwardedBy,
         rich: needs.rich,
+        confirmDone,
         ...readOptions,
       });
     }
   }
+  // confirmed_done rides on the event as replyConfirmedDone; "Reply reads as"
+  // sees it as "Other reply" (what it was before), so a Shadow run reopens
+  // exactly as it did.
+  const confirmedDone = read?.verdict === 'confirmed_done'
+    ? { verdict: 'confirmed_done', via: read.via || null, ...(read.confirmDone || {}) }
+    : null;
+  const eventVerdict = confirmedDone ? 'reply' : read?.verdict || null;
 
   const facts = {
     sentBy: sender.sentBy,
@@ -239,9 +273,13 @@ export async function computeReplyFacts({
     aliasCheck: sender.aliasCheck,
     closedMinutes,
     replyReopens24h,
-    replyVerdict: read?.verdict || null,
+    replyVerdict: eventVerdict,
     verdictVia: read?.via || null,
     entryId: read?.entryId ?? extra?.entryId ?? null,
+    // { verdict: 'confirmed_done', via, confidence, modelVerdict, snippet, reason } or null
+    confirmedDone,
+    // What the waiting-ticket question answered, whatever it was (or null when not asked).
+    confirmDoneRead: read?.confirmDone ? { verdict: read.verdict, via: read.via || null, ...read.confirmDone } : null,
     needs,
     workflows: list || [],
   };
@@ -251,6 +289,7 @@ export async function computeReplyFacts({
     closedMinutes,
     ...(facts.aliasCheck === 'failed' ? { aliasCheckFailed: true } : {}),
     ...(facts.replyVerdict ? { replyVerdict: facts.replyVerdict } : {}),
+    ...(confirmedDone ? { replyConfirmedDone: true } : {}),
   };
   return facts;
 }
@@ -258,6 +297,7 @@ export async function computeReplyFacts({
 export default {
   SENT_BY,
   replyWorkflowNeeds,
+  confirmDoneNeed,
   replySentBy,
   closedMinutesFor,
   replyReopensLast24h,

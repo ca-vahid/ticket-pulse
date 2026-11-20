@@ -1226,7 +1226,10 @@ export async function emitTicketEvent(eventType, ticketId, {
     }
     if (result && typeof result === 'object') {
       result.replyOutcome = outcome
-        ? { openNow: outcome.openNow, wasClosed: outcome.wasClosed, stillClosed: outcome.stillClosed, line: outcome.line?.text || null }
+        ? {
+          openNow: outcome.openNow, wasClosed: outcome.wasClosed, stillClosed: outcome.stillClosed, line: outcome.line?.text || null,
+          ...(outcome.confirmedDone ? { confirmedDone: outcome.confirmedDone } : {}),
+        }
         : null;
     }
   }

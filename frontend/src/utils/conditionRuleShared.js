@@ -15,6 +15,8 @@
  *   - conditionSwitchStop(data, scope): the step switches the engine checks
  *     before the conditions (Skip noise, Don't reopen on a thank-you or
  *     out-of-office reply, Stop after 3 reopens by replies in a day).
+ *   - confirmedDoneSwitch(data, scope): "Resolve when the requester confirms
+ *     it's done (waiting tickets)", checked after the conditions passed.
  *   - describeConditionStep(data): one plain sentence of what a step checks.
  */
 
@@ -172,6 +174,48 @@ export function conditionSwitchStop(data, scope) {
       || REPLY_STAYS_CLOSED_VERDICTS.includes(extra.replyVerdict))) return 'reply_thanks';
   if (data?.replyLoopGuard === true && Number(extra.replyReopens24h) >= REPLY_LOOP_LIMIT) return 'reply_loop';
   return null;
+}
+
+/**
+ * "Resolve when the requester confirms it's done (waiting tickets)"
+ * (`resolveConfirmedDone`, 19 Nov 2026). Off / Shadow / Live; a step saved
+ * before it existed is Off.
+ */
+export const CONFIRMED_DONE_MODES = Object.freeze(['off', 'shadow', 'live']);
+export function confirmedDoneMode(data) {
+  const mode = data?.resolveConfirmedDone;
+  return mode === 'shadow' || mode === 'live' ? mode : 'off';
+}
+
+/**
+ * Checked AFTER the step's conditions passed (so it only acts where the step
+ * would have reopened): 'live' or 'shadow' when the reply on a waiting
+ * (Pending-base) ticket confirmed the request is done
+ * (event.extra.replyConfirmedDone), else null.
+ */
+export function confirmedDoneSwitch(data, scope) {
+  const mode = confirmedDoneMode(data);
+  if (mode === 'off') return null;
+  if (scope?.event?.extra?.replyConfirmedDone !== true) return null;
+  if (scope?.ticket?.statusBase !== 'Pending') return null;
+  return mode;
+}
+
+/**
+ * What the step actually does with a confirmed-done reply: { mode,
+ * configured, fsBorn?, resumed? } or null. Live acts only on a Ticket
+ * Pulse-born ticket in the run's first pass (the resolve happens right after
+ * that pass); a FreshService-born ticket or a resumed run behaves as Shadow.
+ */
+export function confirmedDoneEffect(data, scope, { resumed = false } = {}) {
+  const configured = confirmedDoneSwitch(data, scope);
+  if (!configured) return null;
+  if (configured !== 'live') return { mode: configured, configured };
+  const fsBorn = scope?.ticket?.origin !== 'ticketpulse';
+  if (fsBorn || resumed) {
+    return { mode: 'shadow', configured, ...(fsBorn ? { fsBorn: true } : {}), ...(resumed ? { resumed: true } : {}) };
+  }
+  return { mode: 'live', configured };
 }
 
 // ---------------------------------------------------------------- converter
@@ -566,6 +610,10 @@ export default {
   REPLY_LOOP_LIMIT,
   ignoresThanks,
   conditionSwitchStop,
+  CONFIRMED_DONE_MODES,
+  confirmedDoneMode,
+  confirmedDoneSwitch,
+  confirmedDoneEffect,
   ruleToConditionGroup,
   ruleConversionPatch,
   describeConditionRow,

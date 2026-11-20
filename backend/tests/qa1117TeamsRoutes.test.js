@@ -97,7 +97,9 @@ describe('My Teams choices', () => {
     expect(res.body.data.options.digestSlots).toEqual([]);
     const keys = res.body.data.events.map((e) => e.key);
     expect(keys).toContain('on_call_start');
-    expect(keys).not.toContain('survey_result');
+    // QA 11-19 #1: always offered (own tickets), and only once.
+    expect(keys.filter((k) => k === 'survey_result')).toHaveLength(1);
+    expect(keys).not.toContain('survey_response');
   });
 
   test('switching the 3 PM digest on saves it; "Everyone\'s" falls back to Mine for an agent', async () => {
@@ -109,13 +111,23 @@ describe('My Teams choices', () => {
     expect(res.body.data.options.surveyScope).toBe('mine');
   });
 
-  test('a reviewer (or a super admin) keeps "Everyone\'s"', async () => {
+  test('QA 11-19 #1: a workspace admin (or a super admin) keeps "Everyone\'s"', async () => {
     store.ws = { workspaceId: 3, teamsEnabled: true, defaults: { events: {}, options: {}, extras: { surveyResults: true } } };
-    roles.set('priya.nair@example.com', 'reviewer');
+    roles.set('priya.nair@example.com', 'admin');
     const res = await request(app('priya.nair@example.com')).put('/api/agent/teams/preferences').send({ workspaceId: 3, events: { survey_result: 'digest' }, options: { surveyScope: 'all' } });
     expect(store.pref.options).toEqual({ surveyScope: 'all' });
     expect(res.body.data.surveyScopeChoice).toBe(true);
     const sup = await request(app('super@example.com')).get('/api/agent/teams?workspaceId=3');
     expect(sup.body.data.surveyScopeChoice).toBe(true);
+  });
+
+  test('QA 11-19 #1: a reviewer cannot choose "Everyone\'s"', async () => {
+    store.ws = { workspaceId: 3, teamsEnabled: true, defaults: { events: {}, options: {}, extras: { surveyResults: true } } };
+    roles.set('eli.park@example.com', 'reviewer');
+    const res = await request(app('eli.park@example.com')).put('/api/agent/teams/preferences').send({ workspaceId: 3, events: { survey_result: 'teams' }, options: { surveyScope: 'all' } });
+    expect(res.status).toBe(200);
+    expect(store.pref.options).toEqual({});
+    expect(res.body.data.surveyScopeChoice).toBe(false);
+    expect(res.body.data.options.surveyScope).toBe('mine');
   });
 });

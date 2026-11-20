@@ -45,7 +45,8 @@ import assignmentSharesRoutes from './assignmentShares.routes.js';
 import { requireWorkspace } from '../middleware/workspace.js';
 import usageRoutes from './usage.routes.js';
 import siteStatsRoutes from './siteStats.routes.js';
-import { requireAdmin, requireAdminOrObserver, requireAuth, requireWorkspaceAccess, requireWorkspaceMemberOrAgent } from '../middleware/auth.js';
+import dashboardViewerRoutes from './dashboardViewer.routes.js';
+import { requireAdmin, requireAdminOrObserver, requireAuth, requireDashboardView, requireWorkspaceAccess, requireWorkspaceMemberOrAgent } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -139,6 +140,15 @@ router.use('/ticket-grouping', requireWorkspace, ticketGroupingRoutes);
 router.use('/assignment-spread', requireWorkspace, assignmentSpreadRoutes);
 router.use('/assignment-level-match', requireWorkspace, assignmentLevelMatchRoutes);
 router.use('/assignment-shares', requireWorkspace, assignmentSharesRoutes);
+// Dashboard view grant (QA 11-19 item 2): an admin may let a single agent open
+// the Dashboard read-only (Settings → Members → "Can see the Dashboard"). A
+// listed agent often has no workspace_access row, so the Dashboard mounts
+// ABOVE the strict gate with its own tier — admins, the read-only observer
+// (reads) and listed viewers (reads); everyone else 403. The small router
+// beside it answers "may I?" and the two extra reads the page makes, for
+// listed viewers only; all other callers fall through to the mounts below.
+router.use(dashboardViewerRoutes);
+router.use('/dashboard', requireWorkspace, requireDashboardView, dashboardRoutes);
 router.use(requireWorkspace);
 router.use(requireWorkspaceAccess);
 
@@ -151,8 +161,8 @@ router.use(requireWorkspaceAccess);
 // else. `/sse` stays ABOVE these gates on purpose — viewers need live queue
 // updates. Global admins pass requireAdmin without a DB lookup.
 // Dashboard + Analytics are the observer pages: the 'readonly' grant may READ
-// them (requireAdminOrObserver); Agent Maps and Summit stay admin-only.
-router.use('/dashboard', requireAdminOrObserver, dashboardRoutes);
+// them (requireAdminOrObserver); Agent Maps and Summit stay admin-only. The
+// Dashboard itself is mounted above (requireDashboardView, QA 11-19 item 2).
 router.use('/teams-notifications', teamsAdminRouter);
 // Ticket-status registry (Phase 8a): Settings CRUD, admin-gated in the router.
 router.use('/ticket-statuses', statusesRoutes);

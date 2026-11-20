@@ -48,7 +48,9 @@ import ErrorBoundary from './components/ErrorBoundary';
 import EmailHealthBanner from './components/EmailHealthBanner';
 import SyncHealthBanner from './components/SyncHealthBanner';
 import CommandPalette from './components/CommandPalette';
-import AdminRoute, { BounceTo, LoadingScreen, ViewRoute } from './components/nav/AdminRoute';
+import AdminRoute, {
+  BounceTo, DashboardRoute, LoadingScreen, ViewRoute,
+} from './components/nav/AdminRoute';
 import { consumePostLoginPath } from './utils/postLoginRedirect';
 import AccessBounceToast from './components/nav/AccessBounceToast';
 import V4Splash from './components/v4/V4Splash';
@@ -378,22 +380,24 @@ function App() {
                         }
                       />
 
-                      {/* Admin-only routes (v3.7.02 role lockdown) */}
+                      {/* Admin-only routes (v3.7.02 role lockdown). The Dashboard
+                          and its technician pages also open, read only, for the
+                          agents an admin listed (QA 11-19 item 2). */}
                       <Route
                         path="/dashboard"
                         element={
-                          <ViewRoute>
+                          <DashboardRoute>
                             <Dashboard />
-                          </ViewRoute>
+                          </DashboardRoute>
                         }
                       />
 
                       <Route
                         path="/technician/:id"
                         element={
-                          <ViewRoute>
+                          <DashboardRoute>
                             <TechnicianDetailNew />
-                          </ViewRoute>
+                          </DashboardRoute>
                         }
                       />
 

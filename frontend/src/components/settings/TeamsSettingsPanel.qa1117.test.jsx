@@ -6,7 +6,8 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 // QA 11-17 #2-#4: Settings → Teams gets digest times and two switches. Invented names.
 const EVENTS = [
   { key: 'assigned', label: 'A ticket is assigned to me', group: 'My tickets', mode: 'teams' },
-  { key: 'survey_result', label: 'A survey result comes in', group: 'Surveys', mode: 'off', offeredBy: 'surveyResults' },
+  // QA 11-19 #1: always offered (own tickets), Teams by default; the switch only adds admins' "Everyone's".
+  { key: 'survey_result', label: 'A survey result comes in', group: 'Surveys', mode: 'teams' },
   { key: 'on_call_start', label: "I'm on call this week", group: 'On call', mode: 'teams', modes: ['teams', 'off'], offeredBy: 'onCallNotice' },
 ];
 const settings = (over = {}) => ({
@@ -74,14 +75,15 @@ describe('Digest times', () => {
 });
 
 describe('On-call and survey switches', () => {
-  test('both off by default; the rows they offer stay out of the defaults grid', async () => {
+  test('both off by default; on-call stays out of the defaults grid, survey results are always in it (Teams)', async () => {
     teamsAdminAPI.status.mockResolvedValue({ data: status() });
     render(<TeamsSettingsPanel />);
     const onCall = await screen.findByRole('switch', { name: 'Tell the person on call when their on-call week starts' });
     expect(onCall).toHaveAttribute('aria-checked', 'false');
-    expect(screen.getByRole('switch', { name: 'Offer survey result notices' })).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('switch', { name: 'Let admins get everyone’s survey results' })).toHaveAttribute('aria-checked', 'false');
     expect(screen.queryByText("I'm on call this week")).toBeNull();
-    expect(screen.queryByText('A survey result comes in')).toBeNull();
+    const survey = screen.getByRole('radiogroup', { name: 'A survey result comes in' });
+    expect(within(survey).getByRole('radio', { name: 'Teams' })).toHaveAttribute('aria-checked', 'true');
   });
 
   test('turning on the on-call switch saves it and shows the row (Teams / Off)', async () => {
@@ -94,13 +96,49 @@ describe('On-call and survey switches', () => {
     expect(within(group).getAllByRole('radio').map((r) => r.textContent)).toEqual(['Teams', 'Off']);
   });
 
-  test('turning on survey results saves it and offers the row, off by default', async () => {
+  test('QA 11-19 #1: the survey switch is about admins and everyone\'s results, in those words', async () => {
     teamsAdminAPI.status.mockResolvedValue({ data: status() });
     teamsAdminAPI.saveSettings.mockResolvedValue({ data: settings({ surveyResults: true }) });
     render(<TeamsSettingsPanel />);
-    fireEvent.click(await screen.findByRole('switch', { name: 'Offer survey result notices' }));
+    const sw = await screen.findByRole('switch', { name: 'Let admins get everyone’s survey results' });
+    expect(screen.queryByText('Offer survey result notices')).toBeNull();
+    expect(screen.getByText(/Agents always get “A survey result comes in” for tickets they handled/)).toBeInTheDocument();
+    expect(screen.getByText(/workspace admins can also choose everyone’s results/)).toBeInTheDocument();
+    expect(screen.queryByText(/reviewers/i)).toBeNull();
+    fireEvent.click(sw);
     await waitFor(() => expect(teamsAdminAPI.saveSettings).toHaveBeenCalledWith({ surveyResults: true }));
+    expect(await screen.findByText('Admins can now choose everyone’s survey results')).toBeInTheDocument();
+    // The row was there before and is still there: one row, Teams.
+    expect(screen.getAllByRole('radiogroup', { name: 'A survey result comes in' })).toHaveLength(1);
+  });
+});
+
+describe('QA 11-19 #1: the defaults grid shows the effective default', () => {
+  const surveyMode = async () => {
     const group = await screen.findByRole('radiogroup', { name: 'A survey result comes in' });
-    expect(within(group).getByRole('radio', { name: 'Off' })).toHaveAttribute('aria-checked', 'true');
+    return within(group).getAllByRole('radio').find((r) => r.getAttribute('aria-checked') === 'true').textContent;
+  };
+
+  test('a carried workspace default Off from the old row shows Off, not Teams', async () => {
+    teamsAdminAPI.status.mockResolvedValue({ data: status({ defaults: { events: { survey_response: 'off' }, options: {} } }) });
+    render(<TeamsSettingsPanel />);
+    expect(await surveyMode()).toBe('Off');
+  });
+
+  test('the server\'s computed default wins when the payload has one', async () => {
+    teamsAdminAPI.status.mockResolvedValue({ data: status({ defaults: { events: {}, options: {} }, effectiveDefaults: { survey_result: 'digest' } }) });
+    render(<TeamsSettingsPanel />);
+    expect(await surveyMode()).toBe('Digest');
+  });
+
+  test('the mirrored rule: the new row\'s own default beats the old row; nothing saved is Teams', async () => {
+    const { effectiveDefault } = await import('./teamsEffectiveDefault.js');
+    const row = EVENTS[1];
+    expect(effectiveDefault(row, { events: { survey_result: 'teams', survey_response: 'off' } })).toBe('teams');
+    expect(effectiveDefault(row, { events: { survey_response: 'digest' } })).toBe('digest');
+    expect(effectiveDefault(row, { events: {} })).toBe('teams');
+    expect(effectiveDefault(row, { events: { survey_response: 'nope' } })).toBe('teams');
+    // A row with no retired predecessor ignores old keys.
+    expect(effectiveDefault(EVENTS[0], { events: { survey_response: 'off' } })).toBe('teams');
   });
 });

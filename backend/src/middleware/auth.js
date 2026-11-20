@@ -197,6 +197,86 @@ export function requireAdminOrObserver(req, res, next) {
     });
 }
 
+// Lazy import, same reason as getWsRepo (the service reaches prisma).
+let _dashboardViewers = null;
+async function getDashboardViewers() {
+  if (!_dashboardViewers) {
+    const mod = await import('../services/dashboardViewerService.js');
+    _dashboardViewers = mod.default;
+  }
+  return _dashboardViewers;
+}
+
+/**
+ * Dashboard tier (QA 11-19 item 2): requireAdminOrObserver, plus the agents an
+ * admin listed under Settings → Members → "Can see the Dashboard" — reads only.
+ * Mounted on /dashboard ABOVE requireWorkspaceAccess, because a listed agent
+ * often has no workspace_access row. The grant is a technician row of this
+ * workspace, so it never opens another workspace's Dashboard.
+ *
+ * Refusals are 403: workspace_access_denied when the caller has no role here
+ * and no grant, admin_required when they have a role that does not cover it.
+ */
+export function requireDashboardView(req, res, next) {
+  const user = sessionUser(req);
+  if (user?.role === 'admin') {
+    return next();
+  }
+
+  const email = user?.email;
+  if (!email || !req.workspaceId) {
+    logger.warn(`Dashboard access refused for ${req.path} (no email or workspaceId)`);
+    return next(new AuthorizationError('You do not have access to this workspace', 'workspace_access_denied'));
+  }
+
+  const isRead = req.method === 'GET' || req.method === 'HEAD';
+  const decide = async () => {
+    const wsRepo = await getWsRepo();
+    const wsRole = await wsRepo.getAccessRole(email, req.workspaceId);
+    if (wsRole === 'admin') return null;
+    if (isRead && wsRole === 'readonly') return null;
+    if (isRead) {
+      const viewers = await getDashboardViewers();
+      if (await viewers.isDashboardViewer(email, req.workspaceId)) return null;
+    }
+    logger.warn(`Dashboard access refused for ${req.method} ${req.path} by ${email}`);
+    return wsRole
+      ? new AuthorizationError('Admin access required', 'admin_required')
+      : new AuthorizationError('You do not have access to this workspace', 'workspace_access_denied');
+  };
+  decide().then(
+    (refusal) => next(refusal || undefined),
+    (err) => {
+      logger.error('Error checking dashboard view access:', err.message);
+      next(new AuthorizationError('Admin access required', 'admin_required'));
+    },
+  );
+}
+
+/**
+ * The few extra reads the Dashboard page makes (category tree, holidays),
+ * served to a LISTED dashboard viewer only. Everyone else — and every write —
+ * continues down the normal chain untouched (`next('route')`), so their
+ * existing gates still answer exactly as before.
+ */
+export function dashboardViewerReadsOnly(req, res, next) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return next('route');
+  const user = sessionUser(req);
+  const email = user?.email;
+  if (!email || user?.role === 'admin' || !req.workspaceId) return next('route');
+  const decide = async () => {
+    const wsRepo = await getWsRepo();
+    const wsRole = await wsRepo.getAccessRole(email, req.workspaceId);
+    if (wsRole === 'admin' || wsRole === 'readonly') return false;
+    const viewers = await getDashboardViewers();
+    return viewers.isDashboardViewer(email, req.workspaceId);
+  };
+  decide().then(
+    (serve) => (serve ? next() : next('route')),
+    () => next('route'),
+  );
+}
+
 /**
  * GLOBAL admins only ("super admins") — workspace-scoped admins do NOT pass.
  * For cross-workspace surfaces like the AI usage/cost report, which exposes

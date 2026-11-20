@@ -11,10 +11,15 @@
  *     own Off is respected; quiet hours and work hours are not applied (the
  *     message marks the start of after-hours).
  *
- *  #4 Survey results. When "Offer survey results" is on, each result (the
- *     Ticket Pulse "How did we do?" survey and FreshService CSAT) goes to the
- *     agent who handled the ticket, and to admins and reviewers who chose
- *     "Everyone's". One result per card: no totals, averages or rankings.
+ *  #4 Survey results. Each result (the Ticket Pulse "How did we do?" survey
+ *     and FreshService CSAT) goes to the agent who handled the ticket under
+ *     "A survey result comes in" (Teams by default, no workspace switch
+ *     needed). QA 11-19 #1: this is the only Teams message for a survey
+ *     answer (the retired "The requester rates my ticket in the survey" row
+ *     no longer sends). When Settings → Teams "Let admins get everyone's
+ *     survey results" is on, admins who chose "Everyone's" get them too; the
+ *     admin check runs on every send. One result per card: no totals,
+ *     averages or rankings.
  *
  * Nothing here throws into its callers.
  */
@@ -90,7 +95,8 @@ export function onCallSentence(period, tz = 'America/Vancouver') {
  *   people: [{ technicianId, prefs, privileged }]  (prefs = effective prefs)
  *   assignedTechId: who handled the ticket
  * The handler hears with "Mine" or "Everyone's"; anybody else only with
- * "Everyone's", and only when privileged (admin or reviewer).
+ * "Everyone's", and only when privileged (an admin, where the workspace
+ * allows it - a stored "Everyone's" without that counts as "Mine").
  * @returns {Array<{ technicianId, why: 'mine'|'all', mode }>}
  */
 export function surveyAudience({ people = [], assignedTechId = null } = {}) {
@@ -225,12 +231,15 @@ class TeamsExtraNotices {
       where,
       select: {
         id: true, workspaceId: true, subject: true, freshserviceTicketId: true, nativeNumber: true, origin: true, assignedTechId: true,
-        requester: { select: { name: true } },
+        requester: { select: { name: true, email: true } },
       },
     });
     if (!ticket) return { ...out, off: 'no_ticket' };
     const ws = await teams.workspaceSettings(ticket.workspaceId);
-    if (!ws.teamsEnabled || !ws.surveyResults) return { ...out, off: 'off' };
+    // QA 11-19 #1: the handler's own results need no workspace switch;
+    // ws.surveyResults only decides whether admins' "Everyone's" counts.
+    if (!ws.teamsEnabled) return { ...out, off: 'off' };
+    const requesterEmail = lc(ticket.requester?.email);
 
     const people = await this._surveyPeople(ticket, ws);
     const audience = surveyAudience({ people, assignedTechId: ticket.assignedTechId });
@@ -249,9 +258,9 @@ class TeamsExtraNotices {
       const p = byId.get(a.technicianId);
       const tech = p.tech;
       const base = { workspaceId: ticket.workspaceId, email: tech.email, technicianId: tech.id, ticketId: ticket.id, eventKey: 'survey_result', summary };
-      // A handler already told by "The requester rates my ticket" is not told twice.
-      if (a.why === 'mine' && source === 'ticketpulse' && p.prefs.events.survey_response !== 'off') {
-        out.skipped.push({ technicianId: tech.id, why: 'told_as_survey_response' });
+      // Never about your own action: an agent who answered the survey themselves.
+      if (requesterEmail && lc(tech.email) === requesterEmail) {
+        out.skipped.push({ technicianId: tech.id, why: 'own_answer' });
         continue;
       }
       const already = await Promise.resolve()
@@ -285,9 +294,10 @@ class TeamsExtraNotices {
   }
 
   /**
-   * The people who might hear: the handler, and everybody in the workspace
-   * whose own choice is "Everyone's" (their privilege is checked here, every
-   * time, so a role taken away stops the notices).
+   * The people who might hear: the handler, and - only while the workspace
+   * lets admins get everyone's results - everybody whose own choice is
+   * "Everyone's" (their admin role is checked here, every time, so a role
+   * taken away stops the notices).
    * @returns {Array<{ technicianId, tech, prefs, privileged }>}
    */
   async _surveyPeople(ticket, ws) {
@@ -300,6 +310,7 @@ class TeamsExtraNotices {
         people.push({ technicianId: tech.id, tech, prefs, privileged: false });
       }
     }
+    if (!ws.surveyResults) return people;
     const rows = await Promise.resolve()
       .then(() => prisma.notificationPreference.findMany({ where: { workspaceId: ticket.workspaceId } }))
       .catch(() => []) || [];

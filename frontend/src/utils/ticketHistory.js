@@ -324,7 +324,14 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
     } else if (t === 'requester_reply_stays_closed') {
       // When a requester replies (14 Oct 2026): a thank-you / out-of-office
       // left the ticket closed. The conversation has the quiet line too.
-      item = baseItem({ event: 'reply', verb: 'left the ticket closed', detail: d.note || null, importance: 2, machine: false });
+      // 19 Nov 2026: the same row records "the requester confirmed it's done"
+      // on a waiting ticket (details.cause confirmed_done*).
+      const verb = {
+        confirmed_done: 'resolved the ticket: the requester confirmed it\'s done',
+        confirmed_done_shadow: 'would have resolved the ticket (Shadow)',
+        confirmed_done_failed: 'reopened the ticket: resolving it failed',
+      }[d.cause] || 'left the ticket closed';
+      item = baseItem({ event: 'reply', verb, detail: d.note || null, importance: 2, machine: false });
     } else if (t === 'requester_teams_chat') {
       // QA 10-15 #5: the requester opened a Teams chat with the agent from the urgency page.
       item = baseItem({ event: 'reply', verb: 'opened a Teams chat from the urgency page', detail: d.agentName ? `With ${d.agentName}` : null, importance: 2, machine: false });
