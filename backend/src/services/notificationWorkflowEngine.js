@@ -1126,12 +1126,13 @@ function appendFeedbackScore(url, score) {
 // cell (1 px font, fixed line-height and height) cut the icon in new Outlook.
 // Now the icon sits in its own 40x40 cell with a normal line box and nothing
 // on the outer cell that could clip it.
-function emailIconCell(src, padding) {
+function emailIconCell(src, padding, href = null) {
+  const img = `<img src="${src}" width="40" height="40" alt="" style="display:block;border:0;outline:none;width:40px;height:40px;line-height:1;">`;
   return [
     `<td width="54" valign="middle" style="padding:${padding};">`,
     '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>',
     '<td width="40" height="40" valign="middle" style="width:40px;height:40px;font-size:12px;line-height:1;mso-line-height-rule:exactly;">',
-    `<img src="${src}" width="40" height="40" alt="" style="display:block;border:0;outline:none;width:40px;height:40px;line-height:1;">`,
+    href ? `<a href="${href}" target="_blank" rel="noopener noreferrer" style="display:block;text-decoration:none;">${img}</a>` : img,
     '</td></tr></table></td>',
   ].join('');
 }
@@ -1150,15 +1151,23 @@ function emailGlyphCell(glyph, padding, { color = '#c0392f', tint = '#fbdedb' } 
   ].join('');
 }
 
+// 20 Nov 2026 (TP-13370, "these buttons don't work"): the row used to be ONE
+// <a> wrapped around a whole <table>. Outlook's desktop (Word) renderer drops a
+// link around block content, so nothing in the row could be clicked there.
+// Now every cell carries its own link to the same address (icon, words, arrow),
+// which every client honours; the row looks exactly as before.
 function actionRowHtml({ url, badge, title, subtitle, color, tint, border = null, mb = false }) {
   const borderStyle = border ? `border:1px solid ${border};` : '';
+  const href = escapeHtml(url);
+  const link = (inner, style = '') => `<a href="${href}" target="_blank" rel="noopener noreferrer" style="display:block;text-decoration:none;${style}">${inner}</a>`;
   return [
-    `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="display:block;text-decoration:none;${mb ? 'margin-bottom:10px;' : ''}">`,
-    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;background:${tint};${borderStyle}border-radius:12px;"><tr>`,
-    emailIconCell(badge, '8px 0 8px 14px'),
-    `<td valign="middle" style="padding:11px 0 11px 14px;font-family:Arial,Helvetica,sans-serif;"><div style="font-size:15px;line-height:20px;font-weight:700;color:${color};">${escapeHtml(title)}</div><div style="font-size:12.5px;line-height:17px;color:#64748b;margin-top:1px;">${escapeHtml(subtitle)}</div></td>`,
-    `<td width="42" align="right" valign="middle" style="padding-right:16px;"><span style="font-family:Arial,Helvetica,sans-serif;font-size:20px;font-weight:700;color:${color};">&rarr;</span></td>`,
-    '</tr></table></a>',
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;background:${tint};${borderStyle}border-radius:12px;${mb ? 'margin-bottom:10px;' : ''}"><tr>`,
+    emailIconCell(badge, '8px 0 8px 14px', href),
+    `<td valign="middle" style="padding:11px 0 11px 14px;font-family:Arial,Helvetica,sans-serif;">${link(`<span style="display:block;font-size:15px;line-height:20px;font-weight:700;color:${color};">${escapeHtml(title)}</span><span style="display:block;font-size:12.5px;line-height:17px;color:#64748b;margin-top:1px;">${escapeHtml(subtitle)}</span>`)}</td>`,
+    `<td width="42" align="right" valign="middle" style="padding-right:16px;">${link(`<span style="font-family:Arial,Helvetica,sans-serif;font-size:20px;font-weight:700;color:${color};">&rarr;</span>`)}</td>`,
+    '</tr></table>',
+    // Outlook ignores margin on tables; a spacer row keeps the gap between rows.
+    mb ? '<!--[if mso]><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td height="10" style="height:10px;line-height:10px;font-size:1px;">&nbsp;</td></tr></table><![endif]-->' : '',
   ].join('');
 }
 
@@ -1333,7 +1342,7 @@ function feedbackRocksHtml(url, theme) {
       '<td align="center" valign="top" style="padding:0 3px;">',
       `<a class="tp-rock" href="${rockUrl}" target="_blank" rel="noopener noreferrer" style="display:inline-block;text-decoration:none;">`,
       `<img src="${rock}" width="52" height="52" alt="${FEEDBACK_LABELS[i]}" style="display:block;margin:0 auto;border:0;border-radius:50%;">`,
-      `<div style="font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;color:${FEEDBACK_LABEL_COLORS[i]};margin-top:4px;">${FEEDBACK_LABELS[i]}</div>`,
+      `<span style="display:block;font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;color:${FEEDBACK_LABEL_COLORS[i]};margin-top:4px;">${FEEDBACK_LABELS[i]}</span>`,
       '</a></td>',
     ].join('');
   }).join('');

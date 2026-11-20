@@ -893,6 +893,31 @@ describe('notification workflow engine persistence', () => {
     expect(result.state.email.html).not.toContain("Can't wait until morning?");
   });
 
+  // 20 Nov 2026 (TP-13370): Outlook desktop ignores a link wrapped around a whole
+  // table, so the action rows could not be clicked. Each row's cells now carry
+  // their own links, and no <a> ever contains a <table>.
+  test('action rows are clickable in Outlook: links sit inside the cells, never around a table', async () => {
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    const sendNode = definition.nodes.find((node) => node.type === 'send_email');
+    sendNode.data.appendPublicStatusLink = true;
+    sendNode.data.appendRaiseUrgencyLink = true;
+    const result = await executeDefinition({
+      workflow, definition,
+      eventContext: { ...eventContext, availability: { isBusinessHours: true, isAfterHours: false, isHoliday: false } },
+      dryRun: true, triggerSource: 'test',
+    });
+    const html = result.state.email.html;
+    // No anchor opens and then reaches a <table> before it closes.
+    const anchors = html.match(/<a\b[^>]*>[\s\S]*?<\/a>/g) || [];
+    for (const a of anchors) expect(a).not.toMatch(/<table/i);
+    // Icon, words and arrow each link to the status page (three links per row).
+    const toStatus = anchors.filter((a) => a.includes(publicStatusUrl));
+    expect(toStatus.length).toBeGreaterThanOrEqual(3);
+    expect(toStatus.some((a) => a.includes('Check status'))).toBe(true);
+    expect(toStatus.some((a) => a.includes('&rarr;'))).toBe(true);
+    expect(toStatus.some((a) => /<img\b/.test(a))).toBe(true);
+  });
+
   test('forced preview keeps selected action blocks in one helpful-links bundle', async () => {
     const definition = buildDefaultWorkflowDefinition('ticket.created');
     const sendNode = definition.nodes.find((node) => node.type === 'send_email');
