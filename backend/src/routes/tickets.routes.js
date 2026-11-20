@@ -1,3 +1,4 @@
+import { recordCredentialEvent, ACTIONS } from '../services/accessAuditService.js';
 import express from 'express';
 import multer from 'multer';
 import { asyncHandler } from '../middleware/errorHandler.js';
@@ -1573,6 +1574,37 @@ router.get('/api-keys', requireTicketingAdmin, asyncHandler(async (req, res) => 
   res.json({ success: true, data: await apiKeyService.list(req.workspaceId) });
 }));
 
+// Access history (20 Nov 2026): the credential as it was before a change, and
+// a compact record of what a PATCH changed. A switch from off to on alerts the
+// admins like a new key does.
+async function credentialBefore(model, id, workspaceId) {
+  const select = model === 'apiKey'
+    ? { id: true, name: true, keyPrefix: true, scopes: true, isEnabled: true, ipAllowlist: true, expiresAt: true }
+    : { id: true, name: true, clientId: true, scopes: true, isEnabled: true, ipAllowlist: true, expiresAt: true, trustedIntake: true };
+  return Promise.resolve()
+    .then(() => prisma[model].findFirst({ where: { id: Number(id), workspaceId }, select }))
+    .catch(() => null);
+}
+
+async function recordCredentialUpdate(req, action, before, after) {
+  if (!after) return;
+  const changed = {};
+  for (const f of ['name', 'isEnabled', 'scopes', 'ipAllowlist', 'expiresAt', 'trustedIntake', 'structureOwnTicketsOnly', 'readPrivateNotes', 'readExcludeCategoryIds', 'rateLimitPerMin']) {
+    if (before && JSON.stringify(before[f] ?? null) !== JSON.stringify(after[f] ?? null) && after[f] !== undefined) changed[f] = { from: before[f] ?? null, to: after[f] ?? null };
+  }
+  if (!Object.keys(changed).length) return;
+  // Switched from off to on: its own event, which alerts like a new credential.
+  const switchedOn = before && before.isEnabled === false && after.isEnabled === true;
+  const isKey = action === ACTIONS.API_KEY_UPDATED;
+  await recordCredentialEvent({
+    workspaceId: req.workspaceId,
+    actorEmail: req.ticketActor?.email,
+    action: switchedOn ? (isKey ? ACTIONS.API_KEY_ENABLED : ACTIONS.OAUTH_CLIENT_ENABLED) : action,
+    credential: after,
+    extra: { changed },
+  });
+}
+
 router.get('/api-keys/scopes', requireTicketingAdmin, asyncHandler(async (req, res) => {
   const { API_KEY_SCOPES } = await import('../services/apiKeyService.js');
   res.json({ success: true, data: API_KEY_SCOPES });
@@ -1588,24 +1620,31 @@ router.post('/api-keys', requireTicketingAdmin, asyncHandler(async (req, res) =>
     ipAllowlist: req.body?.ipAllowlist,
     rateLimitPerMin: req.body?.rateLimitPerMin,
   }, req.ticketActor);
+  await recordCredentialEvent({ workspaceId: req.workspaceId, actorEmail: req.ticketActor?.email, action: ACTIONS.API_KEY_CREATED, credential: key });
   // The raw key is returned exactly once — only its hash is stored.
   res.status(201).json({ success: true, data: { ...key, apiKey: key.key } });
 }));
 
 router.patch('/api-keys/:keyId', requireTicketingAdmin, asyncHandler(async (req, res) => {
   const { default: apiKeyService } = await import('../services/apiKeyService.js');
-  res.json({ success: true, data: await apiKeyService.update(Number(req.params.keyId), req.workspaceId, req.body || {}) });
+  const before = await credentialBefore('apiKey', req.params.keyId, req.workspaceId);
+  const updated = await apiKeyService.update(Number(req.params.keyId), req.workspaceId, req.body || {});
+  await recordCredentialUpdate(req, ACTIONS.API_KEY_UPDATED, before, updated);
+  res.json({ success: true, data: updated });
 }));
 
 router.post('/api-keys/:keyId/rotate', requireTicketingAdmin, asyncHandler(async (req, res) => {
   const { default: apiKeyService } = await import('../services/apiKeyService.js');
   const key = await apiKeyService.rotate(Number(req.params.keyId), req.workspaceId);
+  await recordCredentialEvent({ workspaceId: req.workspaceId, actorEmail: req.ticketActor?.email, action: ACTIONS.API_KEY_ROTATED, credential: key });
   res.json({ success: true, data: { ...key, apiKey: key.key } });
 }));
 
 router.post('/api-keys/:keyId/revoke', requireTicketingAdmin, asyncHandler(async (req, res) => {
   const { default: apiKeyService } = await import('../services/apiKeyService.js');
-  res.json({ success: true, data: await apiKeyService.revoke(Number(req.params.keyId), req.workspaceId) });
+  const key = await apiKeyService.revoke(Number(req.params.keyId), req.workspaceId);
+  await recordCredentialEvent({ workspaceId: req.workspaceId, actorEmail: req.ticketActor?.email, action: ACTIONS.API_KEY_REVOKED, credential: key });
+  res.json({ success: true, data: key });
 }));
 
 router.get('/api-keys/:keyId/usage', requireTicketingAdmin, asyncHandler(async (req, res) => {
@@ -1624,7 +1663,10 @@ router.get('/api-keys/:keyId/usage', requireTicketingAdmin, asyncHandler(async (
 
 router.delete('/api-keys/:keyId', requireTicketingAdmin, asyncHandler(async (req, res) => {
   const { default: apiKeyService } = await import('../services/apiKeyService.js');
-  res.json({ success: true, data: await apiKeyService.remove(Number(req.params.keyId), req.workspaceId) });
+  const before = await credentialBefore('apiKey', req.params.keyId, req.workspaceId);
+  const result = await apiKeyService.remove(Number(req.params.keyId), req.workspaceId);
+  await recordCredentialEvent({ workspaceId: req.workspaceId, actorEmail: req.ticketActor?.email, action: ACTIONS.API_KEY_DELETED, credential: before || { id: Number(req.params.keyId) } });
+  res.json({ success: true, data: result });
 }));
 
 // ----------------------------------------- OAuth2 clients (admin)
@@ -1641,6 +1683,7 @@ router.post('/oauth-clients', requireTicketingAdmin, asyncHandler(async (req, re
     trustedIntake: req.body?.trustedIntake, structureOwnTicketsOnly: req.body?.structureOwnTicketsOnly, fsStatusWrite: req.body?.fsStatusWrite, ipAllowlist: req.body?.ipAllowlist, defaultSource: req.body?.defaultSource,
     readExcludeCategoryIds: req.body?.readExcludeCategoryIds, readPrivateNotes: req.body?.readPrivateNotes,
   }, req.ticketActor);
+  await recordCredentialEvent({ workspaceId: req.workspaceId, actorEmail: req.ticketActor?.email, action: ACTIONS.OAUTH_CLIENT_CREATED, credential: client });
   // client_secret returned exactly once.
   res.status(201).json({ success: true, data: client });
 }));
@@ -1654,22 +1697,32 @@ router.get('/oauth-clients/category-options', requireTicketingAdmin, asyncHandle
 
 router.patch('/oauth-clients/:clientId', requireTicketingAdmin, asyncHandler(async (req, res) => {
   const { default: oauthClientService } = await import('../services/oauthClientService.js');
-  res.json({ success: true, data: await oauthClientService.update(Number(req.params.clientId), req.workspaceId, req.body || {}) });
+  const before = await credentialBefore('oAuthClient', req.params.clientId, req.workspaceId);
+  const updated = await oauthClientService.update(Number(req.params.clientId), req.workspaceId, req.body || {});
+  await recordCredentialUpdate(req, ACTIONS.OAUTH_CLIENT_UPDATED, before, updated);
+  res.json({ success: true, data: updated });
 }));
 
 router.post('/oauth-clients/:clientId/rotate', requireTicketingAdmin, asyncHandler(async (req, res) => {
   const { default: oauthClientService } = await import('../services/oauthClientService.js');
-  res.json({ success: true, data: await oauthClientService.rotate(Number(req.params.clientId), req.workspaceId) });
+  const client = await oauthClientService.rotate(Number(req.params.clientId), req.workspaceId);
+  await recordCredentialEvent({ workspaceId: req.workspaceId, actorEmail: req.ticketActor?.email, action: ACTIONS.OAUTH_CLIENT_ROTATED, credential: client });
+  res.json({ success: true, data: client });
 }));
 
 router.post('/oauth-clients/:clientId/revoke', requireTicketingAdmin, asyncHandler(async (req, res) => {
   const { default: oauthClientService } = await import('../services/oauthClientService.js');
-  res.json({ success: true, data: await oauthClientService.revoke(Number(req.params.clientId), req.workspaceId) });
+  const client = await oauthClientService.revoke(Number(req.params.clientId), req.workspaceId);
+  await recordCredentialEvent({ workspaceId: req.workspaceId, actorEmail: req.ticketActor?.email, action: ACTIONS.OAUTH_CLIENT_REVOKED, credential: client });
+  res.json({ success: true, data: client });
 }));
 
 router.delete('/oauth-clients/:clientId', requireTicketingAdmin, asyncHandler(async (req, res) => {
   const { default: oauthClientService } = await import('../services/oauthClientService.js');
-  res.json({ success: true, data: await oauthClientService.remove(Number(req.params.clientId), req.workspaceId) });
+  const before = await credentialBefore('oAuthClient', req.params.clientId, req.workspaceId);
+  const result = await oauthClientService.remove(Number(req.params.clientId), req.workspaceId);
+  await recordCredentialEvent({ workspaceId: req.workspaceId, actorEmail: req.ticketActor?.email, action: ACTIONS.OAUTH_CLIENT_DELETED, credential: before || { id: Number(req.params.clientId) } });
+  res.json({ success: true, data: result });
 }));
 
 // ------------------------------------- outbound webhooks (gap plan 2 P3)

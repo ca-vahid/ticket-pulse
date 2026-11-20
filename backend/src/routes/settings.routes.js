@@ -1751,8 +1751,19 @@ router.put(
       return res.status(400).json({ success: false, message: 'You cannot remove yourself from the admin list' });
     }
 
+    const previous = await Promise.resolve().then(() => settingsRepository.get('admin_emails')).catch(() => null);
+    const before = String(previous || process.env.ADMIN_EMAILS || '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
     await settingsRepository.set('admin_emails', cleaned.join(','));
     logger.info(`Admin emails updated to: ${cleaned.join(', ')}`);
+    const added = cleaned.filter((e) => !before.includes(e));
+    const removed = before.filter((e) => !cleaned.includes(e));
+    if (added.length || removed.length) {
+      const { recordAccessEvent, ACTIONS } = await import('../services/accessAuditService.js');
+      await recordAccessEvent({
+        workspaceId: null, actorEmail: currentUserEmail, action: ACTIONS.ADMIN_LIST_CHANGED,
+        targetLabel: 'Super admins', newValue: `+${added.length} / -${removed.length}`, details: { added, removed },
+      });
+    }
 
     res.json({ success: true, data: { emails: cleaned } });
   }),
