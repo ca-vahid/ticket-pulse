@@ -24,6 +24,11 @@
  *    requester_reply_stays_closed history row with details.note.
  *  - reopenCheck: the reopen workflows of a workspace and the two warnings the
  *    editor shows (two at once / none).
+ *  - afterConfirmedDone (19 Nov 2026): a reply on a WAITING ticket that
+ *    confirms the request is done (verdict confirmed_done, reader
+ *    'confirm_done', high confidence only) — resolved quietly in Live, recorded
+ *    only in Shadow ("Resolve when the requester confirms it's done", the
+ *    condition step's resolveConfirmedDone). listConfirmedDone lists them.
  *
  * Never throws into the reply path: a reply is always recorded.
  */
@@ -33,7 +38,7 @@ import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { isFsSystemConversation } from '../utils/fsSystemConversation.js';
 import { isOutOfOfficeReply, monthStartUtc } from './autoHelpOutcomes.js';
 import { getRequesterReplyRules, REPLY_CHECK_CAP_CHOICES } from './requesterReplyRulesService.js';
-import { REPLY_LOOP_LIMIT, SENT_BY_OPTIONS } from './conditionRuleShared.js';
+import { REPLY_LOOP_LIMIT, SENT_BY_OPTIONS, confirmedDoneMode } from './conditionRuleShared.js';
 
 export const REPLY_CHECK_OPERATION = 'requester_reply_check';
 /** The reading is awaited before the workflows run: short, and a timeout reopens. */
@@ -45,8 +50,22 @@ export const REPLY_VERDICTS = Object.freeze({
   NEW_REQUEST: 'new_request',
   QUESTION: 'question',
   REPLY: 'reply',
+  // 19 Nov 2026: on a waiting (Pending-base) ticket, the requester confirmed
+  // the request is done and nothing more is needed (high confidence only).
+  CONFIRMED_DONE: 'confirmed_done',
 });
 const STAYS_CLOSED = Object.freeze([REPLY_VERDICTS.THANKS, REPLY_VERDICTS.AUTO_REPLY]);
+/** How much of the reply the confirmed-done note and history row quote. */
+export const CONFIRMED_DONE_SNIPPET_CHARS = 160;
+/**
+ * The reason codes (details.cause on the requester_reply_stays_closed history
+ * row) for "Resolve when the requester confirms it's done (waiting tickets)".
+ */
+export const CONFIRMED_DONE_CAUSES = Object.freeze({
+  LIVE: 'confirmed_done', // resolved, with one private note
+  SHADOW: 'confirmed_done_shadow', // would have resolved; reopened as before
+  FAILED: 'confirmed_done_failed', // resolving failed; reopened instead
+});
 const TERMINAL_BASES = Object.freeze(['Resolved', 'Closed']);
 export const QUIET_LINES = Object.freeze({
   thanks: 'Reply read as a thank-you; the ticket stays closed.',
@@ -63,6 +82,10 @@ export const WHY_LINES = Object.freeze({
   mail_review: ({ person }) => `Added without reopening by ${person}.`,
   new_ticket: ({ ref }) => `Reply opened a new ticket, ${ref}; this one stays closed.`,
   joined_ticket: ({ ref }) => `Reply added to ${ref}, which an earlier reply to this ticket started; this one stays closed.`,
+  confirmed_done: ({ snippet }) => `Requester confirmed it's done: "${snippet}"`,
+  confirmed_done_shadow: () => 'Would have resolved: requester confirmed it\'s done.',
+  confirmed_done_failed: ({ reason }) => `Requester confirmed it's done, but resolving failed (${reason}); reopened instead.`,
+  confirmed_done_stuck: ({ reason }) => `Requester confirmed it's done, but Ticket Pulse couldn't resolve or reopen it: ${reason}; left Pending for the normal reopen.`,
 });
 export const STAYS_CLOSED_ACTIVITY = 'requester_reply_stays_closed';
 /** Model answers (reader 'person') → replyVerdict. Anything else is 'reply'. */
@@ -214,9 +237,13 @@ class RequesterReplyReopenService {
    *   rich         a workflow uses "Reply reads as": the model call runs for
    *                the full answer even where a thank-you cannot count
    *   useAi        false = no model call (the editor's "try it" without "Use AI")
+   *   confirmDone  the ticket is waiting (Pending base) and a reply workflow
+   *                has "Resolve when the requester confirms it's done" in
+   *                Shadow or Live: ask the stricter question instead (see
+   *                _readConfirmDone)
    */
   async readReply(ticket, extra = {}, {
-    rules = null, timeoutMs = REPLY_CHECK_TIMEOUT_MS, allowThanks = true, rich = false, useAi = true,
+    rules = null, timeoutMs = REPLY_CHECK_TIMEOUT_MS, allowThanks = true, rich = false, useAi = true, confirmDone = false,
   } = {}) {
     try {
       const entry = await this._replyEntry(Number(ticket.id), extra);
@@ -229,8 +256,9 @@ class RequesterReplyReopenService {
       // headers nor a subject). No AI.
       if (isOutOfOfficeReply(entry)) return { verdict: REPLY_VERDICTS.AUTO_REPLY, via: 'auto_reply', entryId: entry.id };
       // Nothing more to learn: a thank-you cannot count here and nobody asks for the full reading.
-      if (!allowThanks && !rich) return { verdict: REPLY_VERDICTS.REPLY, via: extra?.forwardedBy ? 'forward' : 'not_closed', entryId: entry.id };
+      if (!allowThanks && !rich && !confirmDone) return { verdict: REPLY_VERDICTS.REPLY, via: extra?.forwardedBy ? 'forward' : 'not_closed', entryId: entry.id };
       const text = entry.bodyText || entry.content || String(entry.bodyHtml || '').replace(/<[^>]*>/g, ' ');
+      if (confirmDone) return await this._readConfirmDone(ticket, entry, text, { rules, timeoutMs, useAi, rich });
       const { classifyThanksFast } = await import('./autoHelpOutcomes.js');
       if (!useAi) {
         const fast = classifyThanksFast(text);
@@ -258,6 +286,54 @@ class RequesterReplyReopenService {
       logger.warn(`Reply reading failed for ticket ${ticket?.id} (it reopens): ${err.message}`);
       return { verdict: REPLY_VERDICTS.REPLY, via: 'error' };
     }
+  }
+
+  /**
+   * The waiting-ticket question (19 Nov 2026): "Did the requester confirm the
+   * request is done and no further action is needed?" One model call (reader
+   * 'confirm_done', the same operation, limit and timeout as the reading
+   * above). No keyword shortcut: a bare "thanks" on a waiting ticket is
+   * ambiguous. Only "confirmed_done" at high confidence is CONFIRMED_DONE; a
+   * lower confidence, a next step, a question, a timeout, the spend limit or a
+   * model error is 'reply' (the ticket reopens as before). With `rich` (a
+   * workflow uses "Reply reads as") the other answers map as the six-answer
+   * reading does, a thank-you never counting here; without it they are
+   * 'reply', as a waiting ticket's reply was before (so Shadow changes nothing).
+   * Returns { verdict, via, entryId, confirmDone: { confidence, modelVerdict, snippet, reason } }.
+   */
+  async _readConfirmDone(ticket, entry, text, { rules = null, timeoutMs = REPLY_CHECK_TIMEOUT_MS, useAi = true, rich = false } = {}) {
+    const { ownWords } = await import('./autoHelpOutcomes.js');
+    const own = ownWords(text) || String(text || '').replace(/\s+/g, ' ').trim();
+    const snippet = own.slice(0, CONFIRMED_DONE_SNIPPET_CHARS);
+    const asked = (more = {}) => ({ confidence: null, modelVerdict: null, snippet, ...more });
+    if (!useAi) return { verdict: REPLY_VERDICTS.REPLY, via: 'no_ai', entryId: entry.id, confirmDone: asked() };
+    const { default: autoHelpFollowUp } = await import('./autoHelpFollowUpService.js');
+    const read = await withTimeout(autoHelpFollowUp.classifyReply(ticket.workspaceId, text, {
+      subject: ticket.subject || null,
+      reader: 'confirm_done',
+      operation: REPLY_CHECK_OPERATION,
+      budgetState: (ws) => this.budgetState(ws, rules),
+      timeoutMs,
+    }), timeoutMs + 1000);
+    if (read?.timedOut) return { verdict: REPLY_VERDICTS.REPLY, via: 'timeout', entryId: entry.id, confirmDone: asked() };
+    let verdict = REPLY_VERDICTS.REPLY;
+    if (read?.via === 'model') {
+      if (read.modelVerdict === REPLY_VERDICTS.CONFIRMED_DONE) {
+        verdict = read.confidence === 'high' ? REPLY_VERDICTS.CONFIRMED_DONE : REPLY_VERDICTS.REPLY;
+      } else if (rich) {
+        verdict = verdictFromModel(read.modelVerdict, { allowThanks: false });
+      }
+    }
+    return {
+      verdict,
+      via: read?.via || 'unknown',
+      entryId: entry.id,
+      confirmDone: asked({
+        confidence: read?.confidence ?? null,
+        modelVerdict: read?.modelVerdict ?? null,
+        ...(read?.reason ? { reason: read.reason } : {}),
+      }),
+    };
   }
 
   /**
@@ -319,6 +395,11 @@ class RequesterReplyReopenService {
   async afterWorkflows({ ticket, statusBase = null, facts = {}, result = null, extra = {}, stamp = null } = {}) {
     const out = { openNow: null, wasClosed: TERMINAL_BASES.includes(statusBase), stillClosed: false, line: null };
     if (!ticket?.id) return out;
+    // A waiting ticket whose requester confirmed it's done (19 Nov 2026).
+    if (statusBase === 'Pending' && facts?.confirmedDone) {
+      const done = await soft(() => this.afterConfirmedDone({ ticket, facts, result, extra, stamp }));
+      if (done) out.confirmedDone = done;
+    }
     try {
       const row = await prisma.ticket.findUnique({ where: { id: Number(ticket.id) }, select: { id: true, status: true } });
       const { default: statusService } = await import('./statusService.js');
@@ -346,8 +427,12 @@ class RequesterReplyReopenService {
    * no watcher, no note_added workflow event, never mirrored to FreshService —
    * plus the history row (details.note = the line), and open ticket pages
    * refresh. One per reply: a second call with the same stamp writes nothing.
+   *   thread   false = the history row only, no note in the conversation (Shadow)
+   *   details  more fields for the history row (the confirmed-done record)
    */
-  async writeQuietLine(ticket, { text = null, cause = null, verdict = null, via = null, replyEntryId = null, stamp = null } = {}) {
+  async writeQuietLine(ticket, {
+    text = null, cause = null, verdict = null, via = null, replyEntryId = null, stamp = null, thread = true, details = null,
+  } = {}) {
     const line = text || QUIET_LINES[verdict];
     if (!line) return null;
     if (stamp) {
@@ -359,7 +444,7 @@ class RequesterReplyReopenService {
       if ((recent || []).some((a) => a?.details?.replyStamp === String(stamp))) return null;
     }
     const now = new Date();
-    const entry = await prisma.ticketThreadEntry.create({
+    const entry = thread === false ? null : await prisma.ticketThreadEntry.create({
       data: {
         ticketId: Number(ticket.id),
         workspaceId: Number(ticket.workspaceId),
@@ -384,13 +469,212 @@ class RequesterReplyReopenService {
       activityType: STAYS_CLOSED_ACTIVITY,
       performedBy: 'Ticket Pulse',
       performedAt: now,
-      details: { note: line, cause, verdict, via, replyEntryId, actorKind: 'system', ...(stamp ? { replyStamp: String(stamp) } : {}) },
+      details: {
+        ...(details && typeof details === 'object' ? details : {}),
+        note: line, cause, verdict, via, replyEntryId, actorKind: 'system', ...(stamp ? { replyStamp: String(stamp) } : {}),
+      },
     }));
     import('../routes/sse.routes.js')
       .then(({ sseManager }) => sseManager?.broadcast?.('ticket-change', { action: 'update', workspaceId: ticket.workspaceId, ticketId: ticket.id }, ticket.workspaceId))
       .catch(() => {});
-    logger.info(`Requester reply: ${ticketDisplayRef(ticket)} stays closed (${cause || verdict || 'line'})`);
-    return entry;
+    logger.info(`Requester reply: ${ticketDisplayRef(ticket)} ${String(cause || '').startsWith('confirmed_done') ? cause : `stays closed (${cause || verdict || 'line'})`}`);
+    return entry || { historyOnly: true };
+  }
+
+  // ---------- "Resolve when the requester confirms it's done" ----------
+
+  /**
+   * After the workflows, on a waiting ticket whose reply read as
+   * confirmed_done (19 Nov 2026). The condition step that would have reopened
+   * left a mark in its run state (state.replyConfirmedDone, the engine):
+   *   Live    (TP-born only, the run's first pass, the run completed) the
+   *           step stopped the run; resolve the ticket through the quiet
+   *           update path (no status_changed, so no "resolved" e-mail) and
+   *           write ONE private note quoting the reply. If resolving fails,
+   *           reopen if it is still waiting, and say truthfully what happened.
+   *   Shadow  the step passed and the ticket reopened as before; only the
+   *           history row records what Live would have done. A FreshService-
+   *           born ticket under Live is recorded this way too (fsBorn: true).
+   * A Live workflow whose run did not finish in that pass (parked or failed)
+   * falls back to the normal reopen. Preview / mock runs never act.
+   * Returns { mode, outcome } or null.
+   */
+  async afterConfirmedDone({ ticket, facts = {}, result = null, extra = {}, stamp = null } = {}) {
+    const results = Array.isArray(result?.results) ? result.results : [];
+    const marks = results
+      .filter((r) => r?.status === 'completed' && r?.state?.replyConfirmedDone && r.state.replyConfirmedDone.dryRun !== true)
+      .map((r) => ({ workflowId: r.workflowId ?? null, ...r.state.replyConfirmedDone }));
+    // Live workflows whose run did not complete in this pass: their condition
+    // step may have stopped the run, or may not have run yet.
+    const liveIds = new Set((facts.workflows || [])
+      .filter((w) => (w?.publishedDefinition?.nodes || []).some((n) => n?.type === 'condition' && confirmedDoneMode(n.data) === 'live'))
+      .map((w) => Number(w.id)));
+    const unfinished = results.find((r) => liveIds.has(Number(r?.workflowId)) && ['waiting', 'failed'].includes(r?.status));
+    if (!marks.length && !unfinished) return null;
+    const cd = facts.confirmedDone || {};
+    const snippet = String(cd.snippet || '').slice(0, CONFIRMED_DONE_SNIPPET_CHARS);
+    const replyEntryId = facts.entryId ?? extra?.entryId ?? null;
+    const record = (mark, more = {}) => ({
+      mode: mark.mode,
+      ...(mark.configured && mark.configured !== mark.mode ? { configured: mark.configured } : {}),
+      ...(mark.fsBorn ? { fsBorn: true } : {}),
+      ...(mark.resumed ? { resumed: true } : {}),
+      workflowId: mark.workflowId ?? null,
+      workspaceId: Number(ticket.workspaceId),
+      snippet,
+      confidence: cd.confidence ?? null,
+      ...(cd.reason ? { reason: cd.reason } : {}),
+      ...more,
+    });
+    const write = (mark, cause, text, thread, more = {}) => this.writeQuietLine(ticket, {
+      text, cause, verdict: REPLY_VERDICTS.CONFIRMED_DONE, via: facts.verdictVia || null, replyEntryId, stamp, thread, details: record(mark, more),
+    });
+    const reopenIfWaiting = async (note) => {
+      const now = await this._baseNow(ticket);
+      if (now !== null && now !== 'Pending') return { ok: false, skipped: true, base: now };
+      return this._quietStatus(ticket, 'Open', note);
+    };
+
+    const live = marks.find((m) => m.mode === 'live');
+    if (!live) {
+      if (unfinished) {
+        // The Live step's run parked or failed before it could hand over:
+        // the normal reopen, recorded like Shadow.
+        const reopened = await reopenIfWaiting('Reopened automatically — the requester replied.');
+        const mark = { mode: 'shadow', configured: 'live', workflowId: unfinished.workflowId ?? null };
+        await write(mark, CONFIRMED_DONE_CAUSES.SHADOW, WHY_LINES.confirmed_done_shadow(), false, { fallback: unfinished.status, reopened: reopened.ok === true });
+        return { mode: 'shadow', outcome: reopened.ok ? 'reopened' : 'recorded', fallback: unfinished.status };
+      }
+      await write(marks[0], CONFIRMED_DONE_CAUSES.SHADOW, WHY_LINES.confirmed_done_shadow(), false);
+      return { mode: 'shadow', outcome: 'recorded', ...(marks[0].fsBorn ? { fsBorn: true } : {}) };
+    }
+    // Still waiting? The step already stopped the run, so an unknown status
+    // reopens (the reply must not be lost); another status is left as it is.
+    const base = await this._baseNow(ticket);
+    if (base === null) {
+      const reopened = await this._quietStatus(ticket, 'Open', 'Reopened automatically — the requester replied.');
+      const reason = 'its status could not be read';
+      await write(live, CONFIRMED_DONE_CAUSES.FAILED, reopened.ok
+        ? WHY_LINES.confirmed_done_failed({ reason })
+        : WHY_LINES.confirmed_done_stuck({ reason: `${reason}; ${reopened.reason || 'the reopen failed'}` }), true, { reopened: reopened.ok === true });
+      return { mode: 'live', outcome: reopened.ok ? 'reopened' : 'failed', reason };
+    }
+    if (base !== 'Pending') {
+      logger.info(`Requester reply: ${ticketDisplayRef(ticket)} confirmed done but is no longer waiting (${base}); left as it is`);
+      return { mode: 'live', outcome: 'not_waiting' };
+    }
+    const resolved = await this._quietStatus(ticket, 'Resolved', 'Requester confirmed it\'s done');
+    if (resolved.ok) {
+      await write(live, CONFIRMED_DONE_CAUSES.LIVE, WHY_LINES.confirmed_done({ snippet }), true);
+      return { mode: 'live', outcome: 'resolved' };
+    }
+    // Resolving failed: the reply must not sit unseen on a waiting ticket.
+    const why = String(resolved.reason || 'unknown error').slice(0, 200);
+    const reopened = await reopenIfWaiting('Reopened: resolving after the requester confirmed it\'s done failed');
+    if (reopened.skipped) {
+      logger.info(`Requester reply: ${ticketDisplayRef(ticket)} not resolved (${why}) and no longer waiting (${reopened.base}); left as it is`);
+      return { mode: 'live', outcome: 'not_waiting', reason: why };
+    }
+    await write(live, CONFIRMED_DONE_CAUSES.FAILED, reopened.ok
+      ? WHY_LINES.confirmed_done_failed({ reason: why })
+      : WHY_LINES.confirmed_done_stuck({ reason: `${why}; ${String(reopened.reason || 'the reopen failed').slice(0, 200)}` }), true, { reopened: reopened.ok === true });
+    return { mode: 'live', outcome: reopened.ok ? 'reopened' : 'failed', reason: why };
+  }
+
+  /** The ticket's status base now; null when it cannot be read. */
+  async _baseNow(ticket) {
+    const row = await soft(() => prisma.ticket.findUnique({ where: { id: Number(ticket.id) }, select: { id: true, status: true } }));
+    if (!row?.status) return null;
+    const { default: statusService } = await import('./statusService.js');
+    return (await soft(() => statusService.resolveBaseStatus(ticket.workspaceId, row.status))) || null;
+  }
+
+  /**
+   * A status write through the workflow engine's update path with Ticket
+   * Pulse as the actor: straight to the row (no status_changed event — the
+   * engine's standing rule for its own writes — so no workflow sends a
+   * "resolved" e-mail). Checked by reading the status back: the ticket already
+   * in the target base (a duplicate reply event) counts as done; still
+   * elsewhere (a parent with open children, a failed write) does not.
+   * Returns { ok, reason }.
+   */
+  async _quietStatus(ticket, setStatus, note) {
+    let res = null;
+    let error = null;
+    try {
+      const { executeUpdateTicketNode } = await import('./notificationWorkflowEngine.js');
+      res = await executeUpdateTicketNode(
+        { id: 'reply-confirmed-done', type: 'update_ticket', data: { setStatus, note } },
+        {
+          event: { type: 'ticket.reply_received' },
+          ticket: { id: Number(ticket.id), workspaceId: Number(ticket.workspaceId) },
+          workspace: { id: Number(ticket.workspaceId) },
+        },
+        { actor: { name: 'Ticket Pulse', kind: 'system', source: 'requester_confirmed_done' } },
+      );
+    } catch (err) {
+      error = err.message;
+    }
+    const targets = setStatus === 'Resolved' ? TERMINAL_BASES : ['Open'];
+    const reason = () => {
+      if (error) return error;
+      if (res?.rollUpSkip?.reason) return res.rollUpSkip.reason;
+      if (/No effective changes/.test(String(res?.reason || ''))) return 'the status did not change (a child ticket may still be open)';
+      return res?.reason || res?.error || 'the status did not change';
+    };
+    const now = await this._baseNow(ticket);
+    if (now !== null) return targets.includes(now) ? { ok: true } : { ok: false, reason: reason() };
+    // The status cannot be read back: trust the write's own answer.
+    return !error && Boolean(res?.updated?.status) ? { ok: true } : { ok: false, reason: reason() };
+  }
+
+
+  /**
+   * Shadow review (read-only): the confirmed-done records, newest first —
+   * requester_reply_stays_closed history rows whose details.cause is one of
+   * CONFIRMED_DONE_CAUSES. `cause` 'shadow' (default) | 'live' | 'failed' | 'all'.
+   * Returns [{ ticketId, ref, workspaceId, at, cause, mode, snippet, verdict,
+   * confidence, reason, workflowId, statusNow }].
+   */
+  async listConfirmedDone({ workspaceId = null, cause = 'shadow', since = null, limit = 200 } = {}) {
+    const byKey = { shadow: [CONFIRMED_DONE_CAUSES.SHADOW], live: [CONFIRMED_DONE_CAUSES.LIVE], failed: [CONFIRMED_DONE_CAUSES.FAILED] };
+    const causes = byKey[cause] || Object.values(CONFIRMED_DONE_CAUSES);
+    const from = since ? new Date(since) : new Date(Date.now() - 30 * 86400e3);
+    const rows = await prisma.ticketActivity.findMany({
+      where: {
+        activityType: STAYS_CLOSED_ACTIVITY,
+        performedAt: { gte: from },
+        OR: causes.map((c) => ({ details: { path: ['cause'], equals: c } })),
+        ...(workspaceId ? { AND: [{ details: { path: ['workspaceId'], equals: Number(workspaceId) } }] } : {}),
+      },
+      orderBy: { performedAt: 'desc' },
+      take: Math.max(1, Math.min(1000, Number(limit) || 200)),
+      select: { ticketId: true, performedAt: true, details: true },
+    });
+    const ids = [...new Set((rows || []).map((r) => r.ticketId))];
+    const tickets = ids.length ? await soft(() => prisma.ticket.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, workspaceId: true, origin: true, nativeNumber: true, freshserviceTicketId: true, status: true },
+    }), []) : [];
+    const byId = new Map((tickets || []).map((t) => [t.id, t]));
+    return (rows || []).map((r) => {
+      const d = r.details || {};
+      const t = byId.get(r.ticketId) || null;
+      return {
+        ticketId: r.ticketId,
+        ref: t ? ticketDisplayRef(t) : `#${r.ticketId}`,
+        workspaceId: d.workspaceId ?? t?.workspaceId ?? null,
+        at: r.performedAt,
+        cause: d.cause || null,
+        mode: d.mode || null,
+        snippet: d.snippet || null,
+        verdict: d.verdict || null,
+        confidence: d.confidence ?? null,
+        reason: d.reason || null,
+        workflowId: d.workflowId ?? null,
+        statusNow: t?.status || null,
+      };
+    });
   }
 
   // ---------- the reopen workflows ----------
@@ -454,4 +738,7 @@ class RequesterReplyReopenService {
 }
 
 export { STAYS_CLOSED };
-export default new RequesterReplyReopenService();
+const requesterReplyReopenService = new RequesterReplyReopenService();
+/** The Shadow review list as a plain function (read-only probes). */
+export const listConfirmedDone = (options) => requesterReplyReopenService.listConfirmedDone(options);
+export default requesterReplyReopenService;

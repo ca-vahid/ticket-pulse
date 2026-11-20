@@ -42,8 +42,6 @@ export const EVENTS = [
   { key: 'teammate_update', label: 'Someone else adds a note or reply on my ticket', group: 'My tickets', mode: 'teams' },
   { key: 'status_changed', label: 'Someone else changes the status of my ticket', group: 'My tickets', mode: 'off' },
   { key: 'reopened', label: 'My ticket is reopened', group: 'My tickets', mode: 'teams' },
-  // QA 10-21 #2: the requester's answer to the "How did we do?" survey.
-  { key: 'survey_response', label: 'The requester rates my ticket in the survey', group: 'My tickets', mode: 'teams' },
   { key: 'park_woke', label: 'A parked ticket of mine wakes up', group: 'My tickets', mode: 'teams' },
   { key: 'unassigned_from_me', label: 'My ticket is reassigned to someone else', group: 'My tickets', mode: 'teams' },
   { key: 'sla_pre_breach', label: 'SLA about to breach on my ticket', group: 'Deadlines', mode: 'teams' },
@@ -55,15 +53,34 @@ export const EVENTS = [
   { key: 'av_decided', label: 'My time-away request is approved, denied or cancelled by someone else', group: 'Time away', mode: 'teams' },
   { key: 'av_reminder', label: 'A reminder the working day before my time away starts', group: 'Time away', mode: 'teams' },
   { key: 'av_approval_waiting', label: 'A time-away request is waiting for my approval', group: 'Time away', mode: 'teams' },
-  // QA 11-17 #4: survey results (Ticket Pulse survey and FreshService CSAT), mine or everyone's.
-  { key: 'survey_result', label: 'A survey result comes in', group: 'Surveys', mode: 'off', offeredBy: 'surveyResults' },
+  // QA 11-17 #4 / QA 11-19 #1: survey results (Ticket Pulse survey and
+  // FreshService CSAT). Always offered for my own tickets, Teams by default;
+  // "Everyone's" only for admins, and only where Settings → Teams allows it
+  // (surveyResults). Sent by teamsExtraNotices.js, never by _onTicketEvent.
+  { key: 'survey_result', label: 'A survey result comes in', group: 'Surveys', mode: 'teams' },
   // QA 11-17 #3: once, when my on-call period starts. No Digest: a digest would be late.
   { key: 'on_call_start', label: "I'm on call this week", group: 'On call', mode: 'teams', modes: ['teams', 'off'], offeredBy: 'onCallNotice' },
 ];
-const EVENT_KEYS = new Set(EVENTS.map((e) => e.key));
+
+/**
+ * Rows that are gone but whose stored choices still count (QA 11-19 #1).
+ * The key stays valid in stored prefs, and its deliveries still render, but
+ * it is never offered or sent. A person (or workspace) with no saved value
+ * for `replacedBy` keeps what they chose for the old row; read time only,
+ * nothing is migrated.
+ */
+export const RETIRED_EVENTS = [
+  // QA 10-21 #2 "The requester rates my ticket in the survey" (Teams for my own tickets).
+  { key: 'survey_response', label: 'The requester rates my ticket in the survey', replacedBy: 'survey_result' },
+];
+const CARRIED_FROM = new Map(RETIRED_EVENTS.map((e) => [e.replacedBy, e.key]));
+const EVENT_KEYS = new Set([...EVENTS, ...RETIRED_EVENTS].map((e) => e.key));
 const MODES = new Set(['teams', 'digest', 'off']);
-const EVENT_MODES = new Map(EVENTS.map((e) => [e.key, new Set(e.modes || MODES)]));
+const EVENT_MODES = new Map([...EVENTS, ...RETIRED_EVENTS].map((e) => [e.key, new Set(e.modes || MODES)]));
 const modeOk = (key, v) => Boolean(EVENT_MODES.get(key)?.has(v));
+// Rows another sender delivers: _onTicketEvent maps them (the phone follows
+// the same choice) but never sends a Teams card for them itself.
+const SENT_ELSEWHERE = new Set(['survey_result']);
 export const SURVEY_SCOPES = ['mine', 'all'];
 
 /** The rows a person sees in this workspace: the ones its switches offer. */
@@ -82,7 +99,8 @@ export const DEFAULT_OPTIONS = {
   requesterTeamsChat: false,
   // QA 11-17 #2: the extra workspace digest times this person switched on.
   digestSlots: [],
-  // QA 11-17 #4: whose survey results; 'all' only counts for admins and reviewers.
+  // QA 11-17 #4: whose survey results; 'all' only counts for admins (QA 11-19 #1),
+  // checked on save and on every send.
   surveyScope: 'mine',
 };
 const PERSONAL_ONLY_OPTIONS = ['requesterTeamsChat', 'digestSlots', 'surveyScope'];
@@ -101,8 +119,10 @@ export const EVENT_MAP = {
   'ticket.sla_pre_breach': [['sla_pre_breach', 'assignee']],
   'ticket.sla_breach': [['sla_breach', 'assignee']],
   'ticket.created': [['group_unassigned', 'group']],
-  // Not a workflow trigger: sent by notifyTicketFeedback() when a survey is answered.
-  'ticket.feedback_received': [['survey_response', 'assignee']],
+  // Not a workflow trigger: sent by notifyTicketFeedback() when a survey is
+  // answered. QA 11-19 #1: under "A survey result comes in". The Teams card
+  // comes from teamsExtraNotices (SENT_ELSEWHERE); this entry is for the phone.
+  'ticket.feedback_received': [['survey_result', 'assignee']],
 };
 
 const COALESCE_MS = 45_000;
@@ -136,10 +156,19 @@ function inWindow(start, end, now) {
 /** Merge workspace defaults and a person's own row into one effective view. */
 export function effectivePrefs(wsDefaults = null, row = null) {
   const events = {};
+  // A saved choice for the row, else (QA 11-19 #1) the saved choice for the
+  // retired row it replaced. A saved value on the new row always wins, even
+  // an 'off' next to a 'teams' on the old row: production (19 Nov 2026) had
+  // no such pair, and the 5 saved survey_result values were deliberate.
+  // New saves cannot create the pair either, since the old row is no longer
+  // shown or sent, so the newer, explicit choice is the one to honour.
+  const saved = (src, key) => {
+    if (modeOk(key, src?.[key])) return src[key];
+    const old = CARRIED_FROM.get(key);
+    return old && modeOk(key, src?.[old]) ? src[old] : undefined;
+  };
   for (const e of EVENTS) {
-    const own = row?.events?.[e.key];
-    const ws = wsDefaults?.events?.[e.key];
-    events[e.key] = modeOk(e.key, own) ? own : (modeOk(e.key, ws) ? ws : e.mode);
+    events[e.key] = saved(row?.events, e.key) ?? saved(wsDefaults?.events, e.key) ?? e.mode;
   }
   const wsOptions = { ...(wsDefaults?.options || {}) };
   for (const k of PERSONAL_ONLY_OPTIONS) delete wsOptions[k];
@@ -177,6 +206,7 @@ function eventText(eventKey, ctx) {
     return t.dueBy ? `Due ${fmtDue(t.dueBy, ctx.workspace?.timezone)}.` : 'Due soon.';
   case 'sla_breach':
     return t.dueBy ? `Was due ${fmtDue(t.dueBy, ctx.workspace?.timezone)}.` : 'Past due.';
+  case 'survey_result':
   case 'survey_response': {
     const score = Number(x.score);
     const rated = Number.isFinite(score) ? `${x.updated ? 'Changed the rating to' : 'Rated it'} ${x.label ? `${x.label} (${score} of 5)` : `${score} of 5`}` : 'Answered the survey';
@@ -289,8 +319,12 @@ class TeamsNotificationService {
       digestTimes: workspaceDigestTimes(defaults.options?.digestTime, extras.digestTimes),
       // #3: tell the on-call person when their on-call period starts.
       onCallNotice: extras.onCallNotice === true,
-      // #4: offer "A survey result comes in".
+      // #4 / QA 11-19 #1: let admins choose everyone's survey results.
       surveyResults: extras.surveyResults === true,
+      // QA 11-19 #1: what each row defaults to here, by the same rule a
+      // person's prefs use (incl. a retired row's carried default), so the
+      // Settings → Teams grid shows what agents really get.
+      effectiveDefaults: effectivePrefs(defaults, null).events,
     };
   }
 
@@ -629,6 +663,8 @@ class TeamsNotificationService {
 
     const actor = eventActor(ctx);
     for (const [eventKey, who] of map) {
+      // QA 11-19 #1: one message per survey answer - teamsExtraNotices sends it.
+      if (SENT_ELSEWHERE.has(eventKey)) continue;
       const people = await this._recipients(who, ctx, workspaceId);
       for (const tech of people) {
         await this._consider(tech, eventKey, ctx, ws, actor);
@@ -698,7 +734,7 @@ class TeamsNotificationService {
     if (mode === 'digest') { await this._record({ ...base, status: 'digest', summary: `${summary} — ${eventText(eventKey, ctx)}` }); return; }
 
     // A survey answer is never urgent, whatever the ticket's priority (QA 10-21 #2).
-    const urgent = eventKey !== 'survey_response' && (eventKey === 'sla_breach' || Number(ctx.ticket.priority || 0) >= 4);
+    const urgent = eventKey !== 'survey_response' && eventKey !== 'survey_result' && (eventKey === 'sla_breach' || Number(ctx.ticket.priority || 0) >= 4);
     if (prefs.options.respectAway && !urgent) {
       const away = await this._awayReason(tech, ctx.workspace.id);
       if (away) { await this._record({ ...base, status: 'skipped', reason: away, summary }); return; }
@@ -1314,7 +1350,7 @@ class TeamsNotificationService {
     })).catch(() => []);
     const health = deriveTeamsStatus({ conv, rows: week || [] });
     const wsDefaultEvents = effectivePrefs(ws.defaults, null).events;
-    // QA 11-17 #4: admins and reviewers may choose everyone's survey results.
+    // QA 11-17 #4 / 11-19 #1: admins may choose everyone's survey results.
     const surveyScopeChoice = ws.surveyResults ? await this._canSeeAllSurveys(tech.email, tech.workspaceId) : false;
     return {
       workspace: { id: tech.workspaceId, name: wsRow?.name || null },
@@ -1330,7 +1366,8 @@ class TeamsNotificationService {
         key: e.key, label: e.label, group: e.group, mode: events[e.key], workspaceDefault: wsDefaultEvents[e.key], ...(e.modes ? { modes: e.modes } : {}),
       })),
       // The stored scope as it is (the panel shows the choice only with
-      // surveyScopeChoice; sending a forced 'mine' back would overwrite 'all').
+      // surveyScopeChoice, and Mine without it; sending a forced 'mine' back
+      // would overwrite 'all').
       options,
       // QA 11-17 #2: every digest time of the workspace; the first is the daily digest.
       digestTimes: ws.digestTimes,
@@ -1351,7 +1388,7 @@ class TeamsNotificationService {
     const events = { ...stored.events, ...clean.events };
     const options = { ...stored.options, ...clean.options };
     // The survey scope changes only when the person can choose it right now
-    // (survey results offered here, and they are an admin or reviewer). Any
+    // ("everyone's" allowed here, and they are an admin). Any
     // other save keeps what is stored: a hidden choice or a failed role check
     // never turns an admin's "Everyone's" into "Mine".
     if (clean.options.surveyScope !== undefined) {
@@ -1371,9 +1408,10 @@ class TeamsNotificationService {
   }
 
   /**
-   * QA 11-17 #4: may this person choose everyone's survey results? Super
-   * admins, and the workspace's admins and reviewers (workspace_access.role).
-   * Never throws: false when it cannot tell.
+   * QA 11-17 #4: may this person choose (and get) everyone's survey results?
+   * QA 11-19 #1: super admins and the workspace's admins only
+   * (workspace_access.role 'admin'), not reviewers. Asked on save and on
+   * every send. Never throws: false when it cannot tell.
    */
   async _canSeeAllSurveys(email, workspaceId) {
     try {
@@ -1383,7 +1421,7 @@ class TeamsNotificationService {
       if ((await getAdminEmails()).map(lc).includes(key)) return true;
       const { default: workspaceRepository } = await import('./workspaceRepository.js');
       const role = await workspaceRepository.getAccessRole(key, Number(workspaceId));
-      return role === 'admin' || role === 'reviewer';
+      return role === 'admin';
     } catch {
       return false;
     }

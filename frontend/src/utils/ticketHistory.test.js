@@ -100,6 +100,21 @@ describe('buildHistoryItems — one story, deduplicated, machine chatter folded'
     expect(items.find((i) => i.key === 'fs-902')).toMatchObject({ workflowName: 'Ticket Received (June 19, 2026)', verb: 'called a webhook', reason: 'webhook "Trigger webhook" · Success' });
   });
 
+  test('the reply "why" row names what a confirmed-done reply did (19 Nov 2026); a thank-you row reads as before', () => {
+    const row = (id, cause, note) => ({ id, activityType: 'requester_reply_stays_closed', performedBy: 'Ticket Pulse', performedAt: iso(id * 1000), details: { cause, note } });
+    const items = buildHistoryItems({ activities: [
+      row(81, 'confirmed_done', 'Requester confirmed it\'s done: "All working now, thanks!"'),
+      row(82, 'confirmed_done_shadow', 'Would have resolved: requester confirmed it\'s done.'),
+      row(83, 'confirmed_done_failed', 'Requester confirmed it\'s done, but resolving failed (503); reopened instead.'),
+      row(84, 'thanks', 'Reply read as a thank-you; the ticket stays closed.'),
+    ] });
+    const byKey = Object.fromEntries(items.map((i) => [i.key, i]));
+    expect(byKey['a-81']).toMatchObject({ event: 'reply', verb: 'resolved the ticket: the requester confirmed it\'s done', detail: 'Requester confirmed it\'s done: "All working now, thanks!"' });
+    expect(byKey['a-82']).toMatchObject({ verb: 'would have resolved the ticket (Shadow)' });
+    expect(byKey['a-83']).toMatchObject({ verb: 'reopened the ticket: resolving it failed' });
+    expect(byKey['a-84']).toMatchObject({ verb: 'left the ticket closed' });
+  });
+
   test('a reopen is its own event', () => {
     const [it] = buildHistoryItems({ activities: [{ id: 9, activityType: 'status_changed', performedBy: 'Rita', performedAt: iso(0), details: { oldStatus: 'Resolved', newStatus: 'Open', actorKind: 'human' } }] });
     expect(it).toMatchObject({ event: 'reopen', from: 'Resolved', to: 'Open', importance: 3 });

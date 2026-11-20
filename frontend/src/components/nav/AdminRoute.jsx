@@ -2,7 +2,9 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { Activity } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
-import { ACCESS_BOUNCE_KEY, canViewOps, isWorkspaceAdmin, useWorkspaceRole } from './navDestinations';
+import {
+  ACCESS_BOUNCE_KEY, canViewOps, isWorkspaceAdmin, useDashboardAccess, useWorkspaceRole,
+} from './navDestinations';
 import { rememberPostLoginPath } from '../../utils/postLoginRedirect';
 
 /**
@@ -86,4 +88,31 @@ export function ViewRoute({ children }) {
     return <Navigate to="/tickets" replace />;
   }
   return children;
+}
+
+/**
+ * DashboardRoute (QA 11-19 item 2): ViewRoute semantics for the Dashboard and
+ * the technician pages it links to, plus the agents an admin listed under
+ * Settings → Members → "Can see the Dashboard" — agents included. It waits for
+ * the server's answer before deciding, so a listed agent is never bounced
+ * while it is on its way. Timeline and Analytics stay on ViewRoute.
+ */
+export function DashboardRoute({ children }) {
+  const { user, isAuthenticated, isLoading } = useAuth();
+  const { isWorkspaceSelected, availableWorkspaces, isHydrated } = useWorkspace();
+  const wsRole = useWorkspaceRole();
+  const access = useDashboardAccess();
+  const location = useLocation();
+
+  if (isLoading || !isHydrated) return <LoadingScreen />;
+  if (!isAuthenticated) return <BounceTo to="/login" />;
+  if (!isWorkspaceSelected && availableWorkspaces.length !== 1) {
+    return <BounceTo to="/workspace" />;
+  }
+  if (user?.role !== 'agent' && canViewOps(user, wsRole)) return children;
+  if (access.loading) return <LoadingScreen />;
+  if (access.viewOnly) return children;
+  if (user?.role === 'agent') return <Navigate to="/tickets" replace />;
+  try { sessionStorage.setItem(ACCESS_BOUNCE_KEY, location.pathname); } catch { /* no-op */ }
+  return <Navigate to="/tickets" replace />;
 }

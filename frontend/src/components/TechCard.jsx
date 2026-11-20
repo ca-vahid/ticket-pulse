@@ -325,15 +325,18 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
       className={`${cardBgColor} border ${simple ? 'border-border' : 'border-border'} rounded-lg shadow-sm hover:shadow-xl transition-all duration-300 cursor-pointer group relative overflow-hidden`}
     >
       {/* Hide Button - Top Right. Always visible on touch (hover-reveal is
-          unreachable on phones); fades in on hover for pointer devices. */}
-      <button
-        onClick={handleHideToggle}
-        aria-label={`Hide ${technician.name}`}
-        className="hide-button tp-focus-ring absolute top-2 right-2 p-2 sm:p-1.5 rounded-lg z-10 text-muted-foreground/75 bg-card/70 opacity-70 hover:bg-muted hover:opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
-        title="Hide technician"
-      >
-        <EyeOff className="w-4 h-4" />
-      </button>
+          unreachable on phones); fades in on hover for pointer devices.
+          No onHide = a read-only Dashboard view (QA 11-19 item 2): no button. */}
+      {onHide && (
+        <button
+          onClick={handleHideToggle}
+          aria-label={`Hide ${technician.name}`}
+          className="hide-button tp-focus-ring absolute top-2 right-2 p-2 sm:p-1.5 rounded-lg z-10 text-muted-foreground/75 bg-card/70 opacity-70 hover:bg-muted hover:opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+          title="Hide technician"
+        >
+          <EyeOff className="w-4 h-4" />
+        </button>
+      )}
 
       {/* Card Content */}
       <div className="p-3 sm:p-4">

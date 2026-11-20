@@ -2435,3 +2435,14 @@ export const availabilityAPI = {
   setCalendarImportMode: (data) => api.put('/availability/admin/import/shared-calendar/mode', data),
   reproject: (data = {}) => apiLongTimeout.post('/availability/admin/reproject', data),
 };
+
+// ---- QA 11-19 item 2 — Dashboard view grant ---------------------------------
+// An admin lets one agent open the Dashboard read-only (Settings → Members).
+// mine(): may the signed-in person open the Dashboard in this workspace?
+//   → { success, data: { dashboard, viaGrant } }
+// list/set: admin only → { success, data: { technicianIds } }
+export const dashboardViewersAPI = {
+  mine: () => api.get('/dashboard-access'),
+  list: (workspaceId) => api.get(`/workspaces/${workspaceId}/dashboard-viewers`),
+  set: (workspaceId, technicianId, enabled) => api.put(`/workspaces/${workspaceId}/dashboard-viewers/${technicianId}`, { enabled }),
+};

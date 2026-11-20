@@ -1,6 +1,16 @@
-export const APP_VERSION = '4.3.98-preview';
+export const APP_VERSION = '4.3.99-preview';
 
 export const changelog = [
+  {
+    version: '4.3.99-preview',
+    date: 'November 19, 2026',
+    entries: [
+      { type: 'new', html: '<strong>&ldquo;All done, thanks&rdquo; on a waiting ticket can resolve it</strong> &mdash; when a requester replies to a ticket in Pending Response and clearly confirms it&rsquo;s done, the reopen workflow can set it to Resolved with a private note quoting the reply, instead of reopening it. Replies with a next step, a question or anything unclear still reopen. Off / Shadow / Live on the reopen workflow&rsquo;s condition step; IT runs it in Shadow first. Only Ticket Pulse-born tickets are resolved.' },
+      { type: 'improved', html: '<strong>One survey row in Teams, and everyone&rsquo;s results for admins only</strong> &mdash; &ldquo;The requester rates my ticket in the survey&rdquo; is folded into &ldquo;A survey result comes in&rdquo; (your earlier choice carries over, Teams by default), and only workspace admins can choose everyone&rsquo;s results. (QA 11-19 #1)' },
+      { type: 'new', html: '<strong>Let chosen agents see the Dashboard</strong> &mdash; Settings &rarr; Members has a &ldquo;Can see the Dashboard&rdquo; switch per agent. They get the Dashboard and the technician pages, read only; nothing else about their access changes. (QA 11-19 #2)' },
+      { type: 'fix', html: '<strong>Workspace settings stay with their workspace</strong> &mdash; an admin of one workspace can no longer change another workspace&rsquo;s settings through the general settings screen.' },
+    ],
+  },
   {
     version: '4.3.98-preview',
     date: 'November 18, 2026',

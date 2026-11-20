@@ -20,6 +20,7 @@ import { filterTickets, getTicketCategoryLabel, hasCategoryFilters } from '../ut
 import { getHolidayTooltip, getHolidayInfo, registerDynamicHolidays } from '../utils/holidays';
 import api from '../services/api';
 import { usePrefetch } from '../hooks/usePrefetch';
+import { useDashboardAccess } from '../components/nav/navDestinations';
 import { aiAssignedShare, assignerKind, assignerNamesOf } from '../utils/assignerKind';
 import {
   CheckCircle,
@@ -60,6 +61,9 @@ export default function Dashboard() {
     forceRefreshNoCache,
   } = useDashboard();
   const { currentWorkspace } = useWorkspace();
+  // QA 11-19 item 2: an agent an admin let see the Dashboard reads it only —
+  // no hide/unhide, no sync controls, no sync polling.
+  const { viewOnly } = useDashboardAccess();
   const { width: layoutWidth } = useLayoutWidth();
   const location = useLocation();
   const showSummitWorkshop = Number(currentWorkspace?.id) === 1 || currentWorkspace?.slug === 'it';
@@ -394,7 +398,7 @@ export default function Dashboard() {
 
   // Poll for background sync status every 5 seconds (deferred until primary data arrives)
   useEffect(() => {
-    if (!primaryDataReady) return;
+    if (!primaryDataReady || viewOnly) return;
 
     const checkBackgroundSync = async () => {
       try {
@@ -412,7 +416,7 @@ export default function Dashboard() {
     const interval = setInterval(checkBackgroundSync, 5000);
 
     return () => clearInterval(interval);
-  }, [primaryDataReady]);
+  }, [primaryDataReady, viewOnly]);
 
   const addSyncLog = (message, type = 'info') => {
     const timestamp = new Date().toLocaleTimeString();
@@ -840,9 +844,11 @@ export default function Dashboard() {
     automationNames: viewData?.automationAssignerNames,
   });
 
-  // Filter technicians based on hidden state
-  const visibleTechnicians = technicians.filter(tech => !hiddenTechIds.includes(tech.id));
-  const hiddenTechnicians = technicians.filter(tech => hiddenTechIds.includes(tech.id));
+  // Filter technicians based on hidden state. A read-only view (QA 11-19
+  // item 2) has no hide/unhide, so it always shows the whole team.
+  const effectiveHiddenIds = viewOnly ? [] : hiddenTechIds;
+  const visibleTechnicians = technicians.filter(tech => !effectiveHiddenIds.includes(tech.id));
+  const hiddenTechnicians = technicians.filter(tech => effectiveHiddenIds.includes(tech.id));
 
   // Helper function to get tickets array from tech (handles daily, weekly, and monthly views)
   // CRITICAL: Use viewMode to determine which field to use, NOT whether fields exist
@@ -1373,10 +1379,10 @@ export default function Dashboard() {
         backgroundSyncRunning,
         backgroundSyncStep,
         killingSync,
-        onKillSync: handleKillSync,
+        onKillSync: viewOnly ? undefined : handleKillSync,
         clearCacheOnLogout,
         isColdLoading,
-        dashboardActions: {
+        dashboardActions: viewOnly ? null : {
           onRefresh: handleRefresh,
           onSyncWeek: handleSyncWeek,
           refreshing,
@@ -2195,7 +2201,7 @@ export default function Dashboard() {
                               <TechCardCompact
                                 technician={tech}
                                 rank={tech.rank}
-                                onHide={handleHideTechnician}
+                                onHide={viewOnly ? undefined : handleHideTechnician}
                                 selectedDate={selectedDate}
                                 selectedWeek={selectedWeek}
                                 selectedMonth={selectedMonth}
@@ -2224,7 +2230,7 @@ export default function Dashboard() {
                           <TechCard
                             technician={tech}
                             rank={tech.rank}
-                            onHide={handleHideTechnician}
+                            onHide={viewOnly ? undefined : handleHideTechnician}
                             selectedDate={selectedDate}
                             selectedWeek={selectedWeek}
                             selectedMonth={selectedMonth}
@@ -2254,7 +2260,7 @@ export default function Dashboard() {
                         <TechCard
                           technician={tech}
                           rank={tech.rank}
-                          onHide={handleHideTechnician}
+                          onHide={viewOnly ? undefined : handleHideTechnician}
                           selectedDate={selectedDate}
                           selectedWeek={selectedWeek}
                           selectedMonth={selectedMonth}

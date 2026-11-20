@@ -132,7 +132,41 @@ const READERS = Object.freeze({
       'Reply with JSON only: {"verdict":"thanks"|"auto_reply"|"still_broken"|"new_request"|"question"|"unclear","reason":"one line"}.',
     ],
   },
+  // 19 Nov 2026: a reply to a ticket WAITING on the requester (Pending). A
+  // stricter question than the closed-ticket thank-you: did they confirm the
+  // request is done? Only "confirmed_done" at high confidence counts
+  // (`needsHigh`), and there is no keyword shortcut: a bare "thanks" on a
+  // waiting ticket is ambiguous, so the model reads it.
+  confirm_done: {
+    yes: 'confirmed_done',
+    needsHigh: true,
+    noFastPath: true,
+    schema: Object.freeze({
+      type: 'object',
+      additionalProperties: false,
+      required: ['verdict', 'confidence'],
+      properties: {
+        verdict: { type: 'string', enum: ['confirmed_done', 'next_step', 'auto_reply', 'still_broken', 'new_request', 'question', 'unclear'] },
+        confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+        reason: { type: 'string' },
+      },
+    }),
+    prompt: [
+      'Someone on a helpdesk is waiting for the requester on a support ticket. The requester has now replied. Answer one question: Did the requester confirm the request is done and no further action is needed?',
+      FENCE_RULE,
+      'verdict "confirmed_done": the reply says the problem is fixed, it works now, it is sorted, or nothing more is needed, and it asks for nothing and promises nothing more. A thank-you that also confirms it is done counts.',
+      'verdict "next_step": thanks or an acknowledgement plus something still to happen (they will try, check, ask someone, come by, send something, follow your advice later).',
+      'verdict "auto_reply": an automatic reply (out of office, on leave, mailbox not monitored), not written by the person for this ticket.',
+      'verdict "still_broken": the problem is not fixed, came back, or is only partly fixed.',
+      'verdict "new_request": they ask for something different from the original ticket.',
+      'verdict "question": they ask a question or add information.',
+      'verdict "unclear": anything else, including a bare "thanks" that does not say whether it is done.',
+      'confidence: "high" only when the words leave no doubt; otherwise "medium" or "low". When in doubt, answer "unclear".',
+      'Reply with JSON only: {"verdict":"confirmed_done"|"next_step"|"auto_reply"|"still_broken"|"new_request"|"question"|"unclear","confidence":"high"|"medium"|"low","reason":"one line"}.',
+    ],
+  },
 });
+const CONFIDENCES = Object.freeze(['high', 'medium', 'low']);
 const TERMINAL_BASES = Object.freeze(['Resolved', 'Closed']);
 const STOP_WORDS = Object.freeze({
   deleted: 'the ticket was deleted or marked spam',
@@ -823,13 +857,17 @@ ${lines.map((l) => `<p style="margin:0 0 10px">${l}</p>`).join('\n')}
    * reader 'person' (neutral prompt + bare-thanks fast path), its own
    * `operation` and `budgetState` (never Auto-help's monthly cap), and a
    * shorter `timeoutMs`. Without those options nothing changes for Auto-help.
+   * Reader 'confirm_done' (19 Nov 2026, waiting tickets): no keyword path,
+   * and `confidence` is returned; 'confirmed' needs high confidence.
    */
   async classifyReply(workspaceId, text, {
     subject = null, run = null, reader = 'auto_help', operation = 'auto_help', budgetState = null, timeoutMs = CLASSIFY_TIMEOUT_MS,
   } = {}) {
     const spec = READERS[reader] || READERS.auto_help;
-    const fast = reader === 'person' ? classifyThanksFast(text) : classifyReplyFast(text);
-    if (fast) return { verdict: fast, via: 'keywords', usage: null };
+    if (!spec.noFastPath) {
+      const fast = reader === 'person' ? classifyThanksFast(text) : classifyReplyFast(text);
+      if (fast) return { verdict: fast, via: 'keywords', usage: null };
+    }
     const own = ownWords(text).slice(0, 2000);
     if (!own) return { verdict: 'help', via: 'empty', usage: null };
     // Monthly cost cap, checked at classification time: at the cap a person reads it.
@@ -867,11 +905,14 @@ ${lines.map((l) => `<p style="margin:0 0 10px">${l}</p>`).join('\n')}
         try { parsed = JSON.parse(result.content); } catch { parsed = null; }
       }
       // Only an explicit "resolved" (or "thanks") closes; unclear / needs_help / anything odd → a person.
-      const verdict = parsed?.verdict === spec.yes ? 'confirmed' : 'help';
+      // The confirm_done reader also needs high confidence.
+      const confidence = CONFIDENCES.includes(parsed?.confidence) ? parsed.confidence : null;
+      const verdict = parsed?.verdict === spec.yes && (!spec.needsHigh || confidence === 'high') ? 'confirmed' : 'help';
       return {
         verdict,
         via: 'model',
         modelVerdict: parsed?.verdict || null,
+        ...(spec.needsHigh ? { confidence } : {}),
         reason: typeof parsed?.reason === 'string' ? parsed.reason.slice(0, 300) : null,
         usage: result?.usage ? { ...result.usage, provider: result.provider, model: result.model } : null,
         runId: run?.id ?? null,

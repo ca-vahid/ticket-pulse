@@ -2,15 +2,20 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   useReactTable, getCoreRowModel, getSortedRowModel, flexRender, createColumnHelper,
 } from '@tanstack/react-table';
-import { settingsAPI, workspaceAPI } from '../../services/api';
+import { dashboardViewersAPI, settingsAPI, workspaceAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { useAuth } from '../../contexts/AuthContext';
 import {
   Users, Loader, Cloud, Home, Power, PowerOff, Pencil, Check, X,
   AlertCircle, CheckCircle2, MapPin, Search, UserPlus, Brain,
-  ArrowUpDown, ArrowUp, ArrowDown, KeyRound, Camera, UserCheck, Activity,
+  ArrowUpDown, ArrowUp, ArrowDown, KeyRound, Camera, UserCheck, Activity, LayoutDashboard,
 } from 'lucide-react';
 import PhotoUploadDialog from './PhotoUploadDialog';
+import { Switch } from '../ui/switch';
+import { isWorkspaceAdmin, useWorkspaceRole } from '../nav/navDestinations';
+
+// QA 11-19 item 2: the per-agent Dashboard view grant.
+const DASHBOARD_GRANT_HELP = "Lets this agent open the Dashboard (read only). It doesn't change anything else they can do.";
 
 const COMMON_TIMEZONES = [
   'America/Vancouver', 'America/Edmonton', 'America/Toronto', 'America/Halifax',
@@ -283,8 +288,27 @@ export default function MembersPanel() {
     }
   }, [wsId]);
 
+  // Dashboard view grant (QA 11-19 item 2): technician ids an admin let open
+  // the Dashboard read-only. Best-effort like the access map: null (not
+  // loaded / refused) hides the column.
+  const wsRole = useWorkspaceRole();
+  const canEditDashboardGrant = isWorkspaceAdmin(user, wsRole);
+  const [dashboardViewerIds, setDashboardViewerIds] = useState(null);
+  const [dashboardBusyId, setDashboardBusyId] = useState(null);
+  const loadDashboardViewers = useCallback(async () => {
+    if (!wsId) return;
+    try {
+      const res = await Promise.resolve().then(() => dashboardViewersAPI.list(wsId));
+      const ids = res?.data?.technicianIds;
+      setDashboardViewerIds(Array.isArray(ids) ? new Set(ids.map(Number)) : null);
+    } catch {
+      setDashboardViewerIds(null);
+    }
+  }, [wsId]);
+
   useEffect(() => { load(); }, [load, currentWorkspace?.id]);
   useEffect(() => { loadAccess(); }, [loadAccess]);
+  useEffect(() => { loadDashboardViewers(); }, [loadDashboardViewers]);
 
   const flash = (msg) => { setSuccessMsg(msg); setTimeout(() => setSuccessMsg(null), 4000); };
 
@@ -425,6 +449,32 @@ export default function MembersPanel() {
     }
   }, [wsId, accessByEmail, loadAccess, superAdmins]);
 
+  // "Can see the Dashboard" (QA 11-19 item 2): optimistic, rolled back on error.
+  const toggleDashboardViewer = useCallback(async (t, enabled) => {
+    if (!wsId || typeof t.id !== 'number' || !canEditDashboardGrant) return;
+    setDashboardBusyId(t.id);
+    setError(null);
+    const before = dashboardViewerIds;
+    setDashboardViewerIds((s) => {
+      const next = new Set(s || []);
+      if (enabled) next.add(t.id); else next.delete(t.id);
+      return next;
+    });
+    try {
+      const res = await dashboardViewersAPI.set(wsId, t.id, enabled);
+      const ids = res?.data?.technicianIds;
+      if (Array.isArray(ids)) setDashboardViewerIds(new Set(ids.map(Number)));
+      flash(enabled
+        ? `${t.name} can now open the Dashboard (read only). It applies on their next page load.`
+        : `${t.name} can no longer open the Dashboard.`);
+    } catch (err) {
+      setDashboardViewerIds(before);
+      setError(err.response?.data?.message || err.message || 'Could not change Dashboard access');
+    } finally {
+      setDashboardBusyId(null);
+    }
+  }, [wsId, canEditDashboardGrant, dashboardViewerIds]);
+
   // AI routing guidance (QA 07-14): a standing instruction the assignment AI
   // reads whenever this person is a candidate — e.g. reduced capacity.
   const [guidanceId, setGuidanceId] = useState(null);
@@ -563,7 +613,39 @@ export default function MembersPanel() {
         );
       },
     })] : []),
-  ], [accessByEmail, accessBusyEmail, isGlobalAdmin, changeAccess, superAdmins]);
+    // "Can see the Dashboard" (QA 11-19 item 2): agents only (active roster
+    // rows). People whose access already includes the Dashboard say so in
+    // words; app-only and disabled rows have nothing to switch.
+    ...(dashboardViewerIds ? [columnHelper.accessor((t) => (typeof t.id === 'number' && dashboardViewerIds.has(t.id) ? 1 : 0), {
+      id: 'dashboard',
+      header: 'Can see the Dashboard',
+      cell: ({ row }) => {
+        const t = row.original;
+        if (t.origin === 'app' || !t.isActive || typeof t.id !== 'number') {
+          return <span className="text-xs text-muted-foreground/50" title="Only active agents can be given Dashboard view">—</span>;
+        }
+        const email = String(t.email || '').toLowerCase();
+        const role = accessByEmail?.[email] || '';
+        if (superAdmins.has(email) || role === 'admin' || role === 'readonly') {
+          return <span className="text-xs text-muted-foreground" title="Their access already includes the Dashboard">Already sees it</span>;
+        }
+        const busy = dashboardBusyId === t.id;
+        return (
+          <div className="inline-flex items-center gap-1.5">
+            <Switch
+              checked={dashboardViewerIds.has(t.id)}
+              onCheckedChange={(v) => toggleDashboardViewer(t, v === true)}
+              disabled={busy || !canEditDashboardGrant}
+              aria-label={`${t.name} can see the Dashboard`}
+              title={canEditDashboardGrant ? DASHBOARD_GRANT_HELP : 'Only an admin can change this'}
+            />
+            {busy && <Loader className="w-3.5 h-3.5 text-muted-foreground animate-spin" aria-hidden="true" />}
+          </div>
+        );
+      },
+    })] : []),
+  ], [accessByEmail, accessBusyEmail, isGlobalAdmin, changeAccess, superAdmins,
+    dashboardViewerIds, dashboardBusyId, canEditDashboardGrant, toggleDashboardViewer]);
 
   const table = useReactTable({
     data: rows,
@@ -608,6 +690,15 @@ export default function MembersPanel() {
             <strong className="font-semibold text-muted-foreground"> Reviewer</strong> — also approves AI suggestions and manages approval categories;
             <strong className="font-semibold text-muted-foreground"> Admin</strong> — everything, including Settings.
             Technicians with Basic access can still sign in for their own queue.
+          </span>
+        </p>
+      )}
+      {dashboardViewerIds && (
+        <p className="flex items-start gap-1.5 text-xs text-muted-foreground max-w-3xl" data-testid="dashboard-grant-help">
+          <LayoutDashboard className="w-3.5 h-3.5 mt-0.5 text-muted-foreground/75 shrink-0" aria-hidden="true" />
+          <span>
+            <strong className="font-semibold text-muted-foreground">Can see the Dashboard</strong>: {DASHBOARD_GRANT_HELP}
+            {!canEditDashboardGrant && ' Only an admin can change it.'}
           </span>
         </p>
       )}

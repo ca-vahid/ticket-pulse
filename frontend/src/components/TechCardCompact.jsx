@@ -268,14 +268,16 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
       onMouseLeave={handleMouseLeave}
       className={`${rowBgColor} border border-border rounded-lg hover:shadow-md hover:border-input transition-all duration-200 cursor-pointer group relative`}
     >
-      {/* Hide Button */}
-      <button
-        onClick={handleHideToggle}
-        className="hide-button absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 p-1 hover:bg-muted rounded transition-opacity z-10"
-        title="Hide technician"
-      >
-        <EyeOff className="w-3 h-3 text-muted-foreground/75" />
-      </button>
+      {/* Hide Button (none in a read-only Dashboard view, QA 11-19 item 2) */}
+      {onHide && (
+        <button
+          onClick={handleHideToggle}
+          className="hide-button absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 p-1 hover:bg-muted rounded transition-opacity z-10"
+          title="Hide technician"
+        >
+          <EyeOff className="w-3 h-3 text-muted-foreground/75" />
+        </button>
+      )}
 
       {/* Main row — CSS Grid template matches TechCompactHeader */}
       <div

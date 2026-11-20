@@ -150,6 +150,58 @@ describe('the reply step switches (MEGA 11-14)', () => {
   });
 });
 
+describe('Resolve when the requester confirms it\'s done (waiting tickets), 19 Nov 2026', () => {
+  const EMPTY = { conditionGroup: { logic: 'all', conditions: [] } };
+  const group = () => screen.getByRole('radiogroup', { name: "Resolve when the requester confirms it's done (waiting tickets)" });
+  const choice = (name) => screen.getByRole('radio', { name });
+
+  test('on "Requester replied" steps: Off / Shadow / Live, an old step reads Off; a pick writes resolveConfirmedDone', () => {
+    const onPatch = vi.fn();
+    render(<ConditionStepEditor data={EMPTY} triggerType="ticket.reply_received" onPatch={onPatch} />);
+    expect(group()).toBeInTheDocument();
+    expect(choice('Off')).toHaveAttribute('aria-checked', 'true');
+    expect(choice('Shadow')).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByTestId('confirmed-done-switch')).toHaveTextContent('goes on to the conditions below, as before');
+    fireEvent.click(choice('Shadow'));
+    expect(onPatch).toHaveBeenLastCalledWith({ resolveConfirmedDone: 'shadow' });
+    fireEvent.click(choice('Live'));
+    expect(onPatch).toHaveBeenLastCalledWith({ resolveConfirmedDone: 'live' });
+    // Picking the one already chosen writes nothing.
+    onPatch.mockClear();
+    fireEvent.click(choice('Off'));
+    expect(onPatch).not.toHaveBeenCalled();
+  });
+
+  test('it sits next to the thank-you switch and its line says what each mode does', () => {
+    const { rerender } = render(<ConditionStepEditor data={{ ...EMPTY, ignoreThanks: true, resolveConfirmedDone: 'shadow' }} triggerType="ticket.reply_received" onPatch={() => {}} />);
+    const thanksRow = screen.getByTestId('thanks-switch');
+    expect(thanksRow.nextElementSibling).toBe(screen.getByTestId('confirmed-done-switch'));
+    expect(choice('Shadow')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByTestId('confirmed-done-switch')).toHaveTextContent('Waiting tickets still reopen. The ticket history records each one it would have resolved.');
+    rerender(<ConditionStepEditor data={{ ...EMPTY, resolveConfirmedDone: 'live' }} triggerType="ticket.reply_received" onPatch={() => {}} />);
+    expect(screen.getByTestId('confirmed-done-switch')).toHaveTextContent('No e-mail goes to the requester.');
+    expect(screen.getByTestId('confirmed-done-switch')).toHaveTextContent('the workflow stops here');
+    expect(screen.getByTestId('confirmed-done-switch')).toHaveTextContent('Tickets that came from FreshService are only noted, never resolved.');
+    expect(screen.getByTestId('condition-sentence')).toHaveTextContent('A waiting ticket is resolved instead when the requester confirms it\'s done.');
+  });
+
+  test('on another trigger it shows only while it is not Off; an unknown value reads Off', () => {
+    render(<ConditionStepEditor data={EMPTY} triggerType="ticket.created" onPatch={() => {}} />);
+    expect(screen.queryByTestId('confirmed-done-switch')).not.toBeInTheDocument();
+    cleanup();
+    render(<ConditionStepEditor data={{ ...EMPTY, resolveConfirmedDone: 'live' }} triggerType="ticket.created" onPatch={() => {}} />);
+    expect(choice('Live')).toHaveAttribute('aria-checked', 'true');
+    cleanup();
+    render(<ConditionStepEditor data={{ ...EMPTY, resolveConfirmedDone: 'bogus' }} triggerType="ticket.reply_received" onPatch={() => {}} />);
+    expect(choice('Off')).toHaveAttribute('aria-checked', 'true');
+  });
+
+  test('the sentence names Shadow; Off adds nothing', () => {
+    expect(describeStep({ ...EMPTY, resolveConfirmedDone: 'shadow' })).toBe('Every ticket continues. Shadow: records when a waiting ticket\'s requester confirms it\'s done.');
+    expect(describeStep({ ...EMPTY, resolveConfirmedDone: 'off' })).toBe('Every ticket continues.');
+  });
+});
+
 describe('the step sentence and canvas caption (describeStep)', () => {
   test('short form for the canvas; null for code', () => {
     expect(describeStep({ conditionGroup: { logic: 'all', conditions: [] }, ignoreThanks: true }, { short: true })).toBe('All but a thank-you or out-of-office reply');

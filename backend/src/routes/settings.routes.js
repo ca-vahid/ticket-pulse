@@ -5,7 +5,7 @@ import {
   requireWorkspaceMemberOrAgent,
 } from '../middleware/auth.js';
 import { requireWorkspace } from '../middleware/workspace.js';
-import { NotFoundError, ValidationError } from '../utils/errors.js';
+import { AuthorizationError, NotFoundError, ValidationError } from '../utils/errors.js';
 import settingsRepository from '../services/settingsRepository.js';
 import prisma from '../services/prisma.js';
 import technicianRepository from '../services/technicianRepository.js';
@@ -110,6 +110,34 @@ function requestActor(req) {
   return req.session?.user ?? req.user ?? null;
 }
 
+/**
+ * The generic writers (PUT /settings, PUT /settings/:key) take any key. A
+ * workspace admin must not reach another workspace's per-workspace settings
+ * through them (second look, QA 11-19 item 2): `x-workspace-id: 2` and a key
+ * `dashboard_viewers_ws1` granted a ws1 agent the ws1 Dashboard. Rules, for
+ * everyone but super admins:
+ *   - a key ending in `_ws<N>` is refused unless N is the workspace the
+ *     caller is an admin of (requireAdmin checked req.workspaceId);
+ *   - `dashboard_viewers_ws*` is refused outright: change it under Settings →
+ *     Members, where the person is checked to belong to the workspace.
+ * No screen writes `_ws<N>` keys through these routes (each feature has its
+ * own route), so nothing that works today is refused.
+ */
+const WORKSPACE_KEY_SUFFIX = /_ws(\d+)$/;
+function refuseForeignWorkspaceKeys(req, keys) {
+  if (requestActor(req)?.role === 'admin') return;
+  for (const key of keys) {
+    const text = String(key || '');
+    if (text.startsWith('dashboard_viewers_ws')) {
+      throw new AuthorizationError('Who can see the Dashboard is changed under Settings → Members, not here.', 'setting_not_writable');
+    }
+    const m = text.match(WORKSPACE_KEY_SUFFIX);
+    if (m && Number(m[1]) !== Number(req.workspaceId)) {
+      throw new AuthorizationError("That setting belongs to another workspace. You can only change your own workspace's settings.", 'workspace_mismatch');
+    }
+  }
+}
+
 function parsePositiveId(value, label = 'id') {
   const id = Number.parseInt(value, 10);
   if (!Number.isFinite(id) || id <= 0) throw new ValidationError(`Invalid ${label}`);
@@ -209,6 +237,7 @@ router.put(
     if (!settings || typeof settings !== 'object') {
       throw new ValidationError('Settings object is required');
     }
+    refuseForeignWorkspaceKeys(req, Object.keys(settings));
 
     const normalizedSettings = normalizeSettingsForUpdate(settings);
 
@@ -1548,6 +1577,7 @@ router.put(
     if (value === undefined) {
       throw new ValidationError('Value is required');
     }
+    refuseForeignWorkspaceKeys(req, [key]);
 
     await settingsRepository.set(key, value);
 

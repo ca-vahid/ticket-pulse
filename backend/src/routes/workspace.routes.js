@@ -15,6 +15,7 @@ import azureAdService from '../services/azureAdService.js';
 import logger from '../utils/logger.js';
 import { resolveTicketShortLink, RESERVED_WORKSPACE_SLUGS } from '../services/ticketShortLinkService.js';
 import workspaceLinkNameService from '../services/workspaceLinkNameService.js';
+import dashboardViewerService from '../services/dashboardViewerService.js';
 
 const router = express.Router();
 
@@ -473,6 +474,46 @@ router.get(
       ? members.map((m) => ({ ...m, isSuperAdmin: superAdmins.has(String(m?.email || '').toLowerCase()) }))
       : members;
     res.json({ success: true, data: flagged });
+  }),
+);
+
+/**
+ * GET /api/workspaces/:id/dashboard-viewers
+ * Dashboard view grant (QA 11-19 item 2): the technician ids an admin let open
+ * the Dashboard read-only. Same admin gate as the access routes.
+ */
+router.get(
+  '/:id/dashboard-viewers',
+  scopeToTargetWorkspace,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const technicianIds = await dashboardViewerService.getViewerIds(req.workspaceId);
+    res.json({ success: true, data: { technicianIds } });
+  }),
+);
+
+/**
+ * PUT /api/workspaces/:id/dashboard-viewers/:technicianId  { enabled: boolean }
+ * Turn "Can see the Dashboard" on or off for one member of THAT workspace.
+ * Admin only. It changes nothing else the person can do.
+ */
+router.put(
+  '/:id/dashboard-viewers/:technicianId',
+  scopeToTargetWorkspace,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const technicianIds = await dashboardViewerService.setDashboardViewer(
+      req.workspaceId,
+      req.params.technicianId,
+      req.body?.enabled,
+    );
+    logger.info('Dashboard view grant changed', {
+      actor: sessionUser(req)?.email || null,
+      workspaceId: req.workspaceId,
+      technicianId: Number(req.params.technicianId),
+      enabled: req.body?.enabled === true,
+    });
+    res.json({ success: true, data: { technicianIds } });
   }),
 );
 

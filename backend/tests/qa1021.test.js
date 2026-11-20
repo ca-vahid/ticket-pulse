@@ -16,7 +16,7 @@ jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMo
 const { requesterFirstName, requesterContextFromSource } = await import('../src/services/requesterProfileService.js');
 const { lintWorkflowDefinition, suggestVariable } = await import('../src/services/notificationWorkflowWatchService.js');
 const { withBaseFont, bulletproofButtons } = await import('../src/utils/emailHtmlHardening.js');
-const { eventText, EVENTS, EVENT_MAP } = await import('../src/services/teamsNotificationService.js');
+const { eventText, EVENTS, EVENT_MAP, RETIRED_EVENTS } = await import('../src/services/teamsNotificationService.js');
 const { vacationTrackerState } = await import('../src/services/availability/availabilityService.js');
 const { notificationVariableCatalog } = await import('../src/services/notificationWorkflowDefinition.js');
 
@@ -88,9 +88,11 @@ describe('one base font for workflow e-mail (#10)', () => {
 });
 
 describe('survey responses in Teams (#2)', () => {
-  test('a new row in "What am I told about", on by default, mapped to the agent', () => {
-    expect(EVENTS.find((e) => e.key === 'survey_response')).toMatchObject({ group: 'My tickets', mode: 'teams' });
-    expect(EVENT_MAP['ticket.feedback_received']).toEqual([['survey_response', 'assignee']]);
+  test('QA 11-19 #1: the row is retired into "A survey result comes in" (Teams by default), still mapped to the agent', () => {
+    expect(EVENTS.find((e) => e.key === 'survey_response')).toBeUndefined();
+    expect(RETIRED_EVENTS.find((e) => e.key === 'survey_response')).toMatchObject({ replacedBy: 'survey_result' });
+    expect(EVENTS.find((e) => e.key === 'survey_result')).toMatchObject({ mode: 'teams' });
+    expect(EVENT_MAP['ticket.feedback_received']).toEqual([['survey_result', 'assignee']]);
   });
 
   test('the card line names the requester, the rating and the comment', () => {
@@ -98,6 +100,8 @@ describe('survey responses in Teams (#2)', () => {
     expect(eventText('survey_response', ctx)).toBe('Sam Khadem: Rated it Great (5 of 5) — "Quick fix, thanks"');
     const changed = { requester: null, ticket: {}, event: { extra: { score: 2, label: null, comment: '', updated: true } } };
     expect(eventText('survey_response', changed)).toBe('Changed the rating to 2 of 5.');
+    // The phone push line under the new key reads the same.
+    expect(eventText('survey_result', ctx)).toBe(eventText('survey_response', ctx));
   });
 });
 

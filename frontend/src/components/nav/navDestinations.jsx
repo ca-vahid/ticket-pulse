@@ -8,6 +8,7 @@ import {
 } from './NavIcons';
 import { useHrLifecycleStatus } from '../../hooks/useHrLifecycleStatus';
 import { useUrgentResponseStatus } from '../../hooks/useUrgentResponseStatus';
+import { useDashboardViewAccess } from '../../hooks/useDashboardViewAccess';
 
 // Single source of truth for the primary navigation destinations, shared by the
 // desktop header rail (AppHeader) and the mobile bottom tab bar (MobileTabBar).
@@ -239,6 +240,28 @@ export function canViewOps(user, wsRole) {
 }
 
 /**
+ * Dashboard view grant (QA 11-19 item 2): an admin can let one agent open the
+ * Dashboard and the technician pages it links to, read only, without changing
+ * their role (Settings → Members → "Can see the Dashboard"). Only the Dashboard
+ * — Timeline and Analytics stay with canViewOps, and so does the home page
+ * (homePathFor): a listed agent keeps their usual home and gets the nav entry.
+ *
+ * Returns { canView, viewOnly, loading }: viewOnly = sees it by the grant
+ * alone, so the page hides everything that changes data or settings.
+ */
+export function useDashboardAccess() {
+  const { user } = useAuth();
+  const wsRole = useWorkspaceRole();
+  const ops = canViewOps(user, wsRole);
+  const grant = useDashboardViewAccess({ enabled: Boolean(user) && wsRole !== null && !ops });
+  return {
+    canView: ops || grant.viewer,
+    viewOnly: !ops && grant.viewer,
+    loading: !ops && grant.loading,
+  };
+}
+
+/**
  * Single source of truth for whether a user gets Settings affordances at all.
  * Since v3.7.02 Settings is workspace-admin only: viewers/reviewers have zero
  * sections (approval categories moved to Approvals → Categories), and
@@ -283,18 +306,22 @@ export function useNavDestinations() {
   const hrLifecycle = useHrLifecycleStatus({ enabled: canManage && user?.role !== 'agent' });
   // Everybody asks whether this workspace has an on-call rotation to show.
   const urgentResponse = useUrgentResponseStatus({ enabled: Boolean(user) });
+  // QA 11-19 item 2: an agent an admin let see the Dashboard gets its tile.
+  const dashboardGrant = useDashboardViewAccess({ enabled: Boolean(user) && wsRole !== null && !canView && user?.role !== 'admin' });
 
   // Agent-role users only work tickets + approvals — everything else in the app
   // is coordinator/manager territory and would just bounce them. Agents can be
   // approval managers and request approvals, so the Approvals inbox is theirs too.
   if (user?.role === 'agent') {
     return NAV_DESTINATIONS.filter((dest) => dest.id === 'tickets' || dest.id === 'approvals' || dest.id === 'availability'
-      || (dest.id === 'oncall' && urgentResponse.visible));
+      || (dest.id === 'oncall' && urgentResponse.visible)
+      || (dest.id === 'dashboard' && dashboardGrant.viewer));
   }
 
   return NAV_DESTINATIONS.filter((dest) => {
     if (dest.gate === 'review') return canReview;
     if (dest.gate === 'manage') return canManage;
+    if (dest.id === 'dashboard' && dashboardGrant.viewer) return true;
     if (dest.gate === 'view') return canView;
     if (dest.gate === 'hrLifecycle') return canManage && hrLifecycle.available;
     if (dest.gate === 'signedIn') return Boolean(user);

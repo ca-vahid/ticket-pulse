@@ -3,25 +3,33 @@
  * json-logic rule is shown as builder rows when it converts, else as code.
  * See components/settings/ConditionStepEditor.jsx.
  */
-import { describeConditionStep, ruleConversionPatch, ruleToConditionGroup } from './conditionRuleShared';
+import { confirmedDoneMode, describeConditionStep, ruleConversionPatch, ruleToConditionGroup } from './conditionRuleShared';
 
 export const REPLY_TRIGGER = 'ticket.reply_received';
 
 /**
  * The step switches a condition step can carry (contract §2, MEGA 11-14):
  * Skip noise, "Don't reopen on a thank-you or out-of-office reply"
- * (`ignoreThanks`; the older `ignoreAutoHelpThanks` key means the same) and
- * "Stop after 3 reopens by replies in a day" (`replyLoopGuard`).
+ * (`ignoreThanks`; the older `ignoreAutoHelpThanks` key means the same),
+ * "Stop after 3 reopens by replies in a day" (`replyLoopGuard`) and (19 Nov
+ * 2026) "Resolve when the requester confirms it's done (waiting tickets)"
+ * (`resolveConfirmedDone`: 'off' | 'shadow' | 'live'; missing = 'off').
  */
-export const STEP_SWITCH_KEYS = Object.freeze(['skipNoise', 'ignoreThanks', 'ignoreAutoHelpThanks', 'replyLoopGuard']);
+export const STEP_SWITCH_KEYS = Object.freeze(['skipNoise', 'ignoreThanks', 'ignoreAutoHelpThanks', 'replyLoopGuard', 'resolveConfirmedDone']);
 
 export function stepSwitches(data = {}) {
   return {
     skipNoise: data?.skipNoise === true,
     thanks: data?.ignoreThanks === true || data?.ignoreAutoHelpThanks === true,
     loopGuard: data?.replyLoopGuard === true,
+    confirmedDone: confirmedDoneMode(data),
   };
 }
+
+export const CONFIRMED_DONE_SENTENCES = Object.freeze({
+  live: 'A waiting ticket is resolved instead when the requester confirms it\'s done.',
+  shadow: 'Shadow: records when a waiting ticket\'s requester confirms it\'s done.',
+});
 
 /** The patch the thank-you switch writes: the new key, the legacy key removed. */
 export function thanksSwitchPatch(on) {
@@ -76,7 +84,11 @@ export function describeStep(data = {}, { fields = null, short = false, valueLab
     return exceptions.length ? `All but ${joinAnd(exceptions)}` : base;
   }
   const sentence = exceptions.length ? `${base.replace(/\.$/, '')}, except ${joinAnd(exceptions)}.` : base;
-  return switches.loopGuard ? `${sentence} ${LOOP_GUARD_SENTENCE}` : sentence;
+  const extras = [
+    ...(switches.loopGuard ? [LOOP_GUARD_SENTENCE] : []),
+    ...(CONFIRMED_DONE_SENTENCES[switches.confirmedDone] ? [CONFIRMED_DONE_SENTENCES[switches.confirmedDone]] : []),
+  ];
+  return extras.length ? `${sentence} ${extras.join(' ')}` : sentence;
 }
 
 const hasRawRule = (data) => data?.rule !== undefined && data?.rule !== null

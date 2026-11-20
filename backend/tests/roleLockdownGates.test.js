@@ -35,6 +35,16 @@ const requireAdminOrObserverMock = jest.fn((req, res, next) => {
   if (roleOf(req) === 'admin' || (roleOf(req) === 'readonly' && isRead)) return next();
   return refuse(res, 'admin_required', 'Admin access required');
 });
+// QA 11-19 item 2: the Dashboard tier — requireAdminOrObserver plus agents an
+// admin listed ('dash-agent' here), reads only. No role and no grant reads as
+// "no access to this workspace", same as the strict gate it now sits above.
+const requireDashboardViewMock = jest.fn((req, res, next) => {
+  const isRead = req.method === 'GET' || req.method === 'HEAD';
+  const role = roleOf(req);
+  if (role === 'admin' || (isRead && (role === 'readonly' || role === 'dash-agent'))) return next();
+  if (['viewer', 'reviewer', 'readonly'].includes(role)) return refuse(res, 'admin_required', 'Admin access required');
+  return refuse(res, 'workspace_access_denied', 'Workspace access denied');
+});
 const requireReviewerMock = jest.fn((req, res, next) => {
   if (['admin', 'reviewer'].includes(roleOf(req))) return next();
   return refuse(res, 'reviewer_required', 'Reviewer access required');
@@ -67,6 +77,7 @@ jest.unstable_mockModule('../src/middleware/auth.js', () => ({
   requireAuth: (_req, _res, next) => next(),
   requireAdmin: requireAdminMock,
   requireAdminOrObserver: requireAdminOrObserverMock,
+  requireDashboardView: requireDashboardViewMock,
   requireReviewer: requireReviewerMock,
   requireGlobalAdmin: requireAdminMock,
   requireWorkspaceAccess: requireWorkspaceAccessMock,
@@ -89,6 +100,9 @@ for (const name of [
 }
 jest.unstable_mockModule('../src/routes/summit.routes.js', routeStub('summit', { summitPublicRouter: stubRouter('summit-public') }));
 jest.unstable_mockModule('../src/routes/publicTicketStatus.routes.js', () => ({ publicTicketStatusPublicRouter: stubRouter('ticket-status-public') }));
+// The Dashboard viewer router answers only listed viewers and lets everyone
+// else through; an empty router is that "through" (its own test pins the rest).
+jest.unstable_mockModule('../src/routes/dashboardViewer.routes.js', () => ({ default: express.Router() }));
 jest.unstable_mockModule('../src/routes/tickets.routes.js', routeStub('tickets', { ticketApprovalPublicRouter: stubRouter('approvals-public'), approvalReplyPublicRouter: stubRouter('approvals-reply') }));
 
 // ---- B. assignment.routes.js, real router ----------------------------------
@@ -229,6 +243,28 @@ describe('A. index.js mounts — viewers keep the ticket surface, lose the admin
     const nobody = await as('none', request(apiApp).get('/api/urgent-response/status'));
     expect(nobody.status).toBe(403);
     expect(nobody.body.code).toBe('workspace_access_denied');
+  });
+  // QA 11-19 item 2: the Dashboard sits ABOVE the strict gate on its own tier.
+  test('a listed agent (no access row) reads the Dashboard, never writes, and nothing else opens', async () => {
+    for (const path of ['/api/dashboard', '/api/dashboard/weekly', '/api/dashboard/technician/7']) {
+      const res = await as('dash-agent', request(apiApp).get(path));
+      expect(res.status).toBe(200);
+      expect(res.body.mount).toBe('dashboard');
+    }
+    expect(requireWorkspaceAccessMock).not.toHaveBeenCalled();
+    expect(requireAdminOrObserverMock).not.toHaveBeenCalled();
+    const write = await as('dash-agent', request(apiApp).post('/api/dashboard/anything'));
+    expect(write.status).toBe(403);
+    // Timeline/Analytics and the rest stay where they were.
+    const analytics = await as('dash-agent', request(apiApp).get('/api/analytics/overview'));
+    expect(analytics.status).toBe(403);
+    const visuals = await as('dash-agent', request(apiApp).get('/api/visuals/agents'));
+    expect(visuals.status).toBe(403);
+  });
+  test('an unlisted agent is refused the Dashboard (403)', async () => {
+    const res = await as('agent', request(apiApp).get('/api/dashboard'));
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('workspace_access_denied');
   });
   test('a user with no workspace access is still refused everywhere below the gate', async () => {
     const res = await as('none', request(apiApp).get('/api/dashboard'));
