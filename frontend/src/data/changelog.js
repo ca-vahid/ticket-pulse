@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.3.99-preview';
+export const APP_VERSION = '4.4.01-preview';
 
 export const changelog = [
+  {
+    version: '4.4.01-preview',
+    date: 'November 20, 2026',
+    entries: [
+      { type: 'added', html: '<strong>Access history.</strong> Settings &rarr; Members now ends with a history of who changed whose role, changes to the super admin list, and every API key and OAuth client created, changed, switched off, revoked or deleted. It is newest first and searchable by person or key name. Until now the only record was a server log that disappears after a few days.' },
+      { type: 'added', html: '<strong>Alerts for new API keys.</strong> When someone creates an API key or OAuth client, gives one a new secret, or switches one back on, the workspace&rsquo;s admins and the super admins get an e-mail: who did it, what it can do, whether it&rsquo;s locked to an IP address, and when it expires.' },
+    ],
+  },
   {
     version: '4.3.99-preview',
     date: 'November 19, 2026',

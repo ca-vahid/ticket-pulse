@@ -1859,6 +1859,11 @@ export const workspaceAPI = {
     return await api.post(`/workspaces/${workspaceId}/access`, { email, role });
   },
 
+  // Access history (20 Nov 2026): role, admin-list and API credential changes.
+  getAccessHistory: async (workspaceId, params = {}) => {
+    return await api.get(`/workspaces/${workspaceId}/access-history`, { params });
+  },
+
   revokeAccess: async (workspaceId, email) => {
     return await api.delete(`/workspaces/${workspaceId}/access/${encodeURIComponent(email)}`);
   },

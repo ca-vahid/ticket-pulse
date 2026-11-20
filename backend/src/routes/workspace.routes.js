@@ -1,3 +1,5 @@
+import prisma from '../services/prisma.js';
+import { recordAccessEvent, listAccessEvents, ACTIONS } from '../services/accessAuditService.js';
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import config from '../config/index.js';
@@ -513,7 +515,34 @@ router.put(
       technicianId: Number(req.params.technicianId),
       enabled: req.body?.enabled === true,
     });
+    const tech = await Promise.resolve()
+      .then(() => prisma.technician.findFirst({ where: { id: Number(req.params.technicianId), workspaceId: req.workspaceId }, select: { name: true, email: true } }))
+      .catch(() => null);
+    await recordAccessEvent({
+      workspaceId: req.workspaceId, actorEmail: sessionUser(req)?.email, action: ACTIONS.DASHBOARD_VIEW_CHANGED,
+      targetEmail: tech?.email || null, targetLabel: tech?.name || `technician ${req.params.technicianId}`,
+      newValue: req.body?.enabled === true ? 'on' : 'off',
+    });
     res.json({ success: true, data: { technicianIds } });
+  }),
+);
+
+/**
+ * GET /api/workspaces/:id/access-history?limit=&before=&person=
+ * Access history (20 Nov 2026): role changes, admin-list changes and API key /
+ * OAuth client changes, newest first. Admins of THAT workspace; super admins
+ * also see the app-wide admin-list changes.
+ */
+router.get(
+  '/:id/access-history',
+  scopeToTargetWorkspace,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const includeGlobal = sessionUser(req)?.role === 'admin';
+    const data = await listAccessEvents(req.workspaceId, {
+      includeGlobal, limit: req.query.limit, before: req.query.before, person: req.query.person,
+    });
+    res.json({ success: true, data });
   }),
 );
 
@@ -562,6 +591,12 @@ router.post(
       oldRole: existingRole || null,
       newRole: requestedRole,
     });
+    if (existingRole !== requestedRole) {
+      await recordAccessEvent({
+        workspaceId: req.workspaceId, actorEmail: actor?.email, action: existingRole ? ACTIONS.ROLE_CHANGED : ACTIONS.ROLE_GRANTED,
+        targetEmail, oldValue: existingRole || null, newValue: requestedRole,
+      });
+    }
     res.json({ success: true, data: access });
   }),
 );
@@ -605,6 +640,10 @@ router.delete(
       workspaceId: req.workspaceId,
       oldRole: existingRole,
       newRole: null,
+    });
+    await recordAccessEvent({
+      workspaceId: req.workspaceId, actorEmail: actor?.email, action: ACTIONS.ACCESS_REVOKED,
+      targetEmail, oldValue: existingRole, newValue: null,
     });
     res.json({ success: true, message: 'Access revoked' });
   }),

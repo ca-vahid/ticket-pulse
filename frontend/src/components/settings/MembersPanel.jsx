@@ -11,6 +11,7 @@ import {
   ArrowUpDown, ArrowUp, ArrowDown, KeyRound, Camera, UserCheck, Activity, LayoutDashboard,
 } from 'lucide-react';
 import PhotoUploadDialog from './PhotoUploadDialog';
+import AccessHistory from './AccessHistory';
 import { Switch } from '../ui/switch';
 import { isWorkspaceAdmin, useWorkspaceRole } from '../nav/navDestinations';
 
@@ -900,6 +901,7 @@ export default function MembersPanel() {
           onClose={() => setPhotoFor(null)}
         />
       )}
+      {canEditDashboardGrant && wsId && <AccessHistory workspaceId={wsId} />}
     </div>
   );
 }

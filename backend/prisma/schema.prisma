@@ -352,6 +352,27 @@ model OAuthClient {
   @@map("oauth_clients")
 }
 
+// Access history (20 Nov 2026): every role grant/change/revoke, admin-list
+// change and API key / OAuth client change, kept. workspaceId null = app-wide
+// (the super-admin list). Read by Settings > Members > Access history.
+model AccessAuditEvent {
+  id          Int      @id @default(autoincrement())
+  workspaceId Int?     @map("workspace_id")
+  actorEmail  String?  @map("actor_email") @db.VarChar(255)
+  action      String   @db.VarChar(40)
+  targetEmail String?  @map("target_email") @db.VarChar(255)
+  targetLabel String?  @map("target_label") @db.VarChar(255)
+  oldValue    String?  @map("old_value") @db.VarChar(255)
+  newValue    String?  @map("new_value") @db.VarChar(255)
+  details     Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([workspaceId, id])
+  @@index([targetEmail])
+  @@index([actorEmail])
+  @@map("access_audit_events")
+}
+
 // Idempotency-Key replay cache for POST/PATCH writes on /api/v1 (24h TTL sweep).
 model ApiIdempotencyKey {
   id           Int      @id @default(autoincrement())
