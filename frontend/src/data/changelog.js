@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.4.01-preview';
+export const APP_VERSION = '4.4.02-preview';
 
 export const changelog = [
+  {
+    version: '4.4.02-preview',
+    date: 'November 20, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>E-mail buttons work in the Outlook desktop app</strong> &mdash; the &ldquo;Check status&rdquo;, &ldquo;Raise urgency&rdquo;, &ldquo;Request support&rdquo; and &ldquo;Rate your support&rdquo; buttons in Ticket Pulse e-mails could not be clicked in Outlook on Windows: each button was one link wrapped around a whole block, which that Outlook ignores. Each part of a button (picture, words and arrow) now carries its own link, so the whole button clicks everywhere. The buttons look the same.' },
+    ],
+  },
   {
     version: '4.4.01-preview',
     date: 'November 20, 2026',
