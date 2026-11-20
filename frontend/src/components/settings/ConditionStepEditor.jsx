@@ -87,7 +87,7 @@ export const CONFIRMED_DONE_LABEL = 'Resolve when the requester confirms it\'s d
 const CONFIRMED_DONE_CHOICES = Object.freeze([
   { value: 'off', label: 'Off', dot: 'bg-muted-foreground/40', help: 'A reply to a waiting ticket goes on to the conditions below, as before.' },
   { value: 'shadow', label: 'Shadow', dot: 'bg-amber-500', help: 'Waiting tickets still reopen. The ticket history records each one it would have resolved.' },
-  { value: 'live', label: 'Live', dot: 'bg-emerald-500', help: 'When the requester says it\'s done, the ticket is resolved with a private note and the workflow stops here. No e-mail goes to the requester. FreshService-born tickets are only recorded.' },
+  { value: 'live', label: 'Live', dot: 'bg-emerald-500', help: 'When the requester says it\'s done, the ticket is resolved with a private note and the workflow stops here. No e-mail goes to the requester. Tickets that came from FreshService are only noted, never resolved.' },
 ]);
 
 /**

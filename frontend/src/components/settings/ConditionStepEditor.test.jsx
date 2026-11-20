@@ -181,7 +181,7 @@ describe('Resolve when the requester confirms it\'s done (waiting tickets), 19 N
     rerender(<ConditionStepEditor data={{ ...EMPTY, resolveConfirmedDone: 'live' }} triggerType="ticket.reply_received" onPatch={() => {}} />);
     expect(screen.getByTestId('confirmed-done-switch')).toHaveTextContent('No e-mail goes to the requester.');
     expect(screen.getByTestId('confirmed-done-switch')).toHaveTextContent('the workflow stops here');
-    expect(screen.getByTestId('confirmed-done-switch')).toHaveTextContent('FreshService-born tickets are only recorded.');
+    expect(screen.getByTestId('confirmed-done-switch')).toHaveTextContent('Tickets that came from FreshService are only noted, never resolved.');
     expect(screen.getByTestId('condition-sentence')).toHaveTextContent('A waiting ticket is resolved instead when the requester confirms it\'s done.');
   });
 
