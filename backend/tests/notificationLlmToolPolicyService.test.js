@@ -34,6 +34,7 @@ describe('notification LLM tool policy service', () => {
       redactionEnabled: true,
       maxTurns: 4,
       maxToolCalls: 6,
+      totalTimeoutMs: 60000,
     });
     expect(policy.enabledTools).toContain('get_notification_context');
     expect(policy.toolSettings.context.includeSimilarTickets).toBe(true);
