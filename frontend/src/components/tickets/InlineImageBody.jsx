@@ -115,7 +115,7 @@ export function _resetPictureCache() {
  *  - `shownImages`: names already shown as thumbnails under the message; their
  *    link reads "picture" instead of repeating the file name.
  */
-export function RichBody({ html, text, onImageRef, className = '', shownImages = null, ticketId = null, inlineImages = null }) {
+export function RichBody({ html, text, onImageRef, className = '', shownImages = null, ticketId = null, inlineImages = null, after = null }) {
   const rootRef = useRef(null);
   const inlineByName = useMemo(() => {
     const map = new Map();
@@ -180,7 +180,8 @@ export function RichBody({ html, text, onImageRef, className = '', shownImages =
   };
   return (
     <div ref={rootRef} onClick={handleClick} onKeyDown={handleKey} role="presentation">
-      <SafeHtml html={source} className={className} />
+      {/* `after`: content of the same message rendered inside the same well (inline answers). */}
+      <SafeHtml html={source} className={className} after={after} />
     </div>
   );
 }

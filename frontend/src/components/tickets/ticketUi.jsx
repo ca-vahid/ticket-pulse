@@ -390,7 +390,7 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
  * only near-black text is dropped (v3.8.11). Memoised on [html, isDark] so a
  * theme flip re-sanitises exactly once.
  */
-export function SafeHtml({ html, className = '', isDark: isDarkOverride = null, preferThemed = false }) {
+export function SafeHtml({ html, className = '', isDark: isDarkOverride = null, preferThemed = false, after = null }) {
   const { resolvedTheme } = useTheme();
   // `isDark` override: surfaces with their OWN theme (the public approval page
   // stamps `.dark` from `tp_public_theme`, not from ThemeProvider) must
@@ -422,6 +422,19 @@ export function SafeHtml({ html, className = '', isDark: isDarkOverride = null, 
       variantClass: triggers > 0 ? 'tp-rich-body--paper' : 'tp-rich-body--themed',
     };
   }, [html, isDark, preferThemed]);
+  const wellClass = `tp-rich-body ${variantClass} text-sm text-foreground/85 break-words [&_a]:text-blue-600 [&_a]:underline [&_img]:max-w-full [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_p]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 ${className}`;
+  // `after` (inline answers, 20 Nov 2026): React content that belongs to the same
+  // message (the answers the requester typed inside the quote) sits INSIDE the
+  // same well, under the e-mail HTML, so it takes the well's colours in dark mode.
+  if (after) {
+    return (
+      <div className={wellClass}>
+        {/* Sanitized above with DOMPurify. */}
+        <div className="tp-rich-body__html" dangerouslySetInnerHTML={{ __html: clean }} />
+        {after}
+      </div>
+    );
+  }
   return (
     <div
       // Dark mode (Phase DW, QA 08-31 #5 / QA 09-01 #6): conditional rendering.

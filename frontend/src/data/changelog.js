@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.4.02-preview';
+export const APP_VERSION = '4.4.03-preview';
 
 export const changelog = [
+  {
+    version: '4.4.03-preview',
+    date: 'November 20, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Answers typed inline are kept</strong> &mdash; when a requester answers under each of your questions in the quoted part of their e-mail (often highlighted), the answers now appear under the reply as &ldquo;Answered inline&rdquo;, each under the question it answers, and go to the FreshService copy too. Before, only the short top line was kept. The full e-mail is saved and opens from the message&rsquo;s &ldquo;&hellip;&rdquo; menu &rarr; View the original e-mail.' },
+      { type: 'fix', html: '<strong>Approvals end when the ticket closes</strong> &mdash; an approval still waiting when its ticket is closed now ends as &ldquo;No longer needed: the ticket was closed&rdquo;, quietly: no e-mails, and its Teams card and page say nothing is needed. A decision made at the same moment is refused instead of overriding it.' },
+    ],
+  },
   {
     version: '4.4.02-preview',
     date: 'November 20, 2026',

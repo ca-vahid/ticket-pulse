@@ -2500,6 +2500,30 @@ router.patch('/:id/notes/:entryId', asyncHandler(async (req, res) => {
   res.json({ success: true, data: result });
 }));
 
+// The original e-mail behind a reply (inline answers, 20 Nov 2026): the whole
+// body as it arrived, kept beside what the person wrote. Rendered by the page
+// through the same sanitiser as every e-mail body (SafeHtml).
+router.get('/:id/entries/:entryId/original', asyncHandler(async (req, res) => {
+  const entryId = Number(req.params.entryId);
+  if (!Number.isInteger(entryId) || entryId <= 0) throw new AppError('Invalid entry id', 400);
+  const entry = await prisma.ticketThreadEntry.findFirst({
+    where: { id: entryId, ticketId: parseTicketId(req), workspaceId: req.workspaceId },
+    select: { id: true },
+  });
+  if (!entry) throw new AppError('No original e-mail is stored for this message', 404);
+  // Its own table (21 Nov 2026), so thread reads never load it. A missing table reads as "none".
+  const original = await Promise.resolve()
+    .then(() => prisma.ticketThreadEntryOriginal.findUnique({ where: { entryId: entry.id } }))
+    .catch(() => null);
+  if (!original || original.workspaceId !== req.workspaceId || !(original.html || original.text)) {
+    throw new AppError('No original e-mail is stored for this message', 404);
+  }
+  res.json({
+    success: true,
+    data: { entryId: entry.id, html: original.html || null, text: original.text || null, truncated: original.truncated === true },
+  });
+}));
+
 // -------------------------------------------------------------- attachments
 
 router.get('/:id/attachments', asyncHandler(async (req, res) => {

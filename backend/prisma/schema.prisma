@@ -1803,6 +1803,8 @@ model TicketThreadEntry {
   // body versions append into rawPayload.editHistory — no extra column.
   editedAt            DateTime? @map("edited_at")
   editedBy            String?   @map("edited_by") @db.VarChar(255)
+  // The whole inbound e-mail behind a reply (inline answers, 21 Nov 2026), kept out of raw_payload.
+  original            TicketThreadEntryOriginal?
 
   @@unique([ticketId, externalEntryId])
   @@index([workspaceId, occurredAt])
@@ -1810,6 +1812,24 @@ model TicketThreadEntry {
   @@index([eventType])
   @@index([emailMessageId])
   @@map("ticket_thread_entries")
+}
+
+// The original e-mail behind an inbound reply (inline answers, 21 Nov 2026):
+// the whole body as it arrived (up to 200 KB), beside the stripped body the
+// thread shows. Its own table so thread reads never load it; only
+// GET /tickets/:id/entries/:entryId/original reads it. The entry's
+// rawPayload.hasOriginalEmail says that a row exists.
+model TicketThreadEntryOriginal {
+  entryId     Int               @id @map("entry_id")
+  entry       TicketThreadEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  workspaceId Int               @map("workspace_id")
+  html        String?           @db.Text
+  text        String?           @db.Text
+  truncated   Boolean           @default(false)
+  createdAt   DateTime          @default(now()) @map("created_at")
+
+  @@index([workspaceId])
+  @@map("ticket_thread_entry_originals")
 }
 
 // Pinned workflow cards (Custom Fields Activation Phase 1): an add_note node

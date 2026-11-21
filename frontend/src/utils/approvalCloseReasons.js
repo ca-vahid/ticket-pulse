@@ -16,6 +16,18 @@ export function closeReasonLabel(key) {
   return CLOSE_REASON_OPTIONS.find((r) => r.key === key)?.label || 'Closed without a decision';
 }
 
+/**
+ * 20 Nov 2026: nobody closed it. The ticket was closed while the approval
+ * waited, so the approval ended as not needed (decidedVia 'ticket_closed').
+ * Never "Closed by <approver>".
+ */
+export const TICKET_CLOSED_VIA = 'ticket_closed';
+export function closedByTicketClose(approval) {
+  return Boolean(approval) && approval.status === 'closed' && approval.decidedVia === TICKET_CLOSED_VIA;
+}
+export const TICKET_CLOSED_TITLE = 'No longer needed';
+export const TICKET_CLOSED_LINE = 'The ticket was closed without a decision';
+
 /** "Closed: no longer needed" — the status as a list or a card says it. */
 export function closedWords(key) {
   const hit = CLOSE_REASON_OPTIONS.find((r) => r.key === key);

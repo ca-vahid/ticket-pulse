@@ -759,6 +759,19 @@ describe('the FreshService copy of front-door mail', () => {
     expect(body).not.toContain('already e-mailed to the requester');
   });
 
+  test('answers typed inside the quote reach the copy as the same pairs, never the whole e-mail (20 Nov 2026)', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, freshserviceTicketId: BigInt(90001), requester: { id: 40, email: 'rita@example.com', freshserviceId: BigInt(555001) } });
+    prismaMock.ticketThreadEntry.findUnique.mockResolvedValue({
+      id: 9007, isPrivate: false, incoming: true, actorName: 'Rita Requester', bodyHtml: '<p>Please see below.</p>', mirrorState: 'pending',
+      rawPayload: { hasOriginalEmail: true, inlineAnswers: [{ context: 'Should all three folders go?', answer: 'All three', highlighted: true }] },
+    });
+    prismaMock.ticketThreadEntry.update.mockResolvedValue({});
+    await mirrorService._processJob({ id: 10, ticketId: 501, workspaceId: 1, kind: 'thread_entry', threadEntryId: 9007, attempts: 0 });
+    const [, body] = clientMock.addNote.mock.calls[0];
+    expect(body).toContain('<p>Please see below.</p><p><b>Answered inline</b></p><p><b>Should all three folders go?</b><br>All three</p>');
+    expect(body).not.toContain('hasOriginalEmail');
+  });
+
   test('QA 11-09 #3: a reply that keeps its closed ticket closed is written to FreshService as a note, not an incoming reply', async () => {
     prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, freshserviceTicketId: BigInt(90001), requester: { id: 40, email: 'rita@example.com', freshserviceId: BigInt(555001) } });
     prismaMock.ticketThreadEntry.findUnique.mockResolvedValue({ id: 9005, isPrivate: false, incoming: true, actorName: 'Pat Manager', bodyHtml: '<p>thanks, noted</p>', mirrorState: 'pending', rawPayload: { keepClosed: true } });

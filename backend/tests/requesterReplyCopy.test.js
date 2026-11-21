@@ -99,4 +99,13 @@ describe('renderRequesterReplyCopyEmail', () => {
     expect(html).toContain('href="https://app/tickets/1"');
     expect(html.indexOf('a &lt; b')).toBeLessThan(html.indexOf('history'));
   });
+
+  test('answers typed inside the quote follow the reply as pairs (20 Nov 2026)', () => {
+    const html = renderRequesterReplyCopyEmail({
+      ref: 'TP-1', appUrl: 'https://app/tickets/1', fromName: 'Priya Nair', fromEmail: 'p@example.com', bodyHtml: '<p>See below.</p>',
+      inlineAnswers: [{ context: 'Should all three folders go?', answer: 'All three' }],
+    });
+    expect(html).toContain('<p>See below.</p><p><b>Answered inline</b></p><p><b>Should all three folders go?</b><br>All three</p>');
+    expect(renderRequesterReplyCopyEmail({ ref: 'TP-1', appUrl: 'x', bodyHtml: '<p>Hi</p>' })).not.toContain('Answered inline');
+  });
 });

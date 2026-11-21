@@ -4,6 +4,7 @@ import { fsOnlyAssigneeEmail } from '../utils/fsOnlyAssignee.js';
 import { isHelpdeskMailbox } from '../utils/mailboxProfile.js';
 import { freshserviceTicketNumbers } from '../utils/freshserviceRefs.js';
 import { stripQuotedHtml, stripQuotedText } from '../utils/replyQuoteStripper.js';
+import { capFullBody, detectInlineAnswers, inlineAnswersHtml, inlineAnswersText } from '../utils/inlineAnswers.js';
 import logger from '../utils/logger.js';
 import graphMailClient from '../integrations/graphMailClient.js';
 import ticketService from './ticketService.js';
@@ -1448,7 +1449,19 @@ class MailboxIngestService {
     // Helpdesk mailbox: pictures pasted into the reply, resolved on what the person wrote (not on the quoted thread).
     const writtenHtml = stripQuotedHtml(email.bodyHtml);
     const inline = isHelpdeskMailbox(connection) ? await this._inlineImages(connection, email, writtenHtml) : null;
-    const rawPayload = {
+    // Inline answers (20 Nov 2026): the whole mail is kept beside what the person wrote,
+    // and answers typed inside the quote of our message are lifted out. Never fails ingest.
+    const original = await this._originalAndInlineAnswers(ticket, email, writtenHtml, {
+      detect: requesterSide && !isForward && !workflowRef,
+    });
+    const writtenText = stripQuotedText(email.bodyText || email.bodyPreview || null);
+    // Searchable (and readable by the AI helpers) through body_text. HTML mail only:
+    // a plain-text entry shows its body_text, and the pairs have their own section.
+    const answersText = original.answers && /<[a-z][^>]*>/i.test(String((inline ? inline.html : writtenHtml) || ''))
+      ? inlineAnswersText(original.answers)
+      : '';
+    const storedText = answersText ? `${writtenText || ''}\n\n${answersText}`.trim() : writtenText;
+    const basePayload = {
       ...(recipients || {}),
       ...(isAgentReply ? { deliveryState: 'external', agentIntake: { kind: 'agent_reply_email', technicianId: agent.id, via } } : {}),
       ...(forwardedMeta ? { forwarded: forwardedMeta } : {}),
@@ -1457,34 +1470,44 @@ class MailboxIngestService {
       // FreshService cannot reopen the copy (and the reconcile carry it back).
       ...(keepClosed ? { keepClosed: true } : {}),
     };
-    const entry = await prisma.ticketThreadEntry.create({
-      data: {
-        ticketId: ticket.id,
-        workspaceId: ticket.workspaceId,
-        externalEntryId: `graph-${email.id}`,
-        source: 'email_inbound',
-        eventType: 'reply',
-        actorName: agent ? agent.name : (email.fromName || email.from),
-        actorEmail: agent ? agent.email : email.from,
-        authorType: agent ? 'agent' : 'requester',
-        incoming: !isAgentReply,
-        isPrivate: false,
-        visibility: 'public',
-        // Store what the person WROTE, not their client's copy of our thread
-        // (FR 09-10). Outbound replies now quote the whole conversation; left
-        // unstripped, each round trip would fold another copy back in.
-        bodyHtml: inline ? inline.html : writtenHtml,
-        bodyText: stripQuotedText(email.bodyText || email.bodyPreview || null),
-        content: stripQuotedText(email.bodyText || email.bodyPreview || null),
-        occurredAt: email.receivedAt || now,
-        emailMessageId: email.internetMessageId,
-        // Requester replies belong on the FreshService side too: the TP-born fallback
-        // copy via the mirror queue, an FS-born ticket via the direct write-back below.
-        mirrorState: 'pending',
-        // Who else the sender addressed (QA 08-05 #3) — FS conversation shape.
-        ...(Object.keys(rawPayload).length ? { rawPayload } : {}),
-      },
-    });
+    const rawPayload = { ...original.raw, ...basePayload };
+    const entryData = {
+      ticketId: ticket.id,
+      workspaceId: ticket.workspaceId,
+      externalEntryId: `graph-${email.id}`,
+      source: 'email_inbound',
+      eventType: 'reply',
+      actorName: agent ? agent.name : (email.fromName || email.from),
+      actorEmail: agent ? agent.email : email.from,
+      authorType: agent ? 'agent' : 'requester',
+      incoming: !isAgentReply,
+      isPrivate: false,
+      visibility: 'public',
+      // Store what the person WROTE, not their client's copy of our thread
+      // (FR 09-10). Outbound replies now quote the whole conversation; left
+      // unstripped, each round trip would fold another copy back in.
+      bodyHtml: inline ? inline.html : writtenHtml,
+      bodyText: storedText,
+      content: storedText,
+      occurredAt: email.receivedAt || now,
+      emailMessageId: email.internetMessageId,
+      // Requester replies belong on the FreshService side too: the TP-born fallback
+      // copy via the mirror queue, an FS-born ticket via the direct write-back below.
+      mirrorState: 'pending',
+      // Who else the sender addressed (QA 08-05 #3) — FS conversation shape.
+      ...(Object.keys(rawPayload).length ? { rawPayload } : {}),
+    };
+    // Exactly today's entry, for the one retry when the additions are refused (21 Nov 2026).
+    const hasAdditions = Object.keys(original.raw).length > 0 || storedText !== writtenText;
+    let plainData = null;
+    if (hasAdditions) {
+      plainData = { ...entryData, bodyText: writtenText, content: writtenText };
+      delete plainData.rawPayload;
+      if (Object.keys(basePayload).length) plainData.rawPayload = basePayload;
+    }
+    const { entry, withAdditions } = await this._createReplyEntry(entryData, plainData);
+    // The original e-mail goes to its own table, never into raw_payload (thread reads load that).
+    if (withAdditions && original.original) await this._storeOriginal(entry, original.original);
 
     const attachmentNotice = await this._captureAttachments(connection, email, ticket, entry.id, inline?.fetched || null);
     if (attachmentNotice) {
@@ -1754,6 +1777,129 @@ class MailboxIngestService {
    * not an incoming reply FreshService would reopen on. FS-born: the direct
    * write-back (_writeReplyToFreshService), the same rule. Never throws.
    */
+  /**
+   * The message a reply answers (inline answers, 20 Nov 2026): our entry whose
+   * Message-ID is in In-Reply-To (then References), else the latest public agent
+   * reply on the ticket before this mail. Never throws; null when none.
+   */
+  async _repliedToEntry(ticket, email) {
+    const select = { id: true, bodyHtml: true, bodyText: true, content: true, rawPayload: true, authorType: true };
+    const own = { ticketId: ticket.id, incoming: false, isPrivate: false };
+    const byIds = (ids) => (ids.length
+      ? Promise.resolve()
+        .then(() => prisma.ticketThreadEntry.findFirst({ where: { ...own, emailMessageId: { in: ids } }, orderBy: { occurredAt: 'desc' }, select }))
+        .catch(() => null)
+      : Promise.resolve(null));
+    const direct = String(email.inReplyTo || '').match(/<[^<>\s]+>/)?.[0] || null;
+    const hit = (direct ? await byIds([direct]) : null) || await byIds(referencedMessageIds(email));
+    if (hit && (hit.bodyHtml || hit.bodyText || hit.content)) return { entry: hit, via: 'message_id' };
+    const received = new Date(email.receivedAt || Date.now());
+    const before = Number.isFinite(received.getTime()) ? received : new Date();
+    const rows = await Promise.resolve()
+      .then(() => prisma.ticketThreadEntry.findMany({
+        where: { ...own, eventType: { in: ['reply', 'public_reply'] }, occurredAt: { lte: before } },
+        orderBy: { occurredAt: 'desc' },
+        take: 10,
+        select,
+      }))
+      .catch(() => []);
+    const last = (Array.isArray(rows) ? rows : [])
+      .find((r) => r && r.authorType !== 'requester' && r.authorType !== 'system' && (r.bodyHtml || r.bodyText || r.content));
+    return last ? { entry: last, via: 'latest_agent_reply' } : null;
+  }
+
+  /**
+   * Inline answers (20 Nov 2026). When the quote stripper cut something, the
+   * whole mail (size-capped) is returned as `original` for the side table
+   * ticket_thread_entry_originals (21 Nov: never in raw_payload, which every
+   * thread read loads) and the entry is marked rawPayload.hasOriginalEmail;
+   * shown only behind "View the original e-mail". For a requester reply, the
+   * quote is compared with the message it answers and the answers typed inside
+   * it become rawPayload.inlineAnswers. Nothing is added when nothing was cut,
+   * and any error falls back to today's behaviour.
+   * Returns { raw, answers, original: { html, text, truncated } | null }.
+   */
+  async _originalAndInlineAnswers(ticket, email, writtenHtml, { detect = false } = {}) {
+    const out = { raw: {}, answers: null, original: null };
+    try {
+      const fullHtml = email.bodyHtml ? String(email.bodyHtml) : null;
+      const fullText = !fullHtml && email.bodyText ? String(email.bodyText) : null;
+      const htmlCut = Boolean(fullHtml) && fullHtml.trim() !== String(writtenHtml || '').trim();
+      const textCut = Boolean(fullText) && fullText.trim() !== String(stripQuotedText(fullText) || '').trim();
+      if (!htmlCut && !textCut) return out;
+      const capped = capFullBody(htmlCut ? fullHtml : fullText);
+      out.original = { html: htmlCut ? capped.html : null, text: htmlCut ? null : capped.html, truncated: capped.truncated };
+      out.raw = { hasOriginalEmail: true };
+      if (!detect) return out;
+      const replied = await this._repliedToEntry(ticket, email);
+      if (!replied) {
+        logger.debug?.(`Inline answers on ${ticketDisplayRef(ticket)}: no message to compare with`);
+        return out;
+      }
+      const sent = replied.entry;
+      const result = detectInlineAnswers({
+        replyHtml: htmlCut ? fullHtml : null,
+        replyText: htmlCut ? null : fullText,
+        sentHtml: sent.bodyHtml || null,
+        sentText: sent.bodyHtml ? null : (sent.bodyText || sent.content || ''),
+        sentSignatureText: sent.rawPayload?.sentSignature?.text || null,
+      });
+      if (result.result === 'found' && result.answers.length) {
+        out.answers = result.answers;
+        out.raw.inlineAnswers = result.answers;
+        out.raw.inlineAnswersFrom = { entryId: sent.id ?? null, via: replied.via };
+        logger.info(`Inline answers on ${ticketDisplayRef(ticket)}: ${result.answers.length} found in the quote of entry ${sent.id} (${replied.via})`);
+      } else {
+        logger.debug?.(`Inline answers on ${ticketDisplayRef(ticket)}: ${result.result}${result.reason ? ` (${result.reason})` : ''}`);
+      }
+    } catch (err) {
+      logger.warn(`Inline answers skipped on ${ticketDisplayRef(ticket)} (non-fatal): ${err.message}`);
+      out.answers = null;
+      delete out.raw.inlineAnswers;
+      delete out.raw.inlineAnswersFrom;
+    }
+    return out;
+  }
+
+  /**
+   * The reply's thread entry. If the create fails with the inline-answer
+   * additions (21 Nov 2026: a payload Postgres refuses must never lose the
+   * reply on every retry), it is created once more exactly as before them.
+   * Returns { entry, withAdditions }.
+   */
+  async _createReplyEntry(data, plainData) {
+    try {
+      return { entry: await prisma.ticketThreadEntry.create({ data }), withAdditions: true };
+    } catch (err) {
+      if (!plainData) throw err;
+      logger.warn(`Reply entry create failed with the inline-answer additions; retrying without them: ${err.message}`);
+      return { entry: await prisma.ticketThreadEntry.create({ data: plainData }), withAdditions: false };
+    }
+  }
+
+  /**
+   * Store the original e-mail beside the entry (ticket_thread_entry_originals).
+   * Never throws: on failure (a missing table included) the entry loses its
+   * hasOriginalEmail mark, so the page never offers an original that is not there.
+   */
+  async _storeOriginal(entry, original) {
+    try {
+      await prisma.ticketThreadEntryOriginal.create({
+        data: { entryId: entry.id, workspaceId: entry.workspaceId, html: original.html, text: original.text, truncated: original.truncated === true },
+      });
+      return true;
+    } catch (err) {
+      logger.warn(`Original e-mail not kept for thread entry ${entry?.id} (non-fatal): ${err.message}`);
+      const rawPayload = { ...(entry.rawPayload && typeof entry.rawPayload === 'object' ? entry.rawPayload : {}) };
+      delete rawPayload.hasOriginalEmail;
+      await Promise.resolve()
+        .then(() => prisma.ticketThreadEntry.update({ where: { id: entry.id }, data: { rawPayload } }))
+        .catch(() => {});
+      entry.rawPayload = rawPayload;
+      return false;
+    }
+  }
+
   async _writeReplyCopy(ticket, entry, email, { isAgentReply = false, agent = null, keepClosed = false, ccAdded = false } = {}) {
     try {
       if (ticket.origin === TICKET_ORIGIN.TICKETPULSE) {
@@ -1805,7 +1951,8 @@ class MailboxIngestService {
       const marker = asRequester
         ? ''
         : `<p style="font-size:12px;color:#64748b;margin:0 0 6px"><b>[Ticket Pulse]</b> ${esc(who)} · ${isAgentReply ? 'agent reply' : 'reply'} received by e-mail</p>`;
-      const body = `${marker}${entry.bodyHtml || textToHtml(entry.bodyText || entry.content || '')}`;
+      // Answers typed inside the quote ride along as simple pairs, never the whole e-mail.
+      const body = `${marker}${entry.bodyHtml || textToHtml(entry.bodyText || entry.content || '')}${inlineAnswersHtml(entry.rawPayload?.inlineAnswers)}`;
       let attachments = [];
       try {
         const { default: attachmentService } = await import('./attachmentService.js');

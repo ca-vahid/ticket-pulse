@@ -75,6 +75,8 @@ export function desiredOutcome(rows, now = new Date()) {
       decidedAt: rejected.decidedAt || now, reason: rejected.decisionNote || null,
     };
   }
+  // 20 Nov 2026: the ticket was closed while the request waited (approvalTicketCloseService).
+  if (rows.some((r) => r.status === 'closed' && r.decidedVia === 'ticket_closed')) return { outcome: 'CANCELLED', why: 'ticket_closed' };
   const expired = rows.some((r) => OPEN_STATUSES.includes(r.status));
   return { outcome: 'CANCELLED', why: expired ? 'expired' : 'cancelled' };
 }
@@ -82,7 +84,7 @@ export function desiredOutcome(rows, now = new Date()) {
 const WHY_TEXT = {
   approved: 'approved', rejected: 'not approved', cancelled: 'the approval request was cancelled',
   expired: 'the approval request expired', request_deleted: 'the approval request was deleted',
-  ticket_deleted: 'the ticket was deleted', replaced: 'the laptop or recipient was changed',
+  ticket_deleted: 'the ticket was deleted', ticket_closed: 'the ticket was closed without a decision', replaced: 'the laptop or recipient was changed',
 };
 
 async function ticketNote(ticketId, workspaceId, body) {
@@ -224,10 +226,14 @@ class AssetronReservationService {
     } catch (err) { logger.warn(`Assetron: could not release reservation ${reservationId} after a failed request: ${err.message}`); }
   }
 
-  /** Called after any approval change on a request group (fire-and-forget). */
+  /**
+   * Called after any approval change on a request group (fire-and-forget).
+   * Returns the reconcile promise (never rejects) for callers that must wait,
+   * like the one-off approval sweep script.
+   */
   touch(requestGroupId) {
-    if (!requestGroupId) return;
-    Promise.resolve()
+    if (!requestGroupId) return Promise.resolve(null);
+    return Promise.resolve()
       .then(() => this.reconcile({ requestGroupId }))
       .catch((err) => logger.warn(`Assetron reconcile (${requestGroupId}) failed: ${err.message}`));
   }
@@ -250,7 +256,7 @@ class AssetronReservationService {
       if (hold.state === 'failed') continue;
       const rows = await prisma.ticketApproval.findMany({
         where: { requestGroupId: hold.requestGroupId },
-        select: { status: true, expiresAt: true, approverEmail: true, approverName: true, decidedAt: true, decisionNote: true, conditionNote: true },
+        select: { status: true, expiresAt: true, approverEmail: true, approverName: true, decidedAt: true, decidedVia: true, decisionNote: true, conditionNote: true },
       });
       const ticketAlive = await prisma.ticket.findUnique({ where: { id: hold.ticketId }, select: { id: true } }).catch(() => ({ id: hold.ticketId }));
       const want = ticketAlive ? desiredOutcome(rows, now) : { outcome: 'CANCELLED', why: 'ticket_deleted' };

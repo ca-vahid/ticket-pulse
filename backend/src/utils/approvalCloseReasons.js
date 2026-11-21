@@ -30,4 +30,14 @@ export function closedVerdictWord(value) {
   return key && key !== 'other' ? `Closed: ${CLOSE_REASONS[key].toLowerCase()}` : 'Closed';
 }
 
-export default { CLOSE_REASONS, normalizeCloseReason, closeReasonLabel, closedVerdictWord };
+/**
+ * 20 Nov 2026: nobody closed it — the ticket was closed while the approval
+ * waited, so it ended as not needed (approvalTicketCloseService). Rows like
+ * this carry decidedVia 'ticket_closed' and closeReason 'not_needed'.
+ */
+export const TICKET_CLOSED_VIA = 'ticket_closed';
+export function closedByTicketClose(row) {
+  return Boolean(row) && row.status === 'closed' && row.decidedVia === TICKET_CLOSED_VIA;
+}
+
+export default { CLOSE_REASONS, normalizeCloseReason, closeReasonLabel, closedVerdictWord, TICKET_CLOSED_VIA, closedByTicketClose };

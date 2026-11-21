@@ -4633,6 +4633,8 @@ class SyncService {
         // MEGA 11-14 Part B: this writer bypasses the lifecycle service too, so
         // settle any AI suggestion the new owner / close has made moot.
         await this._settleReviewQueue(current, updated);
+        // 20 Nov 2026: and a close seen here ends the ticket's open approvals.
+        if (statusChanged) await this._closeApprovalsOnClose(current, updated);
         logger.info(`On-open reconcile: ticket ${ticket.id} healed from FS`, {
           workspaceId,
           status: statusChanged ? `${current.status} → ${fsStatusName}` : undefined,
@@ -4702,6 +4704,20 @@ class SyncService {
       await settle.settleOnChange(before, after, { source: 'freshservice' });
     } catch (err) {
       logger.debug?.(`Review settle skipped on reconcile (non-fatal): ${err.message}`);
+    }
+  }
+
+  /**
+   * 20 Nov 2026: a ticket a reconcile just closed ends its open approvals
+   * ("not needed any more", quietly). Writers that bypass the lifecycle
+   * service only. Never throws.
+   */
+  async _closeApprovalsOnClose(before, after) {
+    try {
+      const { closeApprovalsAfterStatusChange } = await import('./approvalTicketCloseService.js');
+      await closeApprovalsAfterStatusChange(before, after, { source: 'freshservice_reconcile' });
+    } catch (err) {
+      logger.debug?.(`Approval close skipped on reconcile (non-fatal): ${err.message}`);
     }
   }
 

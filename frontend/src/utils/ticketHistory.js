@@ -353,6 +353,17 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
         s.skipped ? `skipped${s.reason ? `: ${s.reason}` : ''}` : null,
         s.ok === false ? `failed${s.error ? `: ${s.error}` : ''}` : null,
       ].filter(Boolean).join(' · '));
+    } else if (t === 'approval_closed' && d.via === 'ticket_closed') {
+      // 20 Nov 2026: the ticket closed while an approval waited — the approval
+      // ended as not needed, quietly. Part of the ticket's story, not chatter.
+      const n = Number(d.closed) || (Array.isArray(d.approvalIds) ? d.approvalIds.length : 1);
+      item = baseItem({
+        event: 'system',
+        verb: d.note || 'Approval no longer needed: the ticket was closed',
+        detail: n > 1 ? `${plural(n, 'approval')} closed as not needed. Nobody was told.` : 'Closed as not needed. Nobody was told.',
+        importance: 2,
+        machine: false,
+      });
     } else if (t === 'mirror_conflict') {
       item = baseItem({ event: 'system', verb: 'mirror conflict', detail: d.note || (Array.isArray(d.drift) ? d.drift.join(', ') : null) });
     } else if (t === 'created') {

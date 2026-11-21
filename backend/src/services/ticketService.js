@@ -47,6 +47,7 @@ import { EMAIL_SANITIZE_OPTIONS } from './notificationWorkflowSignatureService.j
 import { appendSignatureToEmail, getEnabledSignatureForSend, signatureAsSent, trimTrailingBlankHtml, closeLastParagraphTight } from './userSignatureService.js';
 import { createInlineBudget, inlinePictures, faceFor, inlineAttachments } from './replyEmailPictures.js';
 import { stripQuotedHtml } from '../utils/replyQuoteStripper.js';
+import { withoutOriginalBody } from '../utils/inlineAnswers.js';
 import { sseManager } from '../routes/sse.routes.js';
 import { actorKindOf, deriveActorKind } from '../utils/actorKind.js';
 import { buildFieldsUpdatedExtra } from './ticketChangeRenderer.js';
@@ -3053,7 +3054,9 @@ class TicketService {
       // Which system mails requester replies on this ticket (17 Sep 2026): the
       // composer says so instead of guessing from the origin.
       replyLane: ticket.origin === TICKET_ORIGIN.TICKETPULSE || (await isFsBornRepliesViaTicketPulseEnabled(workspaceId)) ? 'ticketpulse' : 'freshservice',
-      thread: resolvedThread,
+      // The original e-mail kept beside a reply (inline answers, 20 Nov 2026) is
+      // fetched on demand (GET /tickets/:id/entries/:entryId/original), not shipped here.
+      thread: Array.isArray(resolvedThread) ? resolvedThread.map(withoutOriginalBody) : resolvedThread,
       // Every row carries actorKind (explicit details.actorKind or the
       // read-time heuristic for legacy rows) so the History tab can chip +
       // filter without re-deriving.
@@ -5001,6 +5004,13 @@ class TicketService {
     // workflow status writes never fire status_changed, so workflows cannot set each other off.
     if (notifyLifecycle && (changes.status || 'assignee' in changes || 'assignedTechId' in changes)) {
       await this._notifyLifecycle(ticket, updated, { actorKind: resolvedByKindFromActor(actor), actor });
+    } else if (changes.status) {
+      // A workflow's write-back tells no lifecycle listener (notifyLifecycle
+      // false), so a close it makes ends the ticket's open approvals here
+      // (20 Nov 2026). With notifyLifecycle on, the lifecycle service does it.
+      await import('./approvalTicketCloseService.js')
+        .then(({ closeApprovalsAfterStatusChange }) => closeApprovalsAfterStatusChange(ticket, updated, { source: 'freshservice_writeback' }))
+        .catch((err) => logger.warn(`Approval close after write-back skipped for ticket ${ticket.id}: ${err.message}`));
     }
     this._broadcast(workspaceId, 'fs_update', updated, { changes: Object.keys(changes) });
     // Subject/description changed → the content embedding is stale (P5.2).

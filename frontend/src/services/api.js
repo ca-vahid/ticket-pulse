@@ -930,6 +930,12 @@ export const ticketsAPI = {
     return await api.post(`/tickets/${id}/mirror/retry`);
   },
 
+  // --- Inline answers (20 Nov 2026): the original e-mail behind a reply ---
+  // { entryId, html, text, truncated } — the whole mail as it arrived, kept beside what the person wrote.
+  entryOriginal: async (id, entryId) => {
+    return await api.get(`/tickets/${id}/entries/${entryId}/original`);
+  },
+
   // AI-proposed replies (draft→approve)
   proposedReplies: async (id) => {
     return await api.get(`/tickets/${id}/proposed-replies`);

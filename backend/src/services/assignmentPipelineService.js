@@ -802,6 +802,11 @@ class AssignmentPipelineService {
         ticketId: ticket.id, workspaceId: ticket.workspaceId, from: ticket.status, to: status, at: new Date(),
       }))
       .catch(() => {});
+    // 20 Nov 2026: same bypass — a close seen here ends the ticket's open
+    // approvals ("not needed any more", quietly). Never throws.
+    await import('./approvalTicketCloseService.js')
+      .then(({ closeApprovalsAfterStatusChange }) => closeApprovalsAfterStatusChange(ticket, { ...ticket, status }, { source: 'assignment_pipeline' }))
+      .catch(() => {});
   }
 
   async _markTicketAssignedFromFreshService(ticket, freshserviceResponderId) {

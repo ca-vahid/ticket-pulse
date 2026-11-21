@@ -491,6 +491,14 @@ describe('approval cards follow the approval', () => {
       .toMatchObject({ word: 'Handed on', detail: 'Forwarded to cfo@x.io by Sam. Nothing is needed from you.' });
     expect(approvalClosedStage({ ...AP, conditionNote: 'Under 2k' }, 'sam@x.io').detail).toContain('Condition: Under 2k');
   });
+
+  test('20 Nov 2026: closed because the ticket closed reads as no longer needed, never "You closed this"', () => {
+    const stage = approvalClosedStage({ ...AP, status: 'closed', closeReason: 'not_needed', decidedVia: 'ticket_closed', decisionNote: 'Not needed any more: the ticket was closed without a decision.' }, AP.approverEmail);
+    expect(stage).toMatchObject({ done: 'closed', headline: 'No longer needed' });
+    expect(stage.detail).toMatch(/^The ticket was closed without a decision.*Nothing is needed from you\.$/);
+    // A person's close keeps its own wording.
+    expect(approvalClosedStage({ ...AP, status: 'closed', closeReason: 'not_needed', decidedVia: 'app' }, AP.approverEmail).headline).toBe('You closed this approval');
+  });
 });
 
 // 7 Oct 2026: Vahid's digest read "200 open, 200 overdue". The numbers were

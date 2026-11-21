@@ -24,7 +24,7 @@ import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { isOnCallNow } from './urgentResponse/onCallNow.js';
 import { findNoteImages, noteImagePath, noteTextForPreview, noteTextWithoutMarkers, tokenFromDecisionUrl } from './approvalNoteImages.js';
-import { closeReasonLabel } from '../utils/approvalCloseReasons.js';
+import { closeReasonLabel, closedByTicketClose } from '../utils/approvalCloseReasons.js';
 import { myOpenTickets, openTicketScopes } from './myOpenTickets.js';
 import {
   cleanTimes, digestSlotsFor, isDigestTime, optedExtraTimes, planDigest, sinceSummary, workspaceDigestTimes,
@@ -954,8 +954,9 @@ class TeamsNotificationService {
    * Fire-and-forget; never throws.
    */
   refreshApprovalCards(ticketId) {
-    if (!bot.isTeamsConfigured() || !Number(ticketId)) return;
-    this._refreshApprovalCards(Number(ticketId)).catch((err) => logger.warn(`Teams approval cards for ticket ${ticketId} not refreshed: ${err.message}`));
+    if (!bot.isTeamsConfigured() || !Number(ticketId)) return Promise.resolve(0);
+    // The promise (never rejects) is for callers that must wait — the approval sweep script.
+    return this._refreshApprovalCards(Number(ticketId)).catch((err) => { logger.warn(`Teams approval cards for ticket ${ticketId} not refreshed: ${err.message}`); return 0; });
   }
 
   async _refreshApprovalCards(ticketId) {
@@ -1154,6 +1155,7 @@ class TeamsNotificationService {
     if (!found) return textCard('This approval no longer exists');
     const { approval, model } = found;
     if (lc(approval.approverEmail) !== lc(email)) return approvalCard(model, 'ask', { error: 'Only the named approver can decide this approval.' });
+    if (closedByTicketClose(approval)) return approvalCard(model, approvalClosedStage(approval, email));
     if (approval.status !== 'pending' && approval.status !== 'info_requested') {
       return approvalCard(model, { done: approval.status === 'approved' ? 'approved' : approval.status === 'rejected' ? 'rejected' : 'closed', detail: `This approval is ${approval.status}.` });
     }
@@ -1166,7 +1168,15 @@ class TeamsNotificationService {
       const person = await bot.findUser(email).catch(() => null);
       const actor = { email: lc(email), name: person?.displayName || email };
       const { default: ticketApprovalService } = await import('./ticketApprovalService.js');
-      await ticketApprovalService.decideInApp(approval.ticketId, approval.workspaceId, approval.id, decision, note, actor);
+      try {
+        await ticketApprovalService.decideInApp(approval.ticketId, approval.workspaceId, approval.id, decision, note, actor);
+      } catch (err) {
+        // 20 Nov 2026: the ticket closed while the card was open — nothing was recorded.
+        if (err?.code === 'approval_closed_by_ticket') {
+          return approvalCard(model, { done: 'closed', word: 'Closed', headline: 'No longer needed', detail: 'The ticket was closed without a decision, so your answer was not recorded. Nothing is needed from you.' });
+        }
+        throw err;
+      }
       return approvalCard(model, { done: decision, detail: note ? `Your note: ${note}` : 'Recorded on the ticket; the agent is told.' });
     }
     return approvalCard(model, 'ask');
@@ -1613,6 +1623,10 @@ export function approvalClosedStage(ap, email) {
     const last = log[log.length - 1] || {};
     const to = Array.isArray(last.toEmails) && last.toEmails.length ? last.toEmails.join(', ') : 'the next approver';
     return { done: 'closed', word: 'Handed on', headline: 'Handed on', detail: `${ap.status === 'forwarded' ? 'Forwarded' : 'Escalated'} to ${to}${last.byName ? ` by ${last.byName}` : ''}. Nothing is needed from you.` };
+  }
+  if (closedByTicketClose(ap)) {
+    // 20 Nov 2026: the ticket was closed while this waited — nobody decided it.
+    return { done: 'closed', word: 'Closed', headline: 'No longer needed', detail: `The ticket was closed without a decision${when ? ` on ${when}` : ''}. Nothing is needed from you.` };
   }
   if (ap.status === 'closed') {
     return { done: 'closed', word: 'Closed', headline: mine ? 'You closed this approval' : 'Approval closed', detail: [closeReasonLabel(ap.closeReason), ap.decisionNote].filter(Boolean).join('. ') };
