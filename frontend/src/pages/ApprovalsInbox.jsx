@@ -10,7 +10,7 @@ import {
   ALL_COLS, AllRow, FOR_YOU_COLS, ForYouRow, GroupRow, RequestConversation, STATUS_LOOK, TableHead,
 } from '../components/approvals/ApprovalRows';
 import { groupApprovals } from '../utils/approvalBrief';
-import { closedWords } from '../utils/approvalCloseReasons';
+import { closedWords, closedByTicketClose, TICKET_CLOSED_TITLE, TICKET_CLOSED_LINE } from '../utils/approvalCloseReasons';
 import AppHeader from '../components/AppHeader';
 import PullToRefresh from '../components/common/PullToRefresh';
 import MobileTabBar from '../components/nav/MobileTabBar';
@@ -290,23 +290,29 @@ function Collapse({ open, children }) {
 function DecisionRecord({ a, members = null }) {
   const others = (members || []).filter((m) => m.id !== a.id);
   const m = STATUS_LOOK[a.status] || STATUS_LOOK.cancelled;
-  const label = a.status === 'closed' ? closedWords(a.closeReason) : STATUS_META[a.status]?.label || a.status;
-  const note = cleanNoteText(a.decisionNote || '');
+  // 20 Nov 2026: the ticket was closed while it waited — nobody closed it.
+  const byTicketClose = closedByTicketClose(a);
+  const label = byTicketClose ? TICKET_CLOSED_TITLE : a.status === 'closed' ? closedWords(a.closeReason) : STATUS_META[a.status]?.label || a.status;
+  const note = byTicketClose ? '' : cleanNoteText(a.decisionNote || '');
   const condition = cleanNoteText(a.conditionNote || '');
   return (
     <div className="min-w-0 space-y-2" data-testid="approval-decision-record">
       <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Decision</div>
       <p className={`text-[14px] font-semibold ${m.text}`}>{label}</p>
-      <p className="flex flex-wrap items-center gap-1.5 text-[12.5px] text-muted-foreground">
-        {a.status === 'pending' || a.status === 'info_requested' ? 'Waiting on' : a.status === 'closed' ? 'Closed by' : 'Decided by'}
-        <InlinePerson name={a.approverName} email={a.approverEmail} />
-        {(a.status === 'pending' || a.status === 'info_requested') && others.filter((m) => m.status === a.status).map((m) => (
-          <span key={m.id} className="inline-flex items-center gap-1.5"><span className="text-muted-foreground/60">or</span><InlinePerson name={m.approverName} email={m.approverEmail} /></span>
-        ))}
-      </p>
+      {byTicketClose ? (
+        <p className="text-[12.5px] text-muted-foreground" data-testid="approval-closed-by-ticket">{TICKET_CLOSED_LINE}. Nobody decided it and nobody was told.</p>
+      ) : (
+        <p className="flex flex-wrap items-center gap-1.5 text-[12.5px] text-muted-foreground">
+          {a.status === 'pending' || a.status === 'info_requested' ? 'Waiting on' : a.status === 'closed' ? 'Closed by' : 'Decided by'}
+          <InlinePerson name={a.approverName} email={a.approverEmail} />
+          {(a.status === 'pending' || a.status === 'info_requested') && others.filter((m) => m.status === a.status).map((m) => (
+            <span key={m.id} className="inline-flex items-center gap-1.5"><span className="text-muted-foreground/60">or</span><InlinePerson name={m.approverName} email={m.approverEmail} /></span>
+          ))}
+        </p>
+      )}
       <p className="text-[12px] text-muted-foreground">
         {a.decidedAt ? `${formatDayTime(a.decidedAt)} · ${timeAgo(a.decidedAt)}` : `Asked ${formatDayTime(a.createdAt)} · waiting`}
-        {a.decidedVia ? ` · by ${a.decidedVia === 'email' ? 'e-mail' : a.decidedVia}` : ''}
+        {a.decidedVia && !byTicketClose ? ` · by ${a.decidedVia === 'email' ? 'e-mail' : a.decidedVia}` : ''}
       </p>
       {condition && (
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[13px] text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">

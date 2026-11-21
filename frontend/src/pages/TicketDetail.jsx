@@ -33,6 +33,7 @@ import { ticketNeedsResolutionReason, reasonLabel } from '../utils/resolutionRea
 import { rememberTicket } from '../utils/recentSearches';
 import { RichBody, SentSignature, IMG_REF_RE, openingMessageHtml, openingRepeatsDescription, picturesShownInBody } from '../components/tickets/InlineImageBody';
 import { replyBodyParts } from '../utils/quotedHistory';
+import { EntryMenu, InlineAnswers, OriginalEmailDialog } from '../components/tickets/InlineAnswers';
 import { integrationIdentity, requesterIntegrationIdentity } from '../utils/integrationIdentity';
 import { buildHistoryItems, countMachine } from '../utils/ticketHistory';
 import TicketHistoryTimeline from '../components/tickets/TicketHistoryTimeline';
@@ -403,6 +404,10 @@ export function ThreadEntry({ entry, attachments = [], ticketId = null, onPrevie
   // their mail client quoted under it is one click away, never lost.
   const replyParts = useMemo(() => replyBodyParts(entry, shownHtml), [entry, shownHtml]);
   const [showFullMail, setShowFullMail] = useState(false);
+  // Inline answers (20 Nov 2026): the whole mail kept beside a reply opens from the "…" menu.
+  const [originalOpen, setOriginalOpen] = useState(false);
+  const hasOriginal = Boolean(ticketId && entry?.id && entry.rawPayload?.hasOriginalEmail);
+  const closeOriginal = useCallback(() => setOriginalOpen(false), []);
   // Stable lists: the thumbnail strip loads pictures per list identity.
   const allImageAttachments = useMemo(() => (ticketId ? attachments.filter(isImageAttachment) : []), [attachments, ticketId]);
   // QA 10-13 #2: a picture the message names ("[Image: file]") is shown where it was, small and
@@ -650,6 +655,9 @@ export function ThreadEntry({ entry, attachments = [], ticketId = null, onPrevie
             >
               <Copy className="w-3 h-3" aria-hidden="true" />
             </button>
+            <EntryMenu
+              items={hasOriginal ? [{ key: 'original', label: 'View the original e-mail', onSelect: () => setOriginalOpen(true) }] : []}
+            />
             {entry.editedAt && (
               <span
                 className="inline-flex items-center text-[10px] font-medium text-muted-foreground/75 bg-muted/80 border border-border rounded-full px-1.5 py-0.5 whitespace-nowrap"
@@ -708,7 +716,19 @@ export function ThreadEntry({ entry, attachments = [], ticketId = null, onPrevie
           </div>
         ) : (
           <>
-            <RichBody html={showFullMail && replyParts.full ? replyParts.full : replyParts.fresh} text={body} onImageRef={onImageRef} shownImages={shownImageNames} ticketId={ticketId} inlineImages={inlineImages} />
+            {/* Inline answers (20 Nov 2026): what the requester typed inside the quote of our
+                message, rendered inside the reply's own e-mail well, under its text. */}
+            <RichBody
+              html={showFullMail && replyParts.full ? replyParts.full : replyParts.fresh}
+              text={body}
+              onImageRef={onImageRef}
+              shownImages={shownImageNames}
+              ticketId={ticketId}
+              inlineImages={inlineImages}
+              after={incoming && Array.isArray(entry.rawPayload?.inlineAnswers) && entry.rawPayload.inlineAnswers.length
+                ? <InlineAnswers answers={entry.rawPayload.inlineAnswers} />
+                : null}
+            />
             {replyParts.full && (
               <button
                 type="button"
@@ -746,6 +766,15 @@ export function ThreadEntry({ entry, attachments = [], ticketId = null, onPrevie
           </div>
         )}
       </div>
+      {hasOriginal && (
+        <OriginalEmailDialog
+          open={originalOpen}
+          onClose={closeOriginal}
+          ticketId={ticketId}
+          entryId={entry.id}
+          from={entry.actorName || entry.actorEmail || null}
+        />
+      )}
     </li>
   );
 }

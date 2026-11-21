@@ -610,9 +610,15 @@ code {
     margin: 0.6rem 0 0.2rem;
     font-weight: 600;
   }
-  .tp-rich-body > :first-child {
+  .tp-rich-body > :first-child,
+  .tp-rich-body > .tp-rich-body__html > :first-child {
     margin-top: 0;
   }
+  /* Our own text inside an e-mail well (inline answers, 20 Nov 2026): the
+     well's text colour and its muted grey. Light and dark-themed bodies use
+     the tokens; the dark-mode paper panel (below) has its own pair. */
+  .tp-well-text { color: hsl(var(--foreground)); }
+  .tp-well-muted { color: hsl(var(--muted-foreground)); }
   /* Dark mode (Phase DW — QA 08-31 #5 overrules the v3.8.02 white-well
      convention; neutraliser v2 in QA 09-01 #6): email/note HTML renders
      CONDITIONALLY. SafeHtml (ticketUi.jsx) sanitizes with a theme-gated
@@ -676,6 +682,9 @@ code {
   .dark .tp-light .tp-rich-body--themed { color-scheme: light; }
   .dark .tp-rich-body--paper a { color: #1d4ed8; }
   .dark .tp-rich-body--paper blockquote { border-color: #94a3b8; color: #475569; }
+  /* The paper's text and muted grey (#475569 on #dbe2ec is AA). */
+  .dark .tp-rich-body--paper .tp-well-text { color: #0f172a; }
+  .dark .tp-rich-body--paper .tp-well-muted { color: #475569; }
   /* The light th tint (hsl(210 40% 97%), below) is near-white — too glarey
      inside the dimmed paper panel; sit it just above the paper tone instead. */
   .dark .tp-rich-body--paper .tp-data-table th { background: hsl(213 32% 91%); }

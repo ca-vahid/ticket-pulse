@@ -341,7 +341,7 @@ const T = {
               properties: {
                 name: { type: 'string', nullable: true }, email: { type: 'string' },
                 decision: { type: 'string' }, decidedAt: { type: 'string', format: 'date-time', nullable: true },
-                decidedVia: { type: 'string', nullable: true, enum: ['link', 'app', null] },
+                decidedVia: { type: 'string', nullable: true, enum: ['link', 'app', 'ticket_closed', null], description: 'ticket_closed = nobody decided: the ticket was closed while the request waited, so it ended as not needed.' },
               },
             },
           },

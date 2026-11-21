@@ -3,6 +3,7 @@ import { jest } from '@jest/globals';
 const prismaMock = {
   mailboxConnection: { findMany: jest.fn(), update: jest.fn() },
   ticketThreadEntry: { findFirst: jest.fn(), create: jest.fn(), update: jest.fn() },
+  ticketThreadEntryOriginal: { create: jest.fn() },
   approvalMessage: { findFirst: jest.fn() },
   ticket: { findUnique: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn() },
   ticketLink: { findFirst: jest.fn() },
@@ -89,6 +90,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   prismaMock.ticketThreadEntry.findFirst.mockResolvedValue(null);
   prismaMock.ticketThreadEntry.create.mockImplementation(({ data }) => Promise.resolve({ id: 9001, ...data }));
+  prismaMock.ticketThreadEntryOriginal.create.mockResolvedValue({});
   prismaMock.ticket.findFirst.mockResolvedValue(null);
   prismaMock.ticket.findMany.mockResolvedValue([]);
   prismaMock.ticket.update.mockResolvedValue({});
@@ -1567,5 +1569,113 @@ describe('the opening e-mail as the first conversation entry', () => {
     expect(await mailboxIngestService.processEmail(connection, { ...baseEmail, id: 'AAMk-q2', internetMessageId: '<side-1@example.com>', bodyHtml: body, hasAttachments: true })).toBe('created');
     expect(mirrorServiceMock.enqueueAttachments).not.toHaveBeenCalled();
     delete mirrorServiceMock.enqueueAttachments;
+  });
+});
+
+// Inline answers (20 Nov 2026): answers typed inside the quote of our message.
+const inlineFx = await import('./fixtures/inlineAnswersFixtures.js');
+describe('inline answers on an ingested reply', () => {
+  const ticket = { id: 730, workspaceId: 1, origin: 'ticketpulse', nativeNumber: 4321, ccEmails: [] };
+  const sentEntry = { id: 4100, bodyHtml: inlineFx.SENT_HTML, bodyText: null, content: null, authorType: 'agent', rawPayload: { sentSignature: { text: inlineFx.SENT_SIGNATURE_TEXT } } };
+  const reply = (bodyHtml, extra = {}) => ({ ...baseEmail, id: 'msg-inline', bodyHtml, bodyText: null, bodyPreview: 'Thank you so much Dana. Please see below highlight.', internetMessageId: '<inline-1@example.com>', ...extra });
+  afterEach(() => { delete prismaMock.ticketThreadEntry.findMany; });
+
+  test('the whole mail is kept in its own table beside the stripped body; the three pairs are stored and searchable', async () => {
+    prismaMock.ticketThreadEntry.findMany = jest.fn(async () => [sentEntry]);
+    await mailboxIngestService.ingestReply(connection, ticket, reply(inlineFx.REPLY_INLINE_DESKTOP), 'plus_address');
+    const { data } = prismaMock.ticketThreadEntry.create.mock.calls[0][0];
+    expect(data.bodyHtml).not.toContain('OK to proceed');
+    // Never in raw_payload (every thread read loads it): only the mark.
+    expect(data.rawPayload.fullBodyHtml).toBeUndefined();
+    expect(data.rawPayload.hasOriginalEmail).toBe(true);
+    expect(prismaMock.ticketThreadEntryOriginal.create).toHaveBeenCalledWith({
+      data: { entryId: 9001, workspaceId: 1, html: inlineFx.REPLY_INLINE_DESKTOP, text: null, truncated: false },
+    });
+    expect(data.rawPayload.inlineAnswers.map((p) => p.context)).toEqual(inlineFx.EXPECTED_CONTEXTS);
+    expect(data.rawPayload.inlineAnswers[0]).toEqual({ context: inlineFx.EXPECTED_CONTEXTS[0], answer: 'OK to proceed.', highlighted: true });
+    expect(data.rawPayload.inlineAnswersFrom).toEqual({ entryId: 4100, via: 'latest_agent_reply' });
+    expect(data.bodyText).toContain('Answered inline\nIs it OK if we remove the partial copy in the portal and start fresh?\nOK to proceed.');
+    expect(prismaMock.ticketThreadEntry.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ ticketId: 730, incoming: false, isPrivate: false }),
+    }));
+  });
+
+  test('In-Reply-To finds our sent message first', async () => {
+    prismaMock.ticketThreadEntry.findMany = jest.fn(async () => []);
+    prismaMock.ticketThreadEntry.findFirst.mockImplementation(async ({ where }) => (where?.emailMessageId?.in?.includes('<sent-4100@example.com>') ? sentEntry : null));
+    await mailboxIngestService.ingestReply(connection, ticket, reply(inlineFx.REPLY_INLINE_WEB, { inReplyTo: '<sent-4100@example.com>' }), 'threading_headers');
+    const { data } = prismaMock.ticketThreadEntry.create.mock.calls[0][0];
+    expect(data.rawPayload.inlineAnswers).toHaveLength(3);
+    expect(data.rawPayload.inlineAnswersFrom).toEqual({ entryId: 4100, via: 'message_id' });
+  });
+
+  test('an unchanged quote stores the original only, and the body is exactly as today', async () => {
+    prismaMock.ticketThreadEntry.findMany = jest.fn(async () => [sentEntry]);
+    await mailboxIngestService.ingestReply(connection, ticket, reply(inlineFx.REPLY_TOP_POSTED), 'plus_address');
+    const { data } = prismaMock.ticketThreadEntry.create.mock.calls[0][0];
+    expect(data.rawPayload).toEqual({ hasOriginalEmail: true });
+    expect(prismaMock.ticketThreadEntryOriginal.create.mock.calls[0][0].data.html).toBe(inlineFx.REPLY_TOP_POSTED);
+    expect(data.bodyText).toBe('Thank you so much Dana. Please see below highlight.');
+  });
+
+  test('a failing lookup never fails ingest: today\'s behaviour plus the original', async () => {
+    prismaMock.ticketThreadEntry.findMany = jest.fn(async () => { throw new Error('db gone'); });
+    const entry = await mailboxIngestService.ingestReply(connection, ticket, reply(inlineFx.REPLY_INLINE_DESKTOP), 'plus_address');
+    expect(entry.id).toBe(9001);
+    const { data } = prismaMock.ticketThreadEntry.create.mock.calls[0][0];
+    expect(data.rawPayload.hasOriginalEmail).toBe(true);
+    expect(data.rawPayload.inlineAnswers).toBeUndefined();
+    expect(prismaMock.ticketThreadEntryOriginal.create).toHaveBeenCalledTimes(1);
+    expect(mirrorServiceMock.enqueueThreadEntry).toHaveBeenCalledWith(1, 730, 9001);
+  });
+
+  test('a refused create is retried once exactly as today (no additions), so the reply is never lost', async () => {
+    prismaMock.ticketThreadEntry.findMany = jest.fn(async () => [sentEntry]);
+    prismaMock.ticketThreadEntry.create
+      .mockImplementationOnce(async () => { throw new Error('invalid input syntax for type json'); });
+    const entry = await mailboxIngestService.ingestReply(connection, ticket, reply(inlineFx.REPLY_INLINE_DESKTOP), 'plus_address');
+    expect(entry.id).toBe(9001);
+    expect(prismaMock.ticketThreadEntry.create).toHaveBeenCalledTimes(2);
+    const retry = prismaMock.ticketThreadEntry.create.mock.calls[1][0].data;
+    expect(retry.rawPayload).toBeUndefined();
+    expect(retry.bodyText).toBe('Thank you so much Dana. Please see below highlight.');
+    expect(prismaMock.ticketThreadEntryOriginal.create).not.toHaveBeenCalled();
+    expect(mirrorServiceMock.enqueueThreadEntry).toHaveBeenCalledWith(1, 730, 9001);
+  });
+
+  test('a missing originals table degrades: the reply lands and loses only its "has original" mark', async () => {
+    prismaMock.ticketThreadEntry.findMany = jest.fn(async () => [sentEntry]);
+    prismaMock.ticketThreadEntryOriginal.create.mockRejectedValueOnce(new Error('relation "ticket_thread_entry_originals" does not exist'));
+    prismaMock.ticketThreadEntry.update = jest.fn(async () => ({}));
+    const entry = await mailboxIngestService.ingestReply(connection, ticket, reply(inlineFx.REPLY_INLINE_DESKTOP), 'plus_address');
+    expect(entry.rawPayload.hasOriginalEmail).toBeUndefined();
+    expect(entry.rawPayload.inlineAnswers).toHaveLength(3);
+    const unmark = prismaMock.ticketThreadEntry.update.mock.calls.find(([arg]) => arg.data.rawPayload);
+    expect(unmark[0].data.rawPayload.hasOriginalEmail).toBeUndefined();
+    expect(unmark[0].data.rawPayload.inlineAnswers).toHaveLength(3);
+  });
+
+  test('the FreshService write-back carries the reply and the pairs, never the whole e-mail', async () => {
+    prismaMock.ticketThreadEntry.findMany = jest.fn(async () => [sentEntry]);
+    const fsClient = { addNote: jest.fn(async () => ({ conversation: { id: 555010 } })) };
+    mirrorServiceMock.getInteractiveClient = jest.fn(async () => fsClient);
+    prismaMock.ticketThreadEntry.update = jest.fn(async () => ({}));
+    const fsTicket = { id: 44090, workspaceId: 1, origin: 'freshservice', freshserviceTicketId: 241490n, requesterFreshserviceId: 1n, ccEmails: [] };
+    await mailboxIngestService.ingestReply(connection, fsTicket, reply(inlineFx.REPLY_INLINE_DESKTOP, { internetMessageId: '<inline-fs@example.com>' }), 'plus_address_fs');
+    const [, body] = fsClient.addNote.mock.calls[0];
+    expect(body).toContain('Thank you so much Dana');
+    expect(body).toContain('<p><b>Answered inline</b></p><p><b>Is it OK if we remove the partial copy in the portal and start fresh?</b><br>OK to proceed.</p>');
+    expect(body).not.toContain('Privacy notice');
+    expect(body).not.toContain('From:');
+  });
+
+  test('an agent forward or an agent\'s own Outlook reply is not compared', async () => {
+    prismaMock.ticketThreadEntry.findMany = jest.fn(async () => [sentEntry]);
+    const agent = { id: 7, name: 'Eli Park', email: 'eli.park@example.com' };
+    await mailboxIngestService.ingestReply(connection, ticket, reply(inlineFx.REPLY_INLINE_DESKTOP, { from: 'eli.park@example.com', fromName: 'Eli Park' }), 'plus_address', { agent });
+    const { data } = prismaMock.ticketThreadEntry.create.mock.calls[0][0];
+    expect(data.rawPayload.hasOriginalEmail).toBe(true);
+    expect(data.rawPayload.inlineAnswers).toBeUndefined();
+    expect(prismaMock.ticketThreadEntry.findMany).not.toHaveBeenCalled();
   });
 });

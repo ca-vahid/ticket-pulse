@@ -19,7 +19,7 @@ import {
   XCircle,
   CircleMinus,
 } from 'lucide-react';
-import { closeReasonLabel } from '../utils/approvalCloseReasons';
+import { closeReasonLabel, closedByTicketClose, TICKET_CLOSED_TITLE, TICKET_CLOSED_LINE } from '../utils/approvalCloseReasons';
 import { AmountChip, TierChip } from '../components/tickets/ApprovalHandoff';
 import ApprovalComposer from '../components/tickets/ApprovalComposer';
 import ApprovalThread from '../components/tickets/ApprovalThread';
@@ -104,7 +104,7 @@ const STATUS_ICON = {
 };
 
 /** Header status badge: icon + label in a strong tint, top right of the card. */
-function StatusBadge({ status }) {
+function StatusBadge({ status, label = null }) {
   const meta = STATUS_BADGE[status] || STATUS_BADGE.pending;
   const Icon = STATUS_ICON[status] || Clock;
   return (
@@ -114,7 +114,7 @@ function StatusBadge({ status }) {
       className={`inline-flex items-center gap-2 rounded-xl border px-3.5 py-2 text-[13px] font-bold uppercase tracking-[0.05em] ${meta.badge}`}
     >
       <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-      {meta.label}
+      {label || meta.label}
     </span>
   );
 }
@@ -246,10 +246,16 @@ const DecisionBanner = ({ approval, decidedByYou, bannerRef, isDark }) => {
     disc = 'bg-sky-200/70 text-sky-900 dark:bg-sky-500/25 dark:text-sky-100';
     Icon = CircleMinus;
     const reason = closeReasonLabel(approval.closeReason).toLowerCase();
-    title = decidedInApp
-      ? `Closed by ${approval.approverName || 'another approver'}${when ? ` on ${when}` : ''}: ${reason}`
-      : `You closed this approval${when ? ` on ${when}` : ''}: ${reason}`;
-    body = (
+    if (closedByTicketClose(approval)) {
+      // 20 Nov 2026: nobody decided — the ticket was closed while it waited.
+      title = `${TICKET_CLOSED_TITLE}: the ticket was closed`;
+      body = <p className="mt-1 text-sm opacity-80" data-testid="approval-closed-by-ticket">{TICKET_CLOSED_LINE}, so this request is not needed any more. Nothing is needed from you.</p>;
+    } else {
+      title = decidedInApp
+        ? `Closed by ${approval.approverName || 'another approver'}${when ? ` on ${when}` : ''}: ${reason}`
+        : `You closed this approval${when ? ` on ${when}` : ''}: ${reason}`;
+    }
+    if (!closedByTicketClose(approval)) body = (
       <div className="mt-2 space-y-2">
         {(approval.decisionNoteHtml || approval.decisionNote) && (
           <div className="rounded-lg border border-border/60 bg-card/70 px-3 py-2 text-sm text-foreground/85">
@@ -449,7 +455,20 @@ export default function PublicApprovalDecision() {
 
   const onDecide = useCallback(async (decision, note, noteHtml, extra = {}) => {
     const conditionNote = extra?.conditionNote || null;
-    const body = unwrapBody(await publicApprovalAPI.decide(token, decision, note, noteHtml, { conditionNote, conditionNoteHtml: extra?.conditionNoteHtml || null, ...(Array.isArray(extra?.conditions) ? { conditions: extra.conditions } : {}), notifyRequester: extra?.notifyRequester === true, ...(extra?.closeReason ? { closeReason: extra.closeReason } : {}) })) || {};
+    let response;
+    try {
+      response = await publicApprovalAPI.decide(token, decision, note, noteHtml, { conditionNote, conditionNoteHtml: extra?.conditionNoteHtml || null, ...(Array.isArray(extra?.conditions) ? { conditions: extra.conditions } : {}), notifyRequester: extra?.notifyRequester === true, ...(extra?.closeReason ? { closeReason: extra.closeReason } : {}) });
+    } catch (err) {
+      // 20 Nov 2026: the ticket closed while the page was open, so the
+      // approval ended as not needed and nothing was recorded. Show that.
+      const code = err?.code || err?.response?.data?.code;
+      if (code === 'approval_closed_by_ticket') {
+        const fresh = unwrapBody(await publicApprovalAPI.get(token).catch(() => null));
+        if (fresh?.approval) { focusBannerRef.current = true; setData(fresh); return; }
+      }
+      throw err;
+    }
+    const body = unwrapBody(response) || {};
     focusBannerRef.current = true;
     setDecidedByYou(true);
     setData((prev) => {
@@ -604,7 +623,7 @@ export default function PublicApprovalDecision() {
         <header className="grid items-start gap-4 border-b border-border px-5 py-5 min-[800px]:grid-cols-[minmax(0,1fr)_auto] min-[800px]:grid-rows-[auto_auto] min-[800px]:px-[26px]">
           {/* One badge, placed top-right on wide screens and first on a phone. */}
           <div className="min-[800px]:col-start-2 min-[800px]:row-start-1 min-[800px]:justify-self-end">
-            <StatusBadge status={approval.status} />
+            <StatusBadge status={approval.status} label={closedByTicketClose(approval) ? TICKET_CLOSED_TITLE : null} />
           </div>
           <div className="min-w-0 min-[800px]:col-start-1 min-[800px]:row-start-1 min-[800px]:row-span-2">
             <div className="mb-2.5 flex flex-wrap items-center gap-2">

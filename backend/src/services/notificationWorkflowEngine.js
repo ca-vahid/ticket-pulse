@@ -4698,6 +4698,11 @@ export async function executeUpdateTicketNode(node, eventContext, { dryRun = fal
     await import('./reviewQueueSettleService.js')
       .then(({ default: settle }) => settle.settleOnChange(ticket, { ...ticket, ...patch }, { source: 'workflow' }))
       .catch(() => {});
+    // 20 Nov 2026: same bypass — a workflow that closes the ticket ends its
+    // open approvals ("not needed any more", quietly).
+    await import('./approvalTicketCloseService.js')
+      .then(({ closeApprovalsAfterStatusChange }) => closeApprovalsAfterStatusChange(ticket, { ...ticket, ...patch }, { source: 'workflow' }))
+      .catch(() => {});
   }
   // Re-opened counter (QA 09-25 #1): same bypass — this write never reaches
   // the lifecycle service, so feed the counter here. Never throws.

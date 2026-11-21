@@ -902,6 +902,22 @@ async function settleReviewQueue(existingTicket, upsertedTicket, { source = null
   }
 }
 
+/**
+ * A ticket whose status base became Closed: its open approvals end as "not
+ * needed any more" (approvalTicketCloseService). No read at all unless the
+ * status moved. Never throws.
+ */
+async function closeApprovalsOnClose(existingTicket, upsertedTicket, { source = null } = {}) {
+  try {
+    if (!existingTicket || !upsertedTicket?.id) return;
+    if (String(upsertedTicket.status || '') === String(existingTicket.status || '')) return;
+    const { closeApprovalsAfterStatusChange } = await import('./approvalTicketCloseService.js');
+    await closeApprovalsAfterStatusChange(existingTicket, upsertedTicket, { source });
+  } catch (err) {
+    logger.warn(`Approval close on ticket close skipped (non-fatal): ${err.message}`);
+  }
+}
+
 export async function emitTicketLifecycleNotifications({
   existingTicket,
   upsertedTicket,
@@ -930,6 +946,10 @@ export async function emitTicketLifecycleNotifications({
   // before the workflow gate, so every path that reports a change counts.
   // Never throws; no read at all unless the owner or the status moved.
   await settleReviewQueue(existingTicket, upsertedTicket, { source, actor });
+  // A closed ticket ends its approvals (20 Nov 2026): open ones become
+  // "not needed any more", quietly. Before the workflow gate, like the settle,
+  // so every road that reports a close counts. Never throws.
+  await closeApprovalsOnClose(existingTicket, upsertedTicket, { source });
   // Auto-help (P1 audit): a reassignment to someone else while Auto-help
   // waits on the requester means that person owns it now — the loop ends.
   const ahNewTech = asNumber(upsertedTicket?.assignedTechId);

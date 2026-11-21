@@ -19,6 +19,7 @@ import logger from '../utils/logger.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { escapeHtml } from './approvalEmailTemplate.js';
 import { stripQuotedHtml } from '../utils/replyQuoteStripper.js';
+import { inlineAnswersHtml } from '../utils/inlineAnswers.js';
 
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 import { ticketLinkUrl } from '../utils/ticketLink.js';
@@ -107,7 +108,7 @@ export async function copyRecipientsFor(ticket, { senderEmail = null, extra = []
  * ticket's history in the same "Earlier in this conversation" format a reply
  * carries. It was a "Requester replied" card with a button.
  */
-export function renderRequesterReplyCopyEmail({ ref, appUrl, fromName, fromEmail, bodyHtml, bodyText, primary, quoteHtml = '' }) {
+export function renderRequesterReplyCopyEmail({ ref, appUrl, fromName, fromEmail, bodyHtml, bodyText, primary, quoteHtml = '', inlineAnswers = null }) {
   const who = String(fromName || fromEmail || 'The requester').trim();
   const firstName = who.split(/\s+/)[0];
   const body = bodyHtml
@@ -117,7 +118,8 @@ export function renderRequesterReplyCopyEmail({ ref, appUrl, fromName, fromEmail
   const hint = '<p style="font-family:Calibri,\'Segoe UI\',Arial,sans-serif;font-size:12.5px;line-height:18px;color:#6b7280;margin:22px 0 0;">'
     + `${escapeHtml(firstName)} replied on ${escapeHtml(ref)}. Answer from <a href="${escapeHtml(appUrl)}" target="_blank" style="color:#1d4ed8;">the ticket</a>; `
     + `a reply to this e-mail is added to the ticket as a note and does not reach ${escapeHtml(firstName)}.${escapeHtml(why)}</p>`;
-  return `${body}${hint}${quoteHtml || ''}`;
+  // Answers typed inside the quote of our message (20 Nov 2026), as the same pairs the thread shows.
+  return `${body}${inlineAnswersHtml(inlineAnswers)}${hint}${quoteHtml || ''}`;
 }
 
 /**
@@ -149,7 +151,7 @@ export async function copyAgentsOnRequesterReply(ticket, entry, { fromEmail = nu
     }
     const html = renderRequesterReplyCopyEmail({
       ref, appUrl: `${ticketLinkUrl(publicBaseUrl(), ticket)}`,
-      fromName, fromEmail, bodyHtml, bodyText, primary, quoteHtml,
+      fromName, fromEmail, bodyHtml, bodyText, primary, quoteHtml, inlineAnswers: entry.rawPayload?.inlineAnswers,
     });
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
     const result = await sendTransactionalEmail({

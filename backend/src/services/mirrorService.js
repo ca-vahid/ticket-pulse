@@ -2,6 +2,7 @@ import prisma from './prisma.js';
 import { fsOnlyAssigneeEmail } from '../utils/fsOnlyAssignee.js';
 import { markCreating, settleCreating, clearCreating } from '../utils/mirrorInFlight.js';
 import { fsNoteHeader } from '../utils/fsNoteHeader.js';
+import { inlineAnswersHtml } from '../utils/inlineAnswers.js';
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 import { reasonLabel } from './resolutionReasonService.js';
 import { runJobsInPool } from '../utils/parallelPool.js';
@@ -1087,7 +1088,10 @@ class MirrorService {
       ref: ticketDisplayRef(ticket),
       url: entry.isPrivate ? ticketUrl(ticket) : null,
       marker: MIRROR_MARKER,
-    }) + (entry.bodyHtml || textToHtml(entry.bodyText || entry.content || ''));
+    }) + (entry.bodyHtml || textToHtml(entry.bodyText || entry.content || ''))
+      // Answers the requester typed inside the quote of our message (20 Nov 2026):
+      // the pairs as simple HTML, never the whole e-mail.
+      + inlineAnswersHtml(entry.rawPayload?.inlineAnswers);
   }
 
   async _mirrorThreadEntry(job, client) {

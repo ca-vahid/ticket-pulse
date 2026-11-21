@@ -4,7 +4,7 @@ import ApprovalLaptop from './ApprovalLaptop';
 import {
   Activity, ArrowUpRight, Ban, CheckCircle2, ChevronDown, ChevronRight, CircleMinus, Clock, Forward, Hourglass, MessageCircleQuestion, Minimize2, RefreshCw, Reply, Trash2, XCircle,
 } from 'lucide-react';
-import { closedWords } from '../../utils/approvalCloseReasons';
+import { closedWords, closedByTicketClose, TICKET_CLOSED_TITLE } from '../../utils/approvalCloseReasons';
 import { PersonAvatar, SafeHtml, formatDayTime, timeAgo } from './ticketUi';
 import { AmountChip, TierChip } from './ApprovalHandoff';
 import ApprovalComposer from './ApprovalComposer';
@@ -369,10 +369,14 @@ export default function ApprovalTimeline({
           const isOpen = decided ? flipped.has(groupId) : !flipped.has(groupId);
           const toggle = () => setFlipped((prev) => { const next = new Set(prev); if (next.has(groupId)) next.delete(groupId); else next.add(groupId); return next; });
           const talkCount = groupMessages.filter((m) => ['question', 'answer', 'comment'].includes(m.kind)).length;
+          // 20 Nov 2026: nobody decided it — the ticket was closed while it waited.
+          const byTicketClose = closedByTicketClose(decider);
           const summary = decided
             ? (verdict === 'cancelled' || !decider
               ? `Cancelled · requested by ${agentName}`
-              : `${verdict === 'closed' ? closedWords(decider.closeReason) : vMeta.verb} by ${decider.approverName || decider.approverEmail}${decider.decidedAt ? ` ${formatDayTime(decider.decidedAt)}` : ''} · requested by ${agentName}`)
+              : byTicketClose
+                ? `${TICKET_CLOSED_TITLE}: the ticket was closed${decider.decidedAt ? ` ${formatDayTime(decider.decidedAt)}` : ''} · requested by ${agentName}`
+                : `${verdict === 'closed' ? closedWords(decider.closeReason) : vMeta.verb} by ${decider.approverName || decider.approverEmail}${decider.decidedAt ? ` ${formatDayTime(decider.decidedAt)}` : ''} · requested by ${agentName}`)
             : `${waiting ? waiting.line : 'Open'} · requested by ${agentName}`;
           return (
             <li key={groupId} className={`border-t border-border/70 first:border-t-0 ${isOpen ? 'bg-muted/30' : ''}`} data-testid="ticket-approval" data-status={verdict} data-open={isOpen ? 'true' : 'false'}>
@@ -419,7 +423,22 @@ export default function ApprovalTimeline({
                     {decided ? (
                       <div className="flex items-start gap-4">
                         <div className="min-w-0 flex-1">
-                          {decider ? (
+                          {decider && byTicketClose ? (
+                            <div className="flex items-center gap-3.5" data-testid="approval-closed-by-ticket">
+                              <span className={`flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full ${vMeta.head} border`}>
+                                <vMeta.Icon className={`h-5 w-5 ${vMeta.text}`} aria-hidden="true" />
+                              </span>
+                              <div className="min-w-0">
+                                <p className="text-[15px] text-foreground/85">
+                                  <span className={`font-semibold ${vMeta.text}`}>{TICKET_CLOSED_TITLE}</span>: the ticket was closed
+                                  {decider.decidedAt && <span className="text-muted-foreground/75" title={new Date(decider.decidedAt).toLocaleString()}> · {formatDayTime(decider.decidedAt)} · {timeAgo(decider.decidedAt)}</span>}
+                                </p>
+                                <p className="text-[13px] text-muted-foreground mt-0.5">
+                                  Nobody decided it and nobody was told · requested by {head.requestedByName || people.find((p) => p.email === String(head.requestedBy || '').toLowerCase())?.name || head.requestedBy}
+                                </p>
+                              </div>
+                            </div>
+                          ) : decider ? (
                             <div className="flex items-center gap-3.5">
                               <div className="relative flex-shrink-0">
                                 <ApproverAvatar email={String(decider.approverEmail || '').toLowerCase()} name={decider.approverName || decider.approverEmail} size="h-11 w-11" textSize="text-xs" />
@@ -473,7 +492,7 @@ export default function ApprovalTimeline({
                               <p className="mt-1 text-[15px] leading-relaxed text-foreground/85">{decider.conditionNote}</p>
                             </div>
                           )}
-                          {decider?.decisionNoteHtml && !/^superseded/i.test(decider.decisionNote || '') ? (
+                          {byTicketClose ? null : decider?.decisionNoteHtml && !/^superseded/i.test(decider.decisionNote || '') ? (
                             <div className="mt-4"><SafeHtml html={decider.decisionNoteHtml} className="text-sm leading-relaxed text-foreground/85" /></div>
                           ) : decider?.decisionNote && !/^superseded/i.test(decider.decisionNote) && (
                             <p className="text-sm leading-relaxed text-foreground/85 mt-4 italic">“{decider.decisionNote}”</p>

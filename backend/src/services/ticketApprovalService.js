@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import sanitizeHtml from 'sanitize-html';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
-import { ValidationError, NotFoundError } from '../utils/errors.js';
+import { ValidationError, NotFoundError, ConflictError } from '../utils/errors.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { decodeBasicEntities } from '../utils/htmlContent.js';
@@ -16,7 +16,7 @@ import {
   approvalHistory, requestNoteEntry, savedSignatureHtml, plainTextOf, viaTicketPulse,
 } from './approvalReplyMail.js';
 import { inlinePhotoAttachment } from './userPhotoService.js';
-import { normalizeCloseReason, closeReasonLabel, closedVerdictWord } from '../utils/approvalCloseReasons.js';
+import { normalizeCloseReason, closeReasonLabel, closedVerdictWord, closedByTicketClose } from '../utils/approvalCloseReasons.js';
 import { sseManager } from '../routes/sse.routes.js';
 
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
@@ -25,7 +25,20 @@ import { ticketLinkUrl } from '../utils/ticketLink.js';
 import {
   findNoteImages, noteHtmlWithImages, noteImagePath, noteTextForPreview, tokenFromDecisionUrl, imagePixelWidth,
 } from './approvalNoteImages.js';
+// 20 Nov 2026: a closed ticket ends its open approvals ("not needed any
+// more", quietly). The rule, the status-change hook and the one-off sweep
+// live in approvalTicketCloseService.js; re-exported here with the rest of
+// the approval API.
+export { closeApprovalsOnClosedTickets, closeApprovalsForClosedTicket } from './approvalTicketCloseService.js';
 const APPROVAL_EXPIRY_DAYS = 30;
+
+/** 409 for a decision that lost the race to a ticket close (approvalTicketCloseService). */
+export const CLOSED_BY_TICKET_MESSAGE = 'This approval was closed because the ticket closed. Nothing was recorded or sent.';
+function closedByTicketError() {
+  const err = new ConflictError(CLOSED_BY_TICKET_MESSAGE);
+  err.code = 'approval_closed_by_ticket';
+  return err;
+}
 
 function newToken() {
   return crypto.randomBytes(32).toString('base64url');
@@ -1900,6 +1913,9 @@ class TicketApprovalService {
     }
     // A fresh decision must be on an open row; a change flips an already-decided
     // one (changedFrom carries the prior status so guarding happened upstream).
+    if (!changedFrom && closedByTicketClose(approval)) {
+      throw closedByTicketError();
+    }
     if (!changedFrom && !['pending', 'info_requested'].includes(approval.status)) {
       throw new ValidationError(`This approval was already ${approval.status}`);
     }
@@ -1960,21 +1976,39 @@ class TicketApprovalService {
       signatureHtml = (await conversation.signatureFor(approval.workspaceId, actorEmail || approval.approverEmail))?.html || null;
     } catch { signatureHtml = null; }
 
-    const updated = await prisma.ticketApproval.update({
-      where: { id: approval.id },
-      data: {
-        status: normalized,
-        decidedAt: new Date(),
-        decidedVia: via,
-        decisionNote: note?.trim() || null,
-        decisionNoteHtml: noteHtml ? sanitizeNoteHtml(noteHtml) : null,
-        approverName: approval.approverName || actorLabel,
-        conditionNote: cleanCondition,
-        conditionNoteHtml: cleanConditionHtml,
-        signatureHtml,
-        ...(closeReason ? { closeReason } : {}),
-      },
-    });
+    // 20 Nov 2026: written only while the row is still what was read — open
+    // for a fresh decision, the old verdict for a change. The ticket may have
+    // closed (and ended this approval as not needed) while the name and the
+    // signature were looked up; then nothing here runs: no e-mail, no Assetron
+    // assign, no note, and the caller gets a 409.
+    // A conditional update (Prisma 5 takes a filter beside the id): it writes
+    // only a row in that state and throws P2025 when none matches.
+    let updated;
+    try {
+      updated = await prisma.ticketApproval.update({
+        where: { id: approval.id, status: changedFrom ? changedFrom : { in: [...OPEN_STATUSES] } },
+        data: {
+          status: normalized,
+          decidedAt: new Date(),
+          decidedVia: via,
+          decisionNote: note?.trim() || null,
+          decisionNoteHtml: noteHtml ? sanitizeNoteHtml(noteHtml) : null,
+          approverName: approval.approverName || actorLabel,
+          conditionNote: cleanCondition,
+          conditionNoteHtml: cleanConditionHtml,
+          signatureHtml,
+          ...(closeReason ? { closeReason } : {}),
+        },
+      });
+    } catch (err) {
+      if (err?.code !== 'P2025') throw err;
+      updated = null;
+    }
+    if (!updated) {
+      const current = await Promise.resolve().then(() => prisma.ticketApproval.findUnique({ where: { id: approval.id } })).catch(() => null);
+      if (closedByTicketClose(current)) throw closedByTicketError();
+      throw new ConflictError(`This approval was already ${current?.status || 'decided'}`);
+    }
 
     // Any-one-approves: the first decision supersedes the sibling requests
     // created from the same request (same category, one row per manager).

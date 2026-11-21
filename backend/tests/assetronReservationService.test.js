@@ -74,6 +74,10 @@ describe('desiredOutcome (pure)', () => {
     expect(desiredOutcome([{ status: 'cancelled' }])).toEqual({ outcome: 'CANCELLED', why: 'cancelled' });
     expect(desiredOutcome([])).toEqual({ outcome: 'CANCELLED', why: 'request_deleted' });
   });
+  test('20 Nov 2026: closed because the ticket closed → CANCELLED, why ticket_closed; a person\'s close stays cancelled', () => {
+    expect(desiredOutcome([{ status: 'closed', decidedVia: 'ticket_closed' }, { status: 'cancelled' }])).toEqual({ outcome: 'CANCELLED', why: 'ticket_closed' });
+    expect(desiredOutcome([{ status: 'closed', decidedVia: 'app' }])).toEqual({ outcome: 'CANCELLED', why: 'cancelled' });
+  });
   test('assetLabel reads like a person would say it', () => {
     expect(assetLabel(ASSET)).toBe('Dell Latitude 7650 (S/N 5CG4XYZ123) — Intel Core Ultra 7 165U · 32 GB · 1 TB · 16"');
   });
