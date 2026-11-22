@@ -2,7 +2,45 @@ import logger from '../utils/logger.js';
 import emailHealthService from './emailHealthService.js';
 import { resolveFromName } from './workspaceEmailIdentityService.js';
 import { pickIngestMailbox, pickOutboundMailbox, sendgridFromAddress } from './mailboxPicker.js';
+import * as mailboxPicker from './mailboxPicker.js';
 import { plusAddressReplyTo, storeEntryMessageId, threadingHeadersForTicket } from './emailThreadingService.js';
+
+/**
+ * The team mailbox a send should use (22 Nov 2026). A workspace with one mailbox per team
+ * (Accounting: AP and AR) sent every workflow e-mail from the primary, so an AR ticket's
+ * notice left from the AP address while the agent's reply on the same ticket (since 4.3.91)
+ * left from the AR one. `mailboxTicket` = { workspaceId, groupId, internalGroupId } of the
+ * ticket the e-mail is about; null = the usual workspace pick. Never another workspace's
+ * mailbox: a ticket from elsewhere is ignored.
+ */
+function teamTicketFor(workspaceId, mailboxTicket) {
+  if (!mailboxTicket || typeof mailboxTicket !== 'object') return null;
+  const ws = Number(workspaceId ?? mailboxTicket.workspaceId);
+  if (!Number.isInteger(ws) || ws <= 0) return null;
+  if (mailboxTicket.workspaceId !== null && mailboxTicket.workspaceId !== undefined && Number(mailboxTicket.workspaceId) !== ws) return null;
+  return { workspaceId: ws, groupId: mailboxTicket.groupId ?? null, internalGroupId: mailboxTicket.internalGroupId ?? null };
+}
+
+/** The Graph-lane connection: the ticket's team mailbox when there is one, else the primary. */
+async function outboundConnectionFor(workspaceId, teamTicket) {
+  if (teamTicket && typeof mailboxPicker.pickOutboundMailboxForTicket === 'function') {
+    return mailboxPicker.pickOutboundMailboxForTicket(teamTicket);
+  }
+  return pickOutboundMailbox(workspaceId);
+}
+
+/** The SendGrid-lane mailbox (From and Reply-To): the ticket's team mailbox, else the primary. Never throws. */
+async function ingestConnectionFor(workspaceId, teamTicket) {
+  try {
+    if (teamTicket && typeof mailboxPicker.pickIngestMailboxForTicket === 'function') {
+      return await mailboxPicker.pickIngestMailboxForTicket(teamTicket);
+    }
+    return await pickIngestMailbox(workspaceId ?? null);
+  } catch (err) {
+    logger.debug(`ingest mailbox pick skipped: ${err.message}`);
+    return null;
+  }
+}
 
 function normalizeList(value) {
   const list = Array.isArray(value) ? value : [value];
@@ -116,7 +154,11 @@ export async function deliverTransactionalEmail({
   // Approvals v3: an explicit Reply-To (plus-address reply key) wins over the
   // ticket-derived one on both lanes.
   replyTo: replyToOverride = null,
+  // 22 Nov 2026: the ticket the e-mail is about, for the team-mailbox pick
+  // only (no threading — that stays with `ticket`). See teamTicketFor.
+  mailboxTicket = null,
 }) {
+  const teamTicket = teamTicketFor(workspaceId, mailboxTicket);
   const recipients = normalizeList(to);
   if (recipients.length === 0) {
     const err = new Error('Email recipient is required');
@@ -145,13 +187,19 @@ export async function deliverTransactionalEmail({
   const allRecipients = [...recipients, ...ccRecipients, ...bccRecipients];
 
   let graphError = null;
-  const connection = await pickOutboundMailbox(workspaceId);
+  const connection = await outboundConnectionFor(workspaceId, teamTicket);
   if (connection) {
     const { default: graphMailClient } = await import('../integrations/graphMailClient.js');
     if (graphMailClient.isConfigured()) {
       // Graph bypasses sendgridNotificationService, so record its health here.
       const startedAt = Date.now();
-      const replyTo = replyToOverride || (ticket ? plusAddressReplyTo(connection.address, ticket) : null);
+      // A send-only mailbox is not read (22 Nov 2026 review): replies to it would be
+      // lost, so the plus-address comes from the mailbox that reads replies, or none.
+      let replyTo = replyToOverride || null;
+      if (!replyTo && ticket) {
+        const readsReplies = connection.mode === 'send' ? await ingestConnectionFor(workspaceId, teamTicket) : connection;
+        replyTo = readsReplies?.address ? plusAddressReplyTo(readsReplies.address, ticket) : null;
+      }
       try {
         const sent = await graphMailClient.sendMailAsMailbox(connection.address, {
           to: recipients,
@@ -194,8 +242,17 @@ export async function deliverTransactionalEmail({
   // FR 09-11 #5 the mail also LEAVES from that mailbox's address when the
   // caller did not name one — a workspace's mail should carry the address
   // people write to, not the global sender's.
-  const sendgridReplyTo = replyToOverride || (ticket ? await sendgridLaneReplyTo(workspaceId, ticket) : null);
-  const laneFrom = from || await sendgridFromAddress(workspaceId ?? ticket?.workspaceId ?? null);
+  let sendgridReplyTo;
+  let laneFrom;
+  if (teamTicket) {
+    // The ticket's team mailbox gives both the From and the Reply-To home.
+    const ingest = await ingestConnectionFor(workspaceId, teamTicket);
+    sendgridReplyTo = replyToOverride || (ticket && ingest ? plusAddressReplyTo(ingest.address, ticket) : null);
+    laneFrom = from || String(ingest?.address || '').trim() || null;
+  } else {
+    sendgridReplyTo = replyToOverride || (ticket ? await sendgridLaneReplyTo(workspaceId, ticket) : null);
+    laneFrom = from || await sendgridFromAddress(workspaceId ?? ticket?.workspaceId ?? null);
+  }
   const { default: sendgrid } = await import('./sendgridNotificationService.js');
   try {
     const result = await sendgrid.sendEmail({
@@ -248,6 +305,34 @@ export async function sendgridLaneReplyTo(workspaceId, ticket) {
 }
 
 /**
+ * The address a send WOULD leave from, without sending (22 Nov 2026): what Preview and
+ * Shadow show for a workflow e-mail. Same picks as deliverTransactionalEmail — the
+ * (team) Graph mailbox when Graph is set up, else the caller's `from`, else the (team)
+ * SendGrid mailbox, else the global sender. Never throws; null when unknown.
+ * @returns {Promise<{ address: string|null, via: 'msgraph'|'sendgrid' }|null>}
+ */
+export async function plannedSenderAddress({ workspaceId, from = null, mailboxTicket = null } = {}) {
+  try {
+    const teamTicket = teamTicketFor(workspaceId, mailboxTicket);
+    const connection = await outboundConnectionFor(workspaceId, teamTicket);
+    if (connection?.address) {
+      const { default: graphMailClient } = await import('../integrations/graphMailClient.js');
+      if (graphMailClient.isConfigured()) return { address: connection.address, via: 'msgraph' };
+    }
+    const pinned = String(from || '').trim();
+    if (pinned) return { address: pinned, via: 'sendgrid' };
+    const ingest = await ingestConnectionFor(workspaceId, teamTicket);
+    if (ingest?.address) return { address: String(ingest.address).trim(), via: 'sendgrid' };
+    const { default: settingsRepository } = await import('./settingsRepository.js');
+    const config = await settingsRepository.getSendGridConfig();
+    return { address: config?.fromEmail || config?.smtpFromEmail || null, via: 'sendgrid' };
+  } catch (err) {
+    logger.debug(`plannedSenderAddress skipped: ${err.message}`);
+    return null;
+  }
+}
+
+/**
  * Non-fatal wrapper: never throws.
  * @returns {{ sent: boolean, via?: string, reason?: string, error?: string, messageId?: string|null }}
  */
@@ -263,4 +348,4 @@ export async function sendTransactionalEmail(params) {
   }
 }
 
-export default { sendTransactionalEmail, deliverTransactionalEmail, sendgridLaneReplyTo };
+export default { sendTransactionalEmail, deliverTransactionalEmail, sendgridLaneReplyTo, plannedSenderAddress };

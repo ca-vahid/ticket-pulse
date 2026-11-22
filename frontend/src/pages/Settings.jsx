@@ -48,7 +48,6 @@ import {
   ArrowLeft,
   Save,
   TestTube,
-  RefreshCw,
   CheckCircle,
   XCircle,
   Activity,
@@ -63,6 +62,10 @@ import {
   PanelLeftOpen,
   Search,
 } from 'lucide-react';
+// Company-wide settings (22 Nov 2026): global keys are read-only to workspace admins.
+import {
+  COMPANY_WIDE_SETTINGS_MESSAGE, CompanyWideReadOnlyNote, DashboardSettingsSection, SyncSettingsSection,
+} from '../components/settings/CompanyWideSettingsSections';
 import { AssignmentConfigPanel } from './AssignmentReview';
 import { filterSettingsNavItems, resolveActiveSettingsItem, resolveSettingsAlias } from './settingsNav';
 import { useWorkspaceRole } from '../components/nav/navDestinations';
@@ -398,6 +401,11 @@ export default function Settings() {
 
   const handleSave = async (e) => {
     e.preventDefault();
+    // Every key this form saves is company-wide (the server refuses them too).
+    if (!isGlobalAdmin) {
+      setSaveStatus({ success: false, message: COMPANY_WIDE_SETTINGS_MESSAGE });
+      return;
+    }
     setIsSaving(true);
     setSaveStatus(null);
 
@@ -901,10 +909,12 @@ export default function Settings() {
                     <SyncHealthCard />
                     <RealtimeHealthCard />
                     {!isGlobalAdmin && (
-                      <div className="rounded-xl border border-border bg-muted/50 p-4 text-sm text-muted-foreground">
-                      Notification <span className="font-semibold text-foreground">provider setup</span> (SendGrid / Twilio
-                      credentials) is shared across all workspaces and managed by a global admin. You can monitor
-                      delivery health above; contact a global admin to change provider credentials.
+                      <div className="space-y-2 rounded-xl border border-border bg-muted/50 p-4 text-sm text-muted-foreground">
+                        <CompanyWideReadOnlyNote />
+                        <p>
+                          Notification <span className="font-semibold text-foreground">provider setup</span> (SendGrid / Twilio
+                          credentials) is shared by every workspace. You can watch delivery health above.
+                        </p>
                       </div>
                     )}
                     {isGlobalAdmin && (
@@ -1219,70 +1229,16 @@ export default function Settings() {
 
                 {/* Sync Configuration */}
                 {activeSectionId === 'sync' && (
-                  <div className="p-6 space-y-4">
-                    <div className="bg-card rounded-lg shadow-sm p-5 border border-border">
-                      <h2 className="text-base font-semibold mb-4 text-foreground">Sync Configuration</h2>
-
-                      <div className="space-y-4">
-                        <div>
-                          <label className="block text-sm font-medium text-foreground/85 mb-2">
-                  Sync Interval (minutes)
-                          </label>
-                          <input
-                            type="number"
-                            name="sync_interval_minutes"
-                            value={formData.sync_interval_minutes}
-                            onChange={handleChange}
-                            min="1"
-                            max="60"
-                            className="w-full px-4 py-2 border border-input rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          />
-                          <p className="text-xs text-muted-foreground mt-1">
-                  How often to sync with FreshService (1-60 minutes)
-                          </p>
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium text-foreground/85 mb-2">
-                  Default Timezone
-                          </label>
-                          <select
-                            name="default_timezone"
-                            value={formData.default_timezone}
-                            onChange={handleChange}
-                            className="w-full px-4 py-2 border border-input rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          >
-                            <option value="America/Vancouver">Pacific (Vancouver)</option>
-                            <option value="America/Edmonton">Mountain (Edmonton)</option>
-                            <option value="America/Toronto">Eastern (Toronto)</option>
-                            <option value="America/Halifax">Atlantic (Halifax)</option>
-                          </select>
-                        </div>
-
-                        {syncStatus && (
-                          <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-500/15 rounded-lg">
-                            <p className="text-sm text-foreground/85">
-                              <strong>Sync Status:</strong> {syncStatus.sync?.isRunning ? 'Running' : 'Idle'}
-                            </p>
-                            {syncStatus.sync?.lastSyncTime && (
-                              <p className="text-sm text-muted-foreground mt-1">
-                      Last sync: {new Date(syncStatus.sync.lastSyncTime).toLocaleString()}
-                              </p>
-                            )}
-                          </div>
-                        )}
-
-                        <button
-                          type="button"
-                          onClick={handleTriggerSync}
-                          className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg"
-                        >
-                          <RefreshCw className="w-4 h-4" />
-                Trigger Manual Sync
-                        </button>
-                      </div>
-                    </div>
-                  </div>
+                  <SyncSettingsSection
+                    formData={formData}
+                    onChange={handleChange}
+                    onSubmit={handleSave}
+                    canEdit={isGlobalAdmin}
+                    isSaving={isSaving}
+                    saveStatus={saveStatus}
+                    syncStatus={syncStatus}
+                    onTriggerSync={handleTriggerSync}
+                  />
                 )}
 
                 {/* Sync Operations */}
@@ -1394,29 +1350,14 @@ export default function Settings() {
 
                 {/* Dashboard Configuration */}
                 {activeSectionId === 'dashboard' && (
-                  <div className="p-6">
-                    <div className="bg-card rounded-lg shadow-sm p-5 border border-border">
-                      <h2 className="text-base font-semibold mb-4 text-foreground">Dashboard Configuration</h2>
-
-                      <div>
-                        <label className="block text-sm font-medium text-foreground/85 mb-2">
-                Dashboard Refresh Interval (seconds)
-                        </label>
-                        <input
-                          type="number"
-                          name="dashboard_refresh_seconds"
-                          value={formData.dashboard_refresh_seconds}
-                          onChange={handleChange}
-                          min="10"
-                          max="300"
-                          className="w-full px-4 py-2 border border-input rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        />
-                        <p className="text-xs text-muted-foreground mt-1">
-                How often the dashboard polls for updates (10-300 seconds)
-                        </p>
-                      </div>
-                    </div>
-                  </div>
+                  <DashboardSettingsSection
+                    formData={formData}
+                    onChange={handleChange}
+                    onSubmit={handleSave}
+                    canEdit={isGlobalAdmin}
+                    isSaving={isSaving}
+                    saveStatus={saveStatus}
+                  />
                 )}
 
                 {/* Photos & Locations */}

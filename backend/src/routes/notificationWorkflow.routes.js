@@ -848,6 +848,10 @@ function redactRun(run) {
     })),
     deliveries: (run.deliveries || []).map((delivery) => ({
       ...delivery,
+      // The workspace mailbox the e-mail really left from, when it differs from the
+      // pinned fromAddress (22 Nov 2026). Our own address, like fromAddress, so it is
+      // shown as is; the rest of the payload stays redacted.
+      sentFrom: typeof delivery.payload?.sentFrom === 'string' ? delivery.payload.sentFrom : null,
       payload: redactPayload(delivery.payload),
       htmlBody: truncateString(delivery.htmlBody, AUDIT_EMAIL_MAX_CHARS),
       textBody: truncateString(delivery.textBody, AUDIT_EMAIL_MAX_CHARS),

@@ -117,7 +117,9 @@ function fakeFts(sql, workspaceId, query) {
     .filter((t) => t.workspaceId === workspaceId)
     .filter((t) => {
       const have = new Set(words(`${t.subject} ${t.descriptionText || ''}`));
-      return all ? terms.length > 0 && terms.every((w) => have.has(w)) : terms.some((w) => have.has(w));
+      // A dashed number (2-756-67291) is one phrase, as in the real index.
+      const phrase = (w) => new RegExp(`(?<![\\w-])${w}(?![\\w-])`).test(`${t.subject} ${t.descriptionText || ''}`.toLowerCase());
+      return all ? terms.length > 0 && terms.every((w) => have.has(w)) : terms.some((w) => (w.includes('-') ? phrase(w) : have.has(w)));
     })
     .sort((a, b) => b.createdAt - a.createdAt).slice(0, 40).map((t) => ({ id: t.id }));
 }
@@ -158,6 +160,7 @@ jest.unstable_mockModule('../src/routes/sse.routes.js', () => ({ default: {}, ss
 const {
   default: singleton, MailTriageService, guardDecision, referenceNumbers, newText, isMachineMail, candidateKey, normalizeSettings,
   settingsKey, OPERATION, SYSTEM_PROMPT, ANSWER_SCHEMA, MAX_CANDIDATES, TRIAGE_ACTOR, holdReasonLabel, withTicketRefs,
+  guardFailedJudgement, fallbackNote, ingestRequesterOf, MAX_JUDGEMENTS, hasNumber,
 } = await import('../src/services/mailTriageService.js');
 const { AI_OPERATIONS, getDefaultProviderSetting, supportsOperation } = await import('../src/utils/aiProviders.js');
 const { invalidateRequesterReplyCopyCache } = await import('../src/services/requesterReplyCopyService.js');
@@ -192,7 +195,7 @@ const answer = (over = {}) => ({
   action: 'create', ticketId: null, reopen: false, requesterEmail: null, relatedTicketIds: [], confidence: 'sure', reason: 'A plain reason.', evidence: ['same invoice number'], candidateNotes: [], ...over,
 });
 
-let svc; let gateway; let similarity; let tickets; let attachments; let mirror; let noiseRules; let family;
+let svc; let gateway; let similarity; let tickets; let attachments; let mirror; let noiseRules; let family; let links;
 function reply(parsed, usage = { inputTokens: 2000, outputTokens: 150 }) {
   gateway.sendJson.mockResolvedValue({ parsed, usage, provider: 'anthropic', model: 'claude-haiku-5-5' });
 }
@@ -213,6 +216,12 @@ beforeEach(() => {
     changeStatus: jest.fn(async (id, _ws, status) => setStatus(id, status)),
     updateFsTicket: jest.fn(async (id, _ws, input) => setStatus(id, input.status)),
     deleteTicket: jest.fn(async (id) => setStatus(id, 'Deleted')),
+    // A system note, as ticketService stores one (authorType 'system').
+    addPrivateNote: jest.fn(async (id, ws, input) => ({ entry: await prismaMock.ticketThreadEntry.create({ data: { ticketId: id, workspaceId: ws, eventType: 'note', isPrivate: true, authorType: 'system', bodyText: input.bodyText } }) })),
+  };
+  links = {
+    link: jest.fn(async (ticketId, ws, { relatedTicketId, kind }) => ({ id: 4400 + ticketId, ticketId, relatedTicketId, kind, workspaceId: ws })),
+    unlink: jest.fn(async () => ({ deleted: true })),
   };
   attachments = { removeForThreadEntry: jest.fn(async () => 0) };
   mirror = { enqueueThreadEntryDelete: jest.fn(async () => {}) };
@@ -225,6 +234,7 @@ beforeEach(() => {
   svc._attachments = async () => attachments;
   svc._mirror = async () => mirror;
   svc._noiseRules = async () => noiseRules;
+  svc._links = async () => links;
 
   // The hold queue's own paths, as far as triage can see them.
   holdMock.attach.mockImplementation(async (id, ticketId, actor) => {
@@ -276,6 +286,19 @@ describe('reading a mail without a model', () => {
     expect(referenceNumbers('Statement 20261110', 'Dated 2026-11-10, 70 Days, 3 items')).toEqual([]);
     // Only the first lines of the text: a phone number in a signature is not a reference.
     expect(referenceNumbers('Hello', `${'line\n'.repeat(14)}Phone 6045550101`)).toEqual([]);
+  });
+
+  test('reference numbers (22 Nov 2026): a project number is never one; a dashed invoice number is', () => {
+    // Seven digits and .NN or -NN: a project (phase), shared by many matters.
+    expect(referenceNumbers('RE: Project 2000010.02.11 - invoice approval')).toEqual([]);
+    expect(referenceNumbers('Time sheets for 2636058-03.01', 'Coded to 2000010.02.11 as before.')).toEqual([]);
+    expect(referenceNumbers('Project no. 2636058-03', 'Job 2000010.02')).toEqual([]);
+    // An invoice beside a project number is still found.
+    expect(referenceNumbers('Invoice 4053377 for project 2000010.02.11')).toEqual(['4053377']);
+    // Dashed invoice numbers are references; dates and phone numbers are not.
+    expect(referenceNumbers('FW: Payment notice 2-756-67291')).toEqual(['2-756-67291']);
+    expect(referenceNumbers('Remittance', 'Paid invoice 2-756-67291 and 14-220-5518 today')).toEqual(['2-756-67291', '14-220-5518']);
+    expect(referenceNumbers('Statement 2026-11-10', 'Call 604-555-0101 or 1-800-555-0101, dated 10-11-2026')).toEqual([]);
   });
 
   test('the new text leaves the quoted history out', () => {
@@ -874,7 +897,7 @@ describe('judging a held mail', () => {
     setMode('on');
     noiseRules._getRules.mockResolvedValue([{ mode: 'never_noise', regex: /./, senderRegex: /^alerts@monitor\.example$/ }, { mode: 'never_noise', regex: /courier/i, senderRegex: null }]);
     reply(answer({ action: 'create' }));
-    const row = await svc.judge(held({ subject: 'Disk is filling up', fromEmail: 'alerts@monitor.example' }).id);
+    const row = await svc.judge(held({ subject: 'Disk is filling up', fromEmail: 'alerts@monitor.example', reason: 'sender_burst' }).id);
     expect(row).toMatchObject({ outcome: 'suggested', action: 'create' });
     expect(row.guards.noAuto).toEqual(['The sender is covered by a never-noise rule.']);
     expect(holdMock.createTicket).not.toHaveBeenCalled();
@@ -1050,7 +1073,7 @@ describe('a person decides', () => {
     const none = await suggested(answer({ action: 'no_ticket' }));
     const unsure = await suggested(answer({ action: 'unsure', confidence: 'unsure' }));
     db.requester.push({ id: 7, email: 'backup-watch@example.org', unattended: true });
-    const robot = await suggested(answer({ action: 'create' }), { fromEmail: 'backup-watch@example.org', subject: 'Something new failed' });
+    const robot = await suggested(answer({ action: 'create' }), { fromEmail: 'backup-watch@example.org', subject: 'Something new failed', reason: 'sender_burst' });
     const plain = held();
     const res = await svc.bulkAccept(WS, [sure.h.id, likely.h.id, none.h.id, unsure.h.id, robot.h.id, plain.h?.id || plain.id, 99999], AGENT);
     expect(res.accepted).toEqual([sure.h.id]);
@@ -1462,5 +1485,311 @@ describe('the loop and the housekeeping', () => {
       svc._timer = null;
     }
     expect(singleton).toBeInstanceOf(MailTriageService);
+  });
+});
+
+describe('follow-up holds (22 Nov 2026): new tickets at "likely", and the fallback to a new ticket', () => {
+  const mailboxes = new Set(['artickets@example.org']);
+  const FU = { holdReason: 'possible_follow_up', sender: 'robin.vale@client.example', mailboxes };
+  const AR = { holdReason: 'agent_reply_no_requester', sender: 'pat.agent@example.org', mailboxes };
+  const cands = [
+    { id: 11, hard: false, strong: true, closed: false, open: true },
+    { id: 12, hard: false, strong: true, closed: true, open: false },
+    { id: 13, hard: true, strong: true, closed: true, open: false },
+    { id: 14, hard: false, strong: true, closed: true, open: false, pendingApproval: true },
+  ];
+
+  describe('guardDecision', () => {
+    test('a new ticket at "likely" or "sure" is applied for both follow-up holds when a real requester resolves', () => {
+      const likely = guardDecision(answer({ action: 'create', confidence: 'likely' }), cands, FU);
+      expect(likely).toMatchObject({ action: 'create', confidence: 'likely', requesterEmail: null, noAuto: [], autoApply: true, fallback: null });
+      // "Sure" beside a same-subject ticket is lowered to "likely", and is still applied here.
+      const sure = guardDecision(answer({ action: 'create', confidence: 'sure' }), cands, FU);
+      expect(sure).toMatchObject({ confidence: 'likely', autoApply: true });
+      expect(guardDecision(answer({ action: 'create', confidence: 'sure' }), [], FU)).toMatchObject({ confidence: 'sure', autoApply: true });
+      // An agent's copied mail: the person the ingest picked is the requester when the AI named nobody.
+      const copied = guardDecision(answer({ action: 'create', confidence: 'likely' }), cands, { ...FU, sender: 'pat.agent@example.org', ingestRequester: 'ap@newclient.example' });
+      expect(copied).toMatchObject({ requesterEmail: 'ap@newclient.example', autoApply: true });
+      // agent_reply_no_requester: the AI names the requester, and it is not the team member who sent it.
+      expect(guardDecision(answer({ action: 'create', confidence: 'likely', requesterEmail: 'ap@newclient.example' }), cands, AR)).toMatchObject({ requesterEmail: 'ap@newclient.example', autoApply: true });
+      expect(guardDecision(answer({ action: 'create', confidence: 'sure', requesterEmail: 'ap@newclient.example' }), [], AR).autoApply).toBe(true);
+    });
+
+    test('no real requester: the new ticket waits (none named, the sender itself, or the mailbox)', () => {
+      const none = guardDecision(answer({ action: 'create', confidence: 'likely' }), cands, AR);
+      expect(none).toMatchObject({ autoApply: false, noAuto: ['Nobody but the team member who sent it could be the requester.'] });
+      expect(guardDecision(answer({ action: 'create', confidence: 'sure', requesterEmail: 'Pat.Agent@example.org' }), [], AR).autoApply).toBe(false);
+      const box = guardDecision(answer({ action: 'create', confidence: 'likely', requesterEmail: 'artickets@example.org' }), cands, AR);
+      expect(box.guards).toContain('The AI named the mailbox itself as the requester; that was dropped.');
+      expect(box.autoApply).toBe(false);
+      const fromBox = guardDecision(answer({ action: 'create', confidence: 'likely' }), cands, { ...FU, sender: 'artickets@example.org' });
+      expect(fromBox).toMatchObject({ autoApply: false, noAuto: ['No requester could be worked out for a new ticket.'] });
+    });
+
+    test('other hold reasons keep the "sure" rule; callers without a hold reason are unchanged', () => {
+      for (const holdReason of ['unknown_reference', 'ambiguous_sender', 'sender_burst', undefined]) {
+        const ctx = { holdReason, sender: 'robin.vale@client.example', mailboxes };
+        expect(guardDecision(answer({ action: 'create', confidence: 'likely' }), cands, ctx)).toMatchObject({ autoApply: false, noAuto: ['The AI is only "likely".'], fallback: null });
+        expect(guardDecision(answer({ action: 'create', confidence: 'sure' }), [], ctx)).toMatchObject({ autoApply: true });
+        expect(guardDecision(answer({ action: 'unsure', confidence: 'unsure', ticketId: 12 }), cands, ctx)).toMatchObject({ action: 'unsure', autoApply: false, fallback: null });
+        expect(guardDecision(answer({ action: 'attach', ticketId: 12, confidence: 'likely' }), cands, ctx)).toMatchObject({ action: 'attach', autoApply: false, fallback: null });
+      }
+    });
+
+    test('fallback (a): the AI is unsure, with any action, so the follow-up becomes a new ticket linked to its guess or the best candidate', () => {
+      const guess = guardDecision(answer({ action: 'unsure', confidence: 'unsure', ticketId: 12, relatedTicketIds: [11] }), cands, FU);
+      expect(guess).toMatchObject({
+        action: 'create', ticketId: null, reopen: false, requesterEmail: null, relatedTicketIds: [12, 11], confidence: 'unsure', noAuto: [], autoApply: true,
+        fallback: { kind: 'unsure', relatedTicketId: 12, aiAction: 'unsure', aiConfidence: 'unsure', aiTicketId: 12 },
+      });
+      expect(guess.guards[0]).toMatch(/not sure, so it becomes a new ticket/);
+      // No guess: the best candidate (the list is best first).
+      expect(guardDecision(answer({ action: 'unsure', confidence: 'unsure' }), cands, FU).fallback.relatedTicketId).toBe(11);
+      // "Unsure" with any action.
+      expect(guardDecision(answer({ action: 'attach', ticketId: 11, confidence: 'unsure' }), cands, FU).fallback).toMatchObject({ kind: 'unsure', relatedTicketId: 11 });
+      expect(guardDecision(answer({ action: 'no_ticket', confidence: 'unsure' }), cands, FU).fallback.kind).toBe('unsure');
+      expect(guardDecision(answer({ action: 'create', confidence: 'unsure' }), cands, FU)).toMatchObject({ action: 'create', autoApply: true, fallback: { kind: 'unsure' } });
+      // The requester is the ingest's own (an agent's copied mail), else the sender.
+      expect(guardDecision(answer({ action: 'unsure', confidence: 'unsure' }), cands, { ...FU, ingestRequester: 'ap@newclient.example' }).requesterEmail).toBe('ap@newclient.example');
+      // No candidates at all: still a new ticket, with nothing to link.
+      expect(guardDecision(answer({ action: 'unsure', confidence: 'unsure' }), [], FU)).toMatchObject({ autoApply: true, relatedTicketIds: [], fallback: { relatedTicketId: null } });
+      // Only possible_follow_up falls back.
+      expect(guardDecision(answer({ action: 'unsure', confidence: 'unsure' }), cands, AR)).toMatchObject({ action: 'unsure', autoApply: false, noAuto: ['The AI is not sure.'] });
+    });
+
+    test('fallback (b): "add" at "likely" to a finished ticket becomes a new ticket linked to that ticket', () => {
+      const d = guardDecision(answer({ action: 'attach', ticketId: 12, confidence: 'likely', reopen: true }), cands, FU);
+      expect(d).toMatchObject({ action: 'create', ticketId: null, reopen: false, relatedTicketIds: [12], confidence: 'likely', autoApply: true, fallback: { kind: 'finished', relatedTicketId: 12, aiAction: 'attach', aiTicketId: 12 } });
+      expect(d.guards[0]).toMatch(/already finished/);
+      // "Sure" without a hard link is "likely", so the same.
+      expect(guardDecision(answer({ action: 'attach', ticketId: 12, confidence: 'sure' }), cands, FU).fallback.kind).toBe('finished');
+      // "Sure" with a hard link is added to the finished ticket, as before.
+      expect(guardDecision(answer({ action: 'attach', ticketId: 13, confidence: 'sure' }), cands, FU)).toMatchObject({ action: 'attach', ticketId: 13, autoApply: true, fallback: null });
+    });
+
+    test('fallback (c): the last judgement allowed failed, so the follow-up becomes a new ticket linked to the best candidate', () => {
+      const d = guardDecision(null, cands, { ...FU, lastTry: true });
+      expect(d).toMatchObject({ action: 'create', relatedTicketIds: [11], confidence: 'unsure', autoApply: true, fallback: { kind: 'failed', relatedTicketId: 11 }, failure: 'The model returned no structured answer' });
+      expect(guardDecision(answer({ action: 'merge' }), cands, { ...FU, lastTry: true }).fallback.kind).toBe('failed');
+      expect(guardFailedJudgement('All configured AI providers failed', cands, FU)).toMatchObject({ autoApply: true, fallback: { kind: 'failed' } });
+      // Not the last try, or another hold reason: the failure is recorded and the mail waits.
+      expect(() => guardDecision(null, cands, FU)).toThrow(/no structured answer/);
+      expect(() => guardDecision(null, cands, { ...AR, lastTry: true })).toThrow(/no structured answer/);
+      expect(guardFailedJudgement('timeout', cands, AR)).toBeNull();
+      expect(MAX_JUDGEMENTS).toBe(3);
+    });
+
+    test('"add" at "sure" to an OPEN ticket with a hard link still files, as today, for every hold reason', () => {
+      const open = [{ id: 31, hard: true, strong: true, closed: false, open: true }, ...cands];
+      for (const ctx of [FU, AR, { holdReason: 'unknown_reference', sender: 'robin.vale@client.example', mailboxes }, {}]) {
+        expect(guardDecision(answer({ action: 'attach', ticketId: 31, confidence: 'sure', reopen: true }), open, ctx)).toMatchObject({
+          action: 'attach', ticketId: 31, confidence: 'sure', reopen: false, noAuto: [], autoApply: true, fallback: null,
+        });
+      }
+    });
+
+    test('kept for a person: "add" at "likely" to an open ticket, and "no ticket needed" at "likely" or "sure"', () => {
+      expect(guardDecision(answer({ action: 'attach', ticketId: 11, confidence: 'likely' }), cands, FU)).toMatchObject({ action: 'attach', ticketId: 11, autoApply: false, fallback: null, noAuto: ['The AI is only "likely".'] });
+      for (const confidence of ['likely', 'sure']) {
+        expect(guardDecision(answer({ action: 'no_ticket', confidence }), cands, FU)).toMatchObject({ action: 'no_ticket', autoApply: false, noAuto: ['"No ticket needed" is always a suggestion.'] });
+      }
+    });
+
+    test('every protective guard still wins over the new rules', () => {
+      const unsure = answer({ action: 'unsure', confidence: 'unsure', ticketId: 12 });
+      const finished = answer({ action: 'attach', ticketId: 12, confidence: 'likely' });
+      const likelyNew = answer({ action: 'create', confidence: 'likely' });
+      // Unattended and never-noise senders.
+      for (const flag of [{ unattended: true }, { protectedSender: true }]) {
+        for (const parsed of [unsure, finished, likelyNew]) {
+          const d = guardDecision(parsed, cands, { ...FU, ...flag });
+          expect(d.autoApply).toBe(false);
+          expect(d.fallback).toBeNull();
+        }
+        expect(guardFailedJudgement('timeout', cands, { ...FU, ...flag })).toBeNull();
+      }
+      expect(guardDecision(unsure, cands, { ...FU, unattended: true }).noAuto).toContain('The sender is an unattended alert or integration mailbox.');
+      // A decision that was undone.
+      expect(guardDecision(finished, cands, { ...FU, priorUndone: true })).toMatchObject({ action: 'attach', autoApply: false, fallback: null });
+      expect(guardDecision(likelyNew, cands, { ...FU, priorUndone: true }).autoApply).toBe(false);
+      // An approval waiting on the ticket it would be linked to.
+      const approval = guardDecision(answer({ action: 'attach', ticketId: 14, confidence: 'likely' }), cands, FU);
+      expect(approval).toMatchObject({ action: 'attach', autoApply: false, fallback: null });
+      expect(approval.noAuto).toContain('The related ticket has an approval waiting, so a person decides.');
+      // Machine mail: never filed on a guess, never a new ticket at "likely" (it never reopens either).
+      expect(guardDecision(unsure, cands, { ...FU, machine: true })).toMatchObject({ action: 'unsure', autoApply: false, fallback: null });
+      expect(guardDecision(likelyNew, cands, { ...FU, machine: true }).autoApply).toBe(false);
+      expect(guardDecision(answer({ action: 'attach', ticketId: 13, reopen: true }), cands, { ...FU, machine: true })).toMatchObject({ reopen: false, autoApply: true });
+      expect(guardFailedJudgement('timeout', cands, { ...FU, machine: true })).toBeNull();
+      // The AI's ticket must be a candidate: a ticket outside the list waits, it does not fall back.
+      const outside = guardDecision(answer({ action: 'attach', ticketId: 999, confidence: 'likely' }), cands, FU);
+      expect(outside).toMatchObject({ action: 'unsure', autoApply: false, fallback: null, noAuto: ['The AI is not sure.'] });
+      // The alert-sender guard: a "not sure" the code made never falls back.
+      const alert = guardDecision(answer({ action: 'create' }), [{ id: 21, open: true, sameSender: true, strong: true }], { ...FU, unattended: true });
+      expect(alert).toMatchObject({ action: 'unsure', autoApply: false, fallback: null });
+      // Attach "sure" to a closed ticket with an approval waiting: still never reopened without a person.
+      expect(guardDecision(answer({ action: 'attach', ticketId: 14, reopen: true }), [{ ...cands[3], hard: true }], FU).noAuto[0]).toMatch(/approval waiting/);
+    });
+
+    test('the note and who the ingest would have made the requester', () => {
+      expect(fallbackNote('finished', 'TP-812')).toBe('Filed by Mail triage as a new ticket: it may relate to TP-812, which was already finished.');
+      expect(fallbackNote('unsure', '#249102')).toBe('Filed by Mail triage as a new ticket: it may relate to #249102.');
+      expect(fallbackNote('failed', 'TP-9')).toBe('Filed by Mail triage as a new ticket: it may relate to TP-9.');
+      expect(fallbackNote('failed', null)).toBe('Filed by Mail triage as a new ticket.');
+      expect(ingestRequesterOf({ decision: { rule: 'possible_follow_up', details: { insteadOf: 'agent_cc_intake', requester: 'AP@NewClient.example' } } })).toBe('ap@newclient.example');
+      expect(ingestRequesterOf({ decision: { rule: 'possible_follow_up', details: { insteadOf: 'external_reply_unknown' } } })).toBeNull();
+      expect(ingestRequesterOf({ decision: null })).toBeNull();
+    });
+  });
+
+  describe('judging and undoing', () => {
+    const invoiceSubject = 'Reminder: 70 Days Outstanding Invoice - 4053377 - Northwind Traders';
+    const followUpHeld = (over = {}) => held({
+      reason: 'possible_follow_up', fromEmail: 'robin.vale@client.example', fromName: 'Robin Vale',
+      subject: 'RE: Reminder: 85 Days Outstanding Invoice - 4053377 - Northwind Traders', emailPayload: { bodyText: 'Is this still open?' }, ...over,
+    });
+
+    test('Shadow: the would-be new ticket is logged like any Shadow decision, and nothing is touched', async () => {
+      setMode('shadow');
+      const t = ticket({ subject: invoiceSubject, status: 'Closed', closedAt: ago(10), origin: 'ticketpulse', nativeNumber: 812 });
+      const h = followUpHeld();
+      reply(answer({ action: 'attach', ticketId: t.id, confidence: 'likely', reopen: true }));
+      const row = await svc.judge(h.id);
+      expect(row).toMatchObject({ outcome: 'suggested', mode: 'shadow', action: 'create', ticketId: null, relatedTicketIds: [t.id], confidence: 'likely' });
+      expect(row.guards.fallback).toMatchObject({ kind: 'finished', relatedTicketId: t.id, aiAction: 'attach' });
+      expect(row.guards.noAuto).toEqual([]);
+      expect(row.raw).toMatchObject({ action: 'attach', ticketId: t.id }); // the AI's own answer is kept
+      expect(holdMock.createTicket).not.toHaveBeenCalled();
+      expect(links.link).not.toHaveBeenCalled();
+      expect(tickets.addPrivateNote).not.toHaveBeenCalled();
+      expect(h.status).toBe('held');
+      // The Shadow view: a new ticket for the sender, that would not need a person.
+      const item = await svc.item(WS, h.id);
+      expect(item.suggestion).toMatchObject({ action: 'create', mode: 'shadow', needsPerson: [], requester: { email: 'robin.vale@client.example' } });
+    });
+
+    test('On: a finished ticket at "likely" files a new ticket, links it, notes why; undo removes the link and the ticket', async () => {
+      setMode('on');
+      const t = ticket({ subject: invoiceSubject, status: 'Closed', closedAt: ago(10), origin: 'ticketpulse', nativeNumber: 812 });
+      const h = followUpHeld();
+      reply(answer({ action: 'attach', ticketId: t.id, confidence: 'likely' }));
+      const row = await svc.judge(h.id);
+      expect(holdMock.attach).not.toHaveBeenCalled();
+      expect(holdMock.createTicket).toHaveBeenCalledWith(h.id, { requesterEmail: null, actor: TRIAGE_ACTOR, workspaceId: WS });
+      const made = db.ticket[db.ticket.length - 1];
+      expect(links.link).toHaveBeenCalledWith(made.id, WS, { relatedTicketId: t.id, kind: 'related_to' }, TRIAGE_ACTOR);
+      expect(tickets.addPrivateNote).toHaveBeenCalledWith(made.id, WS, { bodyText: 'Filed by Mail triage as a new ticket: it may relate to TP-812, which was already finished.' }, TRIAGE_ACTOR, [], { systemNote: true });
+      expect(row).toMatchObject({ outcome: 'applied', finalAction: 'create', finalTicketId: made.id });
+      expect(row.undo).toMatchObject({ kind: 'create', ticketId: made.id, fallback: 'finished', relatedTicketId: t.id, linkId: 4400 + made.id });
+      expect(row.undo.noteEntryId).toEqual(expect.any(Number));
+      expect(t.status).toBe('Closed'); // never reopened
+
+      // The system note is not "somebody worked it": undo goes ahead, the link first.
+      await svc.undo(WS, h.id, AGENT);
+      expect(links.unlink).toHaveBeenCalledWith(made.id, WS, 4400 + made.id, AGENT);
+      expect(tickets.deleteTicket).toHaveBeenCalledWith(made.id, WS, AGENT);
+      expect(links.unlink.mock.invocationCallOrder[0]).toBeLessThan(tickets.deleteTicket.mock.invocationCallOrder[0]);
+      expect(h.status).toBe('held');
+      expect(db.mailTriageDecision.find((d) => d.id === row.id)).toMatchObject({ outcome: 'undone' });
+    });
+
+    test('On: a fallback ticket somebody worked cannot be undone, and keeps its link', async () => {
+      setMode('on');
+      ticket({ subject: invoiceSubject, status: 'Resolved', resolvedAt: ago(3), origin: 'ticketpulse', nativeNumber: 813 });
+      const h = followUpHeld();
+      reply(answer({ action: 'unsure', confidence: 'unsure' }));
+      await svc.judge(h.id);
+      const made = db.ticket[db.ticket.length - 1];
+      expect(tickets.addPrivateNote.mock.calls[0][2]).toEqual({ bodyText: 'Filed by Mail triage as a new ticket: it may relate to TP-813.' });
+      db.ticketThreadEntry.push({ id: 9999, ticketId: made.id, authorType: 'agent' });
+      await expect(svc.undo(WS, h.id, AGENT)).rejects.toMatchObject({ statusCode: 409, message: expect.stringMatching(/worked the new ticket/) });
+      expect(links.unlink).not.toHaveBeenCalled();
+      expect(tickets.deleteTicket).not.toHaveBeenCalled();
+    });
+
+    test('On: two follow-ups in a row, each "add" at "sure" to the same OPEN ticket, are both added (no burst downgrade)', async () => {
+      setMode('on');
+      const t = ticket({ subject: invoiceSubject });
+      const first = followUpHeld();
+      const second = followUpHeld({ emailPayload: { bodyText: 'Any news?' } });
+      reply(answer({ action: 'attach', ticketId: t.id, confidence: 'sure' }));
+      const a = await svc.judge(first.id);
+      const b = await svc.judge(second.id);
+      for (const row of [a, b]) expect(row).toMatchObject({ outcome: 'applied', action: 'attach', confidence: 'sure', finalTicketId: t.id });
+      expect(holdMock.attach).toHaveBeenCalledTimes(2);
+      expect(holdMock.createTicket).not.toHaveBeenCalled();
+    });
+
+    test('On: an "add" at "likely" to an OPEN ticket still waits for a person', async () => {
+      setMode('on');
+      const t = ticket({ subject: invoiceSubject });
+      const row = await (async () => { reply(answer({ action: 'attach', ticketId: t.id, confidence: 'likely' })); return svc.judge(followUpHeld().id); })();
+      expect(row).toMatchObject({ outcome: 'suggested', action: 'attach', ticketId: t.id });
+      expect(holdMock.attach).not.toHaveBeenCalled();
+      expect(holdMock.createTicket).not.toHaveBeenCalled();
+    });
+
+    test('On: a new ticket at "likely" is applied for a follow-up hold, with no link and no note', async () => {
+      setMode('on');
+      ticket({ subject: invoiceSubject });
+      reply(answer({ action: 'create', confidence: 'likely' }));
+      const row = await svc.judge(followUpHeld().id);
+      expect(row).toMatchObject({ outcome: 'applied', finalAction: 'create', confidence: 'likely' });
+      expect(row.undo.fallback).toBeUndefined();
+      expect(links.link).not.toHaveBeenCalled();
+      expect(tickets.addPrivateNote).not.toHaveBeenCalled();
+    });
+
+    test('On: three failed judgements, and the third files a new ticket linked to the best candidate (fallback c)', async () => {
+      setMode('on');
+      const t = ticket({ subject: invoiceSubject, status: 'Open', origin: 'ticketpulse', nativeNumber: 814 });
+      const h = followUpHeld();
+      gateway.sendJson.mockRejectedValue(new Error('All configured AI providers failed'));
+      expect((await svc.judge(h.id)).outcome).toBe('failed');
+      expect((await svc.judge(h.id)).outcome).toBe('failed');
+      expect(holdMock.createTicket).not.toHaveBeenCalled();
+      const third = await svc.judge(h.id);
+      expect(third).toMatchObject({ outcome: 'applied', action: 'create', finalAction: 'create', relatedTicketIds: [t.id], error: 'Judgement failed: All configured AI providers failed' });
+      expect(third.guards.fallback).toMatchObject({ kind: 'failed', relatedTicketId: t.id });
+      expect(tickets.addPrivateNote.mock.calls[0][2]).toEqual({ bodyText: 'Filed by Mail triage as a new ticket: it may relate to TP-814.' });
+      expect(await svc.judge(h.id)).toBeNull(); // nothing more to judge
+
+      // An unusable answer on the last try falls back the same way; another hold reason just fails.
+      reply({ action: 'do_everything', confidence: 'sure' });
+      const other = held({ reason: 'agent_reply_no_requester', subject: 'RE: Reminder: 85 Days Outstanding Invoice - 4053377 - Northwind Traders' });
+      for (let i = 0; i < 3; i += 1) expect((await svc.judge(other.id)).outcome).toBe('failed');
+      expect(other.status).toBe('held');
+    });
+
+    test('a failure while another suggestion still stands is not a fallback', async () => {
+      setMode('on');
+      const t = ticket({ subject: invoiceSubject });
+      const h = followUpHeld();
+      reply(answer({ action: 'attach', ticketId: t.id, confidence: 'likely' }));
+      await svc.judge(h.id);
+      ticket({ subject: 'Second ticket', descriptionText: 'about invoice 4053377' });
+      gateway.sendJson.mockRejectedValue(new Error('timeout'));
+      await svc.judge(h.id);
+      ticket({ subject: 'Third ticket', descriptionText: 'about invoice 4053377' });
+      expect((await svc.judge(h.id)).outcome).toBe('failed');
+      expect(holdMock.createTicket).not.toHaveBeenCalled();
+      expect(h.status).toBe('held');
+    });
+
+    test('reference numbers in the candidate finder: a project number is no hard link; a dashed invoice number is', async () => {
+      const project = ticket({ subject: 'Project 2000010.02.11 - time sheets', requester: { name: 'Eli Park', email: 'eli.park@example.org', unattended: false } });
+      const invoice = ticket({ subject: 'Payment notice 2-756-67291 - Contoso', requester: { name: 'Dana Fox', email: 'dana.fox@contoso.example', unattended: false } });
+      const fromProject = await svc.findCandidates(held({ subject: 'Project 2000010.02.11 - invoice approval', fromEmail: 'sam.okafor@vendor.example', emailPayload: { bodyText: 'Please approve.' } }), { semantic: false });
+      expect(fromProject.candidates.find((c) => c.ticket.id === project.id)?.sources || []).not.toContain('reference');
+      // The mail writes the seven digits alone; the ticket has them only as a project number: no link either.
+      const bare = await svc.findCandidates(held({ subject: 'Invoice approval 2000010', fromEmail: 'sam.okafor@vendor.example', emailPayload: { bodyText: 'Please approve.' } }), { semantic: false });
+      expect(bare.candidates.find((c) => c.ticket.id === project.id)?.sources || []).not.toContain('reference');
+      expect(hasNumber('Project 2000010.02.11 - time sheets', '2000010')).toBe(false);
+      expect(hasNumber('Invoice 2000010, project 2000010.02.11', '2000010')).toBe(true);
+      expect(hasNumber('Invoice 4053377-01 paid', '4053377')).toBe(false);
+      expect(hasNumber('Invoice 4053377 paid', '4053377')).toBe(true);
+      const forward = await svc.findCandidates(held({ subject: 'FW: Payment notice 2-756-67291', fromEmail: 'priya.nair@example.org', emailPayload: { bodyText: 'Forwarding the notice.' } }), { semantic: false });
+      expect(forward.candidates.find((c) => c.ticket.id === invoice.id)).toMatchObject({ hard: true, strong: true, sources: expect.arrayContaining(['reference']) });
+    });
   });
 });

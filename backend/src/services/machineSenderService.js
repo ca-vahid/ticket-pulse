@@ -150,19 +150,20 @@ export async function machineSenderMatch(workspaceId, address) {
  * senders taken off (with the entry each matched). Never throws: on any error
  * nothing is removed.
  */
-export async function splitMachineRecipients({ workspaceId, to = [], cc = [] } = {}) {
+export async function splitMachineRecipients({ workspaceId, to = [], cc = [], bcc = [] } = {}) {
   try {
     const { entries } = await getMachineSenders(workspaceId);
     const removed = [];
-    const keep = (list) => list.filter((address) => {
+    const keep = (list, field) => list.filter((address) => {
       const hit = entries.find((e) => entryMatches(e.value, address));
-      if (hit) removed.push({ address: lc(address), entry: hit.value });
+      // `field` only for Bcc (22 Nov 2026): To/Cc records keep their old shape.
+      if (hit) removed.push({ address: lc(address), entry: hit.value, ...(field ? { field } : {}) });
       return !hit;
     });
-    return { to: keep(to), cc: keep(cc), removed };
+    return { to: keep(to), cc: keep(cc), bcc: keep(bcc, 'bcc'), removed };
   } catch (err) {
     logger.debug(`Machine senders skipped: ${err.message}`);
-    return { to: [...to], cc: [...cc], removed: [] };
+    return { to: [...to], cc: [...cc], bcc: [...bcc], removed: [] };
   }
 }
 

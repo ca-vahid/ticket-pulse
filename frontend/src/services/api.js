@@ -2457,3 +2457,10 @@ export const dashboardViewersAPI = {
   list: (workspaceId) => api.get(`/workspaces/${workspaceId}/dashboard-viewers`),
   set: (workspaceId, technicianId, enabled) => api.put(`/workspaces/${workspaceId}/dashboard-viewers/${technicianId}`, { enabled }),
 };
+
+// ---- 22 Nov 2026 — reply box warning: does the requester read replies? -------
+// get(ticketId) → { success, data: { kind: 'unattended' | 'machine_sender' | null,
+//   unattended, machineSender } }. Open to agents; a hint, never a refusal.
+export const replyWarningAPI = {
+  get: (ticketId) => api.get(`/tickets/${ticketId}/reply-warning`),
+};

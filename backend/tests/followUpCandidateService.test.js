@@ -73,6 +73,23 @@ test('a shared invoice number matches whatever the words are; a short or glued n
   expect(prismaMock.ticket.findMany).not.toHaveBeenCalled();
 });
 
+test('reference numbers (22 Nov 2026): a project number is no shared number; a dashed invoice number is', async () => {
+  // Seven digits and .NN or -NN name a project, which carries many matters.
+  const project = ticket('Project 2000010.02.11 - time sheets for October');
+  prismaMock.ticket.findMany.mockResolvedValue([project, ticket('Budget for 2636058-03.01')]);
+  expect(await find('Project 2000010.02.11 - invoice approval')).toBeNull();
+  expect(await find('Re: costs on 2636058-03.01 and 2000010.02.11')).toBeNull();
+  // A dashed invoice number: the forward of the same payment notice is a follow-up.
+  const notice = ticket('Payment notice 2-756-67291 - Contoso');
+  prismaMock.ticket.findMany.mockResolvedValue([notice, ticket('Payment notice 2-756-67292 - Contoso')]);
+  const found = await find('FW: Remittance for 2-756-67291');
+  expect(found.candidates).toEqual([{ ticketId: notice.id, why: 'same reference number 2-756-67291' }]);
+  expect(prismaMock.ticket.findMany.mock.calls.at(-1)[0].where.AND[1].OR).toContainEqual({ subject: { contains: '2-756-67291' } });
+  // Dates and phone numbers written with dashes are not references.
+  prismaMock.ticket.findMany.mockResolvedValue([ticket('Call back 604-555-0101 about 2026-11-10')]);
+  expect(await find('Missed call 604-555-0101 on 2026-11-10')).toBeNull();
+});
+
 test('never a candidate: Security (top-level category), onboarding / offboarding, deleted and spam', async () => {
   const subject = 'Laptop for the new project accountant';
   const security = ticket(subject, { internalCategory: { name: 'Phishing', parent: { name: 'Security' } } });

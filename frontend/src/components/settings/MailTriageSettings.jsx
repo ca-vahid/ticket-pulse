@@ -16,7 +16,7 @@ import { agreementSentence } from '../mailReview/mailReviewText';
 export const MAIL_TRIAGE_MODES = [
   { value: 'off', label: 'Off', help: 'The AI does not read held e-mail. Everything waits for a person, as before.' },
   { value: 'shadow', label: 'Shadow', help: 'The AI reads each held e-mail and suggests what to do. Nothing is applied: Mail review shows the suggestion and people decide.' },
-  { value: 'on', label: 'On', help: 'Only suggestions the AI is sure about, and only adding to a ticket or making a new one. It never discards mail.' },
+  { value: 'on', label: 'On', help: 'Adds e-mail to a ticket only when the AI is sure. Makes a new ticket when it is sure, or for a follow-up when it is likely. A follow-up it cannot place, or that belongs on a finished ticket, becomes a new ticket linked to that one. It never discards mail.' },
 ];
 export const GUIDANCE_MAX = 2000;
 const GUIDANCE_PLACEHOLDER = 'Examples:\nRemittance advice notices need no ticket.\nA reply to an invoice reminder belongs on that invoice’s ticket, even when the subject changed.\nMail from our bank is always a new ticket.';
