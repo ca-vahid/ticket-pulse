@@ -1,6 +1,6 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
-import { longNumbers } from '../utils/subjectIdentity.js';
+import { referenceIdentities } from '../utils/subjectIdentity.js';
 
 /**
  * "Looks like a follow-up to an existing ticket" (11 Nov 2026).
@@ -17,7 +17,9 @@ import { longNumbers } from '../utils/subjectIdentity.js';
  *       "Reminder: 105 Days Outstanding Invoice - X" and "… 175 Days … - X"
  *       are the same matter; or
  *   (b) a long reference number in its subject that the mail's subject also
- *       carries (an invoice, a PO; utils/subjectIdentity.js).
+ *       carries (an invoice, a PO, a dashed invoice number such as
+ *       2-756-67291; utils/subjectIdentity.js referenceIdentities). A project
+ *       number (2000010.02.11) is not one: a project carries many matters.
  * Never a candidate: deleted and spam tickets, tickets of the onboarding /
  * offboarding process, and tickets whose top-level category is Security.
  *
@@ -76,7 +78,7 @@ async function onboardingIds(tickets) {
 export async function findFollowUpCandidates(workspaceId, { subject, normalize, isOpen = null, now = Date.now() } = {}) {
   try {
     const key = followUpSubjectKey(typeof normalize === 'function' ? normalize(subject) : subject);
-    const numbers = longNumbers(subject, { now }).slice(0, MAX_NUMBERS);
+    const numbers = referenceIdentities(subject, { now }).slice(0, MAX_NUMBERS);
     const fragment = key.length >= MIN_SUBJECT_KEY ? searchFragment(key) : '';
     const or = [
       ...(fragment.length >= MIN_SUBJECT_KEY ? [{ subject: { contains: fragment, mode: 'insensitive' } }] : []),
@@ -103,7 +105,7 @@ export async function findFollowUpCandidates(workspaceId, { subject, normalize, 
     for (const t of rows) {
       if (['Deleted', 'Spam'].includes(t.status) || isSecurity(t)) continue;
       const sameSubject = fragment.length >= MIN_SUBJECT_KEY && followUpSubjectKey(typeof normalize === 'function' ? normalize(t.subject) : t.subject) === key;
-      const theirs = longNumbers(t.subject, { now });
+      const theirs = referenceIdentities(t.subject, { now });
       const shared = numbers.filter((n) => theirs.includes(n));
       if (!sameSubject && !shared.length) continue;
       matched.push({

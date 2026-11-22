@@ -13,6 +13,7 @@ import { requiresResolutionReason } from './resolutionReasonService.js';
 import { pacificMonthStart } from './teamsAssistantSettings.js';
 import { getMailboxAliases } from './mailboxAliasService.js';
 import { followUpSubjectKey } from './followUpCandidateService.js';
+import { dashedReferences, projectNumbers } from '../utils/subjectIdentity.js';
 
 /**
  * Mail triage: an AI reviewer for held e-mail (plans/MAIL_TRIAGE_PLAN.md, Part 2).
@@ -32,14 +33,20 @@ import { followUpSubjectKey } from './followUpCandidateService.js';
  *  3. The guards are code, not prompt (guardDecision): the ticket must be one
  *     of the candidates; "sure" on an attach needs a hard link (a header match,
  *     a shared reference number or the same person); machine mail never
- *     reopens; unattended senders, pending approvals and anything "likely" or
- *     "unsure" are never applied without a person. "No ticket needed" is always
- *     a suggestion.
+ *     reopens; unattended senders and pending approvals are never applied
+ *     without a person. "No ticket needed" is always a suggestion.
+ *  4. Follow-up holds (22 Nov 2026, from a review of Accounting's held mail):
+ *     for `possible_follow_up` and `agent_reply_no_requester` a new ticket at
+ *     "likely" is applied too, when a real requester resolves; and a
+ *     `possible_follow_up` the AI is unsure about, or would add at "likely" to
+ *     a finished ticket, or could not judge at all, becomes a NEW ticket (the
+ *     ingest's own requester) linked as related to the closest ticket, with a
+ *     private note. An attach at "likely" to an open ticket still waits.
  *
  * Modes per workspace (app setting `mail_triage_ws<N>`, default off):
  *   off     nothing is judged
  *   shadow  judged and logged (outcome `suggested`); nothing is touched
- *   on      a "sure" attach or create is applied; everything else waits
+ *   on      what guardDecision marks `autoApply` is applied; everything else waits
  *
  * Every judgement is one row in `mail_triage_decisions` (no e-mail bodies),
  * kept 180 days. A person's decision always wins and is recorded against the
@@ -54,6 +61,10 @@ export const CONFIDENCES = Object.freeze(['sure', 'likely', 'unsure']);
 export const SANDBOX_WORKSPACES = Object.freeze([6, 7, 8, 9]);
 export const MAX_CANDIDATES = 8;
 export const MAX_JUDGEMENTS = 3;
+/** Holds where a new ticket at "likely" is applied (a person almost always made one: 7 of 7, 15–21 Nov 2026). */
+export const FOLLOW_UP_HOLDS = Object.freeze(['possible_follow_up', 'agent_reply_no_requester']);
+/** The hold whose doubtful cases become a new ticket instead of waiting (the ingest's behaviour before 11 Nov 2026). */
+export const FALLBACK_HOLD = 'possible_follow_up';
 export const UNDO_DAYS = 14;
 export const RETENTION_DAYS = 180;
 export const PEOPLE_LOOKBACK_DAYS = 90;
@@ -142,6 +153,11 @@ export function newText(email, max = BODY_CHARS) {
  * the subject and the first lines of the text only (a signature's phone number
  * is not a reference). A ticket number (TP-123, [#249132], "ticket 249132") is
  * NOT a reference: writing a ticket's number in a mail proves nothing.
+ *
+ * 22 Nov 2026: a project number (seven digits and .NN or -NN, 2000010.02.11,
+ * 2636058-03.01) is not a reference either: one project carries many matters,
+ * and Accounting's held mail showed it posing as one. A dashed invoice number
+ * (2-756-67291) is one, so a forward of the same payment notice is a hard link.
  */
 export function referenceNumbers(subject, text = '') {
   const head = String(text || '').split(/\n/).slice(0, 12).join('\n').slice(0, 800);
@@ -150,23 +166,29 @@ export function referenceNumbers(subject, text = '') {
     .replace(/\[\s*#\d+\s*\]/g, ' ')
     .replace(/\b(?:ticket|incident|request|case)\s*(?:no\.?|number|#)?\s*:?\s*#?\d+\b/gi, ' ')
     .replace(/\b(?:INC|SR|CHN|PRB)-\d+\b/gi, ' ');
+  const projects = new Set(projectNumbers(source));
   const out = new Set();
   for (const m of source.matchAll(/(?<![\d.,/:+-])\d{6,14}(?![\d]|[.,/:]\d)/g)) {
     const n = m[0];
     // 20261110 is a date, not an invoice.
     if (/^20\d{2}(0[1-9]|1[0-2])([0-2]\d|3[01])$/.test(n)) continue;
+    if (projects.has(n)) continue;
     out.add(n);
   }
   for (const m of source.matchAll(/\b(?:P\.?O\.?|PO|INV|invoice|project|proj|job|WO|SO|quote|order)\s*(?:no\.?|number|#)?\s*[:#-]?\s*([A-Z]{0,3}-?\d{4,14})\b/gi)) {
     const n = m[1].replace(/^[A-Z]*-?/i, '');
-    if (n.length >= 4) out.add(n);
+    if (n.length >= 4 && !projects.has(n)) out.add(n);
   }
+  for (const n of dashedReferences(source)) out.add(n);
   return [...out].slice(0, 6);
 }
 
 /** Does this number stand on its own in the text (not inside a longer number)? */
-function hasNumber(text, n) {
-  return new RegExp(`(?<!\\d)${n}(?!\\d)`).test(String(text || ''));
+export function hasNumber(text, n) {
+  // A seven-digit number is not the ticket's reference where the ticket writes it as a project
+  // number (2000010.02.11): the mail saying "2000010" alone must not match that (22 Nov 2026).
+  const project = /^\d{7}$/.test(String(n)) ? '(?![.-]\\d{2}(?!\\d))' : '';
+  return new RegExp(`(?<!\\d)${n}(?!\\d)${project}`).test(String(text || ''));
 }
 
 /** A robot or an automatic reply: such mail never reopens a ticket. */
@@ -251,14 +273,25 @@ export function withTicketRefs(text, refById) {
  *
  * @param {object} parsed the structured answer
  * @param {Array} candidates [{ id, hard, strong, closed, open, security, lifecycle, pendingApproval, sameSender }]
- * @param {object} ctx { machine, unattended, protectedSender, priorUndone, mailboxes: Set of the mailbox's own addresses and aliases }
- * @returns {{ action, ticketId, reopen, requesterEmail, relatedTicketIds, confidence, reason, evidence, candidateNotes, guards: string[], noAuto: string[] }}
+ * @param {object} ctx { machine, unattended, protectedSender, priorUndone, mailboxes: Set of the mailbox's own addresses and aliases,
+ *   holdReason (the held row's reason), sender (its From), ingestRequester (who the ingest would have made the requester; null = the sender),
+ *   lastTry (true when this is the last judgement allowed: an unusable answer then falls back instead of throwing) }
+ * @returns {{ action, ticketId, reopen, requesterEmail, relatedTicketIds, confidence, reason, evidence, candidateNotes, guards: string[], noAuto: string[],
+ *   autoApply: boolean, fallback: null | { kind: 'unsure'|'finished'|'failed', relatedTicketId, aiAction, aiConfidence, aiTicketId } }}
+ *   `autoApply`: what On applies by itself (Shadow logs the same decision and changes nothing). `fallback`: the decision
+ *   was turned into a new ticket that is linked as related to `relatedTicketId`, with a private note.
  * @throws when the answer is not usable at all (the caller records `failed`)
  */
 export function guardDecision(parsed, candidates = [], ctx = {}) {
-  if (!parsed || typeof parsed !== 'object') throw new Error('The model returned no structured answer');
-  if (!ACTIONS.includes(parsed.action)) throw new Error(`The model returned an unknown action "${String(parsed.action).slice(0, 40)}"`);
-  if (!CONFIDENCES.includes(parsed.confidence)) throw new Error(`The model returned an unknown confidence "${String(parsed.confidence).slice(0, 40)}"`);
+  let problem = null;
+  if (!parsed || typeof parsed !== 'object') problem = 'The model returned no structured answer';
+  else if (!ACTIONS.includes(parsed.action)) problem = `The model returned an unknown action "${String(parsed.action).slice(0, 40)}"`;
+  else if (!CONFIDENCES.includes(parsed.confidence)) problem = `The model returned an unknown confidence "${String(parsed.confidence).slice(0, 40)}"`;
+  if (problem) {
+    const fallback = ctx.lastTry === true ? guardFailedJudgement(problem, candidates, ctx) : null;
+    if (fallback) return fallback;
+    throw new Error(problem);
+  }
   const byId = new Map(candidates.map((c) => [Number(c.id), c]));
   const guards = [];
   const noAuto = [];
@@ -267,6 +300,8 @@ export function guardDecision(parsed, candidates = [], ctx = {}) {
   let ticketId = Number.isInteger(Number(parsed.ticketId)) && Number(parsed.ticketId) > 0 ? Number(parsed.ticketId) : null;
   let reopen = parsed.reopen === true;
   const senderIsRobot = ctx.unattended === true || ctx.protectedSender === true;
+  // A protective guard made this "not sure" (not the AI): it always waits for a person.
+  let guardMadeUnsure = false;
 
   if (action === 'attach') {
     if (!ticketId || !byId.has(ticketId)) {
@@ -274,6 +309,7 @@ export function guardDecision(parsed, candidates = [], ctx = {}) {
       action = 'unsure';
       confidence = 'unsure';
       ticketId = null;
+      guardMadeUnsure = true;
     }
   } else if (action === 'unsure') {
     // "Not sure" may carry a best guess, from the list only.
@@ -288,6 +324,7 @@ export function guardDecision(parsed, candidates = [], ctx = {}) {
     guards.push('An open ticket from the same alert sender is among the candidates, so a new ticket is only "not sure".');
     action = 'unsure';
     confidence = 'unsure';
+    guardMadeUnsure = true;
   }
 
   if (action !== 'attach' || !target?.closed) {
@@ -311,9 +348,62 @@ export function guardDecision(parsed, candidates = [], ctx = {}) {
 
   if (action === 'unsure') confidence = 'unsure';
 
-  if (action === 'no_ticket') noAuto.push('"No ticket needed" is always a suggestion.');
-  if (action === 'unsure') noAuto.push('The AI is not sure.');
-  if ((action === 'attach' || action === 'create') && confidence !== 'sure') noAuto.push(`The AI is only "${confidence}".`);
+  let requesterEmail = (action === 'create' || action === 'unsure') && EMAIL_RE.test(lc(parsed.requesterEmail)) ? lc(parsed.requesterEmail).slice(0, 255) : null;
+  // The mailbox itself, under its own address or an alias, is never the requester.
+  if (requesterEmail && ctx.mailboxes?.has?.(requesterEmail)) {
+    requesterEmail = null;
+    guards.push('The AI named the mailbox itself as the requester; that was dropped.');
+  }
+  let relatedTicketIds = [...new Set((Array.isArray(parsed.relatedTicketIds) ? parsed.relatedTicketIds : []).map(Number))]
+    .filter((id) => byId.has(id) && id !== ticketId).slice(0, MAX_CANDIDATES);
+
+  const holdReason = ctx.holdReason || null;
+  const followUpHold = FOLLOW_UP_HOLDS.includes(holdReason);
+  // Guards that always leave the mail with a person, whatever the rules below allow.
+  const personFirst = senderIsRobot || ctx.priorUndone === true;
+
+  // Fallback (possible_follow_up only): the AI is unsure (any action), or it would add the mail at "likely"
+  // to a ticket that is already finished. Then the mail becomes a new ticket, as before 11 Nov 2026.
+  let fallback = null;
+  const fallbackBlocks = [];
+  const aiUnsure = !guardMadeUnsure && (parsed.action === 'unsure' || parsed.confidence === 'unsure');
+  const fallbackKind = holdReason !== FALLBACK_HOLD || guardMadeUnsure ? null
+    : aiUnsure ? 'unsure'
+      : action === 'attach' && confidence !== 'sure' && target?.closed ? 'finished' : null;
+  if (fallbackKind) {
+    const relatedId = ticketId && byId.has(ticketId) ? ticketId : (candidates[0] ? Number(candidates[0].id) : null);
+    fallbackBlocks.push(...fallbackBlockers(relatedId ? byId.get(relatedId) : null, ctx));
+    if (!fallbackBlocks.length && !personFirst) {
+      const requester = fallbackRequester(ctx);
+      fallback = { kind: fallbackKind, relatedTicketId: relatedId, aiAction: parsed.action, aiConfidence: parsed.confidence, aiTicketId: ticketId };
+      guards.push(fallbackKind === 'finished'
+        ? 'The ticket the AI picked is already finished and the match is only "likely", so it becomes a new ticket, linked to that ticket as related.'
+        : 'The AI is not sure, so it becomes a new ticket, linked to the closest ticket as related.');
+      action = 'create';
+      ticketId = null;
+      reopen = false;
+      requesterEmail = requester === lc(ctx.sender) ? null : requester;
+      relatedTicketIds = [...new Set([relatedId, ...relatedTicketIds].filter(Boolean))].slice(0, MAX_CANDIDATES);
+    }
+  }
+
+  if (!fallback) {
+    if (action === 'no_ticket') noAuto.push('"No ticket needed" is always a suggestion.');
+    if (action === 'unsure') noAuto.push('The AI is not sure.');
+    if (action === 'attach' && confidence !== 'sure') noAuto.push(`The AI is only "${confidence}".`);
+    if (action === 'create') {
+      if (confidence === 'unsure' || (!followUpHold && confidence !== 'sure')) {
+        noAuto.push(`The AI is only "${confidence}".`);
+      } else if (followUpHold) {
+        // A new ticket at "likely" or "sure" for a follow-up hold: only when a real requester resolves.
+        const resolved = createRequester(requesterEmail, ctx);
+        if (resolved.problem) noAuto.push(resolved.problem);
+        else if (resolved.email !== lc(ctx.sender)) requesterEmail = resolved.email;
+        if (confidence === 'likely' && ctx.machine) noAuto.push('Automatic mail becomes a new ticket by itself only when the AI is "sure".');
+      }
+    }
+    noAuto.push(...fallbackBlocks);
+  }
   if (ctx.unattended) noAuto.push('The sender is an unattended alert or integration mailbox.');
   else if (ctx.protectedSender) noAuto.push('The sender is covered by a never-noise rule.');
   if (action === 'attach' && reopen && target) {
@@ -323,14 +413,6 @@ export function guardDecision(parsed, candidates = [], ctx = {}) {
   }
   if (ctx.priorUndone) noAuto.push('An earlier decision on this mail was undone.');
 
-  let requesterEmail = (action === 'create' || action === 'unsure') && EMAIL_RE.test(lc(parsed.requesterEmail)) ? lc(parsed.requesterEmail).slice(0, 255) : null;
-  // The mailbox itself, under its own address or an alias, is never the requester.
-  if (requesterEmail && ctx.mailboxes?.has?.(requesterEmail)) {
-    requesterEmail = null;
-    guards.push('The AI named the mailbox itself as the requester; that was dropped.');
-  }
-  const relatedTicketIds = [...new Set((Array.isArray(parsed.relatedTicketIds) ? parsed.relatedTicketIds : []).map(Number))]
-    .filter((id) => byId.has(id) && id !== ticketId).slice(0, MAX_CANDIDATES);
   const evidence = (Array.isArray(parsed.evidence) ? parsed.evidence : []).map((e) => clip(e, 160)).filter(Boolean).slice(0, 8);
   const candidateNotes = (Array.isArray(parsed.candidateNotes) ? parsed.candidateNotes : [])
     .filter((n) => byId.has(Number(n?.ticketId)))
@@ -338,7 +420,86 @@ export function guardDecision(parsed, candidates = [], ctx = {}) {
   return {
     action, ticketId, reopen, requesterEmail, relatedTicketIds, confidence,
     reason: clip(parsed.reason, 500) || null, evidence, candidateNotes, guards, noAuto,
+    autoApply: noAuto.length === 0 && (action === 'attach' || action === 'create'),
+    fallback,
   };
+}
+
+const usableAddress = (address, ctx) => {
+  const a = lc(address);
+  return EMAIL_RE.test(a) && !ctx.mailboxes?.has?.(a) ? a.slice(0, 255) : null;
+};
+
+/** Who a fallback ticket is for: the ingest's own requester (an agent's copied mail: the person it was written to), else the sender. */
+function fallbackRequester(ctx) {
+  return usableAddress(ctx.ingestRequester, ctx) || usableAddress(ctx.sender, ctx);
+}
+
+/**
+ * The requester of a new ticket on a follow-up hold. possible_follow_up: the AI's, else the ingest's, else
+ * the sender. agent_reply_no_requester: the hold exists because the sender (a team member) is not the
+ * requester, so the AI must name somebody else.
+ */
+function createRequester(aiRequester, ctx) {
+  const sender = lc(ctx.sender);
+  if (ctx.holdReason === 'agent_reply_no_requester') {
+    if (!aiRequester || aiRequester === sender) return { problem: 'Nobody but the team member who sent it could be the requester.' };
+    return { email: aiRequester };
+  }
+  const email = aiRequester || fallbackRequester(ctx);
+  return email ? { email } : { problem: 'No requester could be worked out for a new ticket.' };
+}
+
+/** Why a fallback new ticket must wait for a person (none = it may go ahead). */
+function fallbackBlockers(related, ctx) {
+  const out = [];
+  if (ctx.machine) out.push('Automatic mail is never filed as a new ticket on a guess.');
+  if (!fallbackRequester(ctx)) out.push('No requester could be worked out for a new ticket.');
+  if (related?.pendingApproval) out.push('The related ticket has an approval waiting, so a person decides.');
+  if (related?.security || related?.lifecycle) out.push('The related ticket is a Security, onboarding or offboarding ticket, so a person decides.');
+  return out;
+}
+
+/**
+ * Fallback (c): the last judgement allowed failed (the call, or an unusable answer). A possible_follow_up
+ * then becomes a new ticket linked to the best candidate, unless a guard wants a person. null = it stays
+ * held (the caller records `failed`).
+ */
+export function guardFailedJudgement(problem, candidates = [], ctx = {}) {
+  if (ctx.holdReason !== FALLBACK_HOLD) return null;
+  if (ctx.unattended === true || ctx.protectedSender === true || ctx.priorUndone === true) return null;
+  const related = candidates[0] || null;
+  if (fallbackBlockers(related, ctx).length) return null;
+  const requester = fallbackRequester(ctx);
+  const relatedTicketId = related ? Number(related.id) : null;
+  return {
+    action: 'create', ticketId: null, reopen: false,
+    requesterEmail: requester === lc(ctx.sender) ? null : requester,
+    relatedTicketIds: relatedTicketId ? [relatedTicketId] : [],
+    confidence: 'unsure',
+    reason: 'The AI could not judge this e-mail.',
+    evidence: [], candidateNotes: [],
+    guards: [`The AI could not judge this e-mail in ${MAX_JUDGEMENTS} tries, so it becomes a new ticket, linked to the closest ticket as related.`],
+    noAuto: [],
+    autoApply: true,
+    fallback: { kind: 'failed', relatedTicketId, aiAction: null, aiConfidence: null, aiTicketId: null },
+    failure: clip(problem, 300) || 'The judgement failed',
+  };
+}
+
+/** The private note on a fallback ticket. `ref`: the related ticket's reference (TP-12 / #249102), or null. */
+export function fallbackNote(kind, ref) {
+  if (!ref) return 'Filed by Mail triage as a new ticket.';
+  return kind === 'finished'
+    ? `Filed by Mail triage as a new ticket: it may relate to ${ref}, which was already finished.`
+    : `Filed by Mail triage as a new ticket: it may relate to ${ref}.`;
+}
+
+/** Who the ingest would have made the requester of a held mail (null = the sender). */
+export function ingestRequesterOf(held) {
+  const details = held?.decision && typeof held.decision === 'object' ? held.decision.details : null;
+  if (details?.insteadOf === 'agent_cc_intake' && EMAIL_RE.test(lc(details.requester))) return lc(details.requester);
+  return null;
 }
 
 // ---- the service --------------------------------------------------------------
@@ -361,6 +522,7 @@ class MailTriageService {
   async _tickets() { return (await import('./ticketService.js')).default; }
   async _attachments() { return (await import('./attachmentService.js')).default; }
   async _mirror() { return (await import('./mirrorService.js')).default; }
+  async _links() { return (await import('./ticketLinkService.js')).default; }
   async _noiseRules() { return (await import('./noiseRuleService.js')).default; }
   _table() {
     const t = prisma.mailTriageDecision;
@@ -805,6 +967,15 @@ class MailTriageService {
       candidates: candidates.map((c) => ({ id: c.ticket.id, score: c.score, why: c.why, hard: c.hard, aiNote: null })),
       candidateKey: found.key,
     };
+    const guardCandidates = candidates.map((c) => ({
+      id: c.ticket.id, hard: c.hard, strong: c.strong, closed: c.closed, open: c.open, security: c.security, lifecycle: c.lifecycle, pendingApproval: c.pendingApproval, sameSender: c.sameSender,
+    }));
+    // The last judgement allowed, with no suggestion standing: a failure then falls back (possible_follow_up).
+    const lastTry = judgements.length + 1 >= MAX_JUDGEMENTS && !earlier.some((d) => d.outcome === 'suggested');
+    const guardCtx = {
+      machine, ...flags, priorUndone, mailboxes: found.mailboxes,
+      holdReason: held.reason, sender: held.fromEmail || null, ingestRequester: ingestRequesterOf(held), lastTry,
+    };
 
     const started = Date.now();
     let response = null;
@@ -821,22 +992,34 @@ class MailTriageService {
         extra: { jsonSchema: ANSWER_SCHEMA },
       });
     } catch (err) {
-      logger.warn(`Mail triage: the call for held #${heldId} failed; the mail stays held (${err.message})`);
-      return table.create({ data: { ...base, outcome: 'failed', latencyMs: Date.now() - started, error: clip(err.message, 300) } });
+      const fallback = lastTry ? guardFailedJudgement(err.message, guardCandidates, guardCtx) : null;
+      if (!fallback) {
+        logger.warn(`Mail triage: the call for held #${heldId} failed; the mail stays held (${err.message})`);
+        return table.create({ data: { ...base, outcome: 'failed', latencyMs: Date.now() - started, error: clip(err.message, 300) } });
+      }
+      logger.warn(`Mail triage: the last call for held #${heldId} failed (${err.message}); it falls back to a new ticket`);
+      return this._record(held, settings, base, { latencyMs: Date.now() - started }, fallback, { candidates, flags, machine, raw: null });
     }
     const usage = await this._usage(response);
     const meta = { provider: response?.provider || null, model: response?.model || null, ...usage, latencyMs: Date.now() - started };
 
     let decided;
     try {
-      decided = guardDecision(response?.parsed, candidates.map((c) => ({
-        id: c.ticket.id, hard: c.hard, strong: c.strong, closed: c.closed, open: c.open, security: c.security, lifecycle: c.lifecycle, pendingApproval: c.pendingApproval, sameSender: c.sameSender,
-      })), { machine, ...flags, priorUndone, mailboxes: found.mailboxes });
+      decided = guardDecision(response?.parsed, guardCandidates, guardCtx);
     } catch (err) {
       logger.warn(`Mail triage: unusable answer for held #${heldId}; the mail stays held (${err.message})`);
       return table.create({ data: { ...base, ...meta, raw: response?.parsed ?? null, outcome: 'failed', error: clip(err.message, 300) } });
     }
+    return this._record(held, settings, base, meta, decided, { candidates, flags, machine, raw: response?.parsed ?? null });
+  }
 
+  /**
+   * Write the judgement (outcome `suggested`; Shadow stops there) and, On, apply what the guards
+   * marked `autoApply`. A fallback new ticket is linked to its related ticket and gets a private note.
+   */
+  async _record(held, settings, base, meta, decided, { candidates, flags, machine, raw }) {
+    const table = this._table();
+    const heldId = held.id;
     // People know tickets by their reference, never by the internal id.
     const refById = new Map(candidates.map((c) => [c.ticket.id, ticketDisplayRef(c.ticket)]));
     decided.reason = decided.reason ? withTicketRefs(decided.reason, refById) : decided.reason;
@@ -856,21 +1039,26 @@ class MailTriageService {
         confidence: decided.confidence,
         reason: decided.reason,
         evidence: decided.evidence,
-        guards: { changed: decided.guards, noAuto: decided.noAuto, machine, unattended: flags.unattended, protectedSender: flags.protectedSender },
-        raw: response?.parsed ?? null,
+        guards: {
+          changed: decided.guards, noAuto: decided.noAuto, machine, unattended: flags.unattended, protectedSender: flags.protectedSender,
+          ...(decided.fallback ? { fallback: decided.fallback } : {}),
+        },
+        raw,
         outcome: 'suggested',
+        ...(decided.failure ? { error: clip(`Judgement failed: ${decided.failure}`, 300) } : {}),
       },
     });
 
-    // On: only a "sure" attach or create, and only when no guard asks for a person.
-    if (settings.mode === 'on' && decided.noAuto.length === 0 && (decided.action === 'attach' || decided.action === 'create') && decided.confidence === 'sure') {
+    // On: only what no guard keeps for a person (guardDecision's autoApply).
+    if (settings.mode === 'on' && decided.autoApply === true && (decided.action === 'attach' || decided.action === 'create')) {
       try {
         const applied = await this._apply(held, decided, TRIAGE_ACTOR);
         row = await table.update({
           where: { id: row.id },
           data: { outcome: 'applied', finalAction: decided.action, finalTicketId: applied.ticketId, decidedBy: TRIAGE_ACTOR.name, decidedAt: new Date(), undo: applied.undo },
         });
-        logger.info(`Mail triage: held #${heldId} ${decided.action === 'attach' ? 'added to' : 'became'} ticket ${applied.ticketId} (sure)`);
+        const why = decided.fallback ? `fallback: ${decided.fallback.kind}` : decided.confidence;
+        logger.info(`Mail triage: held #${heldId} ${decided.action === 'attach' ? 'added to' : 'became'} ticket ${applied.ticketId} (${why})`);
       } catch (err) {
         logger.warn(`Mail triage: could not apply the decision for held #${heldId}; it waits for a person (${err.message})`);
         row = await soft(() => table.update({ where: { id: row.id }, data: { error: clip(`Not applied: ${err.message}`, 300) } }), row);
@@ -907,7 +1095,7 @@ class MailTriageService {
    * and never fires "requester replied", so for it the status change is the
    * only thing that reopens.
    */
-  async _apply(held, { action, ticketId = null, reopen = null, requesterEmail = null }, actor) {
+  async _apply(held, { action, ticketId = null, reopen = null, requesterEmail = null, fallback = null }, actor) {
     const workspaceId = held.workspaceId;
     if (action === 'attach') {
       const before = await prisma.ticket.findFirst({ where: { id: Number(ticketId), workspaceId }, select: { id: true, workspaceId: true, status: true, origin: true, nativeNumber: true, freshserviceTicketId: true } });
@@ -936,13 +1124,29 @@ class MailTriageService {
     if (action === 'create') {
       const result = await mailboxHoldService.createTicket(held.id, { requesterEmail: requesterEmail || null, actor, workspaceId });
       const newId = result?.ticket?.id || null;
-      return { ticketId: newId, undo: { kind: 'create', ticketId: newId, at: new Date().toISOString() } };
+      const undo = { kind: 'create', ticketId: newId, at: new Date().toISOString() };
+      if (fallback && newId) Object.assign(undo, await this._fallbackExtras(workspaceId, newId, fallback, actor));
+      return { ticketId: newId, undo };
     }
     if (action === 'no_ticket') {
       await mailboxHoldService.discard(held.id, actor, { workspaceId });
       return { ticketId: null, undo: { kind: 'discard', at: new Date().toISOString() } };
     }
     throw new ValidationError('Choose what to do with this e-mail: add it to a ticket, make a new ticket, or no ticket needed');
+  }
+
+  /**
+   * A fallback new ticket: linked to its related ticket (related_to) and given a private system note
+   * saying why it is a new ticket. Never throws: the ticket exists already. Returns what Undo needs.
+   */
+  async _fallbackExtras(workspaceId, newId, fallback, actor) {
+    const relatedId = Number(fallback.relatedTicketId) || null;
+    const related = relatedId ? await soft(() => prisma.ticket.findFirst({
+      where: { id: relatedId, workspaceId }, select: { id: true, origin: true, nativeNumber: true, freshserviceTicketId: true },
+    })) : null;
+    const link = related ? await soft(async () => (await this._links()).link(newId, workspaceId, { relatedTicketId: related.id, kind: 'related_to' }, actor)) : null;
+    const note = await soft(async () => (await this._tickets()).addPrivateNote(newId, workspaceId, { bodyText: fallbackNote(fallback.kind, related ? ticketDisplayRef(related) : null) }, actor, [], { systemNote: true }));
+    return { fallback: fallback.kind, relatedTicketId: related?.id ?? null, linkId: link?.id ?? null, noteEntryId: note?.entry?.id ?? null };
   }
 
   /** Status back to Open, as the person who decided (or "Mail triage"). Origin-aware. Never throws: the mail is already on the ticket. */
@@ -1081,7 +1285,8 @@ class MailTriageService {
    *  attach   the thread entry it added is removed (with its files); a ticket
    *           it reopened goes back to its previous status
    *  create   the new ticket is deleted the way the app deletes a ticket, when
-   *           nobody has worked it
+   *           nobody has worked it; a fallback ticket's related link is
+   *           removed first (its system note goes with the ticket)
    *  discard  nothing else to do
    * Refused (409, in plain words) after 14 days, when the ticket was worked
    * since, or when the mail was already copied to FreshService.
@@ -1143,6 +1348,10 @@ class MailTriageService {
     const ticket = info.ticketId ? await prisma.ticket.findFirst({ where: { id: Number(info.ticketId), workspaceId: held.workspaceId }, select: { id: true, status: true } }) : null;
     if (!ticket || String(ticket.status) === 'Deleted') return;
     if (await this._workedSince(ticket.id)) throw new ConflictError('Somebody has worked the new ticket since, so it cannot be undone here');
+    // A fallback ticket: its related link goes first (the note, a system note, goes with the ticket).
+    if (info.linkId) {
+      await soft(async () => (await this._links()).unlink(ticket.id, held.workspaceId, Number(info.linkId), actor));
+    }
     await (await this._tickets()).deleteTicket(ticket.id, held.workspaceId, actor);
   }
 

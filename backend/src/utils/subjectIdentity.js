@@ -72,6 +72,53 @@ export function maskCounters(subject, { now = Date.now() } = {}) {
 }
 
 /**
+ * Reference numbers for "is this the same matter?" (22 Nov 2026). Two shapes
+ * differ from `longNumbers` (which the look-alike cap keeps using unchanged):
+ *
+ *  - A seven-digit number followed by .NN or -NN (2000010.02.11,
+ *    2636058-03.01) is a project number: one project carries many matters, so
+ *    it never names one.
+ *  - A dashed invoice number (2-756-67291) IS a reference, although none of its
+ *    parts is six digits long. Dates (2026-11-10) and phone numbers
+ *    (604-555-0101, 1-800-555-0101) are not.
+ */
+const PROJECT_NUMBER_RE = /(?<![\d.,/:+-])(\d{7})[.-]\d{2}(?!\d)/g;
+const DASHED_RE = /(?<![\d.,/:+])(?<!\d-)\d{1,7}(?:-\d{1,8}){2,4}(?!\d|-\d|[.,/:]\d)/g;
+
+/** The project numbers (the seven digits) in a text. */
+export function projectNumbers(text) {
+  return [...new Set([...String(text || '').matchAll(PROJECT_NUMBER_RE)].map((m) => m[1]))];
+}
+
+function looksLikeDashedDate(groups) {
+  const [a, b, c] = groups.map(Number);
+  if (groups.length !== 3) return false;
+  if (groups[0].length === 4) return validYmd(a, b, c);
+  if (groups[2].length === 4) return c >= 1900 && c <= 2099 && a >= 1 && a <= 31 && b >= 1 && b <= 31;
+  return false;
+}
+
+/** The dashed reference numbers in a text (2-756-67291), dates and phone numbers left out. */
+export function dashedReferences(text) {
+  const out = [];
+  for (const m of String(text || '').matchAll(DASHED_RE)) {
+    const run = m[0];
+    const groups = run.split('-');
+    if (groups.join('').length < 8 || groups[groups.length - 1].length < 3) continue;
+    if (looksLikeDashedDate(groups)) continue;
+    if (/^(?:1-)?\d{3}-\d{3}-\d{4}$/.test(run)) continue; // a phone number
+    if (!out.includes(run)) out.push(run);
+  }
+  return out;
+}
+
+/** The references a subject carries: its long numbers without project numbers, and its dashed references. */
+export function referenceIdentities(subject, { now = Date.now() } = {}) {
+  const projects = new Set(projectNumbers(subject));
+  return [...longNumbers(subject, { now }).filter((n) => !projects.has(n)), ...dashedReferences(subject)];
+}
+
+/**
  * Both subjects carry long numbers and share none: they are about different
  * things (two invoices), however alike the words are. False when either has none.
  */

@@ -36,7 +36,7 @@ describe('MailTriageSettings', () => {
   test('On says exactly what is applied automatically', async () => {
     mount();
     fireEvent.change(await screen.findByLabelText('Mode'), { target: { value: 'on' } });
-    expect(screen.getByTestId('mail-triage-mode-help')).toHaveTextContent('Only suggestions the AI is sure about, and only adding to a ticket or making a new one. It never discards mail.');
+    expect(screen.getByTestId('mail-triage-mode-help')).toHaveTextContent('Adds e-mail to a ticket only when the AI is sure. Makes a new ticket when it is sure, or for a follow-up when it is likely. A follow-up it cannot place, or that belongs on a finished ticket, becomes a new ticket linked to that one. It never discards mail.');
     expect(api.saveMailTriageSettings).not.toHaveBeenCalled(); // nothing is saved until Save
   });
 
