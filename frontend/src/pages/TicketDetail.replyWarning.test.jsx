@@ -162,7 +162,7 @@ describe('TicketDetail — the reply box warns when the requester does not read 
     expect(screen.queryByTestId('reply-audience-warning')).not.toBeInTheDocument();
 
     await openReply();
-    expect(await screen.findByTestId('reply-audience-warning')).toHaveTextContent('This address doesn’t read replies (it’s an automated sender). Add a private note instead, or reply to a person in Cc.');
+    expect(await screen.findByTestId('reply-audience-warning')).toHaveTextContent('This address doesn’t read replies (it’s an automated sender). Add a private note instead.');
 
     fireEvent.change(screen.getByRole('textbox', { name: 'Reply body' }), { target: { value: 'Acknowledged.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));

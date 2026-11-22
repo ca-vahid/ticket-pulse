@@ -8,7 +8,7 @@ export const changelog = [
       { type: 'fix', html: '<strong>Accounting&rsquo;s workflow e-mails leave from the right team mailbox</strong> &mdash; a workflow e-mail about a ticket now comes from that ticket&rsquo;s team mailbox (AR tickets from the AR address), like agent replies, and replies come back to it. The workflow Preview shows the From address. Workspaces with one mailbox are unchanged.' },
       { type: 'new', html: '<strong>A warning before replying to an automated sender</strong> &mdash; when the requester is a no-reply address or an integration that doesn&rsquo;t read replies, a line above the reply box says so and suggests a private note.' },
       { type: 'improved', html: '<strong>Inline answers in the quoted history</strong> &mdash; when an agent replies, the quoted earlier message now includes the requester&rsquo;s answers typed inline.' },
-      { type: 'fix', html: '<strong>Company-wide settings for super admins only</strong> &mdash; the FreshService key, mail and text-message providers, sync and dashboard refresh can only be changed by a super admin; other admins see them read only. Secret values are masked for everyone.' },
+      { type: 'fix', html: '<strong>Company-wide settings for super admins only</strong> &mdash; the FreshService key, mail and text-message providers, sync and dashboard refresh can only be changed by a super admin; other admins can see them but not change them. Secret values are masked for everyone.' },
       { type: 'fix', html: '<strong>No-reply addresses off Bcc too</strong> &mdash; automated addresses are taken off a workflow&rsquo;s own Bcc; the &ldquo;copy me&rdquo; Bcc is never affected.' },
     ],
   },

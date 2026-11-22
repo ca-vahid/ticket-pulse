@@ -13,9 +13,17 @@ import { replyWarningAPI } from '../../services/api';
  * unattended requester (4.3.97).
  */
 export const REPLY_WARNING_TEXT = Object.freeze({
-  machine_sender: 'This address doesn’t read replies (it’s an automated sender). Add a private note instead, or reply to a person in Cc.',
+  machine_sender: 'This address doesn’t read replies (it’s an automated sender). Add a private note instead.',
+  // Only when the ticket has someone in Cc: otherwise the advice would point at nobody.
+  machine_sender_cc: 'This address doesn’t read replies (it’s an automated sender). Add a private note instead, or reply to a person in Cc.',
   unattended: 'This requester is an automated system and doesn’t read replies. Add a private note instead.',
 });
+
+/** The sentence for a warning kind; the Cc advice only when someone is in Cc. */
+export function replyWarningText(kind, { hasCc = false } = {}) {
+  if (kind === 'machine_sender' && hasCc) return REPLY_WARNING_TEXT.machine_sender_cc;
+  return REPLY_WARNING_TEXT[kind] || null;
+}
 
 const TTL_MS = 5 * 60 * 1000;
 const cache = new Map(); // ticketId -> { at, kind } | { at, promise }

@@ -4082,6 +4082,7 @@ export default function TicketDetail() {
                           ticketId={ticket?.id}
                           unattended={ticket?.requester?.unattended === true}
                           hasRequester={Boolean(ticket?.requester?.email)}
+                          hasCc={(ticket?.ccEmails || []).length > 0 || (ticket?.replyCcEmails || []).length > 0}
                           show={composerMode === 'reply'}
                         />
                         {composerMode === 'reply' && heldDraftNotice && !pendingSend && (

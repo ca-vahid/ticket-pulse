@@ -27,11 +27,19 @@ describe('ReplyAudienceWarning', () => {
   test('a machine sender: the automated-sender line, asked once for the ticket', async () => {
     getMock.mockResolvedValue(answer('machine_sender'));
     render(<ReplyAudienceWarning ticketId={42} hasRequester show />);
+    const line = await screen.findByTestId('reply-audience-warning');
+    expect(line).toHaveTextContent('This address doesn’t read replies (it’s an automated sender). Add a private note instead.');
+    expect(line).not.toHaveTextContent('Cc');
+    expect(getMock).toHaveBeenCalledTimes(1);
+    expect(getMock).toHaveBeenCalledWith(42);
+  });
+
+  test('a machine sender on a ticket with someone in Cc: also suggests replying to them', async () => {
+    getMock.mockResolvedValue(answer('machine_sender'));
+    render(<ReplyAudienceWarning ticketId={42} hasRequester hasCc show />);
     expect(await screen.findByTestId('reply-audience-warning')).toHaveTextContent(
       'This address doesn’t read replies (it’s an automated sender). Add a private note instead, or reply to a person in Cc.',
     );
-    expect(getMock).toHaveBeenCalledTimes(1);
-    expect(getMock).toHaveBeenCalledWith(42);
   });
 
   test('an unattended requester: the automated-system line, with no request at all', async () => {
@@ -103,8 +111,9 @@ describe('ReplyAudienceWarning', () => {
     expect(getMock).toHaveBeenCalledWith(43);
   });
 
-  test('the two sentences are the approved copy', () => {
-    expect(REPLY_WARNING_TEXT.machine_sender).toBe('This address doesn’t read replies (it’s an automated sender). Add a private note instead, or reply to a person in Cc.');
+  test('the sentences are the approved copy', () => {
+    expect(REPLY_WARNING_TEXT.machine_sender).toBe('This address doesn’t read replies (it’s an automated sender). Add a private note instead.');
+    expect(REPLY_WARNING_TEXT.machine_sender_cc).toBe('This address doesn’t read replies (it’s an automated sender). Add a private note instead, or reply to a person in Cc.');
     expect(REPLY_WARNING_TEXT.unattended).toBe('This requester is an automated system and doesn’t read replies. Add a private note instead.');
   });
 });
