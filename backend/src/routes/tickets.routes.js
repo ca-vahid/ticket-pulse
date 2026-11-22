@@ -2114,6 +2114,29 @@ router.get('/:id/related', asyncHandler(async (req, res) => {
   res.json({ success: true, data: related });
 }));
 
+// Does the requester read replies? (22 Nov 2026) The reply composer shows a
+// quiet warning when the requester is an unattended mailbox (Simorgh A4) or on
+// this workspace's machine-sender list (machineSenderService, the no-reply
+// list). A hint only: nothing is refused here. Agents work the composer, and
+// the admin-only /notification-workflows/machine-senders/check is not theirs,
+// so the answer sits on the ticket. Never fails the page: errors read "reads".
+router.get('/:id/reply-warning', asyncHandler(async (req, res) => {
+  const ticket = await prisma.ticket.findFirst({
+    where: { id: parseTicketId(req), workspaceId: req.workspaceId },
+    select: { requester: { select: { email: true, unattended: true } } },
+  });
+  if (!ticket) throw new NotFoundError('Ticket not found');
+  const email = String(ticket.requester?.email || '').trim();
+  const unattended = ticket.requester?.unattended === true;
+  let machineSender = null;
+  if (!unattended && email.includes('@')) {
+    const { machineSenderMatch } = await import('../services/machineSenderService.js');
+    machineSender = await Promise.resolve().then(() => machineSenderMatch(req.workspaceId, email)).catch(() => null);
+  }
+  const kind = unattended ? 'unattended' : (machineSender ? 'machine_sender' : null);
+  res.json({ success: true, data: { kind, unattended, machineSender } });
+}));
+
 // On-demand AI thread summary for the handling agent (read-only, never stored).
 router.post('/:id/summarize', asyncHandler(async (req, res) => {
   const { default: ticketSummaryService } = await import('../services/ticketSummaryService.js');

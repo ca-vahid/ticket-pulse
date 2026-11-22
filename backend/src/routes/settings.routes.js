@@ -47,18 +47,26 @@ import logger from '../utils/logger.js';
 const router = express.Router();
 const MASKED_SETTING_VALUE = '***MASKED***';
 const SENSITIVE_SETTING_KEYS = new Set(['freshservice_api_key', 'sendgrid_api_key', 'twilio_auth_token']);
+// GET /settings returns every app_settings row, so a secret stored under any
+// other key (the SendGrid event-webhook token, 22 Nov 2026) is masked by name too.
+const SENSITIVE_SETTING_NAME = /(^|_)(api_key|auth_token|token|secret|password)(_ws\d+)?$/i;
+
+function isSensitiveSettingKey(key) {
+  return SENSITIVE_SETTING_KEYS.has(key) || SENSITIVE_SETTING_NAME.test(String(key || ''));
+}
 
 function maskSensitiveSettings(settings) {
-  for (const key of SENSITIVE_SETTING_KEYS) {
-    if (settings[key]) settings[key] = MASKED_SETTING_VALUE;
+  for (const key of Object.keys(settings)) {
+    if (settings[key] && isSensitiveSettingKey(key)) settings[key] = MASKED_SETTING_VALUE;
   }
   return settings;
 }
 
 function normalizeSettingsForUpdate(settings) {
   const normalized = { ...settings };
-  for (const key of SENSITIVE_SETTING_KEYS) {
-    if (normalized[key] === '' || normalized[key] === MASKED_SETTING_VALUE) {
+  for (const key of Object.keys(normalized)) {
+    // The mask is never a value; a blank secret means "keep the saved one".
+    if (normalized[key] === MASKED_SETTING_VALUE || (normalized[key] === '' && isSensitiveSettingKey(key))) {
       delete normalized[key];
     }
   }
@@ -122,8 +130,15 @@ function requestActor(req) {
  *     Members, where the person is checked to belong to the workspace.
  * No screen writes `_ws<N>` keys through these routes (each feature has its
  * own route), so nothing that works today is refused.
+ *
+ * Company-wide settings (22 Nov 2026): every key that is NOT a `_ws<N>` key of
+ * the caller's own admin workspace is global — the FreshService API key,
+ * SendGrid/Twilio credentials, the sync interval, the super admin list — and
+ * needs a super admin. A workspace admin gets 403 super_admin_required. The
+ * Settings page shows those fields read-only to them, so no save fails there.
  */
 const WORKSPACE_KEY_SUFFIX = /_ws(\d+)$/;
+export const COMPANY_WIDE_SETTINGS_MESSAGE = 'Only a super admin can change company-wide settings.';
 function refuseForeignWorkspaceKeys(req, keys) {
   if (requestActor(req)?.role === 'admin') return;
   for (const key of keys) {
@@ -135,7 +150,17 @@ function refuseForeignWorkspaceKeys(req, keys) {
     if (m && Number(m[1]) !== Number(req.workspaceId)) {
       throw new AuthorizationError("That setting belongs to another workspace. You can only change your own workspace's settings.", 'workspace_mismatch');
     }
+    if (!m) {
+      throw new AuthorizationError(COMPANY_WIDE_SETTINGS_MESSAGE, 'super_admin_required');
+    }
   }
+}
+
+// Same rule as auth.js requireGlobalAdmin (a global 'admin' role), kept local
+// so the many tests that stub auth.js for this router need no new export.
+function superAdminOnly(req, _res, next) {
+  if (requestActor(req)?.role === 'admin') return next();
+  return next(new AuthorizationError('Super admin access required', 'super_admin_required'));
 }
 
 function parsePositiveId(value, label = 'id') {
@@ -1563,6 +1588,47 @@ router.put(
 );
 
 /**
+ * PUT /api/settings/admins
+ * Update the super admin list (app_settings admin_emails). Super admins only.
+ * Declared before PUT /:key (22 Nov 2026): declared after it, /:key took the
+ * request, found no `value` in `{ emails }` and answered 400 "Value is required",
+ * so the Super admins panel could never save.
+ */
+router.put(
+  '/admins',
+  superAdminOnly,
+  asyncHandler(async (req, res) => {
+    const { emails } = req.body;
+    if (!Array.isArray(emails) || emails.length === 0) {
+      return res.status(400).json({ success: false, message: 'emails array is required and must not be empty' });
+    }
+
+    const currentUserEmail = (req.session?.user ?? req.user)?.email?.toLowerCase();
+    const cleaned = emails.map(e => String(e || '').trim().toLowerCase()).filter(Boolean);
+
+    if (currentUserEmail && !cleaned.includes(currentUserEmail)) {
+      return res.status(400).json({ success: false, message: 'You cannot remove yourself from the admin list' });
+    }
+
+    const previous = await Promise.resolve().then(() => settingsRepository.get('admin_emails')).catch(() => null);
+    const before = String(previous || process.env.ADMIN_EMAILS || '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+    await settingsRepository.set('admin_emails', cleaned.join(','));
+    logger.info(`Admin emails updated to: ${cleaned.join(', ')}`);
+    const added = cleaned.filter((e) => !before.includes(e));
+    const removed = before.filter((e) => !cleaned.includes(e));
+    if (added.length || removed.length) {
+      const { recordAccessEvent, ACTIONS } = await import('../services/accessAuditService.js');
+      await recordAccessEvent({
+        workspaceId: null, actorEmail: currentUserEmail, action: ACTIONS.ADMIN_LIST_CHANGED,
+        targetLabel: 'Super admins', newValue: `+${added.length} / -${removed.length}`, details: { added, removed },
+      });
+    }
+
+    res.json({ success: true, data: { emails: cleaned } });
+  }),
+);
+
+/**
  * PUT /api/settings/:key
  * Update a single setting
  */
@@ -1578,6 +1644,12 @@ router.put(
       throw new ValidationError('Value is required');
     }
     refuseForeignWorkspaceKeys(req, [key]);
+
+    // Same rule as PUT /: the mask (or a blank secret) means "keep the saved
+    // one" and is never written over the real value.
+    if (Object.keys(normalizeSettingsForUpdate({ [key]: value })).length === 0) {
+      return res.json({ success: true, unchanged: true, message: `Setting ${key} kept as it was` });
+    }
 
     await settingsRepository.set(key, value);
 
@@ -1728,44 +1800,6 @@ router.get(
       emails = (process.env.ADMIN_EMAILS || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
     }
     res.json({ success: true, data: { emails, source: dbVal ? 'database' : 'env' } });
-  }),
-);
-
-/**
- * PUT /api/settings/admins
- * Update the admin emails list. Stores in app_settings.
- */
-router.put(
-  '/admins',
-  requireAdmin,
-  asyncHandler(async (req, res) => {
-    const { emails } = req.body;
-    if (!Array.isArray(emails) || emails.length === 0) {
-      return res.status(400).json({ success: false, message: 'emails array is required and must not be empty' });
-    }
-
-    const currentUserEmail = (req.session?.user ?? req.user)?.email?.toLowerCase();
-    const cleaned = emails.map(e => e.trim().toLowerCase()).filter(Boolean);
-
-    if (currentUserEmail && !cleaned.includes(currentUserEmail)) {
-      return res.status(400).json({ success: false, message: 'You cannot remove yourself from the admin list' });
-    }
-
-    const previous = await Promise.resolve().then(() => settingsRepository.get('admin_emails')).catch(() => null);
-    const before = String(previous || process.env.ADMIN_EMAILS || '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
-    await settingsRepository.set('admin_emails', cleaned.join(','));
-    logger.info(`Admin emails updated to: ${cleaned.join(', ')}`);
-    const added = cleaned.filter((e) => !before.includes(e));
-    const removed = before.filter((e) => !cleaned.includes(e));
-    if (added.length || removed.length) {
-      const { recordAccessEvent, ACTIONS } = await import('../services/accessAuditService.js');
-      await recordAccessEvent({
-        workspaceId: null, actorEmail: currentUserEmail, action: ACTIONS.ADMIN_LIST_CHANGED,
-        targetLabel: 'Super admins', newValue: `+${added.length} / -${removed.length}`, details: { added, removed },
-      });
-    }
-
-    res.json({ success: true, data: { emails: cleaned } });
   }),
 );
 

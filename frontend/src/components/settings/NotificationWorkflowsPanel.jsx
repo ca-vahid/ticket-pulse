@@ -3665,6 +3665,8 @@ function buildPreviewRunModel({ preview, live, running, definition, ticket, star
     steps,
     email,
     recipients,
+    // 22 Nov 2026: the address it would leave from (a team mailbox for a ticket of that team).
+    from: email?.fromAddress || null,
     llm,
     tools: preview ? auditToolRecordsForRun({ steps: finalSteps }, llmRaw) : [],
     context: llmRaw.find((diagnostic) => diagnostic.llm?.context)?.llm?.context || null,
@@ -6795,6 +6797,9 @@ export function MockAuditPanel({
       steps: runStepsForView(activeSteps),
       email: displayEmail,
       recipients: activeRecipients,
+      // The address it left from (live) or would have (Shadow records it on its row) — 22 Nov 2026.
+      // sentFrom: the address really used when Graph ignored a pinned one (live sends).
+      from: activeDelivery?.sentFrom || activeDelivery?.fromAddress || null,
       llm,
       tools: activeToolRecords,
       context: activeContext,

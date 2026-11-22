@@ -85,6 +85,11 @@ const { default: settingsRouter } = await import('../src/routes/settings.routes.
 function buildApp() {
   const app = express();
   app.use(express.json());
+  // Global keys need a super admin (22 Nov 2026): x-test-super signs one in.
+  app.use((req, _res, next) => {
+    if (req.headers['x-test-super']) req.session = { user: { email: 'root@example.com', role: 'admin' } };
+    next();
+  });
   app.use('/settings', settingsRouter);
   // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => {
@@ -161,6 +166,7 @@ describe('sender identity routes (Phase EB)', () => {
     const res = await request(app)
       .put('/settings')
       .set('x-test-role', 'admin')
+      .set('x-test-super', '1')
       .send({ settings: { sendgrid_from_name: '  Ticket Pulse  ' } });
     expect(res.status).toBe(200);
     expect(settingsRepositoryMock.setMany).toHaveBeenCalledWith({ sendgrid_from_name: 'Ticket Pulse' });
@@ -171,8 +177,18 @@ describe('sender identity routes (Phase EB)', () => {
     const res = await request(app)
       .put('/settings')
       .set('x-test-role', 'admin')
+      .set('x-test-super', '1')
       .send({ settings: { sendgrid_from_name: 'Bad\nName' } });
     expect(res.status).toBe(400);
+    expect(settingsRepositoryMock.setMany).not.toHaveBeenCalled();
+  });
+
+  test('a workspace admin (not a super admin) is refused the global key', async () => {
+    const res = await request(app)
+      .put('/settings')
+      .set('x-test-role', 'admin')
+      .send({ settings: { sendgrid_from_name: 'Ticket Pulse' } });
+    expect(res.status).toBe(403);
     expect(settingsRepositoryMock.setMany).not.toHaveBeenCalled();
   });
 });

@@ -47,7 +47,7 @@ import { EMAIL_SANITIZE_OPTIONS } from './notificationWorkflowSignatureService.j
 import { appendSignatureToEmail, getEnabledSignatureForSend, signatureAsSent, trimTrailingBlankHtml, closeLastParagraphTight } from './userSignatureService.js';
 import { createInlineBudget, inlinePictures, faceFor, inlineAttachments } from './replyEmailPictures.js';
 import { stripQuotedHtml } from '../utils/replyQuoteStripper.js';
-import { withoutOriginalBody } from '../utils/inlineAnswers.js';
+import { inlineAnswersHtml, inlineAnswersText, withoutOriginalBody } from '../utils/inlineAnswers.js';
 import { sseManager } from '../routes/sse.routes.js';
 import { actorKindOf, deriveActorKind } from '../utils/actorKind.js';
 import { buildFieldsUpdatedExtra } from './ticketChangeRenderer.js';
@@ -6771,13 +6771,28 @@ class TicketService {
       // line; one <br/> per newline reproduced each blank line in the email
       // the requester receives. textToHtml treats a blank line as a paragraph
       // and a single newline as a line break — mail-client behaviour.
+      // Answers the requester typed inline in our earlier mail (4.4.03) are kept
+      // beside the entry, its body being only their top text. They belong to this
+      // message, so they are quoted under it in the "Answered inline" form the
+      // FreshService copy uses, escaped (22 Nov 2026). '' when there are none.
+      const answersHtml = inlineAnswersHtml(row.rawPayload?.inlineAnswers);
+      const answersText = answersHtml ? inlineAnswersText(row.rawPayload?.inlineAnswers) : '';
+      // Ingest stores an HTML mail's body_text as "top text\n\nAnswered inline…": that
+      // tail comes off before the pairs are added once, so they never show twice.
+      const withoutAnswers = (value) => {
+        const t = String(value || '').trim();
+        return answersText && t.endsWith(answersText) ? t.slice(0, t.length - answersText.length).trim() : t;
+      };
+      const textBody = answersText ? (withoutAnswers(row.bodyText) || withoutAnswers(row.content)) : (row.bodyText || row.content);
       let rawHtml = row.bodyHtml
-        || (row.bodyText || row.content ? textToHtml(row.bodyText || row.content) : '');
-      if (!rawHtml.trim()) return true;
+        || (textBody ? textToHtml(textBody) : '');
+      if (!rawHtml.trim() && !answersHtml) return true;
       // Each message is quoted on its own, so the copy of the thread its mail client
       // added is cut here too: a reply stored before the stripper knew its client's
       // format would otherwise bring the earlier messages a second time.
       if (row.source === 'email_inbound' && row.bodyHtml) rawHtml = stripQuotedHtml(rawHtml);
+      const bodyOnlyHtml = rawHtml;
+      if (answersHtml) rawHtml = `${rawHtml}${answersHtml}`;
       const signature = await signatureFor(row);
       if (signature) {
         rawHtml = `${closeLastParagraphTight(trimTrailingBlankHtml(rawHtml.trim()))}<br>${signature.html || textToHtml(signature.text)}`;
@@ -6827,7 +6842,10 @@ class TicketService {
         `<div class="tp-quoted" style="margin:0;">${headerHtml}`
         + `<blockquote style="margin:0;padding:2px 0 2px 16px;border-left:3px solid #c7d2fe;color:#374151;">${quotedHtml}</blockquote></div>`,
       );
-      const plain = (row.bodyText || row.content || stripHtml(plainSource) || '').trim().slice(0, QUOTE_CAP);
+      const plain = (answersText
+        ? [String(textBody || stripHtml(bodyOnlyHtml) || '').trim(), answersText].filter(Boolean).join('\n\n')
+        : (row.bodyText || row.content || stripHtml(plainSource) || '').trim()
+      ).slice(0, QUOTE_CAP);
       const ccText = cc.length
         ? `> Cc: ${cc.map((person) => (person.name ? `${person.name} <${person.email}>` : person.email)).join('; ')}${cc.more ? ` and ${cc.more} more` : ''}\n>\n`
         : '';
@@ -6953,7 +6971,9 @@ class TicketService {
           // to this mail lands in the monitored mailbox with the ticket
           // number in the envelope (ingest rung 1.5). Graph lane only: the
           // SendGrid sender is not a mailbox we read.
-          replyTo = plusAddressReplyTo(connection.address, ticket);
+          // A send-only mailbox is not read: the token rides the mailbox that reads replies, or none (22 Nov 2026).
+          const readsReplies = connection.mode === 'send' ? await pickIngestMailboxForTicket(ticket).catch(() => null) : connection;
+          replyTo = readsReplies?.address ? plusAddressReplyTo(readsReplies.address, ticket) : null;
           const sent = await graphMailClient.sendMailAsMailbox(connection.address, {
             to: [toAddress],
             cc: ccForSend,

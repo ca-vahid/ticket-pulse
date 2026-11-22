@@ -1,6 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import ApprovalEventCard from '../components/tickets/ApprovalEventCard';
+import ReplyAudienceWarning from '../components/tickets/ReplyAudienceWarning';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ticketShortLink } from '../utils/ticketShortLink';
 import {
@@ -4074,6 +4075,15 @@ export default function TicketDetail() {
                             </span>
                           )}
                         </div>
+                        {/* 22 Nov 2026: the requester does not read replies (an
+                            automated sender or an unattended mailbox). A hint,
+                            asked once per ticket open; never blocks sending. */}
+                        <ReplyAudienceWarning
+                          ticketId={ticket?.id}
+                          unattended={ticket?.requester?.unattended === true}
+                          hasRequester={Boolean(ticket?.requester?.email)}
+                          show={composerMode === 'reply'}
+                        />
                         {composerMode === 'reply' && heldDraftNotice && !pendingSend && (
                           <div role="alert" data-testid="held-draft-notice" className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-l-2 border-amber-500 pl-2.5 text-xs text-amber-800 dark:text-amber-200">
                             <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />

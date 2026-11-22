@@ -226,7 +226,9 @@ function recipientText(values) {
   return (values || []).length ? values.join(', ') : 'None';
 }
 
-function EmailBlock({ email, recipients, emptyText, pending }) {
+// `from` (22 Nov 2026): the address the e-mail leaves (or would leave) from — a team
+// mailbox for a ticket of that team. Shown only when the run reported one.
+function EmailBlock({ email, recipients, from = null, emptyText, pending }) {
   const [device, setDevice] = useState('desktop');
   const [view, setView] = useState('rendered');
   const hasBody = Boolean(email?.html || email?.text);
@@ -243,6 +245,12 @@ function EmailBlock({ email, recipients, emptyText, pending }) {
           </div>
           {!(pending && !email) && (
             <dl className="mt-1.5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-xs">
+              {from && (
+                <>
+                  <dt className="font-semibold text-muted-foreground">From</dt>
+                  <dd className="min-w-0 break-words text-foreground/85" data-testid="run-email-from">{from}</dd>
+                </>
+              )}
               {[['To', recipients?.to], ['Cc', recipients?.cc], ['Bcc', recipients?.bcc]]
                 .filter(([label, values]) => label === 'To' || (values || []).length > 0)
                 .map(([label, values]) => (
@@ -784,7 +792,7 @@ function RunSummary({ summary, onSendTest, testSending, canSendTest }) {
  * model: {
  *   summary: { status, ref, subject, auditId, facts: string[], badges, issueTone },
  *   steps: [{ key, nodeId, nodeType, typeLabel, name, status, durationMs, summary, issue, error, input, output, hasPayload }],
- *   email, recipients, pendingEmail,
+ *   email, recipients, from (the sending address, when known), pendingEmail,
  *   llm: diagnostics (+ name, toneOverrideText), tools, context,
  *   issues: [{ tone, title, detail }],
  *   actionLinks, branding, routing,
@@ -859,6 +867,7 @@ export default function RunResultView({
             <EmailBlock
               email={model?.email}
               recipients={model?.recipients}
+              from={model?.from || model?.email?.fromAddress || null}
               emptyText={model?.emptyEmailText}
               pending={running || model?.pendingEmail}
             />

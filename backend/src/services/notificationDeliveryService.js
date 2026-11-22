@@ -39,26 +39,47 @@ function bodyFromDelivery(delivery) {
  * ingested as a requester reply. Best-effort: a lookup failure means "no
  * threading", never a failed send.
  */
-async function requesterFacingTicket(delivery, toRecipients, ccRecipients) {
+async function deliveryTicket(delivery) {
   const ticketId = Number(delivery.ticketId);
   if (!Number.isInteger(ticketId) || ticketId <= 0) return null;
   try {
-    const ticket = await prisma.ticket.findUnique({
+    return await prisma.ticket.findUnique({
       where: { id: ticketId },
       select: {
         id: true, workspaceId: true, origin: true, nativeNumber: true, freshserviceTicketId: true, ccEmails: true,
+        // 22 Nov 2026: the team mailbox pick (group → internal group → primary).
+        groupId: true, internalGroupId: true,
         requester: { select: { email: true } },
       },
-    });
-    if (!ticket) return null;
-    const audience = new Set([...toRecipients, ...ccRecipients].map((a) => String(a || '').trim().toLowerCase()).filter(Boolean));
-    const ticketSide = [ticket.requester?.email, ...(Array.isArray(ticket.ccEmails) ? ticket.ccEmails : [])]
-      .map((a) => String(a || '').trim().toLowerCase()).filter(Boolean);
-    return ticketSide.some((a) => audience.has(a)) ? ticket : null;
+    }) || null;
   } catch (err) {
     logger.debug(`Delivery ${delivery.id}: ticket lookup for threading skipped: ${err.message}`);
     return null;
   }
+}
+
+function requesterFacing(ticket, toRecipients, ccRecipients) {
+  if (!ticket) return null;
+  const audience = new Set([...toRecipients, ...ccRecipients].map((a) => String(a || '').trim().toLowerCase()).filter(Boolean));
+  const ticketSide = [ticket.requester?.email, ...(Array.isArray(ticket.ccEmails) ? ticket.ccEmails : [])]
+    .map((a) => String(a || '').trim().toLowerCase()).filter(Boolean);
+  return ticketSide.some((a) => audience.has(a)) ? ticket : null;
+}
+
+/**
+ * A workflow e-mail (a run's send step, or the editor's test send) — the ones that leave
+ * from the ticket's team mailbox (22 Nov 2026). Assignment and alert pings keep the
+ * workspace's usual sender.
+ */
+function isWorkflowEmail(delivery) {
+  return Boolean(delivery.workflowRunId) || delivery.notificationType === 'notification_workflow_test_email';
+}
+
+/** The ticket's team-mailbox keys for the transport, or null (no ticket / another workspace). */
+function mailboxTicketFor(delivery, ticket) {
+  if (!ticket || !isWorkflowEmail(delivery)) return null;
+  if (delivery.workspaceId !== null && delivery.workspaceId !== undefined && Number(ticket.workspaceId) !== Number(delivery.workspaceId)) return null;
+  return { workspaceId: ticket.workspaceId, groupId: ticket.groupId ?? null, internalGroupId: ticket.internalGroupId ?? null };
 }
 
 /** Observer Bcc for a workflow e-mail (its workflow read from the run). Never throws. */
@@ -73,14 +94,19 @@ async function observerBccForDelivery(delivery, to, cc, bcc) {
   }
 }
 
-/** Machine senders taken off a workflow e-mail's To/Cc (16 Nov 2026). Never throws. */
-async function machineSplitForDelivery(delivery, to, cc) {
+/**
+ * Machine senders taken off a workflow e-mail's To/Cc (16 Nov 2026) and its own Bcc
+ * (22 Nov 2026). Runs before the observer Bcc is added, so that one is never dropped.
+ * Never throws.
+ */
+async function machineSplitForDelivery(delivery, to, cc, bcc) {
   try {
     const { splitMachineRecipients } = await import('./machineSenderService.js');
-    return await splitMachineRecipients({ workspaceId: delivery.workspaceId, to, cc });
+    const split = await splitMachineRecipients({ workspaceId: delivery.workspaceId, to, cc, bcc });
+    return { ...split, bcc: Array.isArray(split.bcc) ? split.bcc : bcc };
   } catch (err) {
     logger.debug(`Delivery ${delivery.id}: machine-sender check skipped: ${err.message}`);
-    return { to, cc, removed: [] };
+    return { to, cc, bcc, removed: [] };
   }
 }
 
@@ -91,18 +117,21 @@ async function sendDelivery(delivery) {
   if (delivery.channel === 'email') {
     let toRecipients = listFromDelivery(delivery, 'toRecipients', delivery.recipient ? [delivery.recipient] : []);
     let ccRecipients = listFromDelivery(delivery, 'ccRecipients');
-    const bccRecipients = listFromDelivery(delivery, 'bccRecipients');
+    // A copy: the observer Bcc is pushed onto it below, never onto the row's own list.
+    let bccRecipients = [...listFromDelivery(delivery, 'bccRecipients')];
     // Machine senders (16 Nov 2026): BambooHR's new-hire notices, Darktrace's
     // alerts and no-reply addresses open real tickets, but a workflow e-mail to
-    // them reaches nobody. They come off To/Cc; with nobody left on To the
-    // e-mail is not sent at all (the observer Bcc below never goes out alone).
+    // them reaches nobody. They come off To/Cc and (22 Nov 2026) the step's own
+    // Bcc; with nobody left on To the e-mail is not sent at all — a Bcc alone,
+    // custom or observer, never makes a send.
     let machineRemoved = [];
     if (delivery.workflowRunId) {
-      const split = await machineSplitForDelivery(delivery, toRecipients, ccRecipients);
+      const split = await machineSplitForDelivery(delivery, toRecipients, ccRecipients, bccRecipients);
       if (split.removed.length) {
         machineRemoved = split.removed;
         toRecipients = split.to;
         ccRecipients = split.cc;
+        bccRecipients = split.bcc;
         if (!toRecipients.some((a) => String(a || '').includes('@'))) {
           return { skipped: 'machine_sender', machineRemoved };
         }
@@ -120,7 +149,12 @@ async function sendDelivery(delivery) {
     // Per-workspace From display name (Phase EB); falls back to the global
     // default inside resolveFromName when the workspace has no override.
     const fromName = await resolveFromName(delivery.workspaceId ?? null);
-    const ticket = await requesterFacingTicket(delivery, toRecipients, ccRecipients);
+    const deliveryTicketRow = await deliveryTicket(delivery);
+    const ticket = requesterFacing(deliveryTicketRow, toRecipients, ccRecipients);
+    // 22 Nov 2026: a workflow e-mail about a ticket leaves from the ticket's team
+    // mailbox (an AR ticket from the AR address), the same pick agent replies use.
+    // Only the address changes; the From name above is untouched.
+    const mailboxTicket = mailboxTicketFor(delivery, deliveryTicketRow);
     // Mega 08-31 Phase MB-1a: every lane rides the mailbox-aware transport —
     // workspace mailbox via Graph when one is connected (replies land back in
     // the ticket), SendGrid otherwise / on Graph failure. Template + branding
@@ -145,7 +179,9 @@ async function sendDelivery(delivery) {
         ...(delivery.workflowRunId ? { workflow_run_id: String(delivery.workflowRunId) } : {}),
       } : null,
       ticket,
+      ...(mailboxTicket ? { mailboxTicket } : {}),
     });
+    const machineFromBcc = machineRemoved.some((r) => r.field === 'bcc');
     return {
       provider: result.provider,
       providerMessageId: result.providerMessageId,
@@ -154,7 +190,8 @@ async function sendDelivery(delivery) {
       from: result.from,
       replyTo: result.replyTo,
       status: 'accepted',
-      ...(observerBcc.length ? { observerBcc, bccRecipients } : {}),
+      ...(observerBcc.length ? { observerBcc } : {}),
+      ...(observerBcc.length || machineFromBcc ? { bccRecipients } : {}),
       ...(machineRemoved.length ? { machineRemoved, toRecipients, ccRecipients } : {}),
     };
   }
@@ -200,6 +237,11 @@ export async function processDelivery(delivery) {
       logger.info(`Delivery ${delivery.id} not sent: every recipient is a machine sender (${result.machineRemoved.map((r) => r.entry).join(', ')})`);
       return { id: delivery.id, success: true, skipped: 'machine_sender' };
     }
+    // 22 Nov 2026 review: the Graph lane always sends as its mailbox and ignores a
+    // from address pinned on the step, so the pinned column can name an address
+    // the mail never used. The address really used goes in the payload then.
+    const sentFromDiffers = Boolean(result.from && delivery.fromAddress
+      && String(result.from).toLowerCase() !== String(delivery.fromAddress).toLowerCase());
     await prisma.notificationDelivery.update({
       where: { id: delivery.id },
       data: {
@@ -216,14 +258,16 @@ export async function processDelivery(delivery) {
         // and the workflow node did not pin a from address.
         ...(result.from && !delivery.fromAddress ? { fromAddress: result.from } : {}),
         // Who was Bcc'd as an observer is part of the e-mail's own record.
-        ...(result.observerBcc?.length ? { bccRecipients: result.bccRecipients } : {}),
+        // So is a machine sender taken off the Bcc (22 Nov 2026).
+        ...(Array.isArray(result.bccRecipients) ? { bccRecipients: result.bccRecipients } : {}),
         // Who actually got it: machine senders taken off are recorded, not silently lost.
         ...(result.machineRemoved?.length ? { toRecipients: result.toRecipients, ccRecipients: result.ccRecipients } : {}),
-        ...(result.observerBcc?.length || result.machineRemoved?.length ? {
+        ...(result.observerBcc?.length || result.machineRemoved?.length || sentFromDiffers ? {
           payload: {
             ...priorPayload,
             ...(result.observerBcc?.length ? { observerBcc: result.observerBcc } : {}),
             ...(result.machineRemoved?.length ? { machineRemoved: result.machineRemoved } : {}),
+            ...(sentFromDiffers ? { sentFrom: String(result.from) } : {}),
           },
         } : {}),
         sentAt: new Date(),

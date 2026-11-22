@@ -2331,6 +2331,30 @@ export function repeatsDeliveredReply(eventContext, email = {}, toRecipients = [
   return plainForCompare(email?.text).includes(probe) || plainForCompare(email?.html).includes(probe);
 }
 
+/**
+ * The address a workflow e-mail would leave from (22 Nov 2026), for Preview and Shadow:
+ * the ticket's team mailbox when the workspace has one per team, the same pick the send
+ * makes. The ticket is read fresh (an earlier step may have moved it to another group).
+ * Never throws; null when it cannot tell.
+ */
+async function plannedWorkflowSender({ workspaceId, ticketId, from = null }) {
+  try {
+    const mod = await import('./transactionalEmailService.js');
+    const plan = mod.plannedSenderAddress || mod.default?.plannedSenderAddress;
+    if (typeof plan !== 'function') return null;
+    const id = Number(ticketId);
+    const mailboxTicket = Number.isInteger(id) && id > 0
+      ? await Promise.resolve()
+        .then(() => prisma.ticket.findUnique({ where: { id }, select: { workspaceId: true, groupId: true, internalGroupId: true } }))
+        .catch(() => null)
+      : null;
+    return await plan({ workspaceId, from, mailboxTicket: mailboxTicket || null });
+  } catch (err) {
+    logger.debug(`Planned workflow sender skipped: ${err.message}`);
+    return null;
+  }
+}
+
 function buildDeliveryDedupeKey({ workflow, run, node, eventContext, output, toRecipients, ccRecipients, bccRecipients }) {
   const baseRunKey = `${run.dedupeKey}:email:${node.id}`;
   if (!requesterFacingDelivery(eventContext, toRecipients, ccRecipients, bccRecipients)) {
@@ -3547,6 +3571,23 @@ async function executeNode({
       throw new Error(`Email recipient count exceeds the ${MAX_EMAIL_RECIPIENTS} recipient limit`);
     }
 
+    // 22 Nov 2026: Preview and Shadow name the address the e-mail would leave
+    // from (the ticket's team mailbox in a workspace with one per team). A live
+    // send records the address it really used on the delivery. Not in the step
+    // output: the audit copy of that redacts every address.
+    let plannedFromAddress = null;
+    if (executionMode === EXECUTION_MODE_PREVIEW || executionMode === EXECUTION_MODE_MOCK) {
+      const planned = await plannedWorkflowSender({
+        workspaceId: workflow.workspaceId,
+        ticketId: eventContext.ticket?.id,
+        from: node.data?.fromAddress || null,
+      });
+      if (planned?.address) {
+        plannedFromAddress = planned.address;
+        if (state.email && typeof state.email === 'object') state.email = { ...state.email, fromAddress: planned.address };
+      }
+    }
+
     if (executionMode === EXECUTION_MODE_PREVIEW) {
       return { ...output, skipped: true, reason: 'Preview only' };
     }
@@ -3603,7 +3644,8 @@ async function executeNode({
           subject,
           htmlBody,
           textBody,
-          fromAddress: node.data?.fromAddress || null,
+          // A Shadow row (never sent) records the address it would have left from.
+          fromAddress: (isMock ? plannedFromAddress : null) || node.data?.fromAddress || null,
           dedupeKey,
           payload: sanitizeWorkflowAuditPayload(safeJson({
             mockMode: isMock,

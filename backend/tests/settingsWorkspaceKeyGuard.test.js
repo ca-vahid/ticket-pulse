@@ -145,11 +145,13 @@ describe('generic settings writers refuse another workspace\'s keys', () => {
     expect(own.status).toBe(200);
   });
 
-  test('global keys still save for a workspace admin as before', async () => {
+  // 22 Nov 2026: global keys need a super admin now (see the block below).
+  test('global keys no longer save for a workspace admin', async () => {
     const res = await as('adminTwo', request(app).put('/api/settings').set('x-workspace-id', '2')
       .send({ settings: { dashboard_refresh_seconds: 60 } }));
-    expect(res.status).toBe(200);
-    expect(settings.get('dashboard_refresh_seconds')).toBe('60');
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('super_admin_required');
+    expect(settings.has('dashboard_refresh_seconds')).toBe(false);
   });
 
   test('a super admin may write any of them', async () => {
@@ -157,6 +159,126 @@ describe('generic settings writers refuse another workspace\'s keys', () => {
     expect(settings.get('dashboard_viewers_ws1')).toBe('[12]');
     expect((await as('root', request(app).put('/api/settings').set('x-workspace-id', '2')
       .send({ settings: { group_coordinators_ws1: '{}' } }))).status).toBe(200);
+  });
+});
+
+/**
+ * 22 Nov 2026: company-wide settings for super admins only. Every key that is
+ * not a `_ws<N>` key of the caller's own admin workspace is global and needs a
+ * super admin; a workspace admin gets 403 with a plain sentence.
+ */
+const SETTINGS_PAGE_GLOBAL_KEYS = {
+  // The fixed list the Settings page saves (pages/Settings.jsx sectionKeys).
+  freshservice_domain: 'example', freshservice_api_key: 'fs-secret-1', service_account_names: 'Ticket Pulse',
+  sendgrid_api_key: 'SG.secret', sendgrid_from_email: 'tickets@example.com', sendgrid_from_name: 'Ticket Pulse',
+  twilio_account_sid: 'AC123', twilio_auth_token: 'tw-secret', twilio_from_number: '+16045550100',
+  sync_interval_minutes: 5, default_timezone: 'America/Vancouver', dashboard_refresh_seconds: 30,
+};
+
+describe('company-wide settings need a super admin', () => {
+  test.each(Object.keys(SETTINGS_PAGE_GLOBAL_KEYS))('a workspace admin is refused %s on PUT /settings/:key', async (key) => {
+    const res = await as('adminOne', request(app).put(`/api/settings/${key}`).set('x-workspace-id', '1').send({ value: String(SETTINGS_PAGE_GLOBAL_KEYS[key]) }));
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('super_admin_required');
+    expect(res.body.message).toBe('Only a super admin can change company-wide settings.');
+    expect(settingsRepositoryMock.set).not.toHaveBeenCalled();
+  });
+
+  test('a workspace admin is refused the whole Settings-page bundle on PUT /settings', async () => {
+    const res = await as('adminOne', request(app).put('/api/settings').set('x-workspace-id', '1').send({ settings: SETTINGS_PAGE_GLOBAL_KEYS }));
+    expect(res.status).toBe(403);
+    expect(res.body.message).toBe('Only a super admin can change company-wide settings.');
+    expect(settingsRepositoryMock.setMany).not.toHaveBeenCalled();
+  });
+
+  test('…and the super admin list itself (admin_emails) through the generic writer', async () => {
+    const res = await as('adminOne', request(app).put('/api/settings/admin_emails').set('x-workspace-id', '1').send({ value: 'admin.one@example.com' }));
+    expect(res.status).toBe(403);
+    expect(settings.has('admin_emails')).toBe(false);
+  });
+
+  test('one global key in a bulk save with an own-workspace key refuses the lot', async () => {
+    const res = await as('adminOne', request(app).put('/api/settings').set('x-workspace-id', '1')
+      .send({ settings: { mail_subject_ws1: '{}', sendgrid_from_name: 'Desk' } }));
+    expect(res.status).toBe(403);
+    expect(settingsRepositoryMock.setMany).not.toHaveBeenCalled();
+  });
+
+  test('a workspace admin may still write their own workspace\'s `_ws` keys, on both routes', async () => {
+    const single = await as('adminOne', request(app).put('/api/settings/mail_subject_ws1').set('x-workspace-id', '1').send({ value: '{"a":1}' }));
+    expect(single.status).toBe(200);
+    expect(settings.get('mail_subject_ws1')).toBe('{"a":1}');
+    const bulk = await as('adminOne', request(app).put('/api/settings').set('x-workspace-id', '1').send({ settings: { group_coordinators_ws1: '{}' } }));
+    expect(bulk.status).toBe(200);
+    expect(settings.get('group_coordinators_ws1')).toBe('{}');
+  });
+
+  test('a super admin saves the Settings-page bundle and single global keys', async () => {
+    const bulk = await as('root', request(app).put('/api/settings').set('x-workspace-id', '1').send({ settings: SETTINGS_PAGE_GLOBAL_KEYS }));
+    expect(bulk.status).toBe(200);
+    expect(settings.get('freshservice_api_key')).toBe('fs-secret-1');
+    expect(settings.get('sync_interval_minutes')).toBe('5');
+    const single = await as('root', request(app).put('/api/settings/dashboard_refresh_seconds').send({ value: '45' }));
+    expect(single.status).toBe(200);
+    expect(settings.get('dashboard_refresh_seconds')).toBe('45');
+  });
+
+  test('a masked value sent back is never stored as the secret', async () => {
+    settings.set('sendgrid_event_webhook_token', 'real-token');
+    const res = await as('root', request(app).put('/api/settings').send({ settings: { sendgrid_event_webhook_token: '***MASKED***', sendgrid_from_name: 'Desk' } }));
+    expect(res.status).toBe(200);
+    expect(settings.get('sendgrid_event_webhook_token')).toBe('real-token');
+    expect(settings.get('sendgrid_from_name')).toBe('Desk');
+  });
+
+  test('PUT /settings/:key keeps the real secret when sent the mask or a blank', async () => {
+    settings.set('freshservice_api_key', 'fs-real');
+    settings.set('sendgrid_event_webhook_token', 'real-token');
+    for (const [key, value] of [['freshservice_api_key', '***MASKED***'], ['freshservice_api_key', ''], ['sendgrid_event_webhook_token', '***MASKED***']]) {
+      const res = await as('root', request(app).put(`/api/settings/${key}`).send({ value }));
+      expect(res.status).toBe(200);
+      expect(res.body.unchanged).toBe(true);
+    }
+    expect(settings.get('freshservice_api_key')).toBe('fs-real');
+    expect(settings.get('sendgrid_event_webhook_token')).toBe('real-token');
+    expect(settingsRepositoryMock.set).not.toHaveBeenCalled();
+    // A blank non-secret still saves; a real new secret still saves.
+    expect((await as('root', request(app).put('/api/settings/service_account_names').send({ value: '' }))).status).toBe(200);
+    expect(settings.get('service_account_names')).toBe('');
+    await as('root', request(app).put('/api/settings/freshservice_api_key').send({ value: 'fs-new' }));
+    expect(settings.get('freshservice_api_key')).toBe('fs-new');
+  });
+});
+
+describe('GET /settings never returns secrets', () => {
+  test('the three provider secrets and any other secret-named key are masked', async () => {
+    for (const [k, v] of Object.entries({
+      freshservice_api_key: 'fs-secret-1', sendgrid_api_key: 'SG.secret', twilio_auth_token: 'tw-secret',
+      sendgrid_event_webhook_token: 'bounce-token', some_client_secret_ws1: 'abc', sendgrid_from_email: 'tickets@example.com',
+    })) settings.set(k, v);
+    for (const user of ['adminOne', 'root']) {
+      const res = await as(user, request(app).get('/api/settings').set('x-workspace-id', '1'));
+      expect(res.status).toBe(200);
+      const text = JSON.stringify(res.body.data);
+      for (const secret of ['fs-secret-1', 'SG.secret', 'tw-secret', 'bounce-token', '"abc"']) expect(text).not.toContain(secret);
+      expect(res.body.data.sendgrid_event_webhook_token).toBe('***MASKED***');
+      expect(res.body.data.sendgrid_from_email).toBe('tickets@example.com');
+    }
+  });
+});
+
+describe('PUT /settings/admins (the Super admins panel)', () => {
+  test('a super admin saves the list (it was answered by PUT /:key with 400 before)', async () => {
+    const res = await as('root', request(app).put('/api/settings/admins').send({ emails: ['root@example.com', 'Priya.Nair@example.com'] }));
+    expect(res.status).toBe(200);
+    expect(res.body.data.emails).toEqual(['root@example.com', 'priya.nair@example.com']);
+    expect(settings.get('admin_emails')).toBe('root@example.com,priya.nair@example.com');
+  });
+
+  test('a workspace admin is refused', async () => {
+    const res = await as('adminOne', request(app).put('/api/settings/admins').set('x-workspace-id', '1').send({ emails: ['admin.one@example.com'] }));
+    expect(res.status).toBe(403);
+    expect(settings.has('admin_emails')).toBe(false);
   });
 });
 
