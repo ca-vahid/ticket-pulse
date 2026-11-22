@@ -197,6 +197,15 @@ describe('company-wide settings need a super admin', () => {
     expect(settings.has('admin_emails')).toBe(false);
   });
 
+  test('…not even a super admin may change admin_emails through the generic writers (Access history records only /admins)', async () => {
+    const single = await as('root', request(app).put('/api/settings/admin_emails').send({ value: 'someone@example.com' }));
+    expect(single.status).toBe(403);
+    expect(single.body.code).toBe('setting_not_writable');
+    const bulk = await as('root', request(app).put('/api/settings').set('x-workspace-id', '1').send({ settings: { admin_emails: 'someone@example.com' } }));
+    expect(bulk.status).toBe(403);
+    expect(settings.has('admin_emails')).toBe(false);
+  });
+
   test('one global key in a bulk save with an own-workspace key refuses the lot', async () => {
     const res = await as('adminOne', request(app).put('/api/settings').set('x-workspace-id', '1')
       .send({ settings: { mail_subject_ws1: '{}', sendgrid_from_name: 'Desk' } }));

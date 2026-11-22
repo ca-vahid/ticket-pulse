@@ -140,6 +140,11 @@ function requestActor(req) {
 const WORKSPACE_KEY_SUFFIX = /_ws(\d+)$/;
 export const COMPANY_WIDE_SETTINGS_MESSAGE = 'Only a super admin can change company-wide settings.';
 function refuseForeignWorkspaceKeys(req, keys) {
+  // The super admin list is changed only through PUT /settings/admins, which records each change in
+  // Access history (4.4.01). Refused here for everyone, super admins included, so no change goes unrecorded.
+  if (keys.some((key) => String(key || '') === 'admin_emails')) {
+    throw new AuthorizationError('The super admin list is changed under Settings → Super admins, not here.', 'setting_not_writable');
+  }
   if (requestActor(req)?.role === 'admin') return;
   for (const key of keys) {
     const text = String(key || '');
