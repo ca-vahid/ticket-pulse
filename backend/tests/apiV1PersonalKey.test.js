@@ -45,7 +45,7 @@ jest.unstable_mockModule('../src/middleware/apiKeyAuth.js', () => ({
         scopes: ['tickets:read', 'tickets:write', 'conversations:read', 'conversations:write'],
         trustedIntake: false, defaultSource: null, structureOwnTicketsOnly: false, fsStatusWrite: false,
         readExcludeCategoryIds: [], readPrivateNotes: true,
-        personal: { keyId: 31, actor: PERSONAL_ACTOR, abilities: ['read', 'reply', 'update'], keyScopes: ['tickets:read', 'tickets:write', 'conversations:read', 'conversations:write'], expiresAt: '2027-02-20T00:00:00.000Z', readOnly: false, workspaceRole: null },
+        personal: { keyId: 31, actor: req.headers['x-test-member'] ? { ...PERSONAL_ACTOR, kind: 'member', role: 'viewer', workspaceRole: 'viewer' } : PERSONAL_ACTOR, abilities: ['read', 'reply', 'update'], keyScopes: ['tickets:read', 'tickets:write', 'conversations:read', 'conversations:write'], expiresAt: '2027-02-20T00:00:00.000Z', readOnly: false, workspaceRole: null },
       };
     } else {
       req.apiKey = { id: 7, name: 'Power App', keyPrefix: 'tp_live_integrat', mode: 'live', scopes: ['*'], oauthClientId: null, trustedIntake: false, defaultSource: null, fsStatusWrite: false, readExcludeCategoryIds: [], readPrivateNotes: true };
@@ -66,6 +66,15 @@ jest.unstable_mockModule('../src/services/machineSenderService.js', () => machin
 jest.unstable_mockModule('../src/services/personalApiKeyService.js', () => ({ default: personalSvcMock, PERSONAL_KEY_RATE_LIMIT: 60 }));
 jest.unstable_mockModule('../src/services/fsBornStatusService.js', () => ({ default: fsBornMock }));
 jest.unstable_mockModule('../src/utils/publicBaseUrl.js', () => ({ resolvePublicBaseUrl: () => 'https://tickets.example.com' }));
+const mergeMock = { merge: jest.fn().mockResolvedValue({ merged: true }), mergeMany: jest.fn().mockResolvedValue({ results: [] }) };
+const linkMock = { setParent: jest.fn().mockResolvedValue({}), removeParent: jest.fn().mockResolvedValue({}), addChild: jest.fn().mockResolvedValue({}) };
+const splitMock = { split: jest.fn().mockResolvedValue({ id: 9 }) };
+const refsMock = { MAX_REFERENCES_PER_CALL: 50, normalizeReference: jest.fn((r) => r), addReferences: jest.fn().mockResolvedValue({}), listReferences: jest.fn().mockResolvedValue([]) };
+jest.unstable_mockModule('../src/services/ticketMergeService.js', () => ({ default: mergeMock }));
+jest.unstable_mockModule('../src/services/ticketLinkService.js', () => ({ default: linkMock }));
+jest.unstable_mockModule('../src/services/ticketSplitService.js', () => ({ default: splitMock }));
+jest.unstable_mockModule('../src/services/ticketStructureGuard.js', () => ({ assertClientMayStructure: jest.fn() }));
+jest.unstable_mockModule('../src/services/ticketExternalReferenceService.js', () => ({ default: refsMock }));
 
 const { default: apiV1Routes } = await import('../src/routes/apiV1.routes.js');
 
@@ -154,12 +163,22 @@ describe('integration keys are unchanged (pin)', () => {
 });
 
 describe('visibility: the person\'s in-app list', () => {
-  test('GET /tickets with a personal key applies no credential exclusion — the same query the app list uses', async () => {
+  test('GET /tickets with a personal key: no credential exclusion, and the person as actor (AI suggestions hidden as in the app)', async () => {
     await personal(request(buildApp()).get('/api/v1/tickets?status=Open')).expect(200);
     await request(buildApp()).get('/api/v1/tickets?status=Open').expect(200);
     const [personalCall, integrationCall] = ticketServiceMock.listTickets.mock.calls;
     expect(personalCall[1]).not.toHaveProperty('excludeCategoryIds');
-    expect(personalCall).toEqual(integrationCall);
+    expect(personalCall[1]).toEqual(integrationCall[1]); // the same query
+    expect(personalCall[2]).toEqual({ actor: PERSONAL_ACTOR });
+    // integration keys: unchanged, two arguments only
+    expect(integrationCall).toHaveLength(2);
+  });
+
+  test('GET /search/tickets passes the person as actor too', async () => {
+    await personal(request(buildApp()).get('/api/v1/search/tickets?query=printer')).expect(200);
+    expect(ticketServiceMock.listTickets.mock.calls[0][2]).toEqual({ actor: PERSONAL_ACTOR });
+    await request(buildApp()).get('/api/v1/search/tickets?query=printer').expect(200);
+    expect(ticketServiceMock.listTickets.mock.calls[1]).toHaveLength(2);
   });
 
   test('the full conversation (private notes included) is readable, as in the app', async () => {
@@ -176,6 +195,50 @@ describe('routes a personal key never uses', () => {
     expect(ticketServiceMock.createTicket).not.toHaveBeenCalled();
     res = await personal(request(buildApp()).post('/api/v1/alert-occurrences')).send({ fingerprint: 'f', title: 't', requesterEmail: 'eli.park@example.com' }).expect(403);
     expect(res.body.code).toBe('personal_key_not_allowed_here');
+  });
+
+  test('split is refused for every personal key (it creates a ticket); integration keys still split', async () => {
+    for (const member of [false, true]) {
+      const r = personal(request(buildApp()).post('/api/v1/tickets/501/split'));
+      if (member) r.set('x-test-member', '1');
+      expect((await r.send({ subject: 'Part two' }).expect(403)).body.code).toBe('personal_key_not_allowed_here');
+    }
+    expect(splitMock.split).not.toHaveBeenCalled();
+    await request(buildApp()).post('/api/v1/tickets/501/split').send({ subject: 'Part two' }).expect(201);
+    expect(splitMock.split).toHaveBeenCalledTimes(1);
+  });
+
+  test('an agent\'s personal key may not merge, re-parent or add children (403 coordinator_required), as in the app', async () => {
+    const calls = [
+      ['post', '/api/v1/tickets/501/merge', { target: 502 }],
+      ['post', '/api/v1/tickets/501/merge-many', { sources: [502] }],
+      ['put', '/api/v1/tickets/501/parent', { parent: 502 }],
+      ['delete', '/api/v1/tickets/501/parent', {}],
+      ['post', '/api/v1/tickets/501/children', { child: 502 }],
+    ];
+    for (const [method, path, payload] of calls) {
+      const res = await personal(request(buildApp())[method](path)).send(payload).expect(403);
+      expect(res.body.code).toBe('coordinator_required');
+    }
+    expect(mergeMock.merge).not.toHaveBeenCalled();
+    expect(mergeMock.mergeMany).not.toHaveBeenCalled();
+    expect(linkMock.setParent).not.toHaveBeenCalled();
+    expect(linkMock.removeParent).not.toHaveBeenCalled();
+    expect(linkMock.addChild).not.toHaveBeenCalled();
+  });
+
+  test('a member\'s personal key may, as in the app, and runs as the person; integration keys are not gated', async () => {
+    await personal(request(buildApp()).put('/api/v1/tickets/501/parent')).set('x-test-member', '1').send({ parent: 502 }).expect(200);
+    expect(linkMock.setParent).toHaveBeenCalledWith(501, 1, { parentTicketId: 502 }, expect.objectContaining({ email: 'dana.fox@example.com', kind: 'member' }));
+    await personal(request(buildApp()).post('/api/v1/tickets/501/merge')).set('x-test-member', '1').send({ target: 502 }).expect(200);
+    await request(buildApp()).post('/api/v1/tickets/501/merge').send({ target: 502 }).expect(200);
+    expect(mergeMock.merge).toHaveBeenCalledTimes(2);
+  });
+
+  test('external references are refused for personal keys (alert routing relies on them)', async () => {
+    const res = await personal(request(buildApp()).post('/api/v1/tickets/501/references')).send({ reference: { system: 'sentinel', id: 'abc' } }).expect(403);
+    expect(res.body.code).toBe('personal_key_not_allowed_here');
+    expect(refsMock.addReferences).not.toHaveBeenCalled();
   });
 
   test('PATCH may not re-point the requester by e-mail or name (that could create one)', async () => {

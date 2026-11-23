@@ -64,6 +64,9 @@ describe('the guide names only real v1 routes', () => {
     expect(md).toContain('dana.fox@example.com');
     expect(md).toContain('Scopes in force today: `tickets:read`, `conversations:write`');
     expect(md).toContain('"Laptop script" (`tpu_AbCdEfGh…`)');
+    // review #9: plain, accurate wording
+    expect(md).toMatch(/can't create new tickets/);
+    expect(md).not.toMatch(/never creates? a ticket/i);
   });
 
   test('lists the HTML tags the sanitizer keeps and explains line breaks', () => {

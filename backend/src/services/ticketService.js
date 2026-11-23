@@ -1288,6 +1288,8 @@ class TicketService {
       ...(suppressRequesterAck ? { suppressRequesterAck: true } : {}),
       ...(actorKind ? { actorKind } : {}),
       ...(actor ? { actor: { name: actor.name || null, email: actor.email || null, technicianId: actor.technicianId ?? null } } : {}),
+      // Personal API keys (4.4.05): the status webhook says the person resolved through their key.
+      ...(actor?.via?.kind === 'personal_key' ? { resolvedVia: 'personal_key' } : {}),
     }).catch((err) => {
       logger.warn('Native ticket lifecycle notification dispatch failed (non-fatal)', {
         ticketId: upsertedTicket.id,

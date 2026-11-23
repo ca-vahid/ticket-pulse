@@ -546,7 +546,8 @@ export const PROBLEM_CODES = Object.freeze([
   { code: 'read_only_role', status: 403, meaning: 'Personal key: the person’s access is read-only today, so the key reads but changes nothing.' },
   { code: 'personal_key_owner_has_no_access', status: 403, meaning: 'Personal key: the person it belongs to no longer has access to the workspace.' },
   { code: 'personal_key_not_allowed', status: 403, meaning: 'Personal key: the person’s API access was removed by an admin.' },
-  { code: 'personal_key_not_allowed_here', status: 403, meaning: 'Personal key: this call is not open to personal keys (creating tickets or requesters, monitoring alerts).' },
+  { code: 'personal_key_not_allowed_here', status: 403, meaning: 'Personal key: this call is not open to personal keys (it can’t create new tickets or requesters, split tickets, add external references or record monitoring alerts).' },
+  { code: 'coordinator_required', status: 403, meaning: 'Personal key of an agent: merging, re-parenting and adding children need a coordinator or admin role, as in the app.' },
   { code: 'personal_key_required', status: 403, meaning: 'Only a personal key (tpu_…) may call this route (GET /me/guide).' },
   { code: 'fs_status_write_not_enabled', status: 403, meaning: 'The ticket belongs to FreshService and this credential may not change its status.' },
   { code: 'forbidden', status: 403, meaning: 'Refused for another policy reason.' },
@@ -585,7 +586,16 @@ export const PERSONAL_KEYS_DOC = Object.freeze({
     { id: 'update', scopes: ['tickets:write', 'tags:write'] },
     { id: 'tasks', scopes: ['tasks:read', 'tasks:write', 'timeentries:read', 'timeentries:write'] },
   ],
-  never: ['approvals', 'creating tickets or requesters (POST /tickets, requesterEmail/requesterName on PATCH)', '/alert-occurrences', 'custom-field writes', 'creating tags', 'webhooks, keys, members, settings', 'trusted intake, due dates, FreshService status writes'],
+  never: [
+    'can’t create new tickets (POST /tickets, POST /tickets/{id}/split)',
+    'can’t create new requesters (requesterEmail / requesterName on PATCH; an existing requesterId is fine)',
+    'can’t add external references (POST /tickets/{id}/references) or record monitoring alerts (/alert-occurrences)',
+    'merge, re-parent and add-child need a coordinator or admin role, as in the app (403 coordinator_required for agents)',
+    'approvals, custom-field writes, creating tags',
+    'webhooks, keys, members, settings',
+    'trusted intake, due dates, FreshService status writes',
+  ],
+  webhookMarker: 'When a personal key resolves or closes a ticket, the ticket.status_changed webhook carries `data.extra.resolvedVia: "personal_key"` (additive). `resolvedByKind` stays "human" and `actor` is the person.',
   expiry: 'Required: 30, 90 (default), 180 or 365 days. The owner is e-mailed 7 days before. Rotating gives a new secret (and a new key id) with the same settings.',
   undo: 'None. A reply is e-mailed at once; there is no undo-send window.',
   idempotency: 'Send Idempotency-Key on replies and notes; a retry with the same key returns the first answer (24 h).',
@@ -890,7 +900,8 @@ Both resolve to a single workspace; a credential can never read or write another
 <b>3. Personal API key</b> (<code>tpu_…</code>). A person makes one in their own profile once an admin has given them API access (Members → API keys). It <b>acts as them</b>: ${esc(PERSONAL_KEYS_DOC.actsAs)}<br><br>
 <b>Checked on every call:</b><br>${PERSONAL_KEYS_DOC.checkedEveryCall.map((c) => `• ${esc(c)}`).join('<br>')}<br><br>
 <b>What it can do</b> (chosen when it is made; read is always on):<br>${PERSONAL_KEYS_DOC.abilities.map((a) => `• <code>${a.id}</code>: ${a.scopes.map((s) => `<code>${s}</code>`).join(' ')}`).join('<br>')}<br>
-<b>Never:</b> ${PERSONAL_KEYS_DOC.never.map(esc).join('; ')}.<br><br>
+<b>Limits on what it does:</b> ${PERSONAL_KEYS_DOC.never.map(esc).join('; ')}.<br>
+<b>Webhooks:</b> ${esc(PERSONAL_KEYS_DOC.webhookMarker)}<br><br>
 <b>Limits:</b> ${PERSONAL_KEYS_DOC.rateLimitPerMinute} requests a minute per key. ${esc(PERSONAL_KEYS_DOC.expiry)} <b>No undo:</b> ${esc(PERSONAL_KEYS_DOC.undo)} ${esc(PERSONAL_KEYS_DOC.idempotency)}
 <pre>curl -X POST ${baseUrl}/api/v1/tickets/TP-1234/replies \\
   -H "Authorization: Bearer tpu_xxx" -H "Content-Type: application/json" \\
@@ -1148,6 +1159,7 @@ as-is; hand-build a minimal 2.0 file with just <code>POST /tickets</code> (+ <co
 <h2>Outbound webhooks</h2>
 <p>Events: <code>ticket.created</code>, <code>ticket.status_changed</code>, <code>ticket.assigned</code>, <code>ticket.reply_received</code> (a requester replied — payload <code>extra</code> carries <code>sentBy</code> (<code>requester</code> | <code>cc</code> | <code>workflow_recipient</code> | <code>other</code>), <code>closedMinutes</code> (minutes since the ticket closed; <code>null</code> when it is not Resolved/Closed), <code>replyReopens24h</code> (reopens by replies in the last 24 hours), <code>replyToWorkflowEmail</code> and, when a reply workflow in the workspace reads it, <code>replyVerdict</code> (<code>thanks</code> | <code>auto_reply</code> | <code>still_broken</code> | <code>new_request</code> | <code>question</code> | <code>reply</code>); <code>from</code> / <code>fromEmail</code> is the sender's address), <code>ticket.public_reply_added</code>, <code>ticket.note_added</code> (private notes — payload <code>extra</code> carries <code>entryId</code>, <code>author</code>, <code>authorType</code>, <code>stage</code>, <code>agent</code>, <code>bodyText</code>), <code>ticket.tags_changed</code>, <code>ticket.custom_fields_changed</code>, <code>ticket.fields_updated</code> (field edits by a person / the API / a workflow / FreshService — payload <code>extra</code> carries <code>actorKind</code>, <code>source</code>, <code>changedFields</code> and <code>changes{from,to}</code>), <code>approval.requested</code>, <code>approval.decided</code>.</p>
 <p>Subscribe in <b>Settings → API Keys → Outbound webhooks</b>. Deliveries follow the <a href="https://www.standardwebhooks.com">Standard Webhooks</a> spec — headers <code>webhook-id</code>, <code>webhook-timestamp</code>, <code>webhook-signature</code> (<code>v1,&lt;base64 HMAC-SHA256 of id.timestamp.body&gt;</code>, secret <code>whsec_…</code>). Verify with a constant-time compare and a timestamp tolerance; treat <code>webhook-id</code> as an idempotency key. Legacy <code>X-TicketPulse-Signature</code> headers are sent in parallel during migration. Failed deliveries retry with exponential backoff and are visible (with a redeliver action) in the webhook’s delivery log.</p>
+<p><b>Personal keys:</b> ${esc(PERSONAL_KEYS_DOC.webhookMarker)}</p>
 </body></html>`;
 }
 

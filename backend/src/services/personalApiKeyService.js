@@ -90,6 +90,7 @@ export const REASONS = Object.freeze({
   NOT_ON_LIST: 'Ask an admin to give you API access.',
   READ_ONLY: 'Your access is read-only, so you can’t make an API key.',
   HAS_KEY: 'You already have a key. Rotate it for a new secret, or revoke it first.',
+  DISABLED: 'An admin switched your key off. Ask them about it before you make a new one.',
   NO_ACCESS: 'You no longer have access to this workspace.',
 });
 
@@ -237,11 +238,11 @@ async function superAdmins() {
  * The person's standing in a workspace right now. Used on every v1 call and by
  * the owner routes. Reads are live (the list is cached 15 s).
  */
-export async function resolveOwnerAccess(workspaceId, email, { technicianId = null } = {}) {
+export async function resolveOwnerAccess(workspaceId, email, { technicianId = null, fresh = false } = {}) {
   const ws = Number(workspaceId);
   const address = lower(email);
   const [ids, technician, workspaceRole, supers] = await Promise.all([
-    getListedTechnicianIds(ws),
+    getListedTechnicianIds(ws, { fresh }),
     prisma.technician.findFirst({
       where: technicianId
         ? { id: Number(technicianId), workspaceId: ws }
@@ -310,7 +311,9 @@ export async function authenticatePersonalKey(raw) {
   if (!access.onList) {
     throw problems.forbidden('Your API access was removed in this workspace. Ask an admin to give it back.', 'personal_key_not_allowed');
   }
-  if (!access.hasAccess) {
+  // A key needs an ACTIVE agent profile on every call (review 73f06f8b #2): a
+  // switched-off technician who keeps a workspace_access row is refused too.
+  if (!access.hasAccess || !access.eligible) {
     throw problems.forbidden('The person this key belongs to no longer has access to this workspace.', 'personal_key_owner_has_no_access');
   }
   const scopes = roleCappedScopes(key.scopes, access);
@@ -371,7 +374,7 @@ async function workspaceName(workspaceId) {
 
 async function profileUrl() {
   const { resolvePublicBaseUrl } = await import('../utils/publicBaseUrl.js');
-  return `${resolvePublicBaseUrl() || ''}/settings#api-keys`;
+  return `${resolvePublicBaseUrl() || ''}/profile`;
 }
 
 /** The owner's own e-mail: created / rotated / expiring. Exported for tests. */
@@ -450,6 +453,81 @@ async function revokeRows(rows, { reason, actorEmail = null }) {
   return revokedIds;
 }
 
+/**
+ * Take people off the workspace's list (offboarding, review 73f06f8b #8): one
+ * Access history row each (personal_key_access_removed, details.reason). Reads
+ * the list fresh. Returns the ids removed.
+ */
+async function removeFromList(workspaceId, technicianIds, { actorEmail = null, reason = 'offboarded' } = {}) {
+  const ws = Number(workspaceId);
+  const current = await getListedTechnicianIds(ws, { fresh: true });
+  const drop = [...new Set(technicianIds.map(Number))].filter((id) => current.includes(id));
+  if (!drop.length) return [];
+  const ids = current.filter((id) => !drop.includes(id));
+  await settingsRepository.set(personalKeyUsersKey(ws), JSON.stringify(ids));
+  listCache.set(ws, { ids, at: Date.now() });
+  const techs = await Promise.resolve()
+    .then(() => prisma.technician.findMany({ where: { workspaceId: ws, id: { in: drop } }, select: { id: true, name: true, email: true } }))
+    .catch(() => []);
+  const byId = new Map((techs || []).map((t) => [t.id, t]));
+  for (const id of drop) {
+    const t = byId.get(id);
+    await audit({ workspaceId: ws, actorEmail, action: PERSONAL_ACTIONS.ACCESS_REMOVED, targetEmail: t?.email || null, targetLabel: t?.name || `technician ${id}`, extra: { technicianId: id, reason } });
+  }
+  return drop;
+}
+
+/**
+ * Offboarding one technician: revoke their keys AND take them off the list.
+ * Never throws. Returns { revokedKeyIds, removedFromList }.
+ */
+export async function offboardTechnician(workspaceId, technicianId, { actorEmail = null, reason = 'offboarded' } = {}) {
+  const revokedKeyIds = await revokeForTechnician(workspaceId, technicianId, { reason, actorEmail });
+  const removedFromList = await removeFromList(workspaceId, [technicianId], { actorEmail, reason }).catch((err) => {
+    logger.warn(`Personal API keys: list removal for technician ${technicianId} in ws ${workspaceId} failed: ${err.message}`);
+    return [];
+  });
+  return { revokedKeyIds, removedFromList };
+}
+
+/** Offboarding by e-mail (workspace access removed). Never throws. */
+export async function offboardEmail(workspaceId, email, { actorEmail = null, reason = 'offboarded' } = {}) {
+  const revokedKeyIds = await revokeForEmail(workspaceId, email, { reason, actorEmail });
+  let removedFromList = [];
+  try {
+    const tech = await prisma.technician.findFirst({ where: { workspaceId: Number(workspaceId), email: { equals: lower(email), mode: 'insensitive' } }, select: { id: true } });
+    if (tech) removedFromList = await removeFromList(workspaceId, [tech.id], { actorEmail, reason });
+  } catch (err) {
+    logger.warn(`Personal API keys: list removal for ${email} in ws ${workspaceId} failed: ${err.message}`);
+  }
+  return { revokedKeyIds, removedFromList };
+}
+
+/**
+ * After a sync switched technicians off in bulk (deactivateNotInList returns a
+ * count only): offboard every listed person or key owner whose agent profile
+ * is no longer active. Never throws.
+ */
+export async function offboardInactiveTechnicians(workspaceId, { reason = 'offboarded' } = {}) {
+  try {
+    const ws = Number(workspaceId);
+    const [ids, keys] = await Promise.all([
+      getListedTechnicianIds(ws, { fresh: true }),
+      prisma.personalApiKey.findMany({ where: { workspaceId: ws, revokedAt: null }, select: { technicianId: true } }),
+    ]);
+    const candidates = [...new Set([...ids, ...(keys || []).map((k) => k.technicianId).filter(Boolean)])];
+    if (!candidates.length) return [];
+    const techs = await prisma.technician.findMany({ where: { workspaceId: ws, id: { in: candidates } }, select: { id: true, isActive: true } });
+    const active = new Set((techs || []).filter((t) => t.isActive).map((t) => t.id));
+    const gone = candidates.filter((id) => !active.has(id));
+    for (const id of gone) await offboardTechnician(ws, id, { reason });
+    return gone;
+  } catch (err) {
+    logger.warn(`Personal API keys: inactive sweep for ws ${workspaceId} failed: ${err.message}`);
+    return [];
+  }
+}
+
 /** Revoke every live key a technician holds in a workspace. Never throws. */
 export async function revokeForTechnician(workspaceId, technicianId, { reason = 'offboarded', actorEmail = null } = {}) {
   try {
@@ -487,14 +565,55 @@ async function ownKeys(workspaceId, email) {
   });
 }
 
-/** May this person create a key now? → { canCreate, reason }. */
+/**
+ * May this person create a key now? → { canCreate, reason }. `keys` are their
+ * unrevoked keys. A key an admin switched off blocks a new one until an admin
+ * revokes it (the owner can't revoke it either), so a switch-off can't be
+ * dodged. An expired key does not block: create revokes it first.
+ */
 function createVerdict(access, keys) {
   if (!access.hasAccess) return { canCreate: false, reason: REASONS.NO_ACCESS };
   if (!access.onList || !access.eligible) return { canCreate: false, reason: REASONS.NOT_ON_LIST };
   if (access.readOnly) return { canCreate: false, reason: REASONS.READ_ONLY };
-  const live = keys.filter((k) => ['active', 'disabled'].includes(keyStatus(k)));
+  if (keys.some((k) => !k.revokedAt && !k.isEnabled)) return { canCreate: false, reason: REASONS.DISABLED };
+  const live = keys.filter((k) => keyStatus(k) === 'active');
   if (live.length >= MAX_PERSONAL_KEYS) return { canCreate: false, reason: REASONS.HAS_KEY };
   return { canCreate: true, reason: null };
+}
+
+/** A key id from the URL: anything but a positive whole number is "not found". */
+function keyIdOf(id) {
+  const n = Number(id);
+  if (!/^\d+$/.test(String(id ?? '')) || !Number.isSafeInteger(n) || n <= 0) throw new NotFoundError('API key not found');
+  return n;
+}
+
+/**
+ * Check-and-write under a per-person lock (review 73f06f8b #4): two creates or
+ * a create and a rotate at once can never leave two live keys. The partial
+ * unique index personal_api_keys_one_live_per_person is the last line.
+ */
+async function withPersonLock(workspaceId, email, fn) {
+  const lockKey = `pkey:${Number(workspaceId)}:${lower(email)}`;
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}::text))`;
+    return fn(tx);
+  });
+}
+
+function conflict(message, code) {
+  const err = new ConflictError(message);
+  err.code = code;
+  return err;
+}
+
+async function createRow(tx, data) {
+  try {
+    return await tx.personalApiKey.create({ data });
+  } catch (err) {
+    if (err?.code === 'P2002') throw conflict(REASONS.HAS_KEY, 'personal_key_exists');
+    throw err;
+  }
 }
 
 export async function getOwnerOverview(workspaceId, user) {
@@ -515,11 +634,8 @@ export async function getOwnerOverview(workspaceId, user) {
 }
 
 function refusalFor(verdict) {
-  if (verdict.reason === REASONS.HAS_KEY) {
-    const err = new ConflictError(verdict.reason);
-    err.code = 'personal_key_exists';
-    return err;
-  }
+  if (verdict.reason === REASONS.HAS_KEY) return conflict(verdict.reason, 'personal_key_exists');
+  if (verdict.reason === REASONS.DISABLED) return new AuthorizationError(verdict.reason, 'personal_key_disabled');
   if (verdict.reason === REASONS.READ_ONLY) return new AuthorizationError(verdict.reason, 'read_only_role');
   if (verdict.reason === REASONS.NO_ACCESS) return new AuthorizationError(verdict.reason, 'workspace_access_denied');
   return new AuthorizationError(verdict.reason, 'personal_key_not_allowed');
@@ -531,12 +647,24 @@ export async function createOwnKey(workspaceId, user, body = {}, { ip = null } =
   const abilities = validateAbilities(body.abilities);
   const expiresInDays = validateExpiryDays(body.expiresInDays);
   const ipAllowlist = validateIpAllowlist(body.ipAllowlist);
-  const [access, keys] = await Promise.all([resolveOwnerAccess(workspaceId, email), ownKeys(workspaceId, email)]);
-  const verdict = createVerdict(access, keys);
-  if (!verdict.canCreate) throw refusalFor(verdict);
+  // The list is read fresh here, never from the 15 s cache (review #14).
+  const access = await resolveOwnerAccess(workspaceId, email, { fresh: true });
+  const accessVerdict = createVerdict(access, []);
+  if (!accessVerdict.canCreate) throw refusalFor(accessVerdict);
   const { raw, hash, prefix } = generatePersonalKey();
-  const key = await prisma.personalApiKey.create({
-    data: {
+  const { key, expired } = await withPersonLock(workspaceId, email, async (tx) => {
+    const keys = await tx.personalApiKey.findMany({ where: { workspaceId: Number(workspaceId), ownerEmail: email, revokedAt: null } });
+    const verdict = createVerdict(access, keys);
+    if (!verdict.canCreate) throw refusalFor(verdict);
+    // Ended keys still hold the one-key slot (and the unique index): revoke them first.
+    const ended = keys.filter((k) => keyStatus(k) === 'expired');
+    if (ended.length) {
+      await tx.personalApiKey.updateMany({
+        where: { id: { in: ended.map((k) => k.id) }, revokedAt: null },
+        data: { revokedAt: new Date(), revokedBy: null, revokedReason: 'expired', isEnabled: false },
+      });
+    }
+    const row = await createRow(tx, {
       workspaceId: Number(workspaceId),
       technicianId: access.technician.id,
       ownerEmail: email,
@@ -547,8 +675,12 @@ export async function createOwnKey(workspaceId, user, body = {}, { ip = null } =
       ipAllowlist,
       expiresAt: new Date(Date.now() + expiresInDays * DAY_MS),
       createdBy: email,
-    },
+    });
+    return { key: row, expired: ended };
   });
+  for (const old of expired) {
+    await audit({ workspaceId, actorEmail: email, action: PERSONAL_ACTIONS.REVOKED, key: old, extra: { reason: 'expired' } });
+  }
   await audit({ workspaceId, actorEmail: email, action: PERSONAL_ACTIONS.CREATED, key });
   await mailOwner('created', key, { ip });
   logger.info(`Personal API key ${key.id} (${prefix}…) created by ${email} in workspace ${workspaceId}`);
@@ -556,50 +688,58 @@ export async function createOwnKey(workspaceId, user, body = {}, { ip = null } =
 }
 
 async function findOwn(workspaceId, email, id) {
-  const key = await prisma.personalApiKey.findFirst({ where: { id: Number(id), workspaceId: Number(workspaceId), ownerEmail: email } });
+  const key = await prisma.personalApiKey.findFirst({ where: { id: keyIdOf(id), workspaceId: Number(workspaceId), ownerEmail: email } });
   if (!key) throw new NotFoundError('API key not found');
   return key;
 }
 
+const REVOKED_MESSAGE = 'This key was revoked. Make a new one instead.';
+const DISABLED_KEY_MESSAGE = 'An admin switched this key off. Only an admin can switch it back on or revoke it.';
+
+/**
+ * Rotate = replace: the old row is revoked ('rotated') and a new row carries
+ * the same name, abilities and IP lock. The LENGTH carries over (the nearest
+ * of 30/90/180/365 days to the old key's length); the end date restarts from
+ * today. Refused while the person has any other unrevoked key.
+ */
 export async function rotateOwnKey(workspaceId, user, id, { ip = null } = {}) {
   const email = sessionEmail(user);
-  const old = await findOwn(workspaceId, email, id);
-  if (old.revokedAt) {
-    const err = new ConflictError('This key was revoked. Make a new one instead.');
-    err.code = 'personal_key_revoked';
-    throw err;
-  }
-  if (!old.isEnabled) throw new AuthorizationError('An admin switched this key off. Ask them before you rotate it.', 'personal_key_disabled');
-  const access = await resolveOwnerAccess(workspaceId, email);
+  const found = await findOwn(workspaceId, email, id);
+  if (found.revokedAt) throw conflict(REVOKED_MESSAGE, 'personal_key_revoked');
+  if (!found.isEnabled) throw new AuthorizationError(DISABLED_KEY_MESSAGE, 'personal_key_disabled');
+  const access = await resolveOwnerAccess(workspaceId, email, { fresh: true });
   if (!access.hasAccess) throw new AuthorizationError(REASONS.NO_ACCESS, 'workspace_access_denied');
   if (!access.onList || !access.eligible) throw new AuthorizationError(REASONS.NOT_ON_LIST, 'personal_key_not_allowed');
   if (access.readOnly) throw new AuthorizationError(REASONS.READ_ONLY, 'read_only_role');
-  const lengthDays = Math.max(1, Math.round((new Date(old.expiresAt).getTime() - new Date(old.createdAt).getTime()) / DAY_MS));
-  const days = EXPIRY_OPTIONS.reduce((best, d) => (Math.abs(d - lengthDays) < Math.abs(best - lengthDays) ? d : best), DEFAULT_EXPIRY_DAYS);
   const { raw, hash, prefix } = generatePersonalKey();
-  const { count } = await prisma.personalApiKey.updateMany({
-    where: { id: old.id, revokedAt: null },
-    data: { revokedAt: new Date(), revokedBy: email, revokedReason: 'rotated', isEnabled: false },
-  });
-  if (!count) {
-    const err = new ConflictError('This key was revoked. Make a new one instead.');
-    err.code = 'personal_key_revoked';
-    throw err;
-  }
-  const key = await prisma.personalApiKey.create({
-    data: {
-      workspaceId: old.workspaceId,
+  const { key, old } = await withPersonLock(workspaceId, email, async (tx) => {
+    const keys = await tx.personalApiKey.findMany({ where: { workspaceId: Number(workspaceId), ownerEmail: email, revokedAt: null } });
+    const current = keys.find((k) => k.id === found.id);
+    if (!current) throw conflict(REVOKED_MESSAGE, 'personal_key_revoked');
+    if (!current.isEnabled) throw new AuthorizationError(DISABLED_KEY_MESSAGE, 'personal_key_disabled');
+    if (keys.some((k) => k.id !== current.id)) {
+      throw conflict('You have another key. Revoke it before you rotate this one.', 'personal_key_exists');
+    }
+    const lengthDays = Math.max(1, Math.round((new Date(current.expiresAt).getTime() - new Date(current.createdAt).getTime()) / DAY_MS));
+    const days = EXPIRY_OPTIONS.reduce((best, d) => (Math.abs(d - lengthDays) < Math.abs(best - lengthDays) ? d : best), DEFAULT_EXPIRY_DAYS);
+    await tx.personalApiKey.updateMany({
+      where: { id: current.id, revokedAt: null },
+      data: { revokedAt: new Date(), revokedBy: email, revokedReason: 'rotated', isEnabled: false },
+    });
+    const row = await createRow(tx, {
+      workspaceId: current.workspaceId,
       technicianId: access.technician.id,
       ownerEmail: email,
-      name: old.name,
+      name: current.name,
       keyHash: hash,
       keyPrefix: prefix,
-      scopes: roleCappedScopes(old.scopes),
-      ipAllowlist: Array.isArray(old.ipAllowlist) ? old.ipAllowlist : [],
+      scopes: roleCappedScopes(current.scopes),
+      ipAllowlist: Array.isArray(current.ipAllowlist) ? current.ipAllowlist : [],
       expiresAt: new Date(Date.now() + days * DAY_MS),
-      rotatedFromId: old.id,
+      rotatedFromId: current.id,
       createdBy: email,
-    },
+    });
+    return { key: row, old: current };
   });
   await audit({ workspaceId, actorEmail: email, action: PERSONAL_ACTIONS.ROTATED, key, extra: { rotatedFromId: old.id } });
   await mailOwner('rotated', key, { ip });
@@ -610,6 +750,9 @@ export async function revokeOwnKey(workspaceId, user, id) {
   const email = sessionEmail(user);
   const key = await findOwn(workspaceId, email, id);
   if (key.revokedAt) return { revoked: true };
+  // An admin's switch-off can't be dodged by revoking and making a new key
+  // (review #3): only an admin revokes a switched-off key, which frees the slot.
+  if (!key.isEnabled) throw new AuthorizationError(DISABLED_KEY_MESSAGE, 'personal_key_disabled');
   await revokeRows([key], { reason: 'owner', actorEmail: email });
   return { revoked: true };
 }
@@ -645,7 +788,7 @@ export async function adminList(workspaceId) {
 }
 
 async function findInWorkspace(workspaceId, id) {
-  const key = await prisma.personalApiKey.findFirst({ where: { id: Number(id), workspaceId: Number(workspaceId) } });
+  const key = await prisma.personalApiKey.findFirst({ where: { id: keyIdOf(id), workspaceId: Number(workspaceId) } });
   if (!key) throw new NotFoundError('API key not found');
   return key;
 }
@@ -726,16 +869,37 @@ export async function adminUsers(workspaceId) {
   return { technicianIds: ids, people };
 }
 
+function idList(value, label) {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw new ValidationError(`${label} must be a list`);
+  const ids = [...new Set(value.map(Number))];
+  if (ids.some((n) => !Number.isInteger(n) || n <= 0)) throw new ValidationError(`${label} must be positive whole numbers`);
+  return ids;
+}
+
 /**
- * Replace the list. One Access history row per person added or removed; a
- * removed person's key is revoked in the same request (reason access_removed).
+ * Change the list. Body: `{ add: [...], remove: [...] }` (a delta, applied to
+ * the list as it is NOW, so two admins editing at once don't undo each other;
+ * a `technicianIds` sent beside it is ignored) or `{ technicianIds: [...] }`
+ * alone (the whole list). A bare array is read as the whole list. One Access history row per person added or removed; a removed
+ * person's key is revoked in the same request (reason access_removed).
  */
-export async function adminSetUsers(workspaceId, technicianIds, actor) {
+export async function adminSetUsers(workspaceId, body, actor) {
   const ws = Number(workspaceId);
-  if (!Array.isArray(technicianIds)) throw new ValidationError('technicianIds must be a list');
-  const wanted = [...new Set(technicianIds.map(Number))];
-  if (wanted.some((n) => !Number.isInteger(n) || n <= 0)) throw new ValidationError('technicianIds must be positive whole numbers');
+  const input = Array.isArray(body) ? { technicianIds: body } : (body || {});
+  // `add` or `remove` present (even one empty list) = a delta, and any
+  // technicianIds beside it is ignored: the picker may send a stale whole list.
+  const isDelta = input.add !== undefined || input.remove !== undefined;
+  if (!isDelta && !Array.isArray(input.technicianIds)) throw new ValidationError('Send technicianIds (the whole list) or add / remove (changes)');
   const current = await getListedTechnicianIds(ws, { fresh: true });
+  let wanted;
+  if (isDelta) {
+    const add = idList(input.add, 'add');
+    const remove = idList(input.remove, 'remove');
+    wanted = [...new Set([...current, ...add])].filter((id) => !remove.includes(id));
+  } else {
+    wanted = idList(input.technicianIds, 'technicianIds');
+  }
   const added = wanted.filter((id) => !current.includes(id));
   const removed = current.filter((id) => !wanted.includes(id));
   const touched = [...new Set([...added, ...removed])];
@@ -852,6 +1016,9 @@ export default {
   adminSetUsers,
   revokeForTechnician,
   revokeForEmail,
+  offboardTechnician,
+  offboardEmail,
+  offboardInactiveTechnicians,
   runExpirySweep,
   resolveOwnerAccess,
   resetPersonalKeyCaches,

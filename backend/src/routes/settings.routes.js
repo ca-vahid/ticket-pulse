@@ -118,11 +118,14 @@ function requestActor(req) {
   return req.session?.user ?? req.user ?? null;
 }
 
-/** Offboarding (4.4.05): a switched-off technician's personal API keys are revoked. Never throws. */
+/**
+ * Offboarding (4.4.05): a switched-off technician's personal API keys are
+ * revoked and they come off the API access list. Never throws.
+ */
 async function revokePersonalKeysOnDisable(tech, req) {
   if (!tech?.id || !tech.workspaceId) return;
   await import('../services/personalApiKeyService.js')
-    .then(({ revokeForTechnician }) => revokeForTechnician(tech.workspaceId, tech.id, { reason: 'offboarded', actorEmail: requestActor(req)?.email || null }))
+    .then(({ offboardTechnician }) => offboardTechnician(tech.workspaceId, tech.id, { reason: 'offboarded', actorEmail: requestActor(req)?.email || null }))
     .catch(() => {});
 }
 

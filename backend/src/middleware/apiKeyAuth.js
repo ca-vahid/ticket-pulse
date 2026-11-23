@@ -89,7 +89,12 @@ export function apiRequestContext(req, res, next) {
         apiKeyId: req.apiKey?.id || null,
         method: req.method,
         path: (req.baseUrl || '') + (req.route?.path || req.path || ''),
-        scope: req.apiScope || null,
+        // Personal keys (4.4.05) live in their own table, so api_key_id (read by
+        // the integration-key usage panel) stays null; the key rides in `scope`
+        // as "pkey:<id>|<scope>" instead — no schema change.
+        scope: req.apiKey?.personalKeyId
+          ? `pkey:${req.apiKey.personalKeyId}|${req.apiScope || ''}`.slice(0, 60)
+          : (req.apiScope || null),
         statusCode: res.statusCode,
         ip: clientIp(req)?.slice(0, 64) || null,
         requestId: rid,

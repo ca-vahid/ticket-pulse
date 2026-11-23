@@ -100,6 +100,7 @@ jest.unstable_mockModule('../src/services/attachmentService.js', () => ({
 }));
 
 const { default: ticketService } = await import('../src/services/ticketService.js');
+const { invalidateStatusCache } = await import('../src/services/statusService.js');
 
 /**
  * Personal API keys (4.4.05): a v1 reply made with a personal key reaches
@@ -175,6 +176,32 @@ describe('ticketService with a personal-key actor (4.4.05)', () => {
     expect(apiDetails).not.toHaveProperty('via');
     await ticketService._audit(501, 'fields_updated', { email: 'eli.park@example.com', name: 'Eli Park', role: 'viewer' }, {});
     expect(ticketActivityRepositoryMock.create.mock.calls.at(-1)[0].details.actorKind).toBe('human');
+  });
+});
+
+describe('status changes through a personal key (review #10)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    invalidateStatusCache();
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...nativeTicket });
+    prismaMock.ticket.update.mockImplementation(({ data }) => Promise.resolve({ ...nativeTicket, ...data }));
+    prismaMock.ticketAssignmentEpisode.updateMany.mockResolvedValue({ count: 0 });
+    ticketActivityRepositoryMock.create.mockResolvedValue({});
+    lifecycleMock.emitTicketLifecycleNotifications.mockResolvedValue({ status: 'completed' });
+  });
+
+  test('the lifecycle (and so the status webhook) is told resolvedVia personal_key; resolvedByKind stays human', async () => {
+    await ticketService.changeStatus(501, 1, 'Resolved', personalActor);
+    expect(prismaMock.ticket.update.mock.calls[0][0].data.resolvedByKind).toBe('human');
+    expect(lifecycleMock.emitTicketLifecycleNotifications).toHaveBeenCalledWith(expect.objectContaining({
+      resolvedVia: 'personal_key',
+      actor: { name: 'Dana Fox', email: 'dana.fox@example.com', technicianId: 12 },
+    }));
+  });
+
+  test('integration-key and in-app status changes carry no resolvedVia', async () => {
+    await ticketService.changeStatus(501, 1, 'Resolved', integrationActor);
+    expect(lifecycleMock.emitTicketLifecycleNotifications.mock.calls[0][0]).not.toHaveProperty('resolvedVia');
   });
 });
 

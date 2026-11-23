@@ -1102,7 +1102,8 @@ class HrLifecycleService {
         const ch = d.changes && typeof d.changes === 'object' ? d.changes : {};
         // TP-born edits record internalCategoryId / internalSubcategoryId; the FS-born write-back records `category`.
         if (!['internalCategoryId', 'internalSubcategoryId', 'category'].some((k) => hasOwn(ch, k))) return false;
-        if (d.actorKind && d.actorKind !== 'human') return false;
+        // personal_key (4.4.05) = a person acting through their own API key.
+        if (d.actorKind && !['human', 'personal_key'].includes(d.actorKind)) return false;
         // "Ticket Pulse (Onboarding)" (role automation) is stamped 'human' by actorKindOf: the name decides.
         return !/^(ticket pulse|freshservice|ai\b|system|notification workflow|ticket workflow)/i.test(String(r.performedBy || '').trim());
       });

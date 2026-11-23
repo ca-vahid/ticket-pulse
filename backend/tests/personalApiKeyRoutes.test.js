@@ -42,15 +42,15 @@ const personalSvcMock = {
   adminSetDisabled: jest.fn().mockResolvedValue({ id: 31, status: 'disabled' }),
   adminRevoke: jest.fn().mockResolvedValue({ revoked: true }),
 };
-const revokeForEmail = jest.fn().mockResolvedValue([31]);
-const revokeForTechnician = jest.fn().mockResolvedValue([31]);
+const offboardEmail = jest.fn().mockResolvedValue({ revokedKeyIds: [31], removedFromList: [12] });
+const offboardTechnician = jest.fn().mockResolvedValue({ revokedKeyIds: [31], removedFromList: [12] });
 
 const stub = () => ({ default: {} });
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
 jest.unstable_mockModule('../src/services/settingsRepository.js', () => ({ default: settingsRepositoryMock }));
 jest.unstable_mockModule('../src/services/workspaceRepository.js', () => ({ default: workspaceRepoMock, mergeWorkspaceLists: () => [] }));
 jest.unstable_mockModule('../src/services/technicianRepository.js', () => ({ default: technicianRepoMock }));
-jest.unstable_mockModule('../src/services/personalApiKeyService.js', () => ({ default: personalSvcMock, revokeForEmail, revokeForTechnician }));
+jest.unstable_mockModule('../src/services/personalApiKeyService.js', () => ({ default: personalSvcMock, offboardEmail, offboardTechnician }));
 for (const mod of [
   'groupRepository', 'approvalCategoryService', 'syncService', 'emailHealthService', 'afterHoursUrgentEscalationService',
   'userSignatureService', 'llmConfigService', 'noiseRuleService', 'availabilityService', 'groupCoordinatorService',
@@ -164,7 +164,9 @@ describe('admin routes', () => {
   test('PUT users, PATCH and DELETE pass the actor through', async () => {
     const put = await as('adminOne', request(app).put('/api/admin/personal-api-keys/users')).send({ technicianIds: [14] }).expect(200);
     expect(put.body.data).toEqual({ technicianIds: [], revokedKeyIds: [31] });
-    expect(personalSvcMock.adminSetUsers).toHaveBeenCalledWith(1, [14], expect.objectContaining({ email: 'admin.one@example.com' }));
+    expect(personalSvcMock.adminSetUsers).toHaveBeenCalledWith(1, { technicianIds: [14] }, expect.objectContaining({ email: 'admin.one@example.com' }));
+    await as('adminOne', request(app).put('/api/admin/personal-api-keys/users')).send({ add: [14], remove: [], technicianIds: [12] }).expect(200);
+    expect(personalSvcMock.adminSetUsers).toHaveBeenLastCalledWith(1, { add: [14], remove: [], technicianIds: [12] }, expect.anything());
     await as('adminOne', request(app).patch('/api/admin/personal-api-keys/31')).send({ disabled: true }).expect(200);
     expect(personalSvcMock.adminSetDisabled).toHaveBeenCalledWith(1, '31', true, expect.objectContaining({ email: 'admin.one@example.com' }));
     await as('adminOne', request(app).delete('/api/admin/personal-api-keys/31')).expect(200);
@@ -187,23 +189,23 @@ describe('the access list is never written through the generic settings writers'
 });
 
 describe('offboarding revokes personal keys', () => {
-  test('removing someone\'s workspace access revokes their keys in that workspace', async () => {
+  test('removing someone\'s workspace access offboards them: keys revoked and off the list', async () => {
     await as('adminOne', request(app).delete('/api/workspaces/1/access/dana.fox@example.com')).expect(200);
-    expect(revokeForEmail).toHaveBeenCalledWith(1, 'dana.fox@example.com', { reason: 'offboarded', actorEmail: 'admin.one@example.com' });
+    expect(offboardEmail).toHaveBeenCalledWith(1, 'dana.fox@example.com', { reason: 'offboarded', actorEmail: 'admin.one@example.com' });
   });
 
-  test('switching an agent off revokes their keys; switching one on does not', async () => {
+  test('switching an agent off offboards them (keys revoked, off the list); switching one on does not', async () => {
     technicianRepoMock.update.mockResolvedValue({ id: 12, workspaceId: 1, name: 'Dana Fox', isActive: false });
     await as('adminOne', request(app).put('/api/settings/technicians/12/active')).send({ isActive: false }).expect(200);
-    expect(revokeForTechnician).toHaveBeenCalledWith(1, 12, { reason: 'offboarded', actorEmail: 'admin.one@example.com' });
-    revokeForTechnician.mockClear();
+    expect(offboardTechnician).toHaveBeenCalledWith(1, 12, { reason: 'offboarded', actorEmail: 'admin.one@example.com' });
+    offboardTechnician.mockClear();
     technicianRepoMock.update.mockResolvedValue({ id: 12, workspaceId: 1, name: 'Dana Fox', isActive: true });
     await as('adminOne', request(app).put('/api/settings/technicians/12/active')).send({ isActive: true }).expect(200);
-    expect(revokeForTechnician).not.toHaveBeenCalled();
+    expect(offboardTechnician).not.toHaveBeenCalled();
   });
 
   test('a revoke failure never fails the switch-off itself', async () => {
-    revokeForTechnician.mockRejectedValueOnce(new Error('db down'));
+    offboardTechnician.mockRejectedValueOnce(new Error('db down'));
     technicianRepoMock.update.mockResolvedValue({ id: 12, workspaceId: 1, name: 'Dana Fox', isActive: false });
     await as('adminOne', request(app).put('/api/settings/technicians/12/active')).send({ isActive: false }).expect(200);
   });

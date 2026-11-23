@@ -81,7 +81,7 @@ export function buildPersonalKeyGuide({ baseUrl, workspace, person, abilities = 
   }
   if (readOnly) push('- The person\'s access is read-only right now, so every change is refused with `403 read_only_role`.');
   push(
-    '- Never: approvals, creating tickets or requesters, custom-field changes, new tags, settings, keys or webhooks.',
+    '- This key can\'t create new tickets or new requesters, split tickets or add external references. It never handles approvals, custom-field changes, new tags, settings, keys or webhooks.',
     '',
     `Scopes in force today: ${scopes.length ? scopes.map((s) => `\`${s}\``).join(', ') : 'none'}. The person's role is checked on every call, so if it changes, what the key can do changes with it.`,
     '',

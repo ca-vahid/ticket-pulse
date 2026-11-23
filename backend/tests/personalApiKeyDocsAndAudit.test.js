@@ -34,7 +34,10 @@ describe('OpenAPI: personal keys', () => {
     expect(spec.paths['/me/guide'].get.security).toEqual([{ personalKey: [] }]);
     expect(spec.info['x-personal-keys']).toBe(PERSONAL_KEYS_DOC);
     const codes = spec.info['x-problem-codes'].map((c) => c.code);
-    for (const c of ['read_only_role', 'personal_key_owner_has_no_access', 'personal_key_not_allowed', 'personal_key_not_allowed_here', 'personal_key_required']) expect(codes).toContain(c);
+    for (const c of ['read_only_role', 'personal_key_owner_has_no_access', 'personal_key_not_allowed', 'personal_key_not_allowed_here', 'personal_key_required', 'coordinator_required']) expect(codes).toContain(c);
+    expect(PERSONAL_KEYS_DOC.never.join(' ')).toMatch(/can’t create new tickets/);
+    expect(PERSONAL_KEYS_DOC.webhookMarker).toMatch(/data\.extra\.resolvedVia: "personal_key"/);
+    expect(renderDocsPage('https://tickets.example.com')).toContain('resolvedVia');
     expect(new Set(codes).size).toBe(codes.length);
     expect(spec.paths['/tickets/{id}/replies'].post.summary).toMatch(/signature_removed/);
   });
@@ -80,6 +83,17 @@ describe('admin alert for a personal key', () => {
     const out = renderCredentialAlert({ workspaceName: 'IT', actorEmail: 'priya.nair@example.com', action: 'api_key_created', credential: { name: 'Power App' }, details: {}, settingsUrl: 'x' });
     expect(out.subject).toBe('New API key in IT: "Power App"');
     expect(out.text).not.toContain('Acts as');
+  });
+});
+
+describe('the migration', () => {
+  test('is additive and holds the one-live-key-per-person partial unique index', async () => {
+    const { readFileSync } = await import('node:fs');
+    const sql = readFileSync(new URL('../prisma/migrations/20261123000000_personal_api_keys/migration.sql', import.meta.url), 'utf8');
+    expect(sql).toMatch(/CREATE UNIQUE INDEX IF NOT EXISTS "personal_api_keys_one_live_per_person" ON "personal_api_keys" \("workspace_id", lower\("owner_email"\)\) WHERE "revoked_at" IS NULL;/);
+    expect(sql).toMatch(/CREATE UNIQUE INDEX IF NOT EXISTS "personal_api_keys_key_hash_key"/);
+    expect(sql).not.toMatch(/\b(DROP|ALTER TABLE|DELETE|UPDATE)\b/i);
+    for (const stmt of sql.split(';').map((s) => s.replace(/--.*$/gm, '').trim()).filter(Boolean)) expect(stmt).toMatch(/IF NOT EXISTS/);
   });
 });
 

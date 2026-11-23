@@ -31,3 +31,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS "personal_api_keys_key_hash_key" ON "personal_
 CREATE INDEX IF NOT EXISTS "personal_api_keys_workspace_id_technician_id_idx" ON "personal_api_keys" ("workspace_id", "technician_id");
 CREATE INDEX IF NOT EXISTS "personal_api_keys_workspace_id_owner_email_idx" ON "personal_api_keys" ("workspace_id", "owner_email");
 CREATE INDEX IF NOT EXISTS "personal_api_keys_expires_at_idx" ON "personal_api_keys" ("expires_at");
+-- One key per person per workspace: at most one unrevoked row (active, switched
+-- off or ended-but-not-yet-revoked). The service checks first under an advisory
+-- lock; this index is the last line. Not expressible in schema.prisma.
+CREATE UNIQUE INDEX IF NOT EXISTS "personal_api_keys_one_live_per_person" ON "personal_api_keys" ("workspace_id", lower("owner_email")) WHERE "revoked_at" IS NULL;

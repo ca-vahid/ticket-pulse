@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import { activityActorKind, isMachineActivity } from '../tickets/activityKind.jsx';
 import {
-  abilitiesOf, abilitySentence, agoWords, expiryWords, lastUsedWords, parseIpList, personalKeyNameOf,
+  abilitiesOf, abilitySentence, agoWords, expiryShort, expiryWords, formatDayShort, lastUsedPhrase, lastUsedWords,
+  parseIpList, personalKeyNameOf, rotationExpiry,
 } from './personalKeyText';
 
 const NOW = Date.parse('2026-11-22T18:00:00.000Z');
@@ -27,10 +28,26 @@ describe('personal key words', () => {
   });
 
   test('expiry in Pacific time, with days left or "Expired"', () => {
-    expect(expiryWords({ expiresAt: new Date(NOW + 90 * 24 * HOUR).toISOString(), status: 'active' }, NOW)).toMatch(/^Feb 20, 2027 \(in 90 days\)$/);
+    expect(expiryWords({ expiresAt: new Date(NOW + 90 * 24 * HOUR).toISOString(), status: 'active' }, NOW)).toBe('Expires Feb 20, 2027 (in 90 days)');
     expect(expiryWords({ expiresAt: '2026-11-01T07:30:00.000Z', status: 'expired' }, NOW)).toBe('Expired Nov 1, 2026');
+    // A switched-off key past its date reads "Expired", never "Expires Expired".
+    expect(expiryWords({ expiresAt: '2026-11-01T07:30:00.000Z', status: 'disabled' }, NOW)).toBe('Expired Nov 1, 2026');
     // 00:30 UTC on 1 Dec is still 30 Nov in Vancouver.
-    expect(expiryWords({ expiresAt: '2026-12-01T00:30:00.000Z', status: 'active' }, NOW)).toMatch(/^Nov 30, 2026/);
+    expect(expiryWords({ expiresAt: '2026-12-01T00:30:00.000Z', status: 'active' }, NOW)).toMatch(/^Expires Nov 30, 2026/);
+    expect(expiryShort({ expiresAt: new Date(NOW + 90 * 24 * HOUR).toISOString(), status: 'active' }, NOW)).toBe('Expires Feb 20, 2027');
+  });
+
+  test('last used as a whole phrase; "made" dates drop this year', () => {
+    expect(lastUsedPhrase({ lastUsedAt: new Date(NOW - 2 * HOUR).toISOString(), lastUsedIp: '10.1.2.3' }, NOW)).toBe('Last used 2 hours ago from 10.1.2.3');
+    expect(lastUsedPhrase({ lastUsedAt: null }, NOW)).toBe('Not used yet');
+    expect(formatDayShort('2026-11-22T17:00:00.000Z', NOW)).toBe('Nov 22');
+    expect(formatDayShort('2025-03-04T20:00:00.000Z', NOW)).toBe('Mar 4, 2025');
+  });
+
+  test('rotation restarts the same length from today', () => {
+    const key = { createdAt: '2026-11-12T18:00:00.000Z', expiresAt: '2027-02-10T18:00:00.000Z' }; // 90 days
+    expect(rotationExpiry(key, NOW)).toEqual({ days: 90, until: 'Feb 20, 2027' });
+    expect(rotationExpiry({ createdAt: null, expiresAt: null }, NOW)).toBeNull();
   });
 
   test('IP box: one per line, commas tolerated, blanks dropped', () => {

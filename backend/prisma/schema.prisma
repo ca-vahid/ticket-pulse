@@ -378,7 +378,11 @@ model AccessAuditEvent {
 // Every /api/v1 call re-checks the person's access, role and the workspace's
 // personal_api_key_users_ws<N> list; scopes are an upper bound capped by the
 // role. Its own table so integration-key reads (api_keys) never change.
-// One active key per person per workspace (enforced in the service).
+// One key per person per workspace: the service checks under a per-person
+// advisory lock, and the migration adds the partial unique index
+// personal_api_keys_one_live_per_person on (workspace_id, lower(owner_email))
+// WHERE revoked_at IS NULL — Prisma can't express a partial expression index,
+// so it lives in the migration SQL only (a `prisma db pull` would not show it).
 model PersonalApiKey {
   id              Int       @id @default(autoincrement())
   workspaceId     Int       @map("workspace_id")

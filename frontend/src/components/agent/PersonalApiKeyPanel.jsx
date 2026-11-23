@@ -3,7 +3,7 @@ import { Bot, Check, Copy, Download, KeyRound, Loader2, Plus, RefreshCw, Trash2 
 import { personalApiKeysAPI } from '../../services/api';
 import {
   ABILITIES, DEFAULT_EXPIRY_DAYS, EXPIRY_CHOICES, abilitySentence, errorText, expiryWords,
-  isLiveKey, lastUsedWords, parseIpList,
+  isLiveKey, lastUsedPhrase, parseIpList, rotationExpiry,
 } from '../apiKeys/personalKeyText';
 
 /**
@@ -172,6 +172,7 @@ function KeyRow({ k, busy, onRotate, onRevoke }) {
   const [confirm, setConfirm] = useState(null); // 'rotate' | 'revoke' | null
   const switchedOff = k.status === 'disabled';
   const ips = Array.isArray(k.ipAllowlist) ? k.ipAllowlist : [];
+  const rotation = rotationExpiry(k);
   return (
     <div data-testid="personal-key-row">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -182,7 +183,7 @@ function KeyRow({ k, busy, onRotate, onRevoke }) {
           </p>
           <p className="text-sm text-foreground/85">{abilitySentence(k)}</p>
           <p className="text-xs text-muted-foreground">
-            Expires {expiryWords(k)} · Last used {lastUsedWords(k)}
+            {expiryWords(k)} · {lastUsedPhrase(k)}
           </p>
           {ips.length > 0 && <p className="text-xs text-muted-foreground">Works only from {ips.join(', ')}</p>}
           {switchedOff && (
@@ -207,7 +208,7 @@ function KeyRow({ k, busy, onRotate, onRevoke }) {
         <div role="alertdialog" aria-label={confirm === 'rotate' ? 'Rotate this key?' : 'Revoke this key?'} className="mt-3 border-l-2 border-amber-400 dark:border-amber-500/60 pl-3">
           <p className="text-sm text-foreground">
             {confirm === 'rotate'
-              ? `Rotate “${k.name}”? The current secret stops working at once and you get a new one. The name, abilities, expiry and IP addresses stay.`
+              ? `Rotate “${k.name}”? The current secret stops working at once and you get a new one. The name, abilities and IP addresses stay.${rotation ? ` The new key lasts ${rotation.days} days from today, until ${rotation.until}.` : ''}`
               : `Revoke “${k.name}”? It stops working at once and anything using it fails. This can't be undone.`}
           </p>
           <div className="mt-2 flex flex-wrap gap-2">

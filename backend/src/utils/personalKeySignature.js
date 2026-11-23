@@ -42,26 +42,33 @@ export function signatureTexts(signature) {
 }
 
 /**
- * Earliest cut position in `source` whose tail reads exactly as one of `wanted`
- * and whose head still has words in it. `positions` are the allowed cut points.
+ * The LATEST cut position in `source` whose tail reads exactly as one of
+ * `wanted` (so the cut takes the signature and nothing before it), as long as
+ * the head still holds something: words, or a picture.
  */
 function findCut(source, positions, wanted) {
-  for (const pos of positions) {
+  for (const pos of [...positions].sort((a, b) => b - a)) {
     const tail = normalizeSignatureText(source.slice(pos));
     if (!wanted.includes(tail)) continue;
-    const head = normalizeSignatureText(source.slice(0, pos));
-    if (!head) return -1; // the whole body is the signature: leave it alone
+    const headRaw = source.slice(0, pos);
+    if (!normalizeSignatureText(headRaw) && !/<img\b/i.test(headRaw)) return -1; // the whole body is the signature
     return pos;
   }
   return -1;
 }
 
-/** Cut points in HTML: every opening tag (never a closing one, so the head keeps its own closers). */
+/**
+ * Cut points in HTML: the start of a block (<p>, <div>, <table>, <hr>) or the
+ * point just after a <br>. Never at an inline tag, so "Please call <b>Dana
+ * Fox</b>" is never read as a signature.
+ */
 function htmlCutPositions(html) {
   const positions = [];
-  const re = /<(?!\/)[a-z!]/gi;
+  const block = /<(?:p|div|table|hr)\b/gi;
   let m;
-  while ((m = re.exec(html)) !== null) positions.push(m.index);
+  while ((m = block.exec(html)) !== null) positions.push(m.index);
+  const br = /<br\b[^>]*>/gi;
+  while ((m = br.exec(html)) !== null) positions.push(m.index + m[0].length);
   return positions;
 }
 

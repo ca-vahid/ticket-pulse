@@ -144,6 +144,24 @@ describe('refused keys', () => {
     expect((await call('conversations:write').expect(403)).body.code).toBe('personal_key_owner_has_no_access');
   });
 
+  test('a switched-off agent profile is refused on every call, even with a workspace_access row (review #2)', async () => {
+    prismaMock.technician.findFirst.mockResolvedValue({ ...DANA, isActive: false });
+    workspaceRepoMock.getAccessRole.mockResolvedValue('viewer');
+    expect((await call('tickets:read').expect(403)).body.code).toBe('personal_key_owner_has_no_access');
+  });
+
+  test('the request log names the personal key in `scope` (api_key_id stays the integration-key column)', async () => {
+    const { apiRequestContext } = await import('../src/middleware/apiKeyAuth.js');
+    prismaMock.apiRequestLog = { create: jest.fn().mockResolvedValue({}) };
+    const a = express();
+    a.use(apiRequestContext);
+    a.get('/r', requireApiKey('tickets:read'), (req, res) => res.json({ ok: true }));
+    a.use(apiProblemHandler);
+    await request(a).get('/r').set('Authorization', `Bearer ${SECRET}`).expect(200);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(prismaMock.apiRequestLog.create).toHaveBeenCalledWith({ data: expect.objectContaining({ apiKeyId: null, scope: 'pkey:31|tickets:read', workspaceId: 1 }) });
+  });
+
   test('an agent profile whose e-mail no longer matches the key is no access', async () => {
     prismaMock.technician.findFirst.mockResolvedValue({ ...DANA, email: 'someone.else@example.com' });
     expect((await call('tickets:read').expect(403)).body.code).toBe('personal_key_not_allowed');

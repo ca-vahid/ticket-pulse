@@ -181,19 +181,39 @@ describe('Your API key — the key row', () => {
     const row = await screen.findByTestId('personal-key-row');
     expect(row).toHaveTextContent('Reply assistant');
     expect(row).toHaveTextContent('Read tickets · Reply and add notes');
-    expect(row).toHaveTextContent(/Expires .+ \(in 90 days\)/);
-    expect(row).toHaveTextContent('Last used 2 hours ago from 10.1.2.3');
+    expect(row).toHaveTextContent(/Expires .+ \(in 90 days\) · Last used 2 hours ago from 10\.1\.2\.3/);
     expect(row).toHaveTextContent('Works only from 10.1.2.3');
     expect(screen.queryByRole('button', { name: 'Create a key' })).not.toBeInTheDocument();
   });
 
+  test('an unused key says "Not used yet" on its own; an expired switched-off key reads "Expired …" once', async () => {
+    api.mine.mockResolvedValue(mineWith({ keys: [{ ...KEY, lastUsedAt: null, lastUsedIp: null }] }));
+    render(<PersonalApiKeyPanel />);
+    const row = await screen.findByTestId('personal-key-row');
+    expect(row).toHaveTextContent('· Not used yet');
+    expect(row).not.toHaveTextContent('Last used Not used yet');
+    cleanup();
+
+    api.mine.mockResolvedValue(mineWith({ keys: [{ ...KEY, status: 'disabled', expiresAt: new Date(Date.now() - 2 * 24 * HOUR).toISOString() }] }));
+    render(<PersonalApiKeyPanel />);
+    const off = await screen.findByTestId('personal-key-row');
+    expect(off).toHaveTextContent(/Expired [A-Z][a-z]{2} \d{1,2}, \d{4} · Last used/);
+    expect(off).not.toHaveTextContent('Expires Expired');
+  });
+
   test('Rotate asks in the page, then shows the new secret once', async () => {
-    api.mine.mockResolvedValue(mineWith({ keys: [KEY] }));
+    // A 90-day key made 10 days ago: rotating restarts 90 days from today.
+    const made = Date.now() - 10 * 24 * HOUR;
+    const rotating = { ...KEY, createdAt: new Date(made).toISOString(), expiresAt: new Date(made + 90 * 24 * HOUR).toISOString() };
+    const until = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Vancouver', month: 'short', day: 'numeric', year: 'numeric' })
+      .format(new Date(Date.now() + 90 * 24 * HOUR));
+    api.mine.mockResolvedValue(mineWith({ keys: [rotating] }));
     api.rotate.mockResolvedValue({ success: true, data: { key: { ...KEY, id: 8 }, secret: 'tpu_rotated_456' } });
     render(<PersonalApiKeyPanel />);
     fireEvent.click(await screen.findByRole('button', { name: 'Rotate' }));
     const ask = screen.getByRole('alertdialog', { name: 'Rotate this key?' });
     expect(ask).toHaveTextContent('The current secret stops working at once');
+    expect(ask).toHaveTextContent(`The new key lasts 90 days from today, until ${until}.`);
     expect(window.confirm).not.toHaveBeenCalled();
     expect(api.rotate).not.toHaveBeenCalled();
 

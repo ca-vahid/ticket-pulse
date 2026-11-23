@@ -75,7 +75,8 @@ personalKeysAdminRouter.get('/users', asyncHandler(async (req, res) => {
 }));
 
 personalKeysAdminRouter.put('/users', asyncHandler(async (req, res) => {
-  const data = await personalApiKeyService.adminSetUsers(req.workspaceId, req.body?.technicianIds, sessionUser(req));
+  // { add, remove } (preferred: a delta) or { technicianIds } (the whole list).
+  const data = await personalApiKeyService.adminSetUsers(req.workspaceId, req.body || {}, sessionUser(req));
   res.json({ success: true, data });
 }));
 

@@ -686,7 +686,7 @@ export function ThreadEntry({ entry, attachments = [], ticketId = null, onPrevie
                   className="text-[11px] text-muted-foreground/75"
                   title="Sent through this person's own API key. It acts as them, with their signature."
                 >
-                  Sent with API key &lsquo;{personalKeyName}&rsquo;
+                  Sent with API key &ldquo;{personalKeyName}&rdquo;
                 </span>
               )}
             </span>

@@ -2477,7 +2477,11 @@ export const replyWarningAPI = {
 // Admin (workspace admin or super admin):
 //   list()            → { success, data: { enabled, keys: [Key & { owner: { name, email } }] } }
 //   users()           → { success, data: { technicianIds } }
-//   setUsers(ids)     → { success, data: { technicianIds, revokedKeyIds } }
+//   setUsers(ids)     → { success, data: { technicianIds, revokedKeyIds } }   (whole list)
+//   changeUsers({ add, remove, technicianIds }) → same reply; only these people
+//     change. `technicianIds` (the page's whole list) rides along as a fallback
+//     for a backend that only knows the whole-list PUT; one that knows deltas
+//     should apply add/remove and ignore it.
 //   setDisabled(id,b) → { success, data: Key }
 //   adminRevoke(id)   → { success }
 export const personalApiKeysAPI = {
@@ -2489,6 +2493,9 @@ export const personalApiKeysAPI = {
   list: () => api.get('/admin/personal-api-keys'),
   users: () => api.get('/admin/personal-api-keys/users'),
   setUsers: (technicianIds) => api.put('/admin/personal-api-keys/users', { technicianIds }),
+  changeUsers: ({ add = [], remove = [], technicianIds }) => api.put('/admin/personal-api-keys/users', {
+    add, remove, ...(Array.isArray(technicianIds) ? { technicianIds } : {}),
+  }),
   setDisabled: (id, disabled) => api.patch(`/admin/personal-api-keys/${id}`, { disabled }),
   adminRevoke: (id) => api.delete(`/admin/personal-api-keys/${id}`),
 };

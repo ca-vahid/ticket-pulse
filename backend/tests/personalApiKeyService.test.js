@@ -28,7 +28,10 @@ const prismaMock = {
   technician: { findFirst: jest.fn(), findMany: jest.fn() },
   workspaceAccess: { findMany: jest.fn().mockResolvedValue([]) },
   workspace: { findUnique: jest.fn().mockResolvedValue({ name: 'IT' }) },
+  $executeRaw: jest.fn().mockResolvedValue(1),
 };
+// The transaction runs on the same mock; the advisory lock is recorded.
+prismaMock.$transaction = jest.fn(async (fn) => fn(prismaMock));
 
 // A tiny where-matcher for the shapes the service uses.
 function match(row, where = {}) {
@@ -128,17 +131,64 @@ describe('creating a key', () => {
     const mail = mailMock.deliverTransactionalEmail.mock.calls[0][0];
     expect(mail.text).toMatch(/If this wasn’t you, revoke the key now/);
     expect(mail.text).not.toContain(secret);
+    expect(mail.text).toContain('Your API keys: https://tickets.example.com/profile');
   });
 
-  test('one key per person: a second create is refused while one is active or switched off', async () => {
+  test('one key per person: a second create is refused while one is active; the check runs under the person lock', async () => {
     await svc.createOwnKey(1, dana, body());
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    const lockSql = prismaMock.$executeRaw.mock.calls[0];
+    expect(lockSql[0].join('?')).toMatch(/pg_advisory_xact_lock\(hashtext\(\?::text\)\)/);
+    expect(lockSql[1]).toBe('pkey:1:dana.fox@example.com');
     await expect(svc.createOwnKey(1, dana, body({ name: 'Second' }))).rejects.toMatchObject({ statusCode: 409, code: 'personal_key_exists' });
-    const [only] = [...rows.values()];
-    only.isEnabled = false;
-    await expect(svc.createOwnKey(1, dana, body({ name: 'Third' }))).rejects.toMatchObject({ statusCode: 409 });
     // once it is revoked a new one may be made
-    only.revokedAt = new Date();
+    [...rows.values()][0].revokedAt = new Date();
     await expect(svc.createOwnKey(1, dana, body({ name: 'Fresh' }))).resolves.toHaveProperty('secret');
+  });
+
+  test('the unique index is the last line: a racing insert (P2002) answers 409 personal_key_exists', async () => {
+    prismaMock.personalApiKey.create.mockRejectedValueOnce(Object.assign(new Error('Unique constraint failed'), { code: 'P2002' }));
+    await expect(svc.createOwnKey(1, dana, body())).rejects.toMatchObject({ statusCode: 409, code: 'personal_key_exists' });
+  });
+
+  test('an ended key is revoked (reason expired) when a new one is made, and recorded', async () => {
+    const { key } = await svc.createOwnKey(1, dana, body());
+    rows.get(key.id).expiresAt = new Date(Date.now() - 1000);
+    const fresh = await svc.createOwnKey(1, dana, body({ name: 'Next' }));
+    expect(rows.get(key.id)).toEqual(expect.objectContaining({ revokedReason: 'expired', isEnabled: false }));
+    expect(rows.get(key.id).revokedAt).toBeInstanceOf(Date);
+    expect(fresh.key.status).toBe('active');
+    expect(auditMock.recordCredentialEvent).toHaveBeenCalledWith(expect.objectContaining({ action: 'personal_key_revoked', extra: expect.objectContaining({ reason: 'expired' }) }));
+  });
+
+  test('an admin switch-off cannot be dodged: no new key, and the owner cannot revoke it; an admin revoke frees the slot', async () => {
+    const { key } = await svc.createOwnKey(1, dana, body());
+    await svc.adminSetDisabled(1, key.id, true, { email: 'priya.nair@example.com' });
+    await expect(svc.createOwnKey(1, dana, body({ name: 'Around it' }))).rejects.toMatchObject({ statusCode: 403, code: 'personal_key_disabled' });
+    await expect(svc.revokeOwnKey(1, dana, key.id)).rejects.toMatchObject({ statusCode: 403, code: 'personal_key_disabled' });
+    expect(rows.get(key.id).revokedAt).toBeNull();
+    // even after it would have ended, a switched-off key still blocks (expiry never frees it)
+    rows.get(key.id).expiresAt = new Date(Date.now() - 1000);
+    await expect(svc.createOwnKey(1, dana, body({ name: 'Around it' }))).rejects.toMatchObject({ statusCode: 403, code: 'personal_key_disabled' });
+    expect((await svc.getOwnerOverview(1, dana)).reason).toMatch(/An admin switched your key off/);
+    await svc.adminRevoke(1, key.id, { email: 'priya.nair@example.com' });
+    await expect(svc.createOwnKey(1, dana, body({ name: 'Allowed now' }))).resolves.toHaveProperty('secret');
+  });
+
+  test('create reads the access list fresh, never from the 15 s cache', async () => {
+    expect(await svc.getListedTechnicianIds(1)).toEqual([12]); // cached
+    settings.set('personal_api_key_users_ws1', '[]'); // another server took Dana off
+    await expect(svc.createOwnKey(1, dana, body())).rejects.toMatchObject({ statusCode: 403, code: 'personal_key_not_allowed' });
+  });
+
+  test('non-numeric key ids are 404, not 500', async () => {
+    for (const bad of ['abc', '1.5', '-3', '', '9'.repeat(30)]) {
+      await expect(svc.revokeOwnKey(1, dana, bad)).rejects.toMatchObject({ statusCode: 404 });
+      await expect(svc.rotateOwnKey(1, dana, bad)).rejects.toMatchObject({ statusCode: 404 });
+      await expect(svc.adminRevoke(1, bad, {})).rejects.toMatchObject({ statusCode: 404 });
+      await expect(svc.adminSetDisabled(1, bad, true, {})).rejects.toMatchObject({ statusCode: 404 });
+    }
+    expect(prismaMock.personalApiKey.findFirst).not.toHaveBeenCalled();
   });
 
   test('not on the list, read-only, or no access: refused with the matching code', async () => {
@@ -184,6 +234,25 @@ describe('rotate and revoke', () => {
     expect(Math.round((new Date(rotated.key.expiresAt) - Date.now()) / 86400000)).toBe(30);
     expect(auditMock.recordCredentialEvent).toHaveBeenCalledWith(expect.objectContaining({ action: 'personal_key_rotated' }));
     expect(mailMock.deliverTransactionalEmail).toHaveBeenLastCalledWith(expect.objectContaining({ subject: 'Your API key "Laptop script" has a new secret' }));
+  });
+
+  test('rotate refuses while another live key exists (one key per person), inside the person lock', async () => {
+    const { key } = await svc.createOwnKey(1, dana, body());
+    // a second unrevoked row (only possible before the unique index existed)
+    rows.set(999, { ...rows.get(key.id), id: 999, keyHash: 'x'.repeat(64) });
+    prismaMock.$transaction.mockClear();
+    await expect(svc.rotateOwnKey(1, dana, key.id)).rejects.toMatchObject({ statusCode: 409, code: 'personal_key_exists' });
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(rows.get(key.id).revokedAt).toBeNull(); // nothing changed
+  });
+
+  test('rotate keeps the length (nearest of 30/90/180/365) and restarts the end date from today', async () => {
+    const { key } = await svc.createOwnKey(1, dana, body({ expiresInDays: 180 }));
+    // made 100 days ago with 180 days: 80 days left — the new key gets 180 from today
+    rows.get(key.id).createdAt = new Date(Date.now() - 100 * 86400000);
+    rows.get(key.id).expiresAt = new Date(Date.now() + 80 * 86400000);
+    const rotated = await svc.rotateOwnKey(1, dana, key.id);
+    expect(Math.round((new Date(rotated.key.expiresAt) - Date.now()) / 86400000)).toBe(180);
   });
 
   test('a key an admin switched off cannot be rotated by its owner; a revoked one cannot either', async () => {
@@ -259,6 +328,26 @@ describe('admin: who may have a key', () => {
     expect(auditMock.recordAccessEvent).not.toHaveBeenCalled();
   });
 
+  test('PUT users with a delta applies only the delta, to the list as it is now; a stale technicianIds beside it is ignored', async () => {
+    settings.set('personal_api_key_users_ws1', '[12]');
+    // another admin added Eli a moment ago; this admin's picker still shows [12, 15] (stale)
+    settings.set('personal_api_key_users_ws1', '[12,14]');
+    const out = await svc.adminSetUsers(1, { add: [], remove: [12], technicianIds: [12, 15] }, { email: 'priya.nair@example.com' });
+    expect(out.technicianIds).toEqual([14]);
+    expect(settings.get('personal_api_key_users_ws1')).toBe('[14]');
+    expect(auditMock.recordAccessEvent).toHaveBeenCalledTimes(1);
+    expect(auditMock.recordAccessEvent).toHaveBeenCalledWith(expect.objectContaining({ action: 'personal_key_access_removed', targetEmail: 'dana.fox@example.com' }));
+    // an add-only delta
+    const added = await svc.adminSetUsers(1, { add: [12] }, {});
+    expect(added.technicianIds).toEqual([12, 14]);
+    // neither add nor remove: the whole-list form
+    expect((await svc.adminSetUsers(1, { technicianIds: [14] }, {})).technicianIds).toEqual([14]);
+    await expect(svc.adminSetUsers(1, {}, {})).rejects.toMatchObject({ statusCode: 400 });
+    await expect(svc.adminSetUsers(1, { add: 'x' }, {})).rejects.toMatchObject({ statusCode: 400 });
+    // a delta that adds someone not eligible is still 422
+    await expect(svc.adminSetUsers(1, { add: [15] }, {})).rejects.toMatchObject({ statusCode: 422 });
+  });
+
   test('an unchanged list writes no history', async () => {
     await svc.adminSetUsers(1, [12], {});
     expect(auditMock.recordAccessEvent).not.toHaveBeenCalled();
@@ -274,6 +363,36 @@ describe('offboarding', () => {
     expect(await svc.revokeForEmail(1, 'DANA.FOX@example.com')).toEqual([key.id]);
     // nothing left: a second call revokes nothing and never throws
     expect(await svc.revokeForEmail(1, 'dana.fox@example.com')).toEqual([]);
+  });
+
+  test('offboarding a technician revokes AND takes them off the list, with an access event', async () => {
+    settings.set('personal_api_key_users_ws1', '[12,14]');
+    const { key } = await svc.createOwnKey(1, dana, body());
+    auditMock.recordAccessEvent.mockClear();
+    const out = await svc.offboardTechnician(1, 12, { actorEmail: 'priya.nair@example.com' });
+    expect(out).toEqual({ revokedKeyIds: [key.id], removedFromList: [12] });
+    expect(settings.get('personal_api_key_users_ws1')).toBe('[14]');
+    expect(auditMock.recordAccessEvent).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'personal_key_access_removed', targetEmail: 'dana.fox@example.com', actorEmail: 'priya.nair@example.com', details: expect.objectContaining({ technicianId: 12, reason: 'offboarded' }),
+    }));
+    // the next call sees it at once
+    expect(await svc.getListedTechnicianIds(1)).toEqual([14]);
+  });
+
+  test('offboarding by e-mail (access removed) finds their agent profile and takes them off the list too', async () => {
+    const out = await svc.offboardEmail(1, 'Dana.Fox@example.com');
+    expect(out.removedFromList).toEqual([12]);
+    expect(settings.get('personal_api_key_users_ws1')).toBe('[]');
+  });
+
+  test('after a bulk switch-off, every listed person or key owner no longer active is offboarded', async () => {
+    settings.set('personal_api_key_users_ws1', '[12,14]');
+    const { key } = await svc.createOwnKey(1, dana, body());
+    const inactiveDana = { ...DANA, isActive: false };
+    prismaMock.technician.findMany.mockImplementation(async ({ where }) => [inactiveDana, ELI, SAM_OFF].filter((t) => !where.id || where.id.in.includes(t.id)));
+    expect(await svc.offboardInactiveTechnicians(1)).toEqual([12]);
+    expect(rows.get(key.id).revokedReason).toBe('offboarded');
+    expect(settings.get('personal_api_key_users_ws1')).toBe('[14]');
   });
 
   test('a database error never breaks the offboarding step', async () => {

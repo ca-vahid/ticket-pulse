@@ -51,6 +51,29 @@ describe('stripTrailingSignature — HTML bodies', () => {
     expect(stripTrailingSignature({ bodyHtml: body }, SIG).removed).toBe(false);
   });
 
+  test('a picture before the signature is kept (review 73f06f8b #5)', () => {
+    const out = stripTrailingSignature({ bodyHtml: '<p>Here is the error:</p><p><img src="cid:shot1" alt="screenshot"></p><p>Dana Fox<br>IT Service Desk<br>dana.fox@example.com</p>' }, SIG);
+    expect(out.removed).toBe(true);
+    expect(out.bodyHtml).toBe('<p>Here is the error:</p><p><img src="cid:shot1" alt="screenshot"></p>');
+    // a picture alone before the signature also counts as content
+    const pic = stripTrailingSignature({ bodyHtml: '<p><img src="cid:shot1"></p><p>Dana Fox<br>IT Service Desk<br>dana.fox@example.com</p>' }, SIG);
+    expect(pic.bodyHtml).toBe('<p><img src="cid:shot1"></p>');
+  });
+
+  test('never cuts at an inline tag: "Please call <b>Dana Fox</b>" is unchanged', () => {
+    const one = { html: '<p>Dana Fox</p>', text: 'Dana Fox' };
+    const body = '<p>Please call <b>Dana Fox</b></p>';
+    expect(stripTrailingSignature({ bodyHtml: body }, one)).toEqual({ bodyText: null, bodyHtml: body, removed: false });
+    const span = '<p>Thanks to <span>Dana Fox</span></p>';
+    expect(stripTrailingSignature({ bodyHtml: span }, one).removed).toBe(false);
+  });
+
+  test('takes the latest match: a repeated signature-looking block earlier in the body stays', () => {
+    const one = { html: '<p>Dana Fox</p>', text: 'Dana Fox' };
+    const out = stripTrailingSignature({ bodyHtml: '<p>Dana Fox</p><p>asked me to look at this.</p><p>Dana Fox</p>' }, one);
+    expect(out.bodyHtml).toBe('<p>Dana Fox</p><p>asked me to look at this.</p>');
+  });
+
   test('a body that is nothing but the signature is left alone', () => {
     const body = '<p>Dana Fox<br>IT Service Desk<br>dana.fox@example.com</p>';
     expect(stripTrailingSignature({ bodyHtml: body }, SIG)).toEqual({ bodyText: null, bodyHtml: body, removed: false });

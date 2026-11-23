@@ -59,6 +59,21 @@ function noPersonalKey(what) {
   };
 }
 
+/**
+ * Merge / re-parent / add a child: the app refuses these to agents (kind
+ * 'agent', tickets.routes.js), so a personal key refuses them for an agent
+ * too (403 coordinator_required). Members keep them, as in the app.
+ */
+function coordinatorOnlyForPersonalKey(what) {
+  return (req, _res, next) => {
+    if (!isPersonalKeyRequest(req) || personalKeyActor(req)?.kind !== 'agent') return next();
+    return next(problems.forbidden(`${what} requires coordinator or admin access, as in the app.`, 'coordinator_required'));
+  };
+}
+
+/** The person's actor for list reads (AI suggestions hidden as in the app); nothing for other credentials. */
+const listOptions = (req) => (isPersonalKeyRequest(req) ? [{ actor: personalKeyActor(req) }] : []);
+
 // Resolve a /tickets/:id path segment to an internal id. A plain positive
 // integer is the internal id (unchanged); a visible ref (TP-1048, #233976)
 // resolves via the ref resolver → a clean 404 instead of a 500 on a non-numeric
@@ -397,7 +412,7 @@ router.get('/tickets', S('tickets:read'), asyncHandler(async (req, res) => {
     res.json({ success: true, data: { items: [], pagination: q.useCursor ? { next_cursor: null, limit: Number(q.pageSize) || 25, total: 0 } : { page: Number(q.page) || 1, page_size: Number(q.pageSize) || 25, total: 0 } } });
     return;
   }
-  const result = await ticketService.listTickets(req.workspaceId, scoped.q);
+  const result = await ticketService.listTickets(req.workspaceId, scoped.q, ...listOptions(req));
   const pagination = result.nextCursor !== undefined
     ? { next_cursor: result.nextCursor, limit: result.pageSize, total: result.total }
     : { page: result.page, page_size: result.pageSize, total: result.total };
@@ -893,7 +908,7 @@ router.delete('/tickets/:id/park', S('tickets:write'), asyncHandler(async (req, 
   res.json({ success: true, data: result });
 }));
 
-router.post('/tickets/:id/split', S('tickets:write'), withIdempotency, asyncHandler(async (req, res) => {
+router.post('/tickets/:id/split', S('tickets:write'), noPersonalKey('split tickets (a split creates a new ticket)'), withIdempotency, asyncHandler(async (req, res) => {
   const { default: ticketSplitService } = await import('../services/ticketSplitService.js');
   await guardStructure(req, [await tid(req)], 'split');
   const result = await ticketSplitService.split((await tid(req)), req.workspaceId, {
@@ -911,7 +926,7 @@ router.post('/tickets/:id/split', S('tickets:write'), withIdempotency, asyncHand
   res.status(201).json({ success: true, data: result });
 }));
 
-router.post('/tickets/:id/merge', S('tickets:write'), withIdempotency, asyncHandler(async (req, res) => {
+router.post('/tickets/:id/merge', S('tickets:write'), coordinatorOnlyForPersonalKey('Merging tickets'), withIdempotency, asyncHandler(async (req, res) => {
   const { default: ticketMergeService } = await import('../services/ticketMergeService.js');
   const targetTicketId = await bodyTicketId(req, req.body?.target, req.body?.targetTicketId);
   // Both sides change: the source is closed, the survivor gains the thread.
@@ -927,7 +942,7 @@ router.post('/tickets/:id/merge', S('tickets:write'), withIdempotency, asyncHand
 
 // Many sources into this ticket (Simorgh ask 2 — storm clean-up). Sequential,
 // one result per source; a failure on one source does not stop the rest.
-router.post('/tickets/:id/merge-many', S('tickets:write'), withIdempotency, asyncHandler(async (req, res) => {
+router.post('/tickets/:id/merge-many', S('tickets:write'), coordinatorOnlyForPersonalKey('Merging tickets'), withIdempotency, asyncHandler(async (req, res) => {
   const { default: ticketMergeService } = await import('../services/ticketMergeService.js');
   const primaryId = await tid(req);
   const raw = Array.isArray(req.body?.sources) ? req.body.sources : Array.isArray(req.body?.ticketIds) ? req.body.ticketIds : [];
@@ -950,7 +965,7 @@ router.get('/tickets/:id/family', S('tickets:read'), asyncHandler(async (req, re
   res.json({ success: true, data: await ticketLinkService.family((await tid(req)), req.workspaceId) });
 }));
 
-router.put('/tickets/:id/parent', S('tickets:write'), asyncHandler(async (req, res) => {
+router.put('/tickets/:id/parent', S('tickets:write'), coordinatorOnlyForPersonalKey('Linking tickets'), asyncHandler(async (req, res) => {
   const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
   const parentTicketId = await bodyTicketId(req, req.body?.parent, req.body?.parentTicketId);
   await guardStructure(req, [await tid(req), parentTicketId], 're-parent');
@@ -958,14 +973,14 @@ router.put('/tickets/:id/parent', S('tickets:write'), asyncHandler(async (req, r
   res.json({ success: true, data: result });
 }));
 
-router.delete('/tickets/:id/parent', S('tickets:write'), asyncHandler(async (req, res) => {
+router.delete('/tickets/:id/parent', S('tickets:write'), coordinatorOnlyForPersonalKey('Linking tickets'), asyncHandler(async (req, res) => {
   const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
   await guardStructure(req, [await tid(req)], 're-parent');
   res.json({ success: true, data: await ticketLinkService.removeParent((await tid(req)), req.workspaceId, apiActor(req)) });
 }));
 
 // The parent's side of the same relation (Simorgh ask 2): add a child.
-router.post('/tickets/:id/children', S('tickets:write'), asyncHandler(async (req, res) => {
+router.post('/tickets/:id/children', S('tickets:write'), coordinatorOnlyForPersonalKey('Linking tickets'), asyncHandler(async (req, res) => {
   const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
   const parentId = await tid(req);
   const childTicketId = await bodyTicketId(req, req.body?.child, req.body?.childTicketId);
@@ -1327,7 +1342,7 @@ router.get('/tickets/:id/references', S('tickets:read'), asyncHandler(async (req
   res.json({ success: true, data: await refs.listReferences(await tid(req), req.workspaceId) });
 }));
 
-router.post('/tickets/:id/references', S('tickets:write'), asyncHandler(async (req, res) => {
+router.post('/tickets/:id/references', S('tickets:write'), noPersonalKey('add external references (alert routing relies on them)'), asyncHandler(async (req, res) => {
   const { default: refs } = await import('../services/ticketExternalReferenceService.js');
   const id = await tid(req);
   const raw = Array.isArray(req.body?.references) ? req.body.references : (req.body?.reference ? [req.body.reference] : []);
@@ -1676,7 +1691,7 @@ router.get('/search/tickets', S('search:read'), asyncHandler(async (req, res) =>
     const ids = page.map((h) => h.id);
     const [result, descriptions] = ids.length
       ? await Promise.all([
-        ticketService.listTickets(req.workspaceId, { ids, pageSize: limit }),
+        ticketService.listTickets(req.workspaceId, { ids, pageSize: limit }, ...listOptions(req)),
         prisma.ticket.findMany({ where: { id: { in: ids } }, select: { id: true, descriptionText: true } }),
       ])
       : [{ items: [] }, []];
@@ -1705,7 +1720,7 @@ router.get('/search/tickets', S('search:read'), asyncHandler(async (req, res) =>
     res.json({ success: true, data: { items: [], pagination: { page: 1, page_size: Number(req.query.pageSize) || 25, total: 0 } } });
     return;
   }
-  const result = await ticketService.listTickets(req.workspaceId, scoped.q);
+  const result = await ticketService.listTickets(req.workspaceId, scoped.q, ...listOptions(req));
   const pagination = result.nextCursor !== undefined
     ? { next_cursor: result.nextCursor, limit: result.pageSize }
     : { page: result.page, page_size: result.pageSize, total: result.total };

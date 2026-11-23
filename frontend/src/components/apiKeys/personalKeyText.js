@@ -86,14 +86,52 @@ export function lastUsedWords(key, now = Date.now()) {
   return key?.lastUsedIp ? `${ago} from ${key.lastUsedIp}` : ago;
 }
 
-/** "Feb 20, 2027 (in 90 days)" / "Expired Feb 20, 2027". */
+/** "Last used 2 hours ago from 10.1.2.3" / "Not used yet" — a whole phrase. */
+export function lastUsedPhrase(key, now = Date.now()) {
+  return agoWords(key?.lastUsedAt, now) ? `Last used ${lastUsedWords(key, now)}` : 'Not used yet';
+}
+
+const DAY = 86400000;
+
+/** The whole phrase: "Expires Feb 20, 2027 (in 90 days)" / "Expired Feb 20, 2027". */
 export function expiryWords(key, now = Date.now()) {
-  if (!key?.expiresAt) return '—';
+  if (!key?.expiresAt) return 'No end date';
   const t = new Date(key.expiresAt).getTime();
-  if (Number.isNaN(t)) return '—';
+  if (Number.isNaN(t)) return 'No end date';
   if (key.status === 'expired' || t <= now) return `Expired ${formatDate(key.expiresAt)}`;
-  const days = Math.ceil((t - now) / 86400000);
-  return `${formatDate(key.expiresAt)} (in ${plural(days, 'day')})`;
+  const days = Math.ceil((t - now) / DAY);
+  return `Expires ${formatDate(key.expiresAt)} (in ${plural(days, 'day')})`;
+}
+
+/** Short end date for a stacked line: "Expires Feb 20, 2027" / "Expired Feb 20, 2027". */
+export function expiryShort(key, now = Date.now()) {
+  if (!key?.expiresAt) return 'No end date';
+  const t = new Date(key.expiresAt).getTime();
+  if (Number.isNaN(t)) return 'No end date';
+  return `${key.status === 'expired' || t <= now ? 'Expired' : 'Expires'} ${formatDate(key.expiresAt)}`;
+}
+
+const shortFmt = new Intl.DateTimeFormat('en-US', { timeZone: PACIFIC_TZ, month: 'short', day: 'numeric' });
+const yearFmt = new Intl.DateTimeFormat('en-US', { timeZone: PACIFIC_TZ, year: 'numeric' });
+
+/** "Nov 22" this year (Pacific), "Nov 22, 2025" otherwise. */
+export function formatDayShort(value, now = Date.now()) {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+  return yearFmt.format(d) === yearFmt.format(new Date(now)) ? shortFmt.format(d) : formatDate(d);
+}
+
+/**
+ * Rotating restarts the expiry from today with the same length (final
+ * contract). The length is the key's own lifetime, created → expires, in days.
+ */
+export function rotationExpiry(key, now = Date.now()) {
+  const created = new Date(key?.createdAt).getTime();
+  const expires = new Date(key?.expiresAt).getTime();
+  if (Number.isNaN(created) || Number.isNaN(expires) || expires <= created) return null;
+  const days = Math.max(1, Math.round((expires - created) / DAY));
+  return { days, until: formatDate(now + days * DAY) };
 }
 
 export const STATUS_WORDS = {

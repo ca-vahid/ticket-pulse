@@ -11,6 +11,7 @@ const { keysApi, settingsApi } = vi.hoisted(() => ({
     list: vi.fn(),
     users: vi.fn(),
     setUsers: vi.fn(),
+    changeUsers: vi.fn(),
     setDisabled: vi.fn(),
     adminRevoke: vi.fn(),
   },
@@ -59,7 +60,13 @@ beforeEach(() => {
   settingsApi.getTechnicians.mockResolvedValue({ data: ROSTER });
   keysApi.list.mockResolvedValue({ success: true, data: { enabled: true, keys: [ELI_OLD, DANA_KEY] } });
   keysApi.users.mockResolvedValue({ success: true, data: { technicianIds: [12], people: PEOPLE } });
-  keysApi.setUsers.mockImplementation(async (ids) => ({ success: true, data: { technicianIds: ids, revokedKeyIds: ids.includes(12) ? [] : [7] } }));
+  // The server applies the delta to its own list (another admin's change is kept).
+  let serverIds = [12];
+  keysApi.changeUsers.mockImplementation(async ({ add, remove }) => {
+    const revokedKeyIds = remove.includes(12) ? [7] : [];
+    serverIds = [...new Set([...serverIds.filter((x) => !remove.includes(x)), ...add])];
+    return { success: true, data: { technicianIds: serverIds, revokedKeyIds } };
+  });
   keysApi.setDisabled.mockImplementation(async (id, disabled) => ({ success: true, data: { ...DANA_KEY, id, status: disabled ? 'disabled' : 'active' } }));
   keysApi.adminRevoke.mockResolvedValue({ success: true });
 });
@@ -99,7 +106,7 @@ describe('Personal API keys — API access picker', () => {
   });
 
   test('a 422 names who cannot be added and why; nothing changes', async () => {
-    keysApi.setUsers.mockRejectedValueOnce(Object.assign(new Error('Some people cannot have a key.'), {
+    keysApi.changeUsers.mockRejectedValueOnce(Object.assign(new Error('Some people cannot have a key.'), {
       status: 422, code: 'personal_key_user_not_eligible', details: [{ technicianId: 14, reason: 'Their agent profile has no e-mail.' }],
     }));
     render(<PersonalKeysAdmin />);
@@ -108,12 +115,35 @@ describe('Personal API keys — API access picker', () => {
     expect(screen.getByRole('switch', { name: 'Priya Nair may have an API key' })).toHaveAttribute('aria-checked', 'false');
   });
 
-  test('turning a person on saves the whole list, no confirmation needed', async () => {
+  test('turning a person on sends only that person as a delta, no confirmation needed', async () => {
     render(<PersonalKeysAdmin />);
     fireEvent.click(await screen.findByRole('switch', { name: 'Eli Park may have an API key' }));
-    await waitFor(() => expect(keysApi.setUsers).toHaveBeenCalledWith([12, 13]));
-    expect(await screen.findByRole('status')).toHaveTextContent('Eli Park can now make a personal API key');
+    // The delta, plus the page's list as a fallback for a whole-list-only backend.
+    await waitFor(() => expect(keysApi.changeUsers).toHaveBeenCalledWith({ add: [13], remove: [], technicianIds: [12, 13] }));
+    expect(keysApi.setUsers).not.toHaveBeenCalled();
+    expect(await screen.findByRole('status')).toHaveTextContent('Eli Park can now make a personal API key on their Profile page.');
     expect(screen.getByRole('switch', { name: 'Eli Park may have an API key' })).toHaveAttribute('aria-checked', 'true');
+  });
+
+  test("another admin's change is kept: the reply's list wins over what this page had", async () => {
+    keysApi.changeUsers.mockResolvedValueOnce({ success: true, data: { technicianIds: [12, 13, 14], revokedKeyIds: [] } });
+    render(<PersonalKeysAdmin />);
+    fireEvent.click(await screen.findByRole('switch', { name: 'Eli Park may have an API key' }));
+    await waitFor(() => expect(keysApi.changeUsers).toHaveBeenCalledWith(expect.objectContaining({ add: [13], remove: [] })));
+    // Priya was added by someone else meanwhile; the page now shows her too.
+    await waitFor(() => expect(screen.getByRole('switch', { name: 'Priya Nair may have an API key' })).toHaveAttribute('aria-checked', 'true'));
+  });
+
+  test('removing someone with no key: just the question', async () => {
+    render(<PersonalKeysAdmin />);
+    fireEvent.click(await screen.findByRole('switch', { name: 'Eli Park may have an API key' }));
+    await waitFor(() => expect(screen.getByRole('switch', { name: 'Eli Park may have an API key' })).toHaveAttribute('aria-checked', 'true'));
+    fireEvent.click(screen.getByRole('switch', { name: 'Eli Park may have an API key' }));
+    const ask = screen.getByRole('alertdialog', { name: 'Remove Eli Park from API access?' });
+    expect(ask.querySelector('p')).toHaveTextContent(/^Remove Eli Park from API access\?$/);
+    fireEvent.click(within(ask).getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(keysApi.changeUsers).toHaveBeenLastCalledWith(expect.objectContaining({ add: [], remove: [13] })));
+    expect(await screen.findByRole('status')).toHaveTextContent('Eli Park no longer has API access.');
   });
 
   test('removing someone with a key asks in the page and says the key is revoked', async () => {
@@ -122,17 +152,17 @@ describe('Personal API keys — API access picker', () => {
     const ask = screen.getByRole('alertdialog', { name: 'Remove Dana Fox from API access?' });
     expect(ask).toHaveTextContent('Their key “Reply assistant” is revoked now and stops working.');
     expect(window.confirm).not.toHaveBeenCalled();
-    expect(keysApi.setUsers).not.toHaveBeenCalled();
+    expect(keysApi.changeUsers).not.toHaveBeenCalled();
 
     // Cancel keeps them on.
     fireEvent.click(within(ask).getByRole('button', { name: 'Cancel' }));
-    expect(keysApi.setUsers).not.toHaveBeenCalled();
+    expect(keysApi.changeUsers).not.toHaveBeenCalled();
     expect(screen.getByRole('switch', { name: 'Dana Fox may have an API key' })).toHaveAttribute('aria-checked', 'true');
 
     fireEvent.click(screen.getByRole('switch', { name: 'Dana Fox may have an API key' }));
     keysApi.list.mockResolvedValue({ success: true, data: { enabled: true, keys: [ELI_OLD, { ...DANA_KEY, status: 'revoked' }] } });
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove and revoke the key' }));
-    await waitFor(() => expect(keysApi.setUsers).toHaveBeenCalledWith([]));
+    await waitFor(() => expect(keysApi.changeUsers).toHaveBeenCalledWith({ add: [], remove: [12], technicianIds: [] }));
     expect(await screen.findByRole('status')).toHaveTextContent('Dana Fox no longer has API access. Their key was revoked.');
     await waitFor(() => expect(keysApi.list).toHaveBeenCalledTimes(2));
     const row = screen.getAllByTestId('admin-key-row').find((r) => r.textContent.includes('Reply assistant'));
@@ -140,7 +170,7 @@ describe('Personal API keys — API access picker', () => {
   });
 
   test('a refused save rolls the switch back and shows why', async () => {
-    keysApi.setUsers.mockRejectedValueOnce(Object.assign(new Error('Admin access required'), { status: 403 }));
+    keysApi.changeUsers.mockRejectedValueOnce(Object.assign(new Error('Admin access required'), { status: 403 }));
     render(<PersonalKeysAdmin />);
     fireEvent.click(await screen.findByRole('switch', { name: 'Priya Nair may have an API key' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Admin access required');
@@ -156,19 +186,24 @@ describe('Personal API keys — API access picker', () => {
 });
 
 describe("Personal API keys — everyone's keys", () => {
-  test('owner, what it can do, status, created, expires, last used and where from; live keys first', async () => {
+  test('six columns: owner (with when it was made), what it can do, status, expires, last used and where from; live keys first', async () => {
     render(<PersonalKeysAdmin />);
     const table = await screen.findByRole('table', { name: "Everyone's personal keys" });
     expect(within(table).getAllByRole('columnheader').map((c) => c.textContent)).toEqual(
-      ['Owner', 'What it can do', 'Status', 'Created', 'Expires', 'Last used', 'Actions'],
+      ['Owner', 'What it can do', 'Status', 'Expires', 'Last used', 'Actions'],
     );
+    const made = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Vancouver', month: 'short', day: 'numeric' }).format(new Date(DANA_KEY.createdAt));
     const rows = screen.getAllByTestId('admin-key-row');
     expect(rows[0]).toHaveTextContent('Dana Fox');
-    expect(rows[0]).toHaveTextContent('“Reply assistant” · dana.fox@example.com');
+    expect(within(rows[0]).getByTestId('admin-key-name')).toHaveTextContent(`“Reply assistant” · made ${made}`);
     expect(rows[0]).toHaveTextContent('Read tickets · Reply and add notes · Update tickets');
-    expect(rows[0]).toHaveTextContent('On');
     expect(rows[0]).toHaveTextContent('(in 87 days)');
     expect(rows[0]).toHaveTextContent('2 hours ago from 10.1.2.3');
+    // Stacked (below xl): one muted line, no "Label:" mix.
+    const summary = within(rows[0]).getByTestId('admin-key-summary');
+    expect(summary).toHaveClass('xl:hidden', 'text-muted-foreground');
+    expect(summary).toHaveTextContent(/^On · Expires [A-Z][a-z]{2} \d{1,2}, \d{4} · Last used 2 hours ago from 10\.1\.2\.3$/);
+    expect(rows[0]).not.toHaveTextContent('Status:');
     // The revoked one is listed after, with nothing to switch.
     expect(rows[1]).toHaveTextContent('Eli Park');
     expect(rows[1]).toHaveTextContent('Revoked');

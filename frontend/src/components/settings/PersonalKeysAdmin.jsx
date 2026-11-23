@@ -3,7 +3,8 @@ import { KeyRound, Loader2, Search, Trash2, UserRound } from 'lucide-react';
 import { personalApiKeysAPI, settingsAPI } from '../../services/api';
 import { Switch } from '../ui/switch';
 import {
-  STATUS_TONE, STATUS_WORDS, abilitySentence, errorText, expiryWords, formatDate, isLiveKey, lastUsedWords,
+  STATUS_TONE, STATUS_WORDS, abilitySentence, errorText, expiryShort, expiryWords, formatDayShort, isLiveKey,
+  lastUsedPhrase, lastUsedWords,
 } from '../apiKeys/personalKeyText';
 
 /**
@@ -94,10 +95,8 @@ function AccessPicker({ people, accessIds, keyFor, busyId, onAdd, onRemove }) {
               {confirming && (
                 <div role="alertdialog" aria-label={`Remove ${p.name} from API access?`} className="mt-2 border-l-2 border-amber-400 dark:border-amber-500/60 pl-3">
                   <p className="text-xs text-foreground">
-                    Remove {p.name} from API access?{' '}
-                    {key
-                      ? `Their key “${key.name}” is revoked now and stops working. This can't be undone.`
-                      : 'They have no key now. Any key they had would be revoked.'}
+                    Remove {p.name} from API access?
+                    {key && ` Their key “${key.name}” is revoked now and stops working. This can't be undone.`}
                   </p>
                   <div className="mt-1.5 flex gap-1.5">
                     <button type="button" onClick={async () => { setConfirmFor(null); await onRemove(p); }} className={btnDanger}>
@@ -154,7 +153,10 @@ function KeysTable({ keys, busyId, onSetDisabled, onRevoke }) {
       || ownerName(a).localeCompare(ownerName(b))),
     [keys],
   );
-  const cols = 'md:grid md:grid-cols-[minmax(0,1.3fr)_minmax(0,1.5fr)_6.5rem_6.5rem_minmax(0,1.1fr)_minmax(0,1.3fr)_8.5rem] md:items-center md:gap-3';
+  // Six columns from xl up; below that each key stacks: owner, abilities, one
+  // muted status line, actions.
+  const cols = 'xl:grid xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_6.5rem_minmax(0,1.3fr)_minmax(0,1.4fr)_8.5rem] xl:items-center xl:gap-3';
+  const wide = 'hidden xl:block';
 
   return (
     <div data-testid="personal-keys-table">
@@ -167,7 +169,6 @@ function KeysTable({ keys, busyId, onSetDisabled, onRevoke }) {
             <span role="columnheader">Owner</span>
             <span role="columnheader">What it can do</span>
             <span role="columnheader">Status</span>
-            <span role="columnheader">Created</span>
             <span role="columnheader">Expires</span>
             <span role="columnheader">Last used</span>
             <span role="columnheader" className="text-right">Actions</span>
@@ -180,17 +181,17 @@ function KeysTable({ keys, busyId, onSetDisabled, onRevoke }) {
               <div key={k.id} role="row" data-testid="admin-key-row" className={`border-b border-border/60 py-2.5 ${live ? '' : 'opacity-70'}`}>
                 <div className={`grid gap-1 ${cols}`}>
                   <div role="cell" className="min-w-0">
-                    <span className="block truncate text-sm font-medium text-foreground">{who}</span>
-                    <span className="block truncate text-xs text-muted-foreground">“{k.name}”{k.owner?.email && k.owner?.name ? ` · ${k.owner.email}` : ''}</span>
+                    <span className="block truncate text-sm font-medium text-foreground" title={k.owner?.email || undefined}>{who}</span>
+                    <span className="block truncate text-xs text-muted-foreground" data-testid="admin-key-name">“{k.name}” · made {formatDayShort(k.createdAt)}</span>
                   </div>
                   <div role="cell" className="text-xs text-foreground/85">{abilitySentence(k)}</div>
-                  <div role="cell" className={`text-xs font-medium ${STATUS_TONE[k.status] || 'text-muted-foreground'}`}>
-                    <span className="md:hidden text-muted-foreground font-normal">Status: </span>{STATUS_WORDS[k.status] || k.status || '—'}
-                  </div>
-                  <div role="cell" className="text-xs text-muted-foreground"><span className="md:hidden">Created </span>{formatDate(k.createdAt)}</div>
-                  <div role="cell" className="text-xs text-muted-foreground"><span className="md:hidden">Expires </span>{expiryWords(k)}</div>
-                  <div role="cell" className="text-xs text-muted-foreground"><span className="md:hidden">Last used </span>{lastUsedWords(k)}</div>
-                  <div role="cell" className="flex items-center gap-1.5 pt-1 md:justify-end md:pt-0">
+                  <p role="cell" className="text-xs text-muted-foreground xl:hidden" data-testid="admin-key-summary">
+                    {STATUS_WORDS[k.status] || k.status || '—'} · {expiryShort(k)} · {lastUsedPhrase(k)}
+                  </p>
+                  <div role="cell" className={`${wide} text-xs font-medium ${STATUS_TONE[k.status] || 'text-muted-foreground'}`}>{STATUS_WORDS[k.status] || k.status || '—'}</div>
+                  <div role="cell" className={`${wide} text-xs text-muted-foreground`}>{expiryWords(k)}</div>
+                  <div role="cell" className={`${wide} text-xs text-muted-foreground`}>{lastUsedWords(k)}</div>
+                  <div role="cell" className="flex items-center gap-1.5 pt-1 xl:justify-end xl:pt-0">
                     {live ? (
                       <>
                         {busy && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden="true" />}
@@ -305,12 +306,20 @@ export default function PersonalKeysAdmin() {
     setBusyPersonId(person.id);
     setError(null); setNotice(null);
     try {
-      const res = await personalApiKeysAPI.setUsers([...next]);
+      // Only the person toggled, as a delta, so two admins editing at once
+      // don't overwrite each other's changes. The whole list rides along only
+      // as a fallback for a whole-list-only backend (never an empty body that
+      // could read as "nobody").
+      const res = await personalApiKeysAPI.changeUsers({
+        add: on ? [person.id] : [],
+        remove: on ? [] : [person.id],
+        technicianIds: [...next],
+      });
       const ids = res?.data?.technicianIds;
       if (Array.isArray(ids)) setAccessIds(new Set(ids.map(Number)));
       const revoked = Array.isArray(res?.data?.revokedKeyIds) ? res.data.revokedKeyIds : [];
       if (on) {
-        flash(`${person.name} can now make a personal API key, on their profile page.`);
+        flash(`${person.name} can now make a personal API key on their Profile page.`);
       } else {
         flash(revoked.length
           ? `${person.name} no longer has API access. Their key was revoked.`

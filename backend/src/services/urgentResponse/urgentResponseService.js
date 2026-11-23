@@ -682,7 +682,8 @@ class UrgentResponseService {
       orderBy: { performedAt: 'asc' },
       take: 50,
     }), []);
-    const act = activities.find((a) => a.details?.actorKind === 'human' && !isOurs(a.performedBy));
+    // A person through their personal API key (4.4.05) is a person too.
+    const act = activities.find((a) => ['human', 'personal_key'].includes(a.details?.actorKind) && !isOurs(a.performedBy));
     if (act) return { touched: true, kind: act.activityType, by: act.performedBy || null, at: act.performedAt };
 
     const entries = await soft(() => prisma.ticketThreadEntry.findMany({
