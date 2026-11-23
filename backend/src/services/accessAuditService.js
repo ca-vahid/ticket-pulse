@@ -33,13 +33,29 @@ export const ACTIONS = Object.freeze({
   OAUTH_CLIENT_ROTATED: 'oauth_client_rotated',
   OAUTH_CLIENT_REVOKED: 'oauth_client_revoked',
   OAUTH_CLIENT_DELETED: 'oauth_client_deleted',
+  // Personal API keys (4.4.05): a key that acts as one person.
+  PERSONAL_KEY_CREATED: 'personal_key_created',
+  PERSONAL_KEY_ROTATED: 'personal_key_rotated',
+  PERSONAL_KEY_REVOKED: 'personal_key_revoked',
+  PERSONAL_KEY_EXPIRED: 'personal_key_expired',
+  PERSONAL_KEY_DISABLED_BY_ADMIN: 'personal_key_disabled_by_admin',
+  PERSONAL_KEY_ENABLED_BY_ADMIN: 'personal_key_enabled_by_admin',
+  PERSONAL_KEY_ACCESS_GRANTED: 'personal_key_access_granted',
+  PERSONAL_KEY_ACCESS_REMOVED: 'personal_key_access_removed',
 });
 
 // The changes that hand out a working secret, or switch one back on: these alert.
 const ALERT_ACTIONS = new Set([
   ACTIONS.API_KEY_CREATED, ACTIONS.API_KEY_ROTATED, ACTIONS.API_KEY_ENABLED,
   ACTIONS.OAUTH_CLIENT_CREATED, ACTIONS.OAUTH_CLIENT_ROTATED, ACTIONS.OAUTH_CLIENT_ENABLED,
+  ACTIONS.PERSONAL_KEY_CREATED, ACTIONS.PERSONAL_KEY_ROTATED, ACTIONS.PERSONAL_KEY_ENABLED_BY_ADMIN,
 ]);
+
+function credentialKind(action) {
+  if (action.startsWith('oauth_')) return 'oauth';
+  if (action.startsWith('personal_key_')) return 'personal_key';
+  return 'api_key';
+}
 
 const clip = (v, n = 255) => (v === null || v === undefined ? null : String(v).slice(0, n));
 
@@ -73,8 +89,8 @@ export async function recordAccessEvent({
  * working secret. `credential` is the API key / OAuth client as the service
  * returned it (never the secret itself).
  */
-export async function recordCredentialEvent({ workspaceId, actorEmail, action, credential = {}, extra = {} }) {
-  const kind = action.startsWith('oauth_') ? 'oauth' : 'api_key';
+export async function recordCredentialEvent({ workspaceId, actorEmail, action, credential = {}, extra = {}, targetEmail = null }) {
+  const kind = credentialKind(action);
   const details = {
     kind,
     id: credential.id ?? null,
@@ -86,7 +102,7 @@ export async function recordCredentialEvent({ workspaceId, actorEmail, action, c
     mode: credential.mode || undefined,
     ...extra,
   };
-  const row = await recordAccessEvent({ workspaceId, actorEmail, action, targetLabel: credential.name || null, details });
+  const row = await recordAccessEvent({ workspaceId, actorEmail, action, targetEmail, targetLabel: credential.name || null, details });
   if (ALERT_ACTIONS.has(action)) {
     await alertNewCredential({ workspaceId, actorEmail, action, credential, details }).catch((err) => {
       logger.warn(`Access audit: new-credential alert failed (${err.message})`);
@@ -116,9 +132,10 @@ function whenPacific(d = new Date()) {
 /** The alert e-mail: who, what, how much access, and where to look. Exported for tests. */
 export function renderCredentialAlert({ workspaceName, actorEmail, action, credential, details, at = new Date(), settingsUrl }) {
   const isOauth = action.startsWith('oauth_');
+  const isPersonal = action.startsWith('personal_key_');
   const rotated = action.endsWith('_rotated');
-  const enabled = action.endsWith('_enabled');
-  const kindLabel = isOauth ? 'OAuth client' : 'API key';
+  const enabled = action.endsWith('_enabled') || action.endsWith('_enabled_by_admin');
+  const kindLabel = isOauth ? 'OAuth client' : isPersonal ? 'personal API key' : 'API key';
   const verb = rotated ? 'got a new secret' : enabled ? 'was switched back on' : 'was created';
   const name = credential.name || '(no name)';
   const scopes = Array.isArray(details.scopes) && details.scopes.length ? details.scopes.join(', ') : 'none listed';
@@ -127,6 +144,7 @@ export function renderCredentialAlert({ workspaceName, actorEmail, action, crede
   const subject = `${enabled ? 'Switched back on' : 'New'} ${kindLabel} in ${workspaceName}: "${name}"${rotated ? ' (new secret)' : ''}`;
   const rows = [
     ['Who', actorEmail || 'unknown'],
+    ...(isPersonal && details.ownerEmail ? [['Acts as', details.ownerEmail]] : []),
     ['When', whenPacific(at)],
     ['Access', scopes],
     ['IP lock', ip],

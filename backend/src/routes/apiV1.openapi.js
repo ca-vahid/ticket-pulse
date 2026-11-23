@@ -543,6 +543,12 @@ export const PROBLEM_CODES = Object.freeze([
   { code: 'insufficient_scope', status: 403, meaning: 'The credential lacks a scope this call needs; `detail` names it.' },
   { code: 'ip_not_allowed', status: 403, meaning: 'The request came from an address outside the credential’s IP allowlist.' },
   { code: 'test_mode_read_only', status: 403, meaning: 'A tp_test_ key attempted a write.' },
+  { code: 'read_only_role', status: 403, meaning: 'Personal key: the person’s access is read-only today, so the key reads but changes nothing.' },
+  { code: 'personal_key_owner_has_no_access', status: 403, meaning: 'Personal key: the person it belongs to no longer has access to the workspace.' },
+  { code: 'personal_key_not_allowed', status: 403, meaning: 'Personal key: the person’s API access was removed by an admin.' },
+  { code: 'personal_key_not_allowed_here', status: 403, meaning: 'Personal key: this call is not open to personal keys (creating tickets or requesters, monitoring alerts).' },
+  { code: 'personal_key_required', status: 403, meaning: 'Only a personal key (tpu_…) may call this route (GET /me/guide).' },
+  { code: 'fs_status_write_not_enabled', status: 403, meaning: 'The ticket belongs to FreshService and this credential may not change its status.' },
   { code: 'forbidden', status: 403, meaning: 'Refused for another policy reason.' },
   { code: 'not_found', status: 404, meaning: 'No such ticket / resource in this workspace.' },
   { code: 'approval_category_not_found', status: 404, meaning: 'The named approval category does not exist in this workspace.' },
@@ -559,6 +565,34 @@ export const PROBLEM_CODES = Object.freeze([
   { code: 'service_unavailable', status: 503, meaning: 'Temporarily unable to serve (e.g. the FreshService rate-limit queue timed out); retry.' },
 ]);
 
+/**
+ * Personal keys (4.4.05): the facts the spec (`info.x-personal-keys`) and the
+ * docs page both state. Keep in step with personalApiKeyService.ABILITIES.
+ */
+export const PERSONAL_KEYS_DOC = Object.freeze({
+  prefix: 'tpu_',
+  rateLimitPerMinute: 60,
+  actsAs: 'The person who made the key, in the workspace they made it in. Replies carry their name, their signature and the app’s e-mail template; the conversation shows “Sent with API key ‘<name>’”; ticket history rows have actorKind personal_key.',
+  checkedEveryCall: [
+    'the key is not revoked, switched off or past its end date (401 invalid_api_key)',
+    'the person is still on the workspace’s API access list (403 personal_key_not_allowed)',
+    'the person still has access to the workspace (403 personal_key_owner_has_no_access)',
+    'the person’s role today: a read-only person’s key can read only (403 read_only_role)',
+  ],
+  abilities: [
+    { id: 'read', scopes: ['tickets:read', 'conversations:read', 'attachments:read', 'agents:read', 'groups:read', 'categories:read', 'types:read', 'tags:read', 'contacts:read', 'search:read'], always: true },
+    { id: 'reply', scopes: ['conversations:write', 'attachments:write'] },
+    { id: 'update', scopes: ['tickets:write', 'tags:write'] },
+    { id: 'tasks', scopes: ['tasks:read', 'tasks:write', 'timeentries:read', 'timeentries:write'] },
+  ],
+  never: ['approvals', 'creating tickets or requesters (POST /tickets, requesterEmail/requesterName on PATCH)', '/alert-occurrences', 'custom-field writes', 'creating tags', 'webhooks, keys, members, settings', 'trusted intake, due dates, FreshService status writes'],
+  expiry: 'Required: 30, 90 (default), 180 or 365 days. The owner is e-mailed 7 days before. Rotating gives a new secret (and a new key id) with the same settings.',
+  undo: 'None. A reply is e-mailed at once; there is no undo-send window.',
+  idempotency: 'Send Idempotency-Key on replies and notes; a retry with the same key returns the first answer (24 h).',
+  warnings: ['signature_removed', 'requester_unattended', 'requester_automated'],
+  guide: 'GET /me/guide returns a Markdown guide for the person’s AI assistant (also in the profile page). It never contains the secret.',
+});
+
 export function buildOpenApiSpec(baseUrl) {
   return {
     openapi: '3.1.0',
@@ -574,7 +608,9 @@ export function buildOpenApiSpec(baseUrl) {
         '**Idempotency:** send `Idempotency-Key: <uuid>` on writes to make retries safe (per RUN — same key + different body is a 422).',
         '**Resubmissions:** send `externalRef` (your per-RECORD key) on `POST /tickets` — a re-POST for a known record UPDATES the ticket (200, `resubmitted: true`) instead of creating a duplicate.',
         '**Pagination:** list endpoints support `?cursor=` (keyset) or `?page=&pageSize=` (offset).',
+        '**Personal keys:** `Authorization: Bearer tpu_…` — a key that acts as ONE person, limited to what their role allows in the app today; 60 requests a minute. See `x-personal-keys`.',
       ].join('\n'),
+      'x-personal-keys': PERSONAL_KEYS_DOC,
       'x-problem-codes': PROBLEM_CODES.map((c) => ({ ...c })),
     },
     servers: [{ url: `${baseUrl}/api/v1` }],
@@ -582,6 +618,7 @@ export function buildOpenApiSpec(baseUrl) {
     components: {
       securitySchemes: {
         apiKey: { type: 'http', scheme: 'bearer', description: 'API key (tp_live_… / tp_test_…) issued in Settings → API Keys' },
+        personalKey: { type: 'http', scheme: 'bearer', description: 'Personal API key (tpu_…) a person makes in their own profile, when an admin has given them API access. Every call runs as that person, re-checked against their access and role on every call. 60 requests a minute.' },
         oauth2: { type: 'oauth2', description: 'Built-in OAuth2 client-credentials — exchange a client at /oauth/token for a bearer token.', flows: { clientCredentials: { tokenUrl: `${baseUrl}/api/v1/oauth/token`, scopes: {} } } },
       },
       parameters: {
@@ -608,7 +645,17 @@ export function buildOpenApiSpec(baseUrl) {
           },
         },
       },
-      '/me': { get: op('Identity, workspace, and limits for the calling credential', null, { tag: 'discovery' }) },
+      '/me': { get: op('Identity, workspace, and limits for the calling credential. With a personal key: authType personal_key, actsAs { name, email, technicianId, role }, key { name, prefix, scopes, abilities, expiresAt }, rateLimit.perMinute 60', null, { tag: 'discovery' }) },
+      '/me/guide': {
+        get: {
+          ...op('Personal keys only: the Markdown guide for the person’s AI assistant (base URL, what this key can do today, reply and note examples, body format, errors). Never contains the secret.', null, {
+            tag: 'personal keys',
+            responseRef: { type: 'object', properties: { markdown: { type: 'string' }, filename: { type: 'string', example: 'ticket-pulse-api-guide.md' } } },
+            extraResponses: { 403: { description: 'personal_key_required — called with an integration key or OAuth token' } },
+          }),
+          security: [{ personalKey: [] }],
+        },
+      },
       '/meta': { get: op('Enumerations: priorities, statuses, ticket types', null, { tag: 'discovery' }) },
       '/tickets': {
         get: op('List tickets (cursor or offset; filters mirror the queue, incl. cf_* custom-field filters)', 'tickets:read', { tag: 'tickets', responseRef: ref('Ticket'), list: true, parameters: CF_FILTER_PARAMETERS }),
@@ -643,7 +690,7 @@ export function buildOpenApiSpec(baseUrl) {
         delete: op('Detach from parent', 'tickets:write', { tag: 'tickets' }),
       },
       '/tickets/{id}/conversations': { get: op('Full conversation thread (incl. private notes)', 'conversations:read', { tag: 'conversations', responseRef: ref('ThreadEntry') }) },
-      '/tickets/{id}/replies': { post: op('Add a public reply (emails the requester)', 'conversations:write', { tag: 'conversations', body: ref('Message'), status: 201 }) },
+      '/tickets/{id}/replies': { post: op('Add a public reply (emails the requester). With a personal key the reply goes out as the person (name, signature, template); a trailing copy of their own signature is dropped and the answer carries `warnings` (signature_removed, requester_unattended, requester_automated).', 'conversations:write', { tag: 'conversations', body: ref('Message'), status: 201 }) },
       '/tickets/{id}/notes': { post: op('Add a private internal note (optionally stamped with the caller’s stage/agent)', 'conversations:write', { tag: 'conversations', body: ref('Message'), status: 201 }) },
       '/tickets/{id}/activities': {
         get: op('Audit trail: who changed what and when — status, assignee, fields, and every relation change (parent_set, parent_removed, child_added, child_removed, linked, unlinked, merged_into, merged_from, split_into, split_from, task_status_changed). Read-only', 'tickets:read', {
@@ -837,6 +884,20 @@ Both resolve to a single workspace; a credential can never read or write another
 • Send <code>Idempotency-Key: &lt;uuid&gt;</code> on writes so a retry never double-applies (per run; same key + different body → 422).<br>
 • Send <code>externalRef</code> (your per-record key) on <code>POST /tickets</code> — a re-POST for a known record <b>updates</b> the ticket (<code>200</code>, <code>resubmitted: true</code>) instead of duplicating it.<br>
 • Lists page by <code>?cursor=</code> (keyset, use the returned <code>next_cursor</code>) or <code>?page=&amp;pageSize=</code>.
+</div>
+<h2>Personal keys</h2>
+<div class="card">
+<b>3. Personal API key</b> (<code>tpu_…</code>). A person makes one in their own profile once an admin has given them API access (Members → API keys). It <b>acts as them</b>: ${esc(PERSONAL_KEYS_DOC.actsAs)}<br><br>
+<b>Checked on every call:</b><br>${PERSONAL_KEYS_DOC.checkedEveryCall.map((c) => `• ${esc(c)}`).join('<br>')}<br><br>
+<b>What it can do</b> (chosen when it is made; read is always on):<br>${PERSONAL_KEYS_DOC.abilities.map((a) => `• <code>${a.id}</code>: ${a.scopes.map((s) => `<code>${s}</code>`).join(' ')}`).join('<br>')}<br>
+<b>Never:</b> ${PERSONAL_KEYS_DOC.never.map(esc).join('; ')}.<br><br>
+<b>Limits:</b> ${PERSONAL_KEYS_DOC.rateLimitPerMinute} requests a minute per key. ${esc(PERSONAL_KEYS_DOC.expiry)} <b>No undo:</b> ${esc(PERSONAL_KEYS_DOC.undo)} ${esc(PERSONAL_KEYS_DOC.idempotency)}
+<pre>curl -X POST ${baseUrl}/api/v1/tickets/TP-1234/replies \\
+  -H "Authorization: Bearer tpu_xxx" -H "Content-Type: application/json" \\
+  -H "Idempotency-Key: 6f1d2c3a-reply-1" \\
+  -d '{ "body": "&lt;p&gt;Hi Dana,&lt;/p&gt;&lt;p&gt;The VPN profile is fixed. Could you try connecting again?&lt;/p&gt;" }'
+# → 201 { "success": true, "data": { "entryId": 9001, "emailed": true }, "warnings": [] }</pre>
+Don't put a signature, a sign-off name or the earlier e-mails in the body: Ticket Pulse adds the person's signature, the company template and the quoted history itself (a trailing copy of their signature is dropped, <code>warnings: ["signature_removed"]</code>). ${esc(PERSONAL_KEYS_DOC.guide)}
 </div>
 ${sections}
 <h2>Error codes</h2>

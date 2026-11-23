@@ -2464,3 +2464,31 @@ export const dashboardViewersAPI = {
 export const replyWarningAPI = {
   get: (ticketId) => api.get(`/tickets/${ticketId}/reply-warning`),
 };
+
+// Personal API keys (4.4.05)
+// A key owned by one person in one workspace; every call runs as them.
+// Workspace rides the usual X-Workspace-Id header.
+// Owner:
+//   mine()            → { success, data: { enabled, canCreate, reason, maxKeys, keys: [Key] } }
+//   create(body)      body { name, abilities, expiresInDays, ipAllowlist } → { success, data: { key, secret } }
+//   rotate(id)        → { success, data: { key, secret } }
+//   revoke(id)        → { success }
+//   guide()           → { success, data: { markdown, filename } }
+// Admin (workspace admin or super admin):
+//   list()            → { success, data: { enabled, keys: [Key & { owner: { name, email } }] } }
+//   users()           → { success, data: { technicianIds } }
+//   setUsers(ids)     → { success, data: { technicianIds, revokedKeyIds } }
+//   setDisabled(id,b) → { success, data: Key }
+//   adminRevoke(id)   → { success }
+export const personalApiKeysAPI = {
+  mine: () => api.get('/me/api-keys'),
+  create: (body) => api.post('/me/api-keys', body),
+  rotate: (id) => api.post(`/me/api-keys/${id}/rotate`),
+  revoke: (id) => api.delete(`/me/api-keys/${id}`),
+  guide: () => api.get('/me/api-keys/guide'),
+  list: () => api.get('/admin/personal-api-keys'),
+  users: () => api.get('/admin/personal-api-keys/users'),
+  setUsers: (technicianIds) => api.put('/admin/personal-api-keys/users', { technicianIds }),
+  setDisabled: (id, disabled) => api.patch(`/admin/personal-api-keys/${id}`, { disabled }),
+  adminRevoke: (id) => api.delete(`/admin/personal-api-keys/${id}`),
+};

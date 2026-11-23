@@ -4,7 +4,7 @@
  * (explicit `details.actorKind` or the server-side legacy heuristic); the
  * client fallback below only covers responses from an older backend.
  *
- * Kinds: human | api | freshservice_sync | ai | workflow | system | reconcile | mirror | auto_help
+ * Kinds: human | api | personal_key | freshservice_sync | ai | workflow | system | reconcile | mirror | auto_help
  */
 import { BookOpen } from 'lucide-react';
 
@@ -19,6 +19,14 @@ export const ACTOR_KIND_META = {
     label: 'API',
     title: 'Done through the public API (Power Apps, integrations)',
     tone: 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-500/15 dark:text-indigo-200 dark:border-indigo-500/30',
+    machine: false,
+  },
+  // Personal API keys (4.4.05): the person acted through their own key. It is
+  // their action, not machine activity, so the default filter keeps it.
+  personal_key: {
+    label: 'Via API key',
+    title: 'Done by this person with their own API key',
+    tone: 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-500/15 dark:text-blue-200 dark:border-blue-500/30',
     machine: false,
   },
   freshservice_sync: {

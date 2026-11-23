@@ -373,6 +373,45 @@ model AccessAuditEvent {
   @@map("access_audit_events")
 }
 
+// Personal API keys (4.4.05): a key that IS one person in one workspace.
+// Raw secret "tpu_<base64url>" shown once; only its sha256 hash is stored.
+// Every /api/v1 call re-checks the person's access, role and the workspace's
+// personal_api_key_users_ws<N> list; scopes are an upper bound capped by the
+// role. Its own table so integration-key reads (api_keys) never change.
+// One active key per person per workspace (enforced in the service).
+model PersonalApiKey {
+  id              Int       @id @default(autoincrement())
+  workspaceId     Int       @map("workspace_id")
+  technicianId    Int?      @map("technician_id")
+  ownerEmail      String    @map("owner_email") @db.VarChar(255) // lower-case
+  name            String    @db.VarChar(120)
+  keyHash         String    @unique @map("key_hash") @db.VarChar(64)
+  keyPrefix       String    @map("key_prefix") @db.VarChar(24)
+  scopes          String[]  @default([])
+  ipAllowlist     String[]  @default([]) @map("ip_allowlist")
+  expiresAt       DateTime  @map("expires_at")
+  isEnabled       Boolean   @default(true) @map("is_enabled")
+  disabledAt      DateTime? @map("disabled_at")
+  disabledBy      String?   @map("disabled_by") @db.VarChar(255)
+  revokedAt       DateTime? @map("revoked_at")
+  revokedBy       String?   @map("revoked_by") @db.VarChar(255)
+  revokedReason   String?   @map("revoked_reason") @db.VarChar(40)
+  rotatedFromId   Int?      @map("rotated_from_id")
+  expiryWarnedAt  DateTime? @map("expiry_warned_at")
+  expiredNotedAt  DateTime? @map("expired_noted_at")
+  lastUsedAt      DateTime? @map("last_used_at")
+  lastUsedIp      String?   @map("last_used_ip") @db.VarChar(64)
+  requestCount    Int       @default(0) @map("request_count")
+  createdBy       String?   @map("created_by") @db.VarChar(255)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@index([workspaceId, technicianId])
+  @@index([workspaceId, ownerEmail])
+  @@index([expiresAt])
+  @@map("personal_api_keys")
+}
+
 // Idempotency-Key replay cache for POST/PATCH writes on /api/v1 (24h TTL sweep).
 model ApiIdempotencyKey {
   id           Int      @id @default(autoincrement())

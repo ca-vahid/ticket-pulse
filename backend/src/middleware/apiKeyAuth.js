@@ -107,6 +107,23 @@ export function apiRequestContext(req, res, next) {
  * @returns {{ workspaceId, scopes, name, prefix, mode, ipAllowlist, rateLimitPerMin, keyId, bucket }}
  */
 async function resolvePrincipal(raw) {
+  // Personal API keys (4.4.05): a `tpu_` key IS one person. Its own table and
+  // service; integration keys and OAuth below are untouched by this branch.
+  if (raw.startsWith('tpu_')) {
+    const { default: personalApiKeyService } = await import('../services/personalApiKeyService.js');
+    const auth = await personalApiKeyService.authenticatePersonalKey(raw);
+    return {
+      workspaceId: auth.key.workspaceId, scopes: auth.scopes, name: auth.key.name, prefix: auth.key.keyPrefix, mode: 'live',
+      ipAllowlist: Array.isArray(auth.key.ipAllowlist) ? auth.key.ipAllowlist : [],
+      rateLimitPerMin: personalApiKeyService.PERSONAL_KEY_RATE_LIMIT, keyId: null,
+      personalKeyId: auth.key.id, bucket: `pkey:${auth.key.id}`,
+      trustedIntake: false, defaultSource: null,
+      personal: {
+        keyId: auth.key.id, actor: auth.actor, abilities: auth.abilities, keyScopes: auth.keyScopes,
+        expiresAt: auth.key.expiresAt, readOnly: auth.access.readOnly, workspaceRole: auth.access.workspaceRole,
+      },
+    };
+  }
   if (/^tp_(live|test)_/.test(raw) || raw.startsWith('tpk_')) {
     const key = await prisma.apiKey.findUnique({ where: { keyHash: hashApiKey(raw) } });
     if (!keyUsable(key)) throw problems.unauthorized('Unknown, disabled, revoked, or expired API key', 'invalid_api_key');
@@ -151,6 +168,11 @@ export const requireApiKey = (scope) => async (req, res, next) => {
     // `scope` may be a single scope or an array (any-of).
     const required = Array.isArray(scope) ? scope : (scope ? [scope] : []);
     if (required.length && !required.some((s) => scopeSatisfies(principal.scopes, s))) {
+      // A personal key whose own scopes allow this, cut back by the person's
+      // read-only role today: say so, rather than blame the key.
+      if (principal.personal && principal.personal.readOnly && required.some((s) => scopeSatisfies(principal.personal.keyScopes, s))) {
+        throw problems.forbidden('Your access in this workspace is read-only, so this key can read but not change anything.', 'read_only_role');
+      }
       throw problems.forbidden(`This credential is missing the '${required.join("' or '")}' scope`, 'insufficient_scope');
     }
     // Test-mode keys are READ-ONLY until a sandbox data partition exists — a
@@ -182,6 +204,7 @@ export const requireApiKey = (scope) => async (req, res, next) => {
       fsStatusWrite: principal.fsStatusWrite === true,
       readExcludeCategoryIds: Array.isArray(principal.readExcludeCategoryIds) ? principal.readExcludeCategoryIds : [],
       readPrivateNotes: principal.readPrivateNotes !== false,
+      ...(principal.personal ? { personalKeyId: principal.personalKeyId, personal: principal.personal } : {}),
     };
     req.workspaceId = principal.workspaceId;
     req.apiMode = principal.mode;
@@ -192,6 +215,10 @@ export const requireApiKey = (scope) => async (req, res, next) => {
         where: { id: principal.keyId },
         data: { lastUsedAt: new Date(), lastUsedIp: ip?.slice(0, 64) || null, requestCount: { increment: 1 } },
       }).catch(() => {});
+    } else if (principal.personalKeyId) {
+      import('../services/personalApiKeyService.js')
+        .then(({ default: svc }) => svc.recordUse(principal.personalKeyId, ip))
+        .catch(() => {});
     } else if (principal.oauthClientId) {
       prisma.oAuthClient.update({ where: { id: principal.oauthClientId }, data: { lastUsedIp: ip?.slice(0, 64) || null } }).catch(() => {});
     }

@@ -2,6 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } fro
 import { createPortal } from 'react-dom';
 import ApprovalEventCard from '../components/tickets/ApprovalEventCard';
 import ReplyAudienceWarning from '../components/tickets/ReplyAudienceWarning';
+import { personalKeyNameOf } from '../components/apiKeys/personalKeyText';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ticketShortLink } from '../utils/ticketShortLink';
 import {
@@ -470,6 +471,7 @@ export function ThreadEntry({ entry, attachments = [], ticketId = null, onPrevie
   const forwardedBy = forwarded?.byName || forwarded?.byEmail || 'an agent';
   // A message copied in by a merge (18 Oct 2026) says which ticket it came from.
   const mergedFrom = entry.rawPayload?.mergedFrom || null;
+  const personalKeyName = personalKeyNameOf(entry);
   const forwardedTitle = forwarded
     ? [
       forwarded.kind === 'agent_cc' ? `Filed by ${forwardedBy} (Cc'd on the original email)` : `Forwarded by ${forwardedBy}`,
@@ -667,14 +669,26 @@ export function ThreadEntry({ entry, attachments = [], ticketId = null, onPrevie
                 edited {formatDayTime(entry.editedAt)} · {timeAgo(entry.editedAt)}
               </span>
             )}
-            <span
-              className="text-xs text-muted-foreground/75 whitespace-nowrap"
-              title={forwarded?.originalDate
-                ? `Original message date · received by mailbox ${new Date(forwarded.receivedAt || entry.occurredAt).toLocaleString()}`
-                : new Date(entry.occurredAt).toLocaleString()}
-            >
-              {formatDayTime(forwarded?.originalDate || entry.occurredAt)}
-              {' · '}{timeAgo(forwarded?.originalDate || entry.occurredAt)}
+            <span className="flex flex-col items-end">
+              <span
+                className="text-xs text-muted-foreground/75 whitespace-nowrap"
+                title={forwarded?.originalDate
+                  ? `Original message date · received by mailbox ${new Date(forwarded.receivedAt || entry.occurredAt).toLocaleString()}`
+                  : new Date(entry.occurredAt).toLocaleString()}
+              >
+                {formatDayTime(forwarded?.originalDate || entry.occurredAt)}
+                {' · '}{timeAgo(forwarded?.originalDate || entry.occurredAt)}
+              </span>
+              {/* Personal API keys (4.4.05): how a 2 am reply arrived. */}
+              {personalKeyName && (
+                <span
+                  data-testid="sent-with-api-key"
+                  className="text-[11px] text-muted-foreground/75"
+                  title="Sent through this person's own API key. It acts as them, with their signature."
+                >
+                  Sent with API key &lsquo;{personalKeyName}&rsquo;
+                </span>
+              )}
             </span>
           </span>
         </div>

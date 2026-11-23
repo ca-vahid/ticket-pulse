@@ -46,6 +46,7 @@ import { requireWorkspace } from '../middleware/workspace.js';
 import usageRoutes from './usage.routes.js';
 import siteStatsRoutes from './siteStats.routes.js';
 import dashboardViewerRoutes from './dashboardViewer.routes.js';
+import { personalKeysOwnerRouter, personalKeysAdminRouter } from './personalApiKeys.routes.js';
 import { requireAdmin, requireAdminOrObserver, requireAuth, requireDashboardView, requireWorkspaceAccess, requireWorkspaceMemberOrAgent } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -149,6 +150,11 @@ router.use('/assignment-shares', requireWorkspace, assignmentSharesRoutes);
 // listed viewers only; all other callers fall through to the mounts below.
 router.use(dashboardViewerRoutes);
 router.use('/dashboard', requireWorkspace, requireDashboardView, dashboardRoutes);
+// Personal API keys (4.4.05): a person's own key, and the admin view of
+// everyone's. Above the strict gate because agents (no workspace_access row)
+// own keys too; the admin router adds requireAdmin itself.
+router.use('/me/api-keys', requireWorkspace, requireWorkspaceMemberOrAgent, personalKeysOwnerRouter);
+router.use('/admin/personal-api-keys', requireWorkspace, requireWorkspaceMemberOrAgent, personalKeysAdminRouter);
 router.use(requireWorkspace);
 router.use(requireWorkspaceAccess);
 

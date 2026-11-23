@@ -645,6 +645,11 @@ router.delete(
       workspaceId: req.workspaceId, actorEmail: actor?.email, action: ACTIONS.ACCESS_REVOKED,
       targetEmail, oldValue: existingRole, newValue: null,
     });
+    // Offboarding (4.4.05): removing someone's access revokes their personal
+    // API keys in this workspace. Never fails the revoke itself.
+    await import('../services/personalApiKeyService.js')
+      .then(({ revokeForEmail }) => revokeForEmail(req.workspaceId, targetEmail, { reason: 'offboarded', actorEmail: actor?.email || null }))
+      .catch(() => {});
     res.json({ success: true, message: 'Access revoked' });
   }),
 );

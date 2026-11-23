@@ -68,6 +68,7 @@ class ScheduledSyncService {
       this.startMailboxHoldDigest();
       this.startNoiseCloseDigest();
       this.startUrgentResponseDigest();
+      this.startPersonalKeyExpirySweep();
 
       logger.info(`Scheduled sync started for ${workspaces.length} workspace(s)`);
       return true;
@@ -608,6 +609,32 @@ class ScheduledSyncService {
     }
   }
 
+  /**
+   * Personal API keys (4.4.05): daily at 09:00 Pacific, mail each owner once
+   * 7 days before their key ends, and record Access history once a key has
+   * ended. Quiet when nothing is due. Kill switch: PERSONAL_KEY_EXPIRY_SWEEP=false.
+   */
+  startPersonalKeyExpirySweep() {
+    this.stopPersonalKeyExpirySweep();
+    if (process.env.PERSONAL_KEY_EXPIRY_SWEEP === 'false') return;
+    this.personalKeyExpiryJob = cron.schedule('0 9 * * *', async () => {
+      try {
+        const { runExpirySweep } = await import('./personalApiKeyService.js');
+        const result = await runExpirySweep();
+        if (result.warned || result.expired) logger.info(`Personal API keys: ${result.warned} expiry warning(s) sent, ${result.expired} key(s) marked ended`);
+      } catch (error) {
+        logger.warn(`Personal API key expiry sweep failed (non-fatal): ${error.message}`);
+      }
+    }, { scheduled: true, timezone: 'America/Vancouver' });
+  }
+
+  stopPersonalKeyExpirySweep() {
+    if (this.personalKeyExpiryJob) {
+      this.personalKeyExpiryJob.stop();
+      this.personalKeyExpiryJob = null;
+    }
+  }
+
   stopMailboxHoldDigest() {
     if (this.mailboxHoldDigestJob) {
       this.mailboxHoldDigestJob.stop();
@@ -622,6 +649,7 @@ class ScheduledSyncService {
     this.stopMailboxHoldDigest();
     this.stopNoiseCloseDigest();
     this.stopUrgentResponseDigest();
+    this.stopPersonalKeyExpirySweep();
     if (this.cronJobs.size > 0) {
       logger.info(`Stopping all ${this.cronJobs.size} scheduled sync(s)`);
       for (const [wsId] of this.cronJobs) {
