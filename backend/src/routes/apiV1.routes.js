@@ -767,6 +767,12 @@ router.patch('/tickets/:id', S('tickets:write'), withIdempotency, asyncHandler(a
   const id = (await tid(req));
   const body = req.body || {};
   const actor = apiActor(req);
+  // Integrations match resubmissions on externalRef, so a personal key can't
+  // set it (same reason as POST /tickets/:id/references; second look). Checked
+  // before anything is written.
+  if (isPersonalKeyRequest(req) && body.externalRef !== undefined) {
+    throw new ApiProblem({ ...PERSONAL_KEY_REFUSAL, detail: 'A personal API key can\'t set externalRef: integrations use it to match their tickets. Leave it out.' });
+  }
   // A personal key never creates requesters (4.4.05): re-pointing by e-mail or
   // name may make one, so only an existing requesterId is accepted.
   if (isPersonalKeyRequest(req) && (body.requesterEmail !== undefined || body.requesterName !== undefined)) {

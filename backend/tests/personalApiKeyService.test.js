@@ -161,6 +161,15 @@ describe('creating a key', () => {
     expect(auditMock.recordCredentialEvent).toHaveBeenCalledWith(expect.objectContaining({ action: 'personal_key_revoked', extra: expect.objectContaining({ reason: 'expired' }) }));
   });
 
+  test('race: an admin switches the key off between the owner\'s read and the revoke, and the owner\'s revoke does not land', async () => {
+    const { key } = await svc.createOwnKey(1, dana, body());
+    const stale = { ...rows.get(key.id) }; // the owner's read, still on
+    rows.get(key.id).isEnabled = false; // the admin's switch-off lands first
+    prismaMock.personalApiKey.findFirst.mockImplementationOnce(async () => stale);
+    await expect(svc.revokeOwnKey(1, dana, key.id)).rejects.toMatchObject({ statusCode: 403, code: 'personal_key_disabled' });
+    expect(rows.get(key.id).revokedAt).toBeNull();
+  });
+
   test('an admin switch-off cannot be dodged: no new key, and the owner cannot revoke it; an admin revoke frees the slot', async () => {
     const { key } = await svc.createOwnKey(1, dana, body());
     await svc.adminSetDisabled(1, key.id, true, { email: 'priya.nair@example.com' });

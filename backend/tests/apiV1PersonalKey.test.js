@@ -247,6 +247,12 @@ describe('routes a personal key never uses', () => {
     expect(ticketServiceMock.updateTicketFields).not.toHaveBeenCalled();
   });
 
+  test('PATCH may not set externalRef (integrations match on it), and nothing else in the body is written', async () => {
+    const res = await personal(request(buildApp()).patch('/api/v1/tickets/501')).send({ priority: 3, externalRef: 'rec-42' }).expect(403);
+    expect(res.body.code).toBe('personal_key_not_allowed_here');
+    expect(ticketServiceMock.updateTicketFields).not.toHaveBeenCalled();
+  });
+
   test('PATCH status/priority runs as the person', async () => {
     await personal(request(buildApp()).patch('/api/v1/tickets/501')).send({ priority: 3, status: 'Resolved' }).expect(200);
     expect(ticketServiceMock.updateTicketFields).toHaveBeenCalledWith(501, 1, { priority: 3 }, PERSONAL_ACTOR);

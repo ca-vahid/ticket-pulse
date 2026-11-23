@@ -438,11 +438,13 @@ async function noteExpired(key) {
 
 // ------------------------------------------------------------ revoking
 
-async function revokeRows(rows, { reason, actorEmail = null }) {
+async function revokeRows(rows, { reason, actorEmail = null, onlyEnabled = false }) {
   const revokedIds = [];
   for (const key of rows) {
     const { count } = await prisma.personalApiKey.updateMany({
-      where: { id: key.id, revokedAt: null },
+      // onlyEnabled: an owner's revoke never lands on a key an admin switched
+      // off between the owner's read and this write (second-look race).
+      where: { id: key.id, revokedAt: null, ...(onlyEnabled ? { isEnabled: true } : {}) },
       data: { revokedAt: new Date(), revokedBy: actorEmail ? lower(actorEmail) : null, revokedReason: reason, isEnabled: false },
     });
     if (!count) continue;
@@ -753,7 +755,11 @@ export async function revokeOwnKey(workspaceId, user, id) {
   // An admin's switch-off can't be dodged by revoking and making a new key
   // (review #3): only an admin revokes a switched-off key, which frees the slot.
   if (!key.isEnabled) throw new AuthorizationError(DISABLED_KEY_MESSAGE, 'personal_key_disabled');
-  await revokeRows([key], { reason: 'owner', actorEmail: email });
+  const revoked = await revokeRows([key], { reason: 'owner', actorEmail: email, onlyEnabled: true });
+  if (!revoked.length) {
+    const now = await prisma.personalApiKey.findFirst({ where: { id: key.id }, select: { isEnabled: true, revokedAt: true } }).catch(() => null);
+    if (now && !now.revokedAt && !now.isEnabled) throw new AuthorizationError(DISABLED_KEY_MESSAGE, 'personal_key_disabled');
+  }
   return { revoked: true };
 }
 
