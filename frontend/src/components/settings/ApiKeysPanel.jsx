@@ -3,6 +3,7 @@ import {
   Check, Copy, KeyRound, Loader2, Lock, Plus, RefreshCw, Send, Trash2, Webhook,
 } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
+import PersonalKeysAdmin from './PersonalKeysAdmin';
 
 // Grouped scope catalogue — mirrors backend API_KEY_SCOPES (apiKeyService.js).
 const SCOPE_GROUPS = [
@@ -623,6 +624,9 @@ export default function ApiKeysPanel() {
           <button onClick={() => setDraft({ name: '', scopes: ['tickets:read'], mode: 'live', expiresInDays: '' })} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-300 hover:text-blue-700 dark:hover:text-blue-200"><Plus className="w-3.5 h-3.5" aria-hidden="true" /> New API key</button>
         )}
       </section>
+
+      {/* Personal keys (4.4.05): who may have one, and everyone's keys. */}
+      <PersonalKeysAdmin />
 
       <OAuthClientsSection />
       <WebhooksSection />

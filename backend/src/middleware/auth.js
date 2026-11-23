@@ -320,6 +320,8 @@ const READONLY_WRITE_ALLOWLIST = [
   /^\/user-preferences(\/|$)/,
   /\/presence$/,
   /\/approvals\/\d+\/(decide|clarify)$/,
+  // Revoking your own personal API key (4.4.05) is always allowed.
+  /^\/me\/api-keys\/\d+$/,
 ];
 
 function bearerIdentity(req) {

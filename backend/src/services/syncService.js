@@ -2120,6 +2120,11 @@ class SyncService {
           );
           if (deactivatedCount > 0) {
             logger.info(`Deactivated ${deactivatedCount} technicians no longer in workspace ${workspaceId}`);
+            // Offboarding (4.4.05): the bulk switch-off returns a count only, so
+            // sweep: every listed person or key owner no longer active is offboarded.
+            await import('./personalApiKeyService.js')
+              .then(({ offboardInactiveTechnicians }) => offboardInactiveTechnicians(workspaceId))
+              .catch(() => {});
           }
         } catch (error) {
           logger.error('Failed to deactivate removed technicians:', error);
@@ -2146,6 +2151,10 @@ class SyncService {
               ends.pendingApprovals && `${ends.pendingApprovals} pending ticket approval${ends.pendingApprovals === 1 ? '' : 's'} waiting on them`,
             ].filter(Boolean) : [];
             if (held.length) logger.warn(`Technician ${t.name} (${t.id}) is switched off but still has: ${held.join('; ')}. Reassign these.`);
+            // Offboarding (4.4.05): their personal API keys stop with them.
+            await import('./personalApiKeyService.js')
+              .then(({ offboardTechnician }) => offboardTechnician(workspaceId, t.id, { reason: 'offboarded' }))
+              .catch(() => {});
           }
         } catch (error) {
           logger.error('Failed to disable FreshService-deactivated technicians:', error);

@@ -14,6 +14,7 @@ vi.mock('../contexts/AuthContext', () => ({ useAuth: () => ({ user: { name: 'Sus
 vi.mock('../contexts/WorkspaceContext', () => ({ useWorkspace: () => ({ currentWorkspace: { id: 1, name: 'IT' } }) }));
 
 vi.mock('../components/agent/SignaturePanel', () => ({ default: () => <div>My signature panel</div> }));
+vi.mock('../components/agent/PersonalApiKeyPanel', () => ({ default: () => <div>My API key panel</div> }));
 
 import ProfilePage from './ProfilePage';
 
@@ -61,5 +62,13 @@ describe('ProfilePage', () => {
     apiMock.settingsAPI.myPhoto.mockResolvedValue({ data: ME });
     renderPage();
     expect(await screen.findByText('My signature panel')).toBeInTheDocument();
+  });
+
+  test('the personal API key section sits on the profile, under the signature (4.4.05)', async () => {
+    renderPage();
+    const signature = await screen.findByText('My signature panel');
+    const keyPanel = screen.getByText('My API key panel');
+    // eslint-disable-next-line no-bitwise
+    expect(signature.compareDocumentPosition(keyPanel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

@@ -18,6 +18,8 @@ function stableStringify(value) {
 }
 
 function principalBucket(req) {
+  // Personal keys (4.4.05) live in their own table: their own bucket, never key:<id>.
+  if (req.apiKey?.personalKeyId) return `pkey:${req.apiKey.personalKeyId}`;
   if (req.apiKey?.id) return `key:${req.apiKey.id}`;
   if (req.apiKey?.oauthClientId) return `oauth:${req.apiKey.oauthClientId}`;
   return null;

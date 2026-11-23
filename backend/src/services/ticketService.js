@@ -948,7 +948,15 @@ class TicketService {
         performedAt: now,
         // actorKind (TU-1): human | api | system | workflow — an explicit
         // details.actorKind from the caller wins over the actor heuristic.
-        details: { source: 'ticketpulse_native', actorEmail: actor?.email || null, actorKind: actorKindOf(actor), ...details },
+        // Personal API keys (4.4.05): the person acted, through their key —
+        // actorKind 'personal_key' + `via` so History can say how it arrived.
+        details: {
+          source: 'ticketpulse_native',
+          actorEmail: actor?.email || null,
+          actorKind: actor?.via?.kind === 'personal_key' ? 'personal_key' : actorKindOf(actor),
+          ...(actor?.via?.kind === 'personal_key' ? { via: { kind: 'personal_key', keyId: actor.via.keyId ?? null, keyName: actor.via.keyName ?? null } } : {}),
+          ...details,
+        },
       });
       // Every audited action is real activity — keep the honest timestamp fresh.
       await prisma.ticket.update({
@@ -1280,6 +1288,8 @@ class TicketService {
       ...(suppressRequesterAck ? { suppressRequesterAck: true } : {}),
       ...(actorKind ? { actorKind } : {}),
       ...(actor ? { actor: { name: actor.name || null, email: actor.email || null, technicianId: actor.technicianId ?? null } } : {}),
+      // Personal API keys (4.4.05): the status webhook says the person resolved through their key.
+      ...(actor?.via?.kind === 'personal_key' ? { resolvedVia: 'personal_key' } : {}),
     }).catch((err) => {
       logger.warn('Native ticket lifecycle notification dispatch failed (non-fatal)', {
         ticketId: upsertedTicket.id,
@@ -5932,6 +5942,10 @@ class TicketService {
     // agent's words, so the conversation looked as if the reply had gone out unsigned. The entry
     // now remembers the signature that was added; the body is unchanged (nothing is signed twice).
     const sentSignature = !isPrivate && signature ? signatureAsSent(signature) : null;
+    // Personal API keys (4.4.05): "Sent with API key '<name>'" under the time.
+    const sentWithApiKey = actor?.via?.kind === 'personal_key'
+      ? { id: actor.via.keyId ?? null, name: actor.via.keyName ?? null }
+      : null;
     const entry = await prisma.ticketThreadEntry.create({
       data: {
         ticketId: ticket.id,
@@ -5953,7 +5967,7 @@ class TicketService {
         // unless Ticket Pulse mailed the reply itself and records it on FS below.
         mirrorState: isNative || viaTicketPulse ? 'pending' : 'mirrored',
         mirroredAt: isNative || viaTicketPulse ? null : now,
-        ...((recipients || stageMeta || sentSignature) ? { rawPayload: { ...(recipients || {}), ...(stageMeta || {}), ...(sentSignature ? { sentSignature } : {}) } } : {}),
+        ...((recipients || stageMeta || sentSignature || sentWithApiKey) ? { rawPayload: { ...(recipients || {}), ...(stageMeta || {}), ...(sentSignature ? { sentSignature } : {}), ...(sentWithApiKey ? { sentWithApiKey } : {}) } } : {}),
       },
     });
 

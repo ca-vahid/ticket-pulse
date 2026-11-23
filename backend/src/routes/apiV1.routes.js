@@ -21,6 +21,7 @@ import ticketResubmissionService, { normalizeExternalRef } from '../services/tic
 import { buildOpenApiSpec, renderDocsPage } from './apiV1.openapi.js';
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
 import { requesterTitle } from '../utils/requesterTitle.js';
+import { isPersonalKeyRequest, personalKeyActor, PERSONAL_KEY_REFUSAL } from '../utils/personalKeyRequest.js';
 
 /**
  * Public integration API (/api/v1) — key-authenticated, workspace-scoped,
@@ -37,7 +38,10 @@ const router = express.Router();
 router.use(apiRequestContext);
 
 const S = requireApiKey;
-const apiActor = (req) => ({
+// A personal key (4.4.05) acts as its person: the same actor the app builds
+// when they are signed in, plus `via` (how the action arrived). Integration
+// keys and OAuth clients keep their `apikey:` actor, unchanged.
+const apiActor = (req) => personalKeyActor(req) || ({
   email: `apikey:${req.apiKey.keyPrefix}`,
   name: req.apiKey.name,
   role: 'api',
@@ -46,6 +50,29 @@ const apiActor = (req) => ({
   trustedIntake: req.apiKey.trustedIntake === true,
   defaultSource: req.apiKey.defaultSource ?? null,
 });
+
+/** Routes a personal key never reaches (ticket creation, monitoring intake). */
+function noPersonalKey(what) {
+  return (req, _res, next) => {
+    if (!isPersonalKeyRequest(req)) return next();
+    return next(new ApiProblem({ ...PERSONAL_KEY_REFUSAL, detail: `A personal API key can't ${what}. Do it in the app, or ask the Ticket Pulse team for an integration key.` }));
+  };
+}
+
+/**
+ * Merge / re-parent / add a child: the app refuses these to agents (kind
+ * 'agent', tickets.routes.js), so a personal key refuses them for an agent
+ * too (403 coordinator_required). Members keep them, as in the app.
+ */
+function coordinatorOnlyForPersonalKey(what) {
+  return (req, _res, next) => {
+    if (!isPersonalKeyRequest(req) || personalKeyActor(req)?.kind !== 'agent') return next();
+    return next(problems.forbidden(`${what} requires coordinator or admin access, as in the app.`, 'coordinator_required'));
+  };
+}
+
+/** The person's actor for list reads (AI suggestions hidden as in the app); nothing for other credentials. */
+const listOptions = (req) => (isPersonalKeyRequest(req) ? [{ actor: personalKeyActor(req) }] : []);
 
 // Resolve a /tickets/:id path segment to an internal id. A plain positive
 // integer is the internal id (unchanged); a visible ref (TP-1048, #233976)
@@ -290,6 +317,22 @@ router.post('/oauth/token', express.urlencoded({ extended: false }), asyncHandle
 
 router.get('/me', S(), asyncHandler(async (req, res) => {
   const ws = await prisma.workspace.findUnique({ where: { id: req.workspaceId }, select: { id: true, name: true, slug: true } });
+  if (isPersonalKeyRequest(req)) {
+    // Personal keys (4.4.05): who the key acts as and what it can do right now.
+    const p = req.apiKey.personal;
+    const { PERSONAL_KEY_RATE_LIMIT } = await import('../services/personalApiKeyService.js');
+    res.json({
+      success: true,
+      data: {
+        authType: 'personal_key',
+        key: { name: req.apiKey.name, prefix: req.apiKey.keyPrefix, scopes: req.apiKey.scopes, abilities: p.abilities, expiresAt: p.expiresAt },
+        actsAs: { name: p.actor.name, email: p.actor.email, technicianId: p.actor.technicianId, role: p.readOnly ? 'readonly' : (p.actor.workspaceRole || 'agent') },
+        workspace: ws,
+        rateLimit: { perMinute: PERSONAL_KEY_RATE_LIMIT },
+      },
+    });
+    return;
+  }
   res.json({
     success: true,
     data: {
@@ -299,6 +342,23 @@ router.get('/me', S(), asyncHandler(async (req, res) => {
       rateLimit: { perMinute: Number(process.env.API_V1_RATE_LIMIT_PER_MINUTE || 120) },
     },
   });
+}));
+
+// The person's AI assistant loads its own instructions (4.4.05): the same
+// Markdown guide the profile page offers, for the key that calls. Read-only.
+router.get('/me/guide', S(), asyncHandler(async (req, res) => {
+  if (!isPersonalKeyRequest(req)) {
+    throw problems.forbidden('The guide is for personal API keys (tpu_…). Integration keys read /api/v1/docs.', 'personal_key_required');
+  }
+  const p = req.apiKey.personal;
+  const { default: personalApiKeyService } = await import('../services/personalApiKeyService.js');
+  const data = await personalApiKeyService.buildGuide({
+    workspaceId: req.workspaceId,
+    access: { email: p.actor.email, technician: { name: p.actor.name }, readOnly: p.readOnly === true },
+    key: { name: req.apiKey.name, keyPrefix: req.apiKey.keyPrefix, scopes: p.keyScopes, expiresAt: p.expiresAt },
+    baseUrl: resolvePublicBaseUrl() || `${req.protocol}://${req.get('host')}`,
+  });
+  res.json({ success: true, data });
 }));
 
 router.get('/meta', S(), asyncHandler(async (req, res) => {
@@ -352,7 +412,7 @@ router.get('/tickets', S('tickets:read'), asyncHandler(async (req, res) => {
     res.json({ success: true, data: { items: [], pagination: q.useCursor ? { next_cursor: null, limit: Number(q.pageSize) || 25, total: 0 } : { page: Number(q.page) || 1, page_size: Number(q.pageSize) || 25, total: 0 } } });
     return;
   }
-  const result = await ticketService.listTickets(req.workspaceId, scoped.q);
+  const result = await ticketService.listTickets(req.workspaceId, scoped.q, ...listOptions(req));
   const pagination = result.nextCursor !== undefined
     ? { next_cursor: result.nextCursor, limit: result.pageSize, total: result.total }
     : { page: result.page, page_size: result.pageSize, total: result.total };
@@ -539,7 +599,7 @@ function assertCustomFieldsWriteScope(req) {
   }
 }
 
-router.post('/tickets', S('tickets:write'), withIdempotency, asyncHandler(async (req, res) => {
+router.post('/tickets', S('tickets:write'), noPersonalKey('create tickets'), withIdempotency, asyncHandler(async (req, res) => {
   const body = req.body || {};
   const ignoredFields = await liftTopLevelCustomFields(req, body, CREATE_BODY_KEYS);
   if (body.customFields !== undefined) assertCustomFieldsWriteScope(req);
@@ -707,6 +767,17 @@ router.patch('/tickets/:id', S('tickets:write'), withIdempotency, asyncHandler(a
   const id = (await tid(req));
   const body = req.body || {};
   const actor = apiActor(req);
+  // Integrations match resubmissions on externalRef, so a personal key can't
+  // set it (same reason as POST /tickets/:id/references; second look). Checked
+  // before anything is written.
+  if (isPersonalKeyRequest(req) && body.externalRef !== undefined) {
+    throw new ApiProblem({ ...PERSONAL_KEY_REFUSAL, detail: 'A personal API key can\'t set externalRef: integrations use it to match their tickets. Leave it out.' });
+  }
+  // A personal key never creates requesters (4.4.05): re-pointing by e-mail or
+  // name may make one, so only an existing requesterId is accepted.
+  if (isPersonalKeyRequest(req) && (body.requesterEmail !== undefined || body.requesterName !== undefined)) {
+    throw new ApiProblem({ ...PERSONAL_KEY_REFUSAL, detail: 'A personal API key can change the requester by requesterId only (an existing person), never by e-mail or name.' });
+  }
   const ignoredFields = await liftTopLevelCustomFields(req, body, PATCH_BODY_KEYS);
   if (body.customFields !== undefined) assertCustomFieldsWriteScope(req);
   await resolveAssigneeEmail(req, body);
@@ -796,6 +867,9 @@ router.patch('/tickets/:id', S('tickets:write'), withIdempotency, asyncHandler(a
     const { default: fsBornStatusService } = await import('../services/fsBornStatusService.js');
     if (await fsBornStatusService.isFreshServiceBorn(id, req.workspaceId)) {
       // FreshService-born (23 Sep 2026): written to FreshService first, per-client opt-in.
+      if (req.apiKey.fsStatusWrite !== true && isPersonalKeyRequest(req)) {
+        throw problems.forbidden('This ticket belongs to FreshService, so its status is changed in FreshService, not through your API key.', 'fs_status_write_not_enabled');
+      }
       if (req.apiKey.fsStatusWrite !== true) {
         throw problems.forbidden('This ticket belongs to FreshService. Changing its status through the API needs the "may change status on FreshService tickets" permission on this client — ask the Ticket Pulse team.', 'fs_status_write_not_enabled');
       }
@@ -840,7 +914,7 @@ router.delete('/tickets/:id/park', S('tickets:write'), asyncHandler(async (req, 
   res.json({ success: true, data: result });
 }));
 
-router.post('/tickets/:id/split', S('tickets:write'), withIdempotency, asyncHandler(async (req, res) => {
+router.post('/tickets/:id/split', S('tickets:write'), noPersonalKey('split tickets (a split creates a new ticket)'), withIdempotency, asyncHandler(async (req, res) => {
   const { default: ticketSplitService } = await import('../services/ticketSplitService.js');
   await guardStructure(req, [await tid(req)], 'split');
   const result = await ticketSplitService.split((await tid(req)), req.workspaceId, {
@@ -858,7 +932,7 @@ router.post('/tickets/:id/split', S('tickets:write'), withIdempotency, asyncHand
   res.status(201).json({ success: true, data: result });
 }));
 
-router.post('/tickets/:id/merge', S('tickets:write'), withIdempotency, asyncHandler(async (req, res) => {
+router.post('/tickets/:id/merge', S('tickets:write'), coordinatorOnlyForPersonalKey('Merging tickets'), withIdempotency, asyncHandler(async (req, res) => {
   const { default: ticketMergeService } = await import('../services/ticketMergeService.js');
   const targetTicketId = await bodyTicketId(req, req.body?.target, req.body?.targetTicketId);
   // Both sides change: the source is closed, the survivor gains the thread.
@@ -874,7 +948,7 @@ router.post('/tickets/:id/merge', S('tickets:write'), withIdempotency, asyncHand
 
 // Many sources into this ticket (Simorgh ask 2 — storm clean-up). Sequential,
 // one result per source; a failure on one source does not stop the rest.
-router.post('/tickets/:id/merge-many', S('tickets:write'), withIdempotency, asyncHandler(async (req, res) => {
+router.post('/tickets/:id/merge-many', S('tickets:write'), coordinatorOnlyForPersonalKey('Merging tickets'), withIdempotency, asyncHandler(async (req, res) => {
   const { default: ticketMergeService } = await import('../services/ticketMergeService.js');
   const primaryId = await tid(req);
   const raw = Array.isArray(req.body?.sources) ? req.body.sources : Array.isArray(req.body?.ticketIds) ? req.body.ticketIds : [];
@@ -897,7 +971,7 @@ router.get('/tickets/:id/family', S('tickets:read'), asyncHandler(async (req, re
   res.json({ success: true, data: await ticketLinkService.family((await tid(req)), req.workspaceId) });
 }));
 
-router.put('/tickets/:id/parent', S('tickets:write'), asyncHandler(async (req, res) => {
+router.put('/tickets/:id/parent', S('tickets:write'), coordinatorOnlyForPersonalKey('Linking tickets'), asyncHandler(async (req, res) => {
   const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
   const parentTicketId = await bodyTicketId(req, req.body?.parent, req.body?.parentTicketId);
   await guardStructure(req, [await tid(req), parentTicketId], 're-parent');
@@ -905,14 +979,14 @@ router.put('/tickets/:id/parent', S('tickets:write'), asyncHandler(async (req, r
   res.json({ success: true, data: result });
 }));
 
-router.delete('/tickets/:id/parent', S('tickets:write'), asyncHandler(async (req, res) => {
+router.delete('/tickets/:id/parent', S('tickets:write'), coordinatorOnlyForPersonalKey('Linking tickets'), asyncHandler(async (req, res) => {
   const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
   await guardStructure(req, [await tid(req)], 're-parent');
   res.json({ success: true, data: await ticketLinkService.removeParent((await tid(req)), req.workspaceId, apiActor(req)) });
 }));
 
 // The parent's side of the same relation (Simorgh ask 2): add a child.
-router.post('/tickets/:id/children', S('tickets:write'), asyncHandler(async (req, res) => {
+router.post('/tickets/:id/children', S('tickets:write'), coordinatorOnlyForPersonalKey('Linking tickets'), asyncHandler(async (req, res) => {
   const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
   const parentId = await tid(req);
   const childTicketId = await bodyTicketId(req, req.body?.child, req.body?.childTicketId);
@@ -962,9 +1036,49 @@ router.get('/tickets/:id/conversations', S('conversations:read'), asyncHandler(a
   res.json({ success: true, data: (ticket.thread || []).filter((e) => (e.bodyText || e.content) && (privateNotes || e.isPrivate !== true)).map(threadEntryShape) });
 }));
 
+/**
+ * Personal-key replies (4.4.05): before the send, drop a trailing copy of the
+ * person's own signature (the app adds it once) and note whether the
+ * requester reads replies (the composer's 4.4.04 warning). Warnings never
+ * block, matching the reply box. Returns { input, warnings }.
+ */
+async function preparePersonalReply(req, ticketId, input) {
+  const warnings = [];
+  const actor = personalKeyActor(req);
+  const { getEnabledSignatureForSend } = await import('../services/userSignatureService.js');
+  const signature = await getEnabledSignatureForSend(req.workspaceId, actor.email);
+  let body = input;
+  if (signature) {
+    const { stripTrailingSignature } = await import('../utils/personalKeySignature.js');
+    const stripped = stripTrailingSignature(input, signature);
+    if (stripped.removed) {
+      body = { ...input, bodyText: stripped.bodyText, bodyHtml: stripped.bodyHtml };
+      warnings.push('signature_removed');
+    }
+  }
+  const ticket = await Promise.resolve()
+    .then(() => prisma.ticket.findFirst({ where: { id: ticketId, workspaceId: req.workspaceId }, select: { requester: { select: { email: true, unattended: true } } } }))
+    .catch(() => null);
+  const email = String(ticket?.requester?.email || '').trim();
+  if (ticket?.requester?.unattended === true) {
+    warnings.push('requester_unattended');
+  } else if (email.includes('@')) {
+    const { machineSenderMatch } = await import('../services/machineSenderService.js');
+    if (await Promise.resolve().then(() => machineSenderMatch(req.workspaceId, email)).catch(() => null)) warnings.push('requester_automated');
+  }
+  return { input: body, warnings };
+}
+
 router.post('/tickets/:id/replies', S(['tickets:write', 'conversations:write']), withIdempotency, asyncHandler(async (req, res) => {
-  const result = await ticketService.addReply((await tid(req)), req.workspaceId,
-    threadBodyFromApi(req.body?.body || req.body?.bodyText, req.body?.bodyHtml), apiActor(req));
+  const ticketId = await tid(req);
+  const input = threadBodyFromApi(req.body?.body || req.body?.bodyText, req.body?.bodyHtml);
+  if (isPersonalKeyRequest(req)) {
+    const prepared = await preparePersonalReply(req, ticketId, input);
+    const result = await ticketService.addReply(ticketId, req.workspaceId, prepared.input, apiActor(req));
+    res.status(201).json({ success: true, data: { entryId: result.entry.id, emailed: result.email?.sent === true }, warnings: prepared.warnings });
+    return;
+  }
+  const result = await ticketService.addReply(ticketId, req.workspaceId, input, apiActor(req));
   res.status(201).json({ success: true, data: { entryId: result.entry.id, emailed: result.email?.sent === true } });
 }));
 
@@ -975,7 +1089,7 @@ router.post('/tickets/:id/notes', S('conversations:write'), withIdempotency, asy
     stage: req.body?.stage ?? null,
     agent: req.body?.agent ?? null,
   }, apiActor(req));
-  res.status(201).json({ success: true, data: { entryId: result.entry.id, author: result.entry.actorName } });
+  res.status(201).json({ success: true, data: { entryId: result.entry.id, author: result.entry.actorName }, ...(isPersonalKeyRequest(req) ? { warnings: [] } : {}) });
 }));
 
 // Audit read (Simorgh E3): who changed what and when — the same rows the
@@ -1193,7 +1307,7 @@ router.get('/tags', S('tags:read'), asyncHandler(async (req, res) => {
 // ONE call per alert (Sentinel integration, 24 Sep 2026): Ticket Pulse finds
 // the ticket by fingerprint and creates, counts a repeat, reopens within the
 // window, or starts a new linked ticket — see alertOccurrenceService.
-router.post('/alert-occurrences', S('tickets:write'), withIdempotency, asyncHandler(async (req, res) => {
+router.post('/alert-occurrences', S('tickets:write'), noPersonalKey('record monitoring alerts'), withIdempotency, asyncHandler(async (req, res) => {
   const body = req.body || {};
   if (body.customFields !== undefined) assertCustomFieldsWriteScope(req);
   const { default: alertOccurrenceService } = await import('../services/alertOccurrenceService.js');
@@ -1234,7 +1348,7 @@ router.get('/tickets/:id/references', S('tickets:read'), asyncHandler(async (req
   res.json({ success: true, data: await refs.listReferences(await tid(req), req.workspaceId) });
 }));
 
-router.post('/tickets/:id/references', S('tickets:write'), asyncHandler(async (req, res) => {
+router.post('/tickets/:id/references', S('tickets:write'), noPersonalKey('add external references (alert routing relies on them)'), asyncHandler(async (req, res) => {
   const { default: refs } = await import('../services/ticketExternalReferenceService.js');
   const id = await tid(req);
   const raw = Array.isArray(req.body?.references) ? req.body.references : (req.body?.reference ? [req.body.reference] : []);
@@ -1583,7 +1697,7 @@ router.get('/search/tickets', S('search:read'), asyncHandler(async (req, res) =>
     const ids = page.map((h) => h.id);
     const [result, descriptions] = ids.length
       ? await Promise.all([
-        ticketService.listTickets(req.workspaceId, { ids, pageSize: limit }),
+        ticketService.listTickets(req.workspaceId, { ids, pageSize: limit }, ...listOptions(req)),
         prisma.ticket.findMany({ where: { id: { in: ids } }, select: { id: true, descriptionText: true } }),
       ])
       : [{ items: [] }, []];
@@ -1612,7 +1726,7 @@ router.get('/search/tickets', S('search:read'), asyncHandler(async (req, res) =>
     res.json({ success: true, data: { items: [], pagination: { page: 1, page_size: Number(req.query.pageSize) || 25, total: 0 } } });
     return;
   }
-  const result = await ticketService.listTickets(req.workspaceId, scoped.q);
+  const result = await ticketService.listTickets(req.workspaceId, scoped.q, ...listOptions(req));
   const pagination = result.nextCursor !== undefined
     ? { next_cursor: result.nextCursor, limit: result.pageSize }
     : { page: result.page, page_size: result.pageSize, total: result.total };

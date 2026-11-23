@@ -568,6 +568,19 @@ async function dispatchTeamsNotifications(eventContext) {
   } catch { /* notifications never break the pipeline */ }
 }
 
+/**
+ * Personal API keys (4.4.05): a status-family event that resolves or closes
+ * the ticket gets `extra.resolvedVia` (e.g. 'personal_key'). Additive; never on
+ * other events or on a move to an open status. Exported for tests.
+ */
+export function stampResolvedVia(event, resolvedVia) {
+  if (!resolvedVia || !event?.extra) return event;
+  const resolving = event.type === 'ticket.resolved_closed'
+    || (event.type === 'ticket.status_changed' && ['Resolved', 'Closed'].includes(event.extra.toBase));
+  if (resolving) event.extra.resolvedVia = resolvedVia;
+  return event;
+}
+
 async function dispatchLifecycleWebhook(eventContext) {
   try {
     const { dispatchWebhookEvent } = await import('./webhookDispatchService.js');
@@ -934,6 +947,10 @@ export async function emitTicketLifecycleNotifications({
   // caller; null on sync paths. Rides on event.extra.actor for the
   // status-family events and on the webhook payload.
   actor = null,
+  // Personal API keys (4.4.05): 'personal_key' when a person resolved or
+  // closed the ticket through their own key. Additive marker on the
+  // status-family events' extra (and so on the webhook payload's `extra`).
+  resolvedVia = null,
 } = {}) {
   // Re-opened bookkeeping (QA 09-25 #1) runs for EVERY observed status move —
   // before the workflow gate, so syncs that don't run workflows still count.
@@ -1030,6 +1047,7 @@ export async function emitTicketLifecycleNotifications({
           resolutionNote: ticket.resolutionNote || null,
           resolvedByKind: ticket.resolvedByKind || null,
         };
+        stampResolvedVia(event, resolvedVia);
       }
       if (event.type === 'ticket.created' && suppressRequesterAck) event.extra.suppressRequesterAck = true;
       if (actor && (event.type === 'ticket.assigned' || event.type === 'ticket.reassigned')) {

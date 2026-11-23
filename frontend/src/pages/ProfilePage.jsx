@@ -6,6 +6,7 @@ import { useWorkspace } from '../contexts/WorkspaceContext';
 import { settingsAPI } from '../services/api';
 import PhotoUploadDialog from '../components/settings/PhotoUploadDialog';
 import SignaturePanel from '../components/agent/SignaturePanel';
+import PersonalApiKeyPanel from '../components/agent/PersonalApiKeyPanel';
 import { PersonAvatar } from '../components/tickets/ticketUi';
 
 /**
@@ -168,6 +169,12 @@ export default function ProfilePage() {
             lives with your photo, not under Mail & alerts. */}
         <div className="mt-4">
           <SignaturePanel />
+        </div>
+
+        {/* Personal API keys (4.4.05): renders nothing unless an admin put
+            this person on the workspace's API access list. */}
+        <div className="mt-4 empty:hidden">
+          <PersonalApiKeyPanel />
         </div>
 
         <nav aria-label="Your settings" className="mt-4 grid gap-2.5 sm:grid-cols-2">

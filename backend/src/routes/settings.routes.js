@@ -119,6 +119,17 @@ function requestActor(req) {
 }
 
 /**
+ * Offboarding (4.4.05): a switched-off technician's personal API keys are
+ * revoked and they come off the API access list. Never throws.
+ */
+async function revokePersonalKeysOnDisable(tech, req) {
+  if (!tech?.id || !tech.workspaceId) return;
+  await import('../services/personalApiKeyService.js')
+    .then(({ offboardTechnician }) => offboardTechnician(tech.workspaceId, tech.id, { reason: 'offboarded', actorEmail: requestActor(req)?.email || null }))
+    .catch(() => {});
+}
+
+/**
  * The generic writers (PUT /settings, PUT /settings/:key) take any key. A
  * workspace admin must not reach another workspace's per-workspace settings
  * through them (second look, QA 11-19 item 2): `x-workspace-id: 2` and a key
@@ -144,6 +155,12 @@ function refuseForeignWorkspaceKeys(req, keys) {
   // Access history (4.4.01). Refused here for everyone, super admins included, so no change goes unrecorded.
   if (keys.some((key) => String(key || '') === 'admin_emails')) {
     throw new AuthorizationError('The super admin list is changed under Settings → Super admins, not here.', 'setting_not_writable');
+  }
+  // Who may have a personal API key (4.4.05) is an access grant: changed only
+  // through PUT /api/admin/personal-api-keys/users, which records each person
+  // in Access history and revokes the keys of people taken off. Everyone, super admins included.
+  if (keys.some((key) => String(key || '').startsWith('personal_api_key_users_ws'))) {
+    throw new AuthorizationError('Who may have an API key is changed under Members → API keys, not here.', 'setting_not_writable');
   }
   if (requestActor(req)?.role === 'admin') return;
   for (const key of keys) {
@@ -2018,6 +2035,7 @@ router.patch(
       ...(routingGuidance !== undefined ? { routingGuidance: String(routingGuidance || '').trim().slice(0, 500) || null } : {}),
     });
     clearReadCache();
+    if (isActive !== undefined && !isActive) await revokePersonalKeysOnDisable(tech, req);
     res.json({ success: true, data: { id: tech.id, name: tech.name, email: tech.email, origin: tech.origin, isActive: tech.isActive } });
   }),
 );
@@ -2040,6 +2058,8 @@ router.put(
     const tech = await technicianRepository.update(id, { isActive });
     clearReadCache();
     logger.info(`Technician ${tech.name} (${id}) ${isActive ? 'enabled' : 'disabled'}`);
+    // Offboarding (4.4.05): switching a person off revokes their personal API keys.
+    if (isActive === false) await revokePersonalKeysOnDisable(tech, req);
     res.json({ success: true, data: { id: tech.id, name: tech.name, isActive: tech.isActive } });
   }),
 );

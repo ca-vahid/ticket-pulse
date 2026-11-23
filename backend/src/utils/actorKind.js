@@ -24,6 +24,10 @@
 
 export const ACTOR_KINDS = Object.freeze([
   'human', 'api', 'system', 'workflow', 'freshservice_sync', 'reconcile', 'mirror', 'ai', 'auto_help',
+  // personal_key (4.4.05): a person acting through their own API key. A person,
+  // not a machine — shown with the human rows. Stamped by ticketService._audit
+  // from actor.via; actorKindOf never returns it (workflows see 'human').
+  'personal_key',
 ]);
 /** The actor name Auto-help writes as (autoHelpDeliveryService.AUTO_HELP_ACTOR). */
 export const AUTO_HELP_ACTOR_NAME = 'ticket pulse (auto-help)';
