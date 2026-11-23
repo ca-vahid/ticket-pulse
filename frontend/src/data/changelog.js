@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.4.04-preview';
+export const APP_VERSION = '4.4.05-preview';
 
 export const changelog = [
+  {
+    version: '4.4.05-preview',
+    date: 'November 23, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Personal API keys</strong> &mdash; people an admin gives API access can make one key of their own on their Profile page. The key acts as them: replies go out under their name, with their signature and the app&rsquo;s template, and the thread notes &ldquo;Sent with API key&rdquo;. It can only do what they can do in the app, and stops working if their access changes. A guide on the same page tells their AI assistant how to write replies the app can format, with no signature of its own.' },
+      { type: 'new', html: '<strong>API access, per person</strong> &mdash; admins choose who may have a personal key under Settings &rarr; API Keys, and see everyone&rsquo;s keys there, with when each was last used and from where; they can switch a key off or revoke it. Removing someone from API access, or offboarding them, revokes their key. Every change is in Access history.' },
+    ],
+  },
   {
     version: '4.4.04-preview',
     date: 'November 22, 2026',
