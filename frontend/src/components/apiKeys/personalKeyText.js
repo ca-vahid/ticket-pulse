@@ -86,9 +86,21 @@ export function lastUsedWords(key, now = Date.now()) {
   return key?.lastUsedIp ? `${ago} from ${key.lastUsedIp}` : ago;
 }
 
-/** "Last used 2 hours ago from 10.1.2.3" / "Not used yet" — a whole phrase. */
+/**
+ * Last use in two whole phrases, for a table cell that puts each on its own
+ * line: { when: '2 hours ago' | 'Oct 9, 2026' | 'Not used yet', from: 'from 10.1.2.3' | null }.
+ */
+export function lastUsedParts(key, now = Date.now()) {
+  const ago = agoWords(key?.lastUsedAt, now);
+  if (!ago) return { when: 'Not used yet', from: null };
+  return { when: ago.replace(/^on /, ''), from: key?.lastUsedIp ? `from ${key.lastUsedIp}` : null };
+}
+
+/** "Last used 2 hours ago from 10.1.2.3" / "Last used Oct 9, 2026" / "Not used yet" — a whole phrase. */
 export function lastUsedPhrase(key, now = Date.now()) {
-  return agoWords(key?.lastUsedAt, now) ? `Last used ${lastUsedWords(key, now)}` : 'Not used yet';
+  const { when, from } = lastUsedParts(key, now);
+  if (!agoWords(key?.lastUsedAt, now)) return when;
+  return `Last used ${when}${from ? ` ${from}` : ''}`;
 }
 
 const DAY = 86400000;
@@ -111,7 +123,23 @@ export function expiryShort(key, now = Date.now()) {
   return `${key.status === 'expired' || t <= now ? 'Expired' : 'Expires'} ${formatDate(key.expiresAt)}`;
 }
 
-const shortFmt = new Intl.DateTimeFormat('en-US', { timeZone: PACIFIC_TZ, month: 'short', day: 'numeric' });
+/**
+ * The end date for a column headed "Expires": the date alone, then a quieter
+ * note on its own line. { date: 'Feb 20, 2027', note: 'in 90 days' }; an
+ * expired or revoked key gives the date only (the status says the rest); a
+ * switched-off key past its date notes 'Expired'.
+ */
+export function expiryParts(key, now = Date.now()) {
+  if (!key?.expiresAt) return { date: 'No end date', note: null };
+  const t = new Date(key.expiresAt).getTime();
+  if (Number.isNaN(t)) return { date: 'No end date', note: null };
+  const date = formatDate(key.expiresAt);
+  if (key.status === 'expired' || key.status === 'revoked') return { date, note: null };
+  if (t <= now) return { date, note: 'Expired' };
+  return { date, note: `in ${plural(Math.ceil((t - now) / DAY), 'day')}` };
+}
+
+const shortFmt =new Intl.DateTimeFormat('en-US', { timeZone: PACIFIC_TZ, month: 'short', day: 'numeric' });
 const yearFmt = new Intl.DateTimeFormat('en-US', { timeZone: PACIFIC_TZ, year: 'numeric' });
 
 /** "Nov 22" this year (Pacific), "Nov 22, 2025" otherwise. */
@@ -147,6 +175,26 @@ export const STATUS_TONE = {
   expired: 'text-muted-foreground',
   revoked: 'text-muted-foreground',
 };
+
+/**
+ * One status line for a stacked key, each word said once:
+ * "On · Expires Feb 18, 2027 · Last used 2 hours ago from 10.1.2.3",
+ * "Expired Oct 24, 2026 · Last used Oct 9, 2026 from 10.1.2.3",
+ * "Revoked Nov 2, 2026 · Not used yet". When the date phrase already says
+ * Expired or Revoked, the separate status word is dropped.
+ */
+export function keySummaryLine(key, now = Date.now()) {
+  let lead;
+  if (key?.status === 'revoked') {
+    lead = key.revokedAt && formatDate(key.revokedAt) !== '—' ? `Revoked ${formatDate(key.revokedAt)}` : 'Revoked';
+  } else if (key?.status === 'expired') {
+    const end = expiryShort(key, now);
+    lead = end.startsWith('Expired') ? end : 'Expired';
+  } else {
+    lead = `${STATUS_WORDS[key?.status] || key?.status || '—'} · ${expiryShort(key, now)}`;
+  }
+  return `${lead} · ${lastUsedPhrase(key, now)}`;
+}
 
 /** A key still holding the person's one slot (on, or switched off by an admin). */
 export const isLiveKey = (key) => key?.status === 'active' || key?.status === 'disabled';

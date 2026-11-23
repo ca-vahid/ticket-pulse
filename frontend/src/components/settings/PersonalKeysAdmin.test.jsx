@@ -195,10 +195,19 @@ describe("Personal API keys — everyone's keys", () => {
     const made = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Vancouver', month: 'short', day: 'numeric' }).format(new Date(DANA_KEY.createdAt));
     const rows = screen.getAllByTestId('admin-key-row');
     expect(rows[0]).toHaveTextContent('Dana Fox');
-    expect(within(rows[0]).getByTestId('admin-key-name')).toHaveTextContent(`“Reply assistant” · made ${made}`);
+    // Owner cell: name, key name (wraps, never truncated), "made …" on its own line.
+    const keyName = within(rows[0]).getByTestId('admin-key-name');
+    expect(keyName).toHaveTextContent(/^“Reply assistant”$/);
+    expect(keyName).not.toHaveClass('truncate');
+    expect(within(rows[0]).getByTestId('admin-key-made')).toHaveTextContent(`made ${made}`);
     expect(rows[0]).toHaveTextContent('Read tickets · Reply and add notes · Update tickets');
-    expect(rows[0]).toHaveTextContent('(in 87 days)');
-    expect(rows[0]).toHaveTextContent('2 hours ago from 10.1.2.3');
+    // Expires: the date, then "in 87 days" on its own line; no "Expires" word under the header.
+    const expires = within(rows[0]).getByTestId('admin-key-expires');
+    expect([...expires.children].map((c) => c.textContent)).toEqual([expect.stringMatching(/^[A-Z][a-z]{2} \d{1,2}, \d{4}$/), 'in 87 days']);
+    [...expires.children].forEach((c) => expect(c).toHaveClass('whitespace-nowrap'));
+    // Last used: when, then "from <ip>" on its own line.
+    const used = within(rows[0]).getByTestId('admin-key-last-used');
+    expect([...used.children].map((c) => c.textContent)).toEqual(['2 hours ago', 'from 10.1.2.3']);
     // Stacked (below xl): one muted line, no "Label:" mix.
     const summary = within(rows[0]).getByTestId('admin-key-summary');
     expect(summary).toHaveClass('xl:hidden', 'text-muted-foreground');
@@ -210,6 +219,31 @@ describe("Personal API keys — everyone's keys", () => {
     expect(rows[1]).toHaveTextContent('Not used yet');
     expect(within(rows[1]).queryByRole('switch')).not.toBeInTheDocument();
     expect(within(rows[1]).queryByRole('button', { name: /Revoke/ })).not.toBeInTheDocument();
+  });
+
+  test('an expired key: said once, not faded, and no actions at all', async () => {
+    const PRIYA_OLD = {
+      ...DANA_KEY,
+      id: 9,
+      name: 'Triage helper',
+      status: 'expired',
+      expiresAt: '2026-10-24T19:00:00.000Z',
+      lastUsedAt: '2026-10-09T19:00:00.000Z',
+      lastUsedIp: '203.0.113.9',
+      owner: { name: 'Priya Nair', email: 'priya.nair@example.com', technicianId: 14 },
+    };
+    keysApi.list.mockResolvedValue({ success: true, data: { enabled: true, keys: [DANA_KEY, PRIYA_OLD] } });
+    render(<PersonalKeysAdmin />);
+    await screen.findByRole('table', { name: "Everyone's personal keys" });
+    const row = screen.getAllByTestId('admin-key-row').find((r) => r.textContent.includes('Priya Nair'));
+    expect(within(row).getByTestId('admin-key-summary')).toHaveTextContent(/^Expired Oct 24, 2026 · Last used Oct 9, 2026 from 203\.0\.113\.9$/);
+    // The Expires column gives the date only; the Status column says Expired.
+    expect(within(row).getByTestId('admin-key-expires')).toHaveTextContent(/^Oct 24, 2026$/);
+    expect(row.className).not.toMatch(/opacity-/);
+    expect(row.innerHTML).not.toMatch(/text-muted-foreground\/\d/);
+    expect(row).not.toHaveTextContent('—');
+    expect(within(row).queryAllByRole('cell')).toHaveLength(6);
+    expect(within(row).queryByRole('switch')).not.toBeInTheDocument();
   });
 
   test('switch a key off and back on', async () => {
@@ -244,5 +278,9 @@ describe("Personal API keys — everyone's keys", () => {
     keysApi.list.mockResolvedValue({ success: true, data: { enabled: true, keys: [] } });
     render(<PersonalKeysAdmin />);
     expect(await screen.findByText('No one has made a personal key yet.')).toBeInTheDocument();
+    // The footer's key icon keeps its size when the note wraps on a phone.
+    const note = screen.getByText(/Each person has at most one key per workspace/);
+    expect(note).toHaveClass('items-start');
+    expect(note.querySelector('svg')).toHaveClass('shrink-0', 'h-3.5', 'w-3.5');
   });
 });
