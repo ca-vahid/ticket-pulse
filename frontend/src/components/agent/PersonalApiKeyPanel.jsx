@@ -38,7 +38,11 @@ function expiryChoices(info) {
 const btnPrimary = 'tp-focus-ring inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60';
 const btnQuiet = 'tp-focus-ring inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-60';
 const btnDanger = 'tp-focus-ring inline-flex items-center gap-1.5 rounded-lg bg-destructive px-3 py-2 text-sm font-semibold text-destructive-foreground hover:bg-destructive/90 disabled:opacity-60';
-const field = 'tp-focus-ring w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/75';
+const fieldBase = 'tp-focus-ring rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/75';
+const field = `${fieldBase} w-full`;
+// Content-width: `w-full` would beat `w-auto` in the built CSS, so the select
+// never carries it.
+const selectField = `${fieldBase} block w-auto min-w-[8rem]`;
 
 function useCopied() {
   const [copied, setCopied] = useState(false);
@@ -116,7 +120,7 @@ function CreateForm({ busy, error, onSubmit, onCancel, abilities: choices = ABIL
           id="pk-expiry"
           value={draft.expiresInDays}
           onChange={(e) => setDraft({ ...draft, expiresInDays: Number(e.target.value) })}
-          className={`${field} mt-1.5 w-auto`}
+          className={`${selectField} mt-1.5`}
         >
           {expiry.options.map((d) => <option key={d} value={d}>{d} days</option>)}
         </select>
@@ -191,7 +195,9 @@ function KeyRow({ k, busy, onRotate, onRevoke }) {
           )}
         </div>
         {!confirm && (
-          <div className="flex shrink-0 gap-1">
+          // -ml-3 on the stacked layout lines the icons up with the text above
+          // (the buttons' own px-3 would push them 12 px in).
+          <div className="-ml-3 flex shrink-0 gap-1 sm:ml-0">
             {!switchedOff && (
               <button type="button" onClick={() => setConfirm('rotate')} disabled={busy} className={btnQuiet}>
                 <RefreshCw className="h-4 w-4" aria-hidden="true" /> Rotate
@@ -285,7 +291,7 @@ export function AssistantGuide() {
       {ready && (
         <details className="mt-2 pl-6">
           <summary className="tp-focus-ring w-fit cursor-pointer rounded text-xs font-medium text-muted-foreground hover:text-foreground">See what it says</summary>
-          <pre className="settings-scrollbar mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-muted/50 p-3 font-mono text-[11px] leading-relaxed text-foreground/85">{state.markdown}</pre>
+          <pre className="settings-scrollbar mt-2 max-h-72 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] rounded-lg bg-muted/50 p-3 font-mono text-[11px] leading-relaxed text-foreground/85">{state.markdown}</pre>
         </details>
       )}
     </div>

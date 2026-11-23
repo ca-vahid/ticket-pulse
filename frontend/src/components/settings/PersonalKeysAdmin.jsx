@@ -3,8 +3,8 @@ import { KeyRound, Loader2, Search, Trash2, UserRound } from 'lucide-react';
 import { personalApiKeysAPI, settingsAPI } from '../../services/api';
 import { Switch } from '../ui/switch';
 import {
-  STATUS_TONE, STATUS_WORDS, abilitySentence, errorText, expiryShort, expiryWords, formatDayShort, isLiveKey,
-  lastUsedPhrase, lastUsedWords,
+  STATUS_TONE, STATUS_WORDS, abilitySentence, errorText, expiryParts, formatDayShort, isLiveKey,
+  keySummaryLine, lastUsedParts,
 } from '../apiKeys/personalKeyText';
 
 /**
@@ -153,9 +153,14 @@ function KeysTable({ keys, busyId, onSetDisabled, onRevoke }) {
       || ownerName(a).localeCompare(ownerName(b))),
     [keys],
   );
-  // Six columns from xl up; below that each key stacks: owner, abilities, one
-  // muted status line, actions.
-  const cols = 'xl:grid xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_6.5rem_minmax(0,1.3fr)_minmax(0,1.4fr)_8.5rem] xl:items-center xl:gap-3';
+  // Six columns from xl up (the settings pane is ~970 px there). The table is
+  // one grid and every row a subgrid of it, so a column is as wide as its
+  // widest cell: fr tracks never squeeze below their content (the phrases are
+  // whole lines, whitespace-nowrap), and Status and Actions take only what
+  // they need. Below xl each key stacks: owner, abilities, one status line,
+  // and the actions (to the right from sm up).
+  const table = 'xl:grid xl:grid-cols-[1.3fr_1.6fr_auto_1fr_1fr_auto] xl:gap-x-4';
+  const subrow = 'xl:col-span-full xl:grid xl:grid-cols-subgrid';
   const wide = 'hidden xl:block';
 
   return (
@@ -164,8 +169,8 @@ function KeysTable({ keys, busyId, onSetDisabled, onRevoke }) {
       {sorted.length === 0 ? (
         <p className="mt-1 text-sm text-muted-foreground">No one has made a personal key yet.</p>
       ) : (
-        <div role="table" aria-label="Everyone's personal keys" className="mt-2">
-          <div role="row" className={`hidden border-b border-border pb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground ${cols}`}>
+        <div role="table" aria-label="Everyone's personal keys" className={`mt-2 ${table}`}>
+          <div role="row" className={`hidden border-b border-border pb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground ${subrow}`}>
             <span role="columnheader">Owner</span>
             <span role="columnheader">What it can do</span>
             <span role="columnheader">Status</span>
@@ -177,42 +182,52 @@ function KeysTable({ keys, busyId, onSetDisabled, onRevoke }) {
             const live = isLiveKey(k);
             const busy = busyId === k.id;
             const who = ownerName(k);
+            const end = expiryParts(k);
+            const used = lastUsedParts(k);
+            // A key that no longer works is marked by its status word only:
+            // no fading, so every line keeps AA contrast.
+            const lead = live ? 'text-foreground/85' : 'text-muted-foreground';
             return (
-              <div key={k.id} role="row" data-testid="admin-key-row" className={`border-b border-border/60 py-2.5 ${live ? '' : 'opacity-70'}`}>
-                <div className={`grid gap-1 ${cols}`}>
-                  <div role="cell" className="min-w-0">
-                    <span className="block truncate text-sm font-medium text-foreground" title={k.owner?.email || undefined}>{who}</span>
-                    <span className="block truncate text-xs text-muted-foreground" data-testid="admin-key-name">“{k.name}” · made {formatDayShort(k.createdAt)}</span>
+              <div key={k.id} role="row" data-testid="admin-key-row" className={`border-b border-border/60 py-2.5 ${subrow}`}>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4 xl:contents">
+                  <div className="min-w-0 flex-1 space-y-1 xl:contents">
+                    <div role="cell" className="min-w-0 xl:self-center">
+                      <span className="block break-words text-sm font-medium text-foreground" title={k.owner?.email || undefined}>{who}</span>
+                      <span className="block break-words text-xs text-muted-foreground" data-testid="admin-key-name">“{k.name}”</span>
+                      <span className="block text-[11px] text-muted-foreground" data-testid="admin-key-made">made {formatDayShort(k.createdAt)}</span>
+                    </div>
+                    <div role="cell" className={`text-xs ${lead} xl:self-center`}>{abilitySentence(k)}</div>
+                    <p role="cell" className="text-xs text-muted-foreground xl:hidden" data-testid="admin-key-summary">{keySummaryLine(k)}</p>
+                    <div role="cell" className={`${wide} self-center whitespace-nowrap text-xs font-medium ${STATUS_TONE[k.status] || 'text-muted-foreground'}`}>{STATUS_WORDS[k.status] || k.status || '—'}</div>
+                    <div role="cell" className={`${wide} self-center text-xs`} data-testid="admin-key-expires">
+                      <span className={`block whitespace-nowrap ${lead}`}>{end.date}</span>
+                      {end.note && <span className="block whitespace-nowrap text-muted-foreground">{end.note}</span>}
+                    </div>
+                    <div role="cell" className={`${wide} self-center text-xs`} data-testid="admin-key-last-used">
+                      <span className={`block whitespace-nowrap ${lead}`}>{used.when}</span>
+                      {used.from && <span className="block whitespace-nowrap text-muted-foreground">{used.from}</span>}
+                    </div>
                   </div>
-                  <div role="cell" className="text-xs text-foreground/85">{abilitySentence(k)}</div>
-                  <p role="cell" className="text-xs text-muted-foreground xl:hidden" data-testid="admin-key-summary">
-                    {STATUS_WORDS[k.status] || k.status || '—'} · {expiryShort(k)} · {lastUsedPhrase(k)}
-                  </p>
-                  <div role="cell" className={`${wide} text-xs font-medium ${STATUS_TONE[k.status] || 'text-muted-foreground'}`}>{STATUS_WORDS[k.status] || k.status || '—'}</div>
-                  <div role="cell" className={`${wide} text-xs text-muted-foreground`}>{expiryWords(k)}</div>
-                  <div role="cell" className={`${wide} text-xs text-muted-foreground`}>{lastUsedWords(k)}</div>
-                  <div role="cell" className="flex items-center gap-1.5 pt-1 xl:justify-end xl:pt-0">
-                    {live ? (
-                      <>
-                        {busy && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden="true" />}
-                        <Switch
-                          checked={k.status === 'active'}
-                          disabled={busy}
-                          aria-label={`${who}'s key “${k.name}” is on`}
-                          title={k.status === 'active' ? 'Switch this key off' : 'Switch this key back on'}
-                          onCheckedChange={(v) => onSetDisabled(k, v !== true)}
-                        />
-                        {confirmFor !== k.id && (
-                          <button type="button" onClick={() => setConfirmFor(k.id)} disabled={busy} aria-label={`Revoke ${who}'s key “${k.name}”`} className={`${btnQuiet} hover:text-destructive`}>
-                            <Trash2 className="h-3.5 w-3.5" aria-hidden="true" /> Revoke
-                          </button>
-                        )}
-                      </>
-                    ) : <span className="text-xs text-muted-foreground/50">—</span>}
-                  </div>
+                  {live && (
+                    <div role="cell" className="flex shrink-0 items-center gap-1.5 xl:justify-end xl:self-center">
+                      {busy && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden="true" />}
+                      <Switch
+                        checked={k.status === 'active'}
+                        disabled={busy}
+                        aria-label={`${who}'s key “${k.name}” is on`}
+                        title={k.status === 'active' ? 'Switch this key off' : 'Switch this key back on'}
+                        onCheckedChange={(v) => onSetDisabled(k, v !== true)}
+                      />
+                      {confirmFor !== k.id && (
+                        <button type="button" onClick={() => setConfirmFor(k.id)} disabled={busy} aria-label={`Revoke ${who}'s key “${k.name}”`} className={`${btnQuiet} hover:text-destructive`}>
+                          <Trash2 className="h-3.5 w-3.5" aria-hidden="true" /> Revoke
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
                 {confirmFor === k.id && (
-                  <div role="alertdialog" aria-label={`Revoke ${who}'s key?`} className="mt-2 border-l-2 border-amber-400 dark:border-amber-500/60 pl-3">
+                  <div role="alertdialog" aria-label={`Revoke ${who}'s key?`} className="mt-2 border-l-2 border-amber-400 dark:border-amber-500/60 pl-3 xl:col-span-full">
                     <p className="text-xs text-foreground">Revoke {who}&rsquo;s key “{k.name}”? It stops working at once and they would have to make a new one. This can&rsquo;t be undone.</p>
                     <div className="mt-1.5 flex gap-1.5">
                       <button type="button" onClick={async () => { setConfirmFor(null); await onRevoke(k); }} className={btnDanger}>Revoke key</button>
@@ -396,8 +411,8 @@ export default function PersonalKeysAdmin() {
           <KeysTable keys={keys} busyId={busyKeyId} onSetDisabled={setDisabled} onRevoke={revoke} />
         </div>
       )}
-      <p className="mt-3 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-        <KeyRound className="h-3 w-3" aria-hidden="true" /> Each person has at most one key per workspace. Every create, rotate and revoke shows in Members → Access history.
+      <p className="mt-3 flex items-start gap-1.5 text-[11px] text-muted-foreground">
+        <KeyRound className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" /> Each person has at most one key per workspace. Every create, rotate and revoke shows in Members → Access history.
       </p>
     </section>
   );

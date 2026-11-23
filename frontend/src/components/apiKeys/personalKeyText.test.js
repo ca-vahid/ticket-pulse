@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import { activityActorKind, isMachineActivity } from '../tickets/activityKind.jsx';
 import {
-  abilitiesOf, abilitySentence, agoWords, expiryShort, expiryWords, formatDayShort, lastUsedPhrase, lastUsedWords,
-  parseIpList, personalKeyNameOf, rotationExpiry,
+  abilitiesOf, abilitySentence, agoWords, expiryParts, expiryShort, expiryWords, formatDayShort, keySummaryLine,
+  lastUsedParts, lastUsedPhrase, lastUsedWords, parseIpList, personalKeyNameOf, rotationExpiry,
 } from './personalKeyText';
 
 const NOW = Date.parse('2026-11-22T18:00:00.000Z');
@@ -40,8 +40,33 @@ describe('personal key words', () => {
   test('last used as a whole phrase; "made" dates drop this year', () => {
     expect(lastUsedPhrase({ lastUsedAt: new Date(NOW - 2 * HOUR).toISOString(), lastUsedIp: '10.1.2.3' }, NOW)).toBe('Last used 2 hours ago from 10.1.2.3');
     expect(lastUsedPhrase({ lastUsedAt: null }, NOW)).toBe('Not used yet');
+    // Older than a month: the date, without a stray "on".
+    expect(lastUsedPhrase({ lastUsedAt: '2026-10-09T19:00:00.000Z' }, NOW)).toBe('Last used Oct 9, 2026');
     expect(formatDayShort('2026-11-22T17:00:00.000Z', NOW)).toBe('Nov 22');
     expect(formatDayShort('2025-03-04T20:00:00.000Z', NOW)).toBe('Mar 4, 2025');
+  });
+
+  test('table cells: whole phrases on their own lines', () => {
+    const live = { expiresAt: new Date(NOW + 90 * 24 * HOUR).toISOString(), status: 'active' };
+    expect(expiryParts(live, NOW)).toEqual({ date: 'Feb 20, 2027', note: 'in 90 days' });
+    expect(expiryParts({ expiresAt: '2026-11-01T07:30:00.000Z', status: 'expired' }, NOW)).toEqual({ date: 'Nov 1, 2026', note: null });
+    expect(expiryParts({ ...live, status: 'revoked' }, NOW)).toEqual({ date: 'Feb 20, 2027', note: null });
+    expect(expiryParts({ expiresAt: '2026-11-01T07:30:00.000Z', status: 'disabled' }, NOW)).toEqual({ date: 'Nov 1, 2026', note: 'Expired' });
+    expect(expiryParts({ expiresAt: null }, NOW)).toEqual({ date: 'No end date', note: null });
+    expect(lastUsedParts({ lastUsedAt: new Date(NOW - 2 * HOUR).toISOString(), lastUsedIp: '203.0.113.24' }, NOW)).toEqual({ when: '2 hours ago', from: 'from 203.0.113.24' });
+    expect(lastUsedParts({ lastUsedAt: '2026-10-09T19:00:00.000Z' }, NOW)).toEqual({ when: 'Oct 9, 2026', from: null });
+    expect(lastUsedParts({ lastUsedAt: null }, NOW)).toEqual({ when: 'Not used yet', from: null });
+  });
+
+  test('stacked status line says each word once', () => {
+    const used = { lastUsedAt: new Date(NOW - 2 * HOUR).toISOString(), lastUsedIp: '203.0.113.24' };
+    const ends = new Date(NOW + 90 * 24 * HOUR).toISOString();
+    expect(keySummaryLine({ ...used, status: 'active', expiresAt: ends }, NOW)).toBe('On · Expires Feb 20, 2027 · Last used 2 hours ago from 203.0.113.24');
+    expect(keySummaryLine({ ...used, status: 'disabled', expiresAt: ends }, NOW)).toBe('Switched off · Expires Feb 20, 2027 · Last used 2 hours ago from 203.0.113.24');
+    expect(keySummaryLine({ status: 'expired', expiresAt: '2026-10-24T19:00:00.000Z', lastUsedAt: '2026-10-09T19:00:00.000Z', lastUsedIp: '203.0.113.9' }, NOW))
+      .toBe('Expired Oct 24, 2026 · Last used Oct 9, 2026 from 203.0.113.9');
+    expect(keySummaryLine({ status: 'revoked', revokedAt: '2026-11-02T19:00:00.000Z', expiresAt: ends, lastUsedAt: null }, NOW)).toBe('Revoked Nov 2, 2026 · Not used yet');
+    expect(keySummaryLine({ status: 'revoked', expiresAt: ends, lastUsedAt: null }, NOW)).toBe('Revoked · Not used yet');
   });
 
   test('rotation restarts the same length from today', () => {

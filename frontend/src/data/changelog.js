@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.4.05-preview';
+export const APP_VERSION = '4.4.06-preview';
 
 export const changelog = [
+  {
+    version: '4.4.06-preview',
+    date: 'November 23, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Personal API keys read cleanly</strong> &mdash; the admin list of everyone&rsquo;s keys no longer cuts off key names or breaks dates and addresses mid-phrase; ended keys are no longer faded and say their status once; the expiry choice is its own width, and long links in the AI guide wrap on a phone.' },
+    ],
+  },
   {
     version: '4.4.05-preview',
     date: 'November 23, 2026',

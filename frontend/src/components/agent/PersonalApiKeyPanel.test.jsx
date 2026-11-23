@@ -131,7 +131,10 @@ describe('Your API key — create and the secret shown once', () => {
     const expiry = within(form).getByLabelText('Expires after');
     expect(expiry).toHaveValue('90');
     expect([...expiry.querySelectorAll('option')].map((o) => o.textContent)).toEqual(['30 days', '90 days', '180 days', '365 days']);
-    const create = within(form).getByRole('button', { name: 'Create key' });
+    // Content-width: never w-full (it beats w-auto in the built CSS).
+    expect(expiry).toHaveClass('w-auto');
+    expect(expiry).not.toHaveClass('w-full');
+    const create =within(form).getByRole('button', { name: 'Create key' });
     expect(create).toBeDisabled(); // no name yet
 
     fireEvent.change(within(form).getByLabelText('Name'), { target: { value: '  Reply assistant ' } });
@@ -265,6 +268,8 @@ describe('Your AI assistant guide', () => {
     fireEvent.click(copy);
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(GUIDE));
     expect(await within(guide).findByRole('button', { name: 'Copied' })).toBeInTheDocument();
+    // The preview wraps long URLs inside its box.
+    expect(guide.querySelector('pre')).toHaveClass('whitespace-pre-wrap', '[overflow-wrap:anywhere]');
   });
 
   test('Download saves a .md file with the server-given name', async () => {
