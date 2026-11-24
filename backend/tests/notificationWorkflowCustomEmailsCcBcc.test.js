@@ -24,6 +24,10 @@ const prismaMock = {
   mirrorJob: { findFirst: jest.fn(), create: jest.fn() },
   ticketThreadEntry: { findMany: jest.fn() },
   notificationDelivery: { upsert: jest.fn(), findUnique: jest.fn(), update: jest.fn(), create: jest.fn() },
+  // "Everyone on the original e-mail" (24 Nov 2026) reads our mailbox list in
+  // full before it reaches anyone: none connected here.
+  mailboxConnection: { findMany: jest.fn().mockResolvedValue([]) },
+  appSettings: { findUnique: jest.fn().mockResolvedValue(null) },
 };
 
 const alsoForMock = {

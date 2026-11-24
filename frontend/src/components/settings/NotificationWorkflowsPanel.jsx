@@ -2587,6 +2587,12 @@ const RECIPIENT_CUSTOM_EMAILS_MAX = 25;
 // The `original_ccs` recipient (24 Nov 2026): was "Original CCs" and read only
 // the Cc lists; it now reaches the To line too.
 export const ORIGINAL_RECIPIENTS_LABEL = 'Everyone on the original e-mail';
+// Why a Preview or Shadow run did not use the original e-mail's To line.
+const ORIGINAL_TO_LINE_REASONS = {
+  forwarded: 'To line not used: the ticket came from an agent\'s forward',
+  not_direct: 'To line not used: the e-mail did not come straight to our mailbox',
+  too_long: 'To line not used: more than 10 people on it',
+};
 export const ORIGINAL_RECIPIENTS_HELP = 'Everyone on the original e-mail\'s To and Cc lines, plus anyone added to Cc since. Leaves out our own mailboxes, our agents, the requester and automated addresses.';
 
 export function RecipientsNodeEditor({ data = {}, onChange, customFieldDefs = [], groups = [] }) {
@@ -3192,11 +3198,13 @@ export function originalRecipientsNote(summary) {
     off.automated ? plural(off.automated, 'automated address', 'automated addresses') : null,
     off.unattended ? plural(off.unattended, 'automation mailbox', 'automation mailboxes') : null,
     off.removedByAgent ? plural(off.removedByAgent, 'person an agent took off the Cc', 'people an agent took off the Cc') : null,
+    off.notAPerson ? plural(off.notAPerson, 'address on our domain that is not a person', 'addresses on our domain that are not a person') : null,
     off.overRecipientLimit ? `${off.overRecipientLimit} over the 25-recipient limit` : null,
   ].filter(Boolean);
+  if (summary.unavailable) return `${ORIGINAL_RECIPIENTS_LABEL}: nobody this time, our mailbox list could not be read`;
   const head = `${ORIGINAL_RECIPIENTS_LABEL}: ${plural(n, 'person', 'people')}`;
-  const tail = summary.toLineSkipped ? ' (To line not read this time)' : '';
-  return `${head}${parts.length ? ` (left out: ${parts.join(', ')})` : ''}${tail}`;
+  const toLine = ORIGINAL_TO_LINE_REASONS[summary.toLine] || '';
+  return `${head}${parts.length ? ` (left out: ${parts.join(', ')})` : ''}${toLine ? `. ${toLine}` : ''}`;
 }
 
 function summarizePreviewStep(step) {

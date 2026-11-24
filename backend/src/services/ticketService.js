@@ -260,6 +260,22 @@ const emailListSchema = z.preprocess(
 );
 
 /**
+ * createTicket's `mailRecipients` (24 Nov 2026) as the in-memory hand-off to
+ * the ticket.created workflows: { toEmails, ccEmails, viaMailbox }, or null.
+ */
+export function cleanMailRecipients(mailRecipients) {
+  if (!mailRecipients || typeof mailRecipients !== 'object') return null;
+  const clean = (list) => [...new Set((Array.isArray(list) ? list : [])
+    .map((a) => String(a || '').trim().toLowerCase())
+    .filter((a) => a.includes('@')))];
+  return {
+    toEmails: clean(mailRecipients.toEmails),
+    ccEmails: clean(mailRecipients.ccEmails),
+    viaMailbox: mailRecipients.viaMailbox === true,
+  };
+}
+
+/**
  * Reply recipients (Phase MR4): the ticket's "Also for" list ∪ the composer's
  * cc, deduped case-insensitively, the requester excluded (they are the To).
  * Runs server-side as the safety net — the composer seeds the same union,
@@ -3945,10 +3961,11 @@ class TicketService {
     // description become attachments. Mail, API, Teams and automation intakes
     // keep their description exactly as before.
     liftPastedImages = false,
-    // Mail intake only (24 Nov 2026): the arriving e-mail's To/Cc, already
-    // cleaned by the ingest. Written on the new row so the ticket.created
-    // workflows, which run inside this call, can reach everyone on the e-mail.
-    // Internal: never read from the request body.
+    // Mail intake only (24 Nov 2026): the arriving e-mail's To/Cc (cleaned by
+    // the ingest) and whether it came straight to the mailbox. NOT written to
+    // the row (the ingest stores them after, as before); handed to the
+    // ticket.created workflows in memory, like createdVia, so "Everyone on the
+    // original e-mail" can reach them. Internal: never read from the request body.
     mailRecipients = null,
   } = {}) {
     const workspace = await this._getWorkspace(workspaceId);
@@ -4081,11 +4098,6 @@ class TicketService {
     // Dedupe once so the ticket row AND the created audit agree (the schema
     // already lowercased/trimmed each address).
     data.ccEmails = [...new Set(data.ccEmails)];
-    const cleanMailList = (list) => [...new Set((Array.isArray(list) ? list : [])
-      .map((a) => String(a || '').trim().toLowerCase())
-      .filter((a) => a.includes('@')))];
-    const mailTo = cleanMailList(mailRecipients?.toEmails);
-    const mailCc = cleanMailList(mailRecipients?.ccEmails);
 
     const ticket = await prisma.ticket.create({
       data: {
@@ -4134,9 +4146,6 @@ class TicketService {
         // FS-born tickets — so the UI renders To/Cc for both origins from one
         // place.
         ...(data.ccEmails.length ? { ccEmails: data.ccEmails } : {}),
-        // A mail-in ticket's own To/Cc (see mailRecipients above).
-        ...(mailTo.length ? { toEmails: mailTo } : {}),
-        ...(mailCc.length && !data.ccEmails.length ? { ccEmails: mailCc } : {}),
         // Cleaned custom-field values land on the row at creation (FR 08-05
         // #1) — same Json column setValues merges into later.
         ...(Object.keys(customFieldIntake.values).length ? { customFields: customFieldIntake.values } : {}),
@@ -4236,21 +4245,21 @@ class TicketService {
 
     if (createdVia) ticket.createdVia = createdVia;
     if (suppressRequesterAck) ticket.suppressRequesterAck = true;
+    const originalEmailRecipients = cleanMailRecipients(mailRecipients);
+    if (originalEmailRecipients) ticket.originalEmailRecipients = originalEmailRecipients;
     await this._notifyLifecycle(null, ticket, {
       allow: data.notifyRequester,
       suppressRequesterAck: suppressRequesterAck === true,
       actorKind: actorKindOf(actor),
     });
+    // In memory for the ticket.created workflows only: never broadcast or returned.
+    delete ticket.originalEmailRecipients;
     // Category/group watchers + custom agent alerts (both fire-and-forget;
     // creation never blocks on them).
     watcherNotificationService.notify('created', ticket.id).catch(() => {});
     import('./agentAlertService.js').then(({ default: s }) => s.evaluate('created', ticket.id)).catch(() => {});
     this._broadcast(workspaceId, 'created', ticket);
-    // The mail-in Cc set above stays off the FreshService copy's create, as
-    // before (no FreshService new-ticket notice to them). To is never sent.
-    const mailCcOnRow = mailCc.length && !data.ccEmails.length ? mailCc : [];
-    if (mailCcOnRow.length) await mirrorService.enqueueTicketCreate(ticket, { mailCcEmails: mailCcOnRow });
-    else await mirrorService.enqueueTicketCreate(ticket);
+    await mirrorService.enqueueTicketCreate(ticket);
 
     // AI on create, decoupled from assignment:
     //  • unassigned + runAiTriage  → FULL pipeline (classify + priority + type + recommend)

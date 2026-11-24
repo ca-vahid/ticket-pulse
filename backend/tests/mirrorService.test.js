@@ -550,41 +550,6 @@ describe('mirrorService — "Also for" additional requesters → cc_emails (Phas
     expect(clientMock.createTicket).toHaveBeenCalledWith(expect.not.objectContaining({ cc_emails: expect.anything() }));
   });
 
-  // 24 Nov 2026: a mail-in ticket now has its Cc on the row at creation. The
-  // copy's create must send what it sent before (the ingest wrote the Cc after
-  // the copy was usually made): no cc_emails from the e-mail, so FreshService
-  // sends no new-ticket notice to those people. Later field syncs carry them.
-  test('create_ticket leaves the mail-in Cc (job payload mailCcEmails) off the copy', async () => {
-    prismaMock.mirrorJob.create.mockImplementation(({ data }) => Promise.resolve({ id: 30, ...data }));
-    const job = await mirrorService.enqueueTicketCreate({ workspaceId: 1, id: 501 }, { mailCcEmails: ['Priya.Nair@example.com'] });
-    expect(prismaMock.mirrorJob.create).toHaveBeenCalledWith({
-      data: { workspaceId: 1, ticketId: 501, kind: 'create_ticket', threadEntryId: null, payload: { mailCcEmails: ['priya.nair@example.com'] } },
-    });
-
-    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, ccEmails: ['priya.nair@example.com'] });
-    clientMock.createTicket.mockResolvedValue({ id: 90003, requester_id: 555001 });
-    clientMock.updateTicket.mockResolvedValue({ id: 90003 });
-    expect(await mirrorService._processJob({ ...job, attempts: 0 })).toBe(true);
-    expect(clientMock.createTicket).toHaveBeenCalledWith(expect.not.objectContaining({ cc_emails: expect.anything() }));
-    expect(clientMock.createTicket.mock.calls[0][0]).not.toHaveProperty('to_emails');
-  });
-
-  test('create_ticket: an "Also for" address set another way still rides along beside a mail-in Cc', async () => {
-    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, ccEmails: ['priya.nair@example.com', 'lead@example.com'] });
-    clientMock.createTicket.mockResolvedValue({ id: 90004, requester_id: 555001 });
-    clientMock.updateTicket.mockResolvedValue({ id: 90004 });
-    await mirrorService._processJob({ id: 31, ticketId: 501, workspaceId: 1, kind: 'create_ticket', attempts: 0, payload: { mailCcEmails: ['priya.nair@example.com'] } });
-    expect(clientMock.createTicket).toHaveBeenCalledWith(expect.objectContaining({ cc_emails: ['lead@example.com'] }));
-  });
-
-  test('enqueueTicketCreate without mail Cc keeps its old job shape', async () => {
-    prismaMock.mirrorJob.create.mockResolvedValue({ id: 32 });
-    await mirrorService.enqueueTicketCreate({ workspaceId: 1, id: 501 });
-    expect(prismaMock.mirrorJob.create).toHaveBeenCalledWith({
-      data: { workspaceId: 1, ticketId: 501, kind: 'create_ticket', threadEntryId: null, payload: null },
-    });
-  });
-
   test('update_fields propagates the current list to the FS copy', async () => {
     prismaMock.ticket.findUnique.mockResolvedValue({
       ...baseTicket, freshserviceTicketId: BigInt(90001), ccEmails: ['assistant@example.com'],

@@ -3,8 +3,9 @@ import { jest } from '@jest/globals';
 // 24 Nov 2026 — "Everyone on the original e-mail", the ticketService side:
 //  - the people an agent took off a reply's Cc are kept with the reply
 //    (rawPayload.cc_removed), so later workflow mail leaves them off;
-//  - a mail-in ticket's To/Cc go on the row at creation, because the
-//    "Ticket arrived" workflows run inside createTicket.
+//  - a mail-in ticket's To/Cc reach the "Ticket arrived" workflows (which run
+//    inside createTicket) in memory only; the row and the FreshService copy
+//    are written exactly as before.
 // Invented names and example.com only.
 
 const prismaMock = {
@@ -111,8 +112,10 @@ test('an ordinary reply carries no cc_removed key', async () => {
   expect(data.rawPayload).not.toHaveProperty('cc_removed');
 });
 
-describe('createTicket: a mail-in ticket carries its To/Cc from the first write', () => {
+describe('createTicket: a mail-in ticket hands its To/Cc to ticket.created in memory only', () => {
+  let seenByLifecycle;
   beforeEach(() => {
+    seenByLifecycle = undefined;
     prismaMock.workspace.findUnique.mockResolvedValue({ id: 1, name: 'IT', isActive: true, nativeTicketingEnabled: true });
     requesterRepositoryMock.findByEmail.mockResolvedValue({ id: 40, name: 'Dana Fox', email: 'dana.fox@example.com', department: 'Finance', freshserviceId: null });
     noiseRuleServiceMock.evaluate.mockResolvedValue({ isNoise: false, ruleId: null });
@@ -120,27 +123,23 @@ describe('createTicket: a mail-in ticket carries its To/Cc from the first write'
     prismaMock.ticket.create.mockImplementation(({ data }) => Promise.resolve({
       id: 501, ...data, requester: { id: 40, name: 'Dana Fox', email: 'dana.fox@example.com' }, assignedTech: null, internalCategory: null, internalSubcategory: null,
     }));
-    lifecycleMock.emitTicketLifecycleNotifications.mockResolvedValue({ status: 'completed' });
+    lifecycleMock.emitTicketLifecycleNotifications.mockImplementation(async ({ upsertedTicket }) => {
+      seenByLifecycle = upsertedTicket.originalEmailRecipients ? { ...upsertedTicket.originalEmailRecipients } : null;
+      return { status: 'completed' };
+    });
   });
 
-  test('mailRecipients land on the created row, before ticket.created fires', async () => {
-    await ticketService.createTicket(1, { subject: 'Shared drive access', requesterEmail: 'dana.fox@example.com' }, actor, {
-      mailRecipients: { toEmails: ['IT@example.com', 'priya.nair@example.com', 'priya.nair@example.com'], ccEmails: ['lead@example.com'] },
+  test('the row is written exactly as before: no To, no Cc from the e-mail', async () => {
+    const ticket = await ticketService.createTicket(1, { subject: 'Shared drive access', requesterEmail: 'dana.fox@example.com' }, actor, {
+      mailRecipients: { toEmails: ['IT@example.com', 'priya.nair@example.com', 'priya.nair@example.com'], ccEmails: ['lead@example.com'], viaMailbox: true },
     });
     const { data } = prismaMock.ticket.create.mock.calls[0][0];
-    expect(data.toEmails).toEqual(['it@example.com', 'priya.nair@example.com']);
-    expect(data.ccEmails).toEqual(['lead@example.com']);
-    // The lifecycle (and so the "Ticket arrived" workflows) runs after the row exists.
-    expect(prismaMock.ticket.create.mock.invocationCallOrder[0])
-      .toBeLessThan(lifecycleMock.emitTicketLifecycleNotifications.mock.invocationCallOrder[0]);
-    // The FreshService copy is told to leave the mail-in Cc off its create.
-    expect(mirrorEnqueueCreate).toHaveBeenCalledWith(expect.objectContaining({ id: 501 }), { mailCcEmails: ['lead@example.com'] });
-  });
-
-  test('Cc typed by a person (not from the e-mail) goes to the copy as before', async () => {
-    await ticketService.createTicket(1, { subject: 'Shared drive access', requesterEmail: 'dana.fox@example.com', ccEmails: ['lead@example.com'] }, actor, {
-      mailRecipients: { toEmails: ['priya.nair@example.com'], ccEmails: ['other@example.com'] },
-    });
+    expect(data).not.toHaveProperty('toEmails');
+    expect(data).not.toHaveProperty('ccEmails');
+    // The ticket.created workflows get the lists in memory…
+    expect(seenByLifecycle).toEqual({ toEmails: ['it@example.com', 'priya.nair@example.com'], ccEmails: ['lead@example.com'], viaMailbox: true });
+    // …and nothing else does: not the returned ticket, not the FreshService copy's job.
+    expect(ticket).not.toHaveProperty('originalEmailRecipients');
     expect(mirrorEnqueueCreate).toHaveBeenCalledWith(expect.objectContaining({ id: 501 }));
     expect(mirrorEnqueueCreate.mock.calls[0]).toHaveLength(1);
   });
@@ -150,6 +149,7 @@ describe('createTicket: a mail-in ticket carries its To/Cc from the first write'
     const { data } = prismaMock.ticket.create.mock.calls[0][0];
     expect(data.toEmails).toBeUndefined();
     expect(data.ccEmails).toEqual(['lead@example.com']);
+    expect(seenByLifecycle).toBeNull();
   });
 
   test('mailRecipients is never read from the request body', async () => {
@@ -158,6 +158,7 @@ describe('createTicket: a mail-in ticket carries its To/Cc from the first write'
     }, actor);
     const { data } = prismaMock.ticket.create.mock.calls[0][0];
     expect(data.toEmails).toBeUndefined();
+    expect(seenByLifecycle).toBeNull();
   });
 });
 

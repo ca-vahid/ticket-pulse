@@ -844,7 +844,7 @@ describe('agent forwards (Phase FW)', () => {
     expect(input.requesterEmail).toBe('someone@customer.example');
     expect(input.subject).toBe('FW: Invoice 4471 still unpaid');
     // 24 Nov 2026: the mail's To/Cc ride along so the row has them at creation.
-    expect(options).toEqual({ sourceChannel: 1, createdVia: 'email', mailRecipients: { toEmails: ['helpdesk-pilot@example.com'], ccEmails: [] } });
+    expect(options).toEqual({ sourceChannel: 1, createdVia: 'email', mailRecipients: { toEmails: ['helpdesk-pilot@example.com'], ccEmails: [], viaMailbox: true } });
     const original = prismaMock.ticketThreadEntry.create.mock.calls[0][0].data;
     expect(original.rawPayload?.forwarded).toBeUndefined();
     expect(activityMock.create).not.toHaveBeenCalledWith(expect.objectContaining({ activityType: 'forwarded_intake' }));
@@ -1107,13 +1107,23 @@ describe('hold-queue callbacks (RL-4 contract)', () => {
     });
     expect(ticketServiceMock.createTicket).toHaveBeenCalledWith(1, expect.objectContaining({
       requesterEmail: 'chosen.person@customer.example', requesterName: null, subject: 'Printer on 3rd floor jammed',
-    }), expect.objectContaining({ role: 'system' }), { sourceChannel: 1, createdVia: 'held_reply', mailRecipients: { toEmails: ['helpdesk-pilot@example.com'], ccEmails: [] } });
+    }), expect.objectContaining({ role: 'system' }), { sourceChannel: 1, createdVia: 'held_reply', mailRecipients: { toEmails: ['helpdesk-pilot@example.com'], ccEmails: [], viaMailbox: true } });
     const original = prismaMock.ticketThreadEntry.create.mock.calls[0][0].data;
     expect(original).toEqual(expect.objectContaining({ eventType: 'original_email', actorEmail: 'rita@example.com', emailMessageId: '<held-1@example.com>' }));
     expect(original.rawPayload).toEqual({
       to_emails: ['helpdesk-pilot@example.com'], cc_emails: [],
       heldReply: { heldMessageId: 31, resolvedBy: 'Kirsten (coordinator)', forcedRequester: 'chosen.person@customer.example' },
     });
+  });
+
+  // 24 Nov 2026: a released held mail that reached us through a list (the
+  // mailbox is on neither To nor Cc) says so, and "Everyone on the original
+  // e-mail" then leaves its To line out.
+  test('a held mail that came through a list: mailRecipients.viaMailbox is false', async () => {
+    const email = { ...baseEmail, id: 'msg-list', internetMessageId: '<held-2@example.com>', to: ['all-staff@example.com', 'Priya.Nair@example.com'] };
+    await mailboxIngestService.createTicketFromEmail(connection, email, { kind: 'fresh', createdVia: 'held_reply', heldMessageId: 33, resolvedBy: 'x' });
+    const options = ticketServiceMock.createTicket.mock.calls[0][3];
+    expect(options.mailRecipients).toEqual({ toEmails: ['all-staff@example.com', 'priya.nair@example.com'], ccEmails: [], viaMailbox: false });
   });
 
   test('no forcedRequester → email.from; no createdVia → email', async () => {

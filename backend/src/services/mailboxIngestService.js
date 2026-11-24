@@ -2147,9 +2147,9 @@ class MailboxIngestService {
     // Persist who the email was addressed to (QA 08-05 #3): graphMailClient
     // already fetched to/cc. A meeting invite (QA 11-09 #8) never carries its
     // attendees into the ticket. Worked out before the ticket exists (24 Nov
-    // 2026): the "Ticket arrived" workflows run inside createTicket, and
-    // "Everyone on the original e-mail" reads these lists, so they go on the
-    // row at creation (and are written again below, as before).
+    // 2026): the "Ticket arrived" workflows run inside createTicket, so the
+    // lists are handed to them in memory (mailRecipients). The row still gets
+    // them below, after creation, exactly as before.
     const recipients = this._withoutAttendees(emailRecipients(email), email, connection);
     let ccEmails = [];
     if (recipients) {
@@ -2163,10 +2163,16 @@ class MailboxIngestService {
         ccEmails = mergeInboundCc([], { cc: [...(recipients.cc_emails || []), ...onBehalf] }, { mailboxAddress: ownAddresses(connection), exclude: [String(email.from || '').toLowerCase(), ...agents] }).next;
       }
     }
+    // Did the mail come straight to this mailbox (its address or an alias on
+    // To/Cc)? Not, for a list or an unknown alias (typically a released held
+    // mail): then its To line is nobody we should copy.
+    const mailboxOwn = ownAddresses(connection);
+    const viaMailbox = Boolean(recipients)
+      && [...(recipients.to_emails || []), ...(recipients.cc_emails || [])].some((a) => isOwnAddress(a, mailboxOwn));
     const options = {
       sourceChannel: TICKET_SOURCE.EMAIL,
       createdVia,
-      ...(recipients ? { mailRecipients: { toEmails: recipients.to_emails, ccEmails } } : {}),
+      ...(recipients ? { mailRecipients: { toEmails: recipients.to_emails, ccEmails, viaMailbox } } : {}),
     };
     let ticket;
     try {

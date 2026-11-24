@@ -5,7 +5,7 @@ import { jest } from '@jest/globals';
  * `original_ccs`). A requester wrote to four colleagues and the IT mailbox,
  * everyone on To, and the "Ticket arrived" acknowledgement reached the
  * requester only: the token read the Cc lists and never the To line.
- * Invented names and example.com only.
+ * Invented names, example.com (our domain) and example.net (outside) only.
  */
 
 const prismaMock = {
@@ -22,27 +22,27 @@ const prismaMock = {
   competencyCategory: { findMany: jest.fn(), findFirst: jest.fn() },
   ticketActivity: { create: jest.fn(), findMany: jest.fn() },
   mirrorJob: { findFirst: jest.fn(), create: jest.fn() },
-  ticketThreadEntry: { findMany: jest.fn() },
+  ticketThreadEntry: { findMany: jest.fn(), findFirst: jest.fn() },
   notificationDelivery: { upsert: jest.fn(), findUnique: jest.fn(), update: jest.fn(), create: jest.fn() },
   mailboxConnection: { findMany: jest.fn() },
   requester: { findMany: jest.fn() },
   technician: { findMany: jest.fn() },
+  workspaceAccess: { findMany: jest.fn() },
+  workspace: { findUnique: jest.fn() },
 };
 
-const aliases = new Map();
 const settings = new Map();
-
-jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
-jest.unstable_mockModule('../src/services/alsoForNotifyService.js', () => ({
+const settingsMock = { get: jest.fn(async (key) => settings.get(key) ?? null), set: jest.fn(), delete: jest.fn() };
+const alsoForMock = {
   additionalRequesterCc: jest.fn().mockResolvedValue([]),
   isAlsoForNotifyEnabled: jest.fn().mockResolvedValue(false),
-}));
-jest.unstable_mockModule('../src/services/mailboxAliasService.js', () => ({
-  getMailboxAliases: jest.fn(async (id) => aliases.get(id) || []),
-}));
-jest.unstable_mockModule('../src/services/settingsRepository.js', () => ({
-  default: { get: jest.fn(async (key) => settings.get(key) ?? null), set: jest.fn(), delete: jest.fn() },
-}));
+};
+const directoryMock = { resolveAddress: jest.fn() };
+
+jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
+jest.unstable_mockModule('../src/services/alsoForNotifyService.js', () => ({ default: alsoForMock, ...alsoForMock }));
+jest.unstable_mockModule('../src/services/settingsRepository.js', () => ({ default: settingsMock }));
+jest.unstable_mockModule('../src/services/azureAdService.js', () => ({ default: directoryMock }));
 jest.unstable_mockModule('../src/services/notificationDeliveryService.js', () => ({
   processDelivery: jest.fn().mockResolvedValue({ success: true, status: 'sent' }),
 }));
@@ -65,6 +65,7 @@ const svc = await import('../src/services/originalRecipientsService.js');
 const { invalidateMachineSenderCache } = await import('../src/services/machineSenderService.js');
 
 const REQUESTER = 'dana.fox@example.com';
+const COLLEAGUES = ['priya.nair@example.com', 'sam.okafor@example.com', 'lee.chen@example.com', 'ada.ruiz@example.com'];
 
 const eventContext = (ticket = {}, over = {}) => ({
   event: { type: 'ticket.created', source: 'test', occurredAt: '2026-11-24T10:00:00.000Z', dedupeStamp: `t-${Math.random()}` },
@@ -96,23 +97,29 @@ function definition(recipientData) {
 
 const workflow = { id: 77, workspaceId: 1, triggerType: 'ticket.created', publishedVersion: 1, versions: [] };
 
-async function resolve(ticket, recipientData = {}, mode = 'live') {
-  await executeDefinition({ workflow, definition: definition(recipientData), eventContext: eventContext(ticket), executionMode: mode });
+async function run(context, recipientData = {}, mode = 'live') {
+  await executeDefinition({ workflow, definition: definition(recipientData), eventContext: context, executionMode: mode });
   const created = prismaMock.notificationDelivery.create.mock.calls[0]?.[0]?.data;
   return created ? { to: created.toRecipients, cc: created.ccRecipients, bcc: created.bccRecipients } : null;
 }
+const resolve = (ticket, recipientData = {}, mode = 'live') => run(eventContext(ticket), recipientData, mode);
 
 let replies = [];
 let ccChanges = [];
+let people = new Set();
+let originalEntry = null;
 
 beforeEach(() => {
   jest.clearAllMocks();
   svc.invalidateOwnMailboxCache();
   invalidateMachineSenderCache();
-  aliases.clear();
   settings.clear();
+  settingsMock.get.mockImplementation(async (key) => settings.get(key) ?? null);
   replies = [];
   ccChanges = [];
+  originalEntry = null;
+  // Colleagues on our own domain are people (active requesters).
+  people = new Set(COLLEAGUES);
   let stepId = 100;
   prismaMock.notificationWorkflowRun.create.mockImplementation(({ data }) => Promise.resolve({ id: 900, ...data }));
   prismaMock.notificationWorkflowRun.update.mockResolvedValue({});
@@ -128,6 +135,7 @@ beforeEach(() => {
   prismaMock.ticketActivity.findMany.mockImplementation(async () => ccChanges);
   prismaMock.mirrorJob.findFirst.mockResolvedValue({ id: 1 });
   prismaMock.ticketThreadEntry.findMany.mockImplementation(async ({ where } = {}) => (where?.eventType === 'reply' ? replies : []));
+  prismaMock.ticketThreadEntry.findFirst.mockImplementation(async () => originalEntry);
   prismaMock.notificationEmailSignature.findUnique.mockResolvedValue(null);
   prismaMock.notificationDelivery.findUnique.mockResolvedValue(null);
   prismaMock.notificationDelivery.update.mockResolvedValue({});
@@ -138,31 +146,85 @@ beforeEach(() => {
     { id: 1, address: 'it-tickets@example.com' },
     { id: 2, address: 'accounts@example.com' },
   ]);
-  aliases.set(1, ['it@example.com']);
-  prismaMock.requester.findMany.mockResolvedValue([]);
+  settings.set('mailbox_aliases_1', 'it@example.com');
+  prismaMock.requester.findMany.mockImplementation(async ({ where }) => where.email.in
+    .filter((a) => people.has(a))
+    .map((email) => ({ email, unattended: false, isActive: true, suppressedAt: null })));
   prismaMock.technician.findMany.mockResolvedValue([]);
+  prismaMock.workspaceAccess.findMany.mockResolvedValue([]);
+  prismaMock.workspace.findUnique.mockResolvedValue({ internalDomains: ['example.com'] });
+  directoryMock.resolveAddress.mockResolvedValue({ status: 'absent' });
+  alsoForMock.additionalRequesterCc.mockResolvedValue([]);
+});
+
+describe('bareAddress', () => {
+  test('keeps apostrophes and the usual local-part characters', () => {
+    expect(svc.bareAddress("o'brien@example.com")).toBe("o'brien@example.com");
+    expect(svc.bareAddress("D'Souza.R@Example.com")).toBe("d'souza.r@example.com");
+    expect(svc.bareAddress('first+tag_x-y@example.net')).toBe('first+tag_x-y@example.net');
+  });
+
+  test('takes the address inside <…>, trims whitespace, lowercases', () => {
+    expect(svc.bareAddress('Pat O\'Brien <Pat.OBrien@Example.com>')).toBe('pat.obrien@example.com');
+    expect(svc.bareAddress('"Nair, Priya" <priya.nair@example.com>')).toBe('priya.nair@example.com');
+    expect(svc.bareAddress("   o'brien@example.com \n")).toBe("o'brien@example.com");
+  });
+
+  test('anything that is not one address is nothing', () => {
+    for (const bad of ['', 'not-an-address', '@example.com', 'a@', 'a b@example.com', 'a@example', 'a@b.com, c@d.com', '.a@example.com']) {
+      expect(svc.bareAddress(bad)).toBe('');
+    }
+  });
+
+  test('an apostrophe address reaches the e-mail whole', async () => {
+    people.add("o'brien@example.com");
+    const delivery = await resolve({ toEmails: ['it@example.com', "O'Brien@example.com"] });
+    expect(delivery.cc).toEqual(["o'brien@example.com"]);
+  });
 });
 
 describe('the To line counts', () => {
   test('the reported case: four colleagues and the IT mailbox on To, nobody on Cc', async () => {
-    const delivery = await resolve({
-      toEmails: ['IT@example.com', 'priya.nair@example.com', 'sam.okafor@example.com', 'lee.chen@example.com', 'ada.ruiz@example.com'],
-    });
+    const delivery = await resolve({ toEmails: ['IT@example.com', ...COLLEAGUES] });
     expect(delivery.to).toEqual([REQUESTER]);
-    expect(delivery.cc).toEqual(['priya.nair@example.com', 'sam.okafor@example.com', 'lee.chen@example.com', 'ada.ruiz@example.com']);
+    expect(delivery.cc).toEqual(COLLEAGUES);
+  });
+
+  test('"Ticket arrived" on a mail-in ticket reads the arriving e-mail in memory (the row is still empty)', async () => {
+    const context = eventContext({}, {
+      originalEmailRecipients: { toEmails: ['it@example.com', 'priya.nair@example.com'], ccEmails: ['manager@example.net'], viaMailbox: true },
+    });
+    const delivery = await run(context);
+    expect(delivery.cc).toEqual(['manager@example.net', 'priya.nair@example.com']);
   });
 
   test('Cc and reply Cc still count, To joins them', async () => {
-    const delivery = await resolve({
-      ccEmails: ['manager@example.com'],
-      replyCcEmails: ['lead@example.com'],
-      toEmails: ['priya.nair@example.com'],
-    });
-    expect(delivery.cc).toEqual(['manager@example.com', 'lead@example.com', 'priya.nair@example.com']);
+    const delivery = await resolve({ ccEmails: ['manager@example.net'], replyCcEmails: ['lead@example.net'], toEmails: ['it@example.com', 'priya.nair@example.com'] });
+    expect(delivery.cc).toEqual(['manager@example.net', 'lead@example.net', 'priya.nair@example.com']);
   });
 });
 
-describe('who is left off', () => {
+describe('other workflows are untouched (the mail\'s To/Cc never reach the ticket early)', () => {
+  const mailIn = (over = {}) => eventContext({ ccEmails: [], toEmails: [] }, {
+    originalEmailRecipients: { toEmails: ['it@example.com'], ccEmails: ['manager@example.net'], viaMailbox: true },
+    ...over,
+  });
+
+  test('the requester token\'s unattended fallback reads the ticket\'s Cc, as before (empty at creation)', async () => {
+    const delivery = await run(mailIn({ requester: { name: 'Scanner', email: 'scanner@example.net', unattended: true } }), { cc: [] });
+    expect(delivery).toBeNull(); // nobody on To, as before: the mail's Cc is not on the ticket yet
+    expect(prismaMock.mailboxConnection.findMany).not.toHaveBeenCalled();
+  });
+
+  test('"Also notify additional requesters" sees the ticket as before', async () => {
+    await run(mailIn(), { cc: [] });
+    expect(alsoForMock.additionalRequesterCc).toHaveBeenCalledTimes(1);
+    expect(alsoForMock.additionalRequesterCc.mock.calls[0][1].ccEmails).toEqual([]);
+    expect(prismaMock.notificationDelivery.create.mock.calls[0][0].data.ccRecipients).toEqual([]);
+  });
+});
+
+describe('who is left out', () => {
   test('our own mailboxes in any workspace, their aliases, +tag variants and the FreshService relay', async () => {
     const delivery = await resolve({
       toEmails: ['it-tickets@example.com', 'it@example.com', 'accounts@example.com', 'it-tickets+tp42@example.com', 'help@acme.freshservice.com', 'priya.nair@example.com'],
@@ -171,43 +233,39 @@ describe('who is left off', () => {
     expect(delivery.cc).toEqual(['priya.nair@example.com']);
   });
 
-  test('the global sender address', async () => {
-    const before = process.env.SENDGRID_FROM_EMAIL;
-    process.env.SENDGRID_FROM_EMAIL = 'ticketpulse@example.com';
-    try {
-      const delivery = await resolve({ toEmails: ['ticketpulse@example.com', 'priya.nair@example.com'] });
-      expect(delivery.cc).toEqual(['priya.nair@example.com']);
-    } finally {
-      if (before === undefined) delete process.env.SENDGRID_FROM_EMAIL;
-      else process.env.SENDGRID_FROM_EMAIL = before;
-    }
-  });
-
-  test('the requester, in any case', async () => {
-    const delivery = await resolve({ toEmails: ['Dana.Fox@Example.com', 'priya.nair@example.com'], ccEmails: [REQUESTER] });
-    expect(delivery.to).toEqual([REQUESTER]);
+  test('the global sender from Settings', async () => {
+    settings.set('sendgrid_from_email', 'ticketpulse@example.net');
+    const delivery = await resolve({ toEmails: ['it@example.com', 'ticketpulse@example.net', 'priya.nair@example.com'] });
     expect(delivery.cc).toEqual(['priya.nair@example.com']);
   });
 
-  test('no-reply and the workspace machine senders', async () => {
-    settings.set('machine_senders_ws1', JSON.stringify({ entries: [{ value: 'alerts.example.net' }] }));
-    const delivery = await resolve({
-      toEmails: ['no-reply@example.com', 'noreply.billing@example.com', 'mailer-daemon@example.com', 'watch@alerts.example.net', 'priya.nair@example.com'],
-    });
+  test('the requester, in any case', async () => {
+    const delivery = await resolve({ toEmails: ['it@example.com', 'Dana.Fox@Example.com', 'priya.nair@example.com'], ccEmails: [REQUESTER] });
+    expect(delivery.to).toEqual([REQUESTER]);
     expect(delivery.cc).toEqual(['priya.nair@example.com']);
   });
 
   test('active agents of the ticket\'s workspace (they see the ticket in the app)', async () => {
     prismaMock.technician.findMany.mockResolvedValue([{ email: 'Eli.Park@example.com' }]);
-    const delivery = await resolve({ toEmails: ['eli.park@example.com', 'priya.nair@example.com'], ccEmails: ['ELI.PARK@example.com'] });
+    const delivery = await resolve({ toEmails: ['it@example.com', 'eli.park@example.com', 'priya.nair@example.com'], ccEmails: ['ELI.PARK@example.com'] });
     expect(delivery.cc).toEqual(['priya.nair@example.com']);
-    const query = prismaMock.technician.findMany.mock.calls[0][0];
-    expect(query.where).toMatchObject({ workspaceId: 1, isActive: true });
+    expect(prismaMock.technician.findMany.mock.calls[0][0].where).toMatchObject({ workspaceId: 1, isActive: true });
+  });
+
+  test('no-reply and the workspace machine senders', async () => {
+    settings.set('machine_senders_ws1', JSON.stringify({ entries: [{ value: 'alerts.example.net' }] }));
+    const delivery = await resolve({
+      toEmails: ['it@example.com', 'no-reply@example.net', 'noreply.billing@example.net', 'mailer-daemon@example.net', 'watch@alerts.example.net', 'priya.nair@example.com'],
+    });
+    expect(delivery.cc).toEqual(['priya.nair@example.com']);
   });
 
   test('unattended requesters (an automation mailbox on the To line)', async () => {
-    prismaMock.requester.findMany.mockResolvedValue([{ email: 'scanner@example.com' }]);
-    const delivery = await resolve({ toEmails: ['scanner@example.com', 'priya.nair@example.com'] });
+    prismaMock.requester.findMany.mockResolvedValue([
+      { email: 'scanner@example.net', unattended: true, isActive: true, suppressedAt: null },
+      { email: 'priya.nair@example.com', unattended: false, isActive: true, suppressedAt: null },
+    ]);
+    const delivery = await resolve({ toEmails: ['it@example.com', 'scanner@example.net', 'priya.nair@example.com'] });
     expect(delivery.cc).toEqual(['priya.nair@example.com']);
   });
 
@@ -215,29 +273,133 @@ describe('who is left off', () => {
     const delivery = await resolve({
       ccEmails: ['Priya.Nair@example.com'],
       replyCcEmails: ['priya.nair@EXAMPLE.com', 'sam.okafor@example.com'],
-      toEmails: ['PRIYA.NAIR@example.com', 'Sam Okafor <Sam.Okafor@example.com>'],
+      toEmails: ['it@example.com', 'PRIYA.NAIR@example.com', 'Sam Okafor <Sam.Okafor@example.com>'],
     });
     expect(delivery.cc).toEqual(['priya.nair@example.com', 'sam.okafor@example.com']);
   });
+});
 
-  test('when our mailboxes cannot be read, the To line is left out (never risk mailing ourselves)', async () => {
+describe('our mailbox list must be read in full', () => {
+  test('mailbox list unreadable: nobody from the original e-mail (not even the Cc)', async () => {
     prismaMock.mailboxConnection.findMany.mockRejectedValue(new Error('db down'));
-    const delivery = await resolve({ ccEmails: ['manager@example.com'], toEmails: ['it@example.com', 'priya.nair@example.com'] });
-    expect(delivery.cc).toEqual(['manager@example.com']);
+    const delivery = await resolve({ ccEmails: ['manager@example.net'], toEmails: ['it@example.com', 'priya.nair@example.com'] });
+    expect(delivery).toEqual({ to: [REQUESTER], cc: [], bcc: [] });
+  });
+
+  test('an alias read failure reaches nobody, and the partial list is not cached', async () => {
+    let failAliases = true;
+    settingsMock.get.mockImplementation(async (key) => {
+      if (key === 'mailbox_aliases_1' && failAliases) throw new Error('settings down');
+      return settings.get(key) ?? null;
+    });
+    const first = await resolve({ toEmails: ['it@example.com', 'priya.nair@example.com'] });
+    expect(first.cc).toEqual([]);
+    failAliases = false;
+    jest.clearAllMocks();
+    prismaMock.notificationDelivery.create.mockImplementation(({ data }) => Promise.resolve({ id: 701, ...data }));
+    // Next run reads again (nothing cached) and it@ is known as ours.
+    const second = await resolve({ toEmails: ['it@example.com', 'priya.nair@example.com'] });
+    expect(second.cc).toEqual(['priya.nair@example.com']);
+    expect(prismaMock.mailboxConnection.findMany).toHaveBeenCalled();
+  });
+});
+
+describe('lists, loops and long To lines', () => {
+  test('a mail that did not come straight to our mailbox (a list or unknown alias): To line left out, Cc kept', async () => {
+    const delivery = await resolve({ toEmails: ['all-staff@example.com', 'priya.nair@example.com'], ccEmails: ['manager@example.net'] });
+    expect(delivery.cc).toEqual(['manager@example.net']);
+  });
+
+  test('the same for the arriving e-mail in memory (viaMailbox false)', async () => {
+    const context = eventContext({}, { originalEmailRecipients: { toEmails: ['priya.nair@example.com'], ccEmails: ['manager@example.net'], viaMailbox: false } });
+    expect((await run(context)).cc).toEqual(['manager@example.net']);
+  });
+
+  test('the original e-mail entry decides how the mail arrived (the mailbox was on its Cc)', async () => {
+    originalEntry = { rawPayload: { to_emails: ['priya.nair@example.com'], cc_emails: ['it@example.com'] } };
+    const delivery = await resolve({ toEmails: ['priya.nair@example.com'] });
+    expect(delivery.cc).toEqual(['priya.nair@example.com']);
+  });
+
+  test('an agent\'s forward: To line left out, Cc kept', async () => {
+    originalEntry = { rawPayload: { to_emails: ['it@example.com'], forwarded: { by: 'eli.park@example.com' } } };
+    const delivery = await resolve({ toEmails: ['it@example.com', 'priya.nair@example.com'], ccEmails: ['manager@example.net'] });
+    expect(delivery.cc).toEqual(['manager@example.net']);
+  });
+
+  test('more than 10 people on To: To line left out, Cc kept', async () => {
+    const many = Array.from({ length: 11 }, (_, i) => `person${i}@example.net`);
+    const delivery = await resolve({ toEmails: ['it@example.com', ...many], ccEmails: ['manager@example.net'] });
+    expect(delivery.cc).toEqual(['manager@example.net']);
+  });
+
+  test('exactly 10 people on To are all reached', async () => {
+    const ten = Array.from({ length: 10 }, (_, i) => `person${i}@example.net`);
+    const delivery = await resolve({ toEmails: ['it@example.com', ...ten] });
+    expect(delivery.cc).toEqual(ten);
+  });
+});
+
+describe('addresses on our own domains must be a person', () => {
+  test('active requester or member: kept; external addresses kept with no lookup', async () => {
+    people = new Set(['priya.nair@example.com']);
+    prismaMock.workspaceAccess.findMany.mockResolvedValue([{ email: 'coord@example.com' }]);
+    const delivery = await resolve({ toEmails: ['it@example.com', 'priya.nair@example.com', 'coord@example.com', 'partner@example.net'] });
+    expect(delivery.cc).toEqual(['priya.nair@example.com', 'coord@example.com', 'partner@example.net']);
+    expect(directoryMock.resolveAddress).not.toHaveBeenCalled();
+  });
+
+  test('a suppressed or inactive requester is not a person', async () => {
+    people = new Set();
+    prismaMock.requester.findMany.mockResolvedValue([
+      { email: 'old.hand@example.com', unattended: false, isActive: false, suppressedAt: null },
+      { email: 'qa.box@example.com', unattended: false, isActive: true, suppressedAt: new Date() },
+    ]);
+    const delivery = await resolve({ toEmails: ['it@example.com', 'old.hand@example.com', 'qa.box@example.com'] });
+    expect(delivery.cc).toEqual([]);
+  });
+
+  test('the directory decides the rest: a person with a title is kept; a list, a stranger or no answer is left out', async () => {
+    people = new Set();
+    directoryMock.resolveAddress.mockImplementation(async (address) => ({
+      'lee.chen@example.com': { status: 'found', jobTitle: 'Geologist', department: null },
+      'ada.ruiz@example.com': { status: 'alias', jobTitle: null, department: 'Finance' },
+      'all-hands@example.com': { status: 'found', jobTitle: null, department: null },
+      'projects@example.com': { status: 'absent' },
+      'sam.okafor@example.com': { status: 'unavailable' },
+    })[address]);
+    const delivery = await resolve({
+      toEmails: ['it@example.com', 'lee.chen@example.com', 'ada.ruiz@example.com', 'all-hands@example.com', 'projects@example.com', 'sam.okafor@example.com'],
+    });
+    expect(delivery.cc).toEqual(['lee.chen@example.com', 'ada.ruiz@example.com']);
+  });
+
+  test('directory answers are cached, and at most 10 lookups run per e-mail', async () => {
+    people = new Set();
+    directoryMock.resolveAddress.mockResolvedValue({ status: 'found', jobTitle: 'Engineer' });
+    const many = Array.from({ length: 12 }, (_, i) => `staff${i}@example.com`);
+    await resolve({ ccEmails: many, toEmails: ['it@example.com'] });
+    expect(directoryMock.resolveAddress).toHaveBeenCalledTimes(10);
+    directoryMock.resolveAddress.mockClear();
+    jest.clearAllMocks();
+    prismaMock.notificationDelivery.create.mockImplementation(({ data }) => Promise.resolve({ id: 702, ...data }));
+    const again = await resolve({ ccEmails: many.slice(0, 3), toEmails: ['it@example.com'] });
+    expect(directoryMock.resolveAddress).not.toHaveBeenCalled();
+    expect(again.cc).toEqual(many.slice(0, 3));
   });
 });
 
 describe('people an agent took off the Cc', () => {
   test('a reply that took someone off the Cc keeps them off later workflow mail', async () => {
-    replies = [{ occurredAt: new Date('2026-11-24T11:00:00Z'), rawPayload: { to_emails: [REQUESTER], cc_emails: ['lead@example.com'], cc_removed: ['priya.nair@example.com'] } }];
-    const delivery = await resolve({ ccEmails: ['priya.nair@example.com', 'lead@example.com'], toEmails: ['priya.nair@example.com'] });
-    expect(delivery.cc).toEqual(['lead@example.com']);
+    replies = [{ occurredAt: new Date('2026-11-24T11:00:00Z'), rawPayload: { to_emails: [REQUESTER], cc_emails: ['lead@example.net'], cc_removed: ['priya.nair@example.com'] } }];
+    const delivery = await resolve({ ccEmails: ['priya.nair@example.com', 'lead@example.net'], toEmails: ['it@example.com', 'priya.nair@example.com'] });
+    expect(delivery.cc).toEqual(['lead@example.net']);
   });
 
   test('an "Also for" removal keeps them off even though they were on To', async () => {
-    ccChanges = [{ performedAt: new Date('2026-11-24T11:00:00Z'), details: { from: ['priya.nair@example.com', 'lead@example.com'], to: ['lead@example.com'] } }];
-    const delivery = await resolve({ ccEmails: ['lead@example.com'], toEmails: ['priya.nair@example.com'] });
-    expect(delivery.cc).toEqual(['lead@example.com']);
+    ccChanges = [{ performedAt: new Date('2026-11-24T11:00:00Z'), details: { from: ['priya.nair@example.com', 'lead@example.net'], to: ['lead@example.net'] } }];
+    const delivery = await resolve({ ccEmails: ['lead@example.net'], toEmails: ['it@example.com', 'priya.nair@example.com'] });
+    expect(delivery.cc).toEqual(['lead@example.net']);
   });
 
   test('added back later by an agent, they are reached again', async () => {
@@ -245,7 +407,7 @@ describe('people an agent took off the Cc', () => {
       { occurredAt: new Date('2026-11-24T11:00:00Z'), rawPayload: { cc_removed: ['priya.nair@example.com'] } },
       { occurredAt: new Date('2026-11-24T12:00:00Z'), rawPayload: { cc_emails: ['priya.nair@example.com'] } },
     ];
-    const delivery = await resolve({ toEmails: ['priya.nair@example.com'] });
+    const delivery = await resolve({ toEmails: ['it@example.com', 'priya.nair@example.com'] });
     expect(delivery.cc).toEqual(['priya.nair@example.com']);
   });
 
@@ -262,42 +424,56 @@ describe('people an agent took off the Cc', () => {
 });
 
 describe('the 25-recipient cap', () => {
-  const list = (n, prefix) => Array.from({ length: n }, (_, i) => `${prefix}${i}@example.com`);
+  const list = (n, prefix) => Array.from({ length: n }, (_, i) => `${prefix}${i}@example.net`);
 
-  test('a long To line is trimmed so the requester still gets the e-mail', async () => {
-    const delivery = await resolve({ toEmails: list(30, 'colleague') });
+  test('a long Cc list is trimmed so the requester still gets the e-mail', async () => {
+    const delivery = await resolve({ ccEmails: list(30, 'colleague') });
     expect(delivery.to).toEqual([REQUESTER]);
     expect(delivery.cc).toHaveLength(24);
-    expect(delivery.to.length + delivery.cc.length + delivery.bcc.length).toBe(25);
-    expect(delivery.cc[0]).toBe('colleague0@example.com');
+    expect(delivery.cc[0]).toBe('colleague0@example.net');
   });
 
-  test('typed addresses are never trimmed; only original-e-mail people make room', async () => {
-    const delivery = await resolve({ toEmails: list(30, 'colleague') }, { ccCustomEmails: ['audit@example.com'] });
-    expect(delivery.cc).toContain('audit@example.com');
+  test('typed addresses are never trimmed, even when also on the original e-mail', async () => {
+    const delivery = await resolve({ ccEmails: list(30, 'colleague') }, { ccCustomEmails: ['audit@example.net', 'colleague29@example.net'] });
+    expect(delivery.cc).toEqual(expect.arrayContaining(['audit@example.net', 'colleague29@example.net']));
     expect(delivery.to.length + delivery.cc.length + delivery.bcc.length).toBe(25);
   });
 
-  test('trimOriginalToCap leaves off the last original people first, Cc before Bcc before To', () => {
-    const out = svc.trimOriginalToCap({ to: ['r@example.com', 'o1@example.com'], cc: ['x@example.com', 'o2@example.com'], bcc: ['o3@example.com'] }, ['o1@example.com', 'o2@example.com', 'o3@example.com'], 3);
-    expect(out).toEqual({ to: ['r@example.com', 'o1@example.com'], cc: ['x@example.com'], bcc: [], trimmed: 2 });
+  test('trimOriginalToCap leaves out the last original people first, Cc before Bcc before To', () => {
+    const out = svc.trimOriginalToCap({ to: ['r@example.net', 'o1@example.net'], cc: ['x@example.net', 'o2@example.net'], bcc: ['o3@example.net'] }, ['o1@example.net', 'o2@example.net', 'o3@example.net'], 3);
+    expect(out).toEqual({ to: ['r@example.net', 'o1@example.net'], cc: ['x@example.net'], bcc: [], trimmed: 2 });
   });
 });
 
 describe('Preview and Shadow list the widened recipients', () => {
   const ticket = {
-    toEmails: ['it@example.com', 'priya.nair@example.com', 'no-reply@example.com', REQUESTER],
+    toEmails: ['it@example.com', 'priya.nair@example.com', 'no-reply@example.net', REQUESTER],
     ccEmails: ['sam.okafor@example.com'],
   };
 
-  test('Preview shows the widened list and why people were left off', async () => {
+  test('Preview shows the widened list and why people were left out', async () => {
     const result = await executePreview({ workflow, definition: definition({}), eventContext: eventContext(ticket) });
     expect(result.state.recipients).toEqual({ to: [REQUESTER], cc: ['sam.okafor@example.com', 'priya.nair@example.com'], bcc: [] });
     const step = result.steps.find((s) => s.nodeId === 'recipients');
     expect(step.output.originalRecipients).toEqual({
       count: 2,
-      leftOff: { ownMailbox: 1, agent: 0, requester: 1, automated: 1, unattended: 0, removedByAgent: 0 },
+      leftOff: { ownMailbox: 1, agent: 0, requester: 1, automated: 1, unattended: 0, removedByAgent: 0, notAPerson: 0 },
     });
+  });
+
+  test('the count leaves out people the step reaches another way', async () => {
+    const result = await executePreview({
+      workflow, definition: definition({ ccCustomEmails: ['sam.okafor@example.com'] }), eventContext: eventContext(ticket),
+    });
+    expect(result.state.recipients.cc).toEqual(['sam.okafor@example.com', 'priya.nair@example.com']);
+    const step = result.steps.find((s) => s.nodeId === 'recipients');
+    expect(step.output.originalRecipients.count).toBe(1);
+  });
+
+  test('Preview says why the To line was not used', async () => {
+    const result = await executePreview({ workflow, definition: definition({}), eventContext: eventContext({ toEmails: ['all-staff@example.com', 'priya.nair@example.com'] }) });
+    const step = result.steps.find((s) => s.nodeId === 'recipients');
+    expect(step.output.originalRecipients).toMatchObject({ count: 0, toLine: 'not_direct' });
   });
 
   test('a Shadow run records the widened list on its delivery row', async () => {

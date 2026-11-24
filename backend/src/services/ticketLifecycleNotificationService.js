@@ -1070,8 +1070,14 @@ export async function emitTicketLifecycleNotifications({
     dispatchLifecycleWebhook(eventContext);
     dispatchTeamsNotifications(eventContext);
     maybeRefreshSentiment(eventContext);
+    // A mail-in ticket's To/Cc (24 Nov 2026), in memory like createdVia: the
+    // ticket row gets them only after this event, and only the workflows'
+    // "Everyone on the original e-mail" reads them. Webhooks and Teams never see it.
+    const workflowContext = event.type === 'ticket.created' && upsertedTicket?.originalEmailRecipients
+      ? { ...eventContext, originalEmailRecipients: upsertedTicket.originalEmailRecipients }
+      : eventContext;
     try {
-      results.push(await notificationWorkflowEngine.executeForEvent(eventContext, {
+      results.push(await notificationWorkflowEngine.executeForEvent(workflowContext, {
         triggerSource: source,
       }));
     } catch (error) {

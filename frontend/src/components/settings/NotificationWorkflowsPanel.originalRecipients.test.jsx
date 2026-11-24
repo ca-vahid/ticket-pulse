@@ -75,9 +75,23 @@ describe('Preview and Shadow run line', () => {
     expect(originalRecipientsNote({ count: 1, leftOff: {} })).toBe('Everyone on the original e-mail: 1 person');
   });
 
-  test('the recipient cap and an unread To line are named', () => {
-    expect(originalRecipientsNote({ count: 24, leftOff: { overRecipientLimit: 6 }, toLineSkipped: true }))
-      .toBe('Everyone on the original e-mail: 24 people (left out: 6 over the 25-recipient limit) (To line not read this time)');
+  test('the recipient cap and non-people on our domain are named', () => {
+    expect(originalRecipientsNote({ count: 24, leftOff: { overRecipientLimit: 6, notAPerson: 2 } }))
+      .toBe('Everyone on the original e-mail: 24 people (left out: 2 addresses on our domain that are not a person, 6 over the 25-recipient limit)');
+  });
+
+  test('says why the To line was not used', () => {
+    expect(originalRecipientsNote({ count: 1, leftOff: {}, toLine: 'not_direct' }))
+      .toBe('Everyone on the original e-mail: 1 person. To line not used: the e-mail did not come straight to our mailbox');
+    expect(originalRecipientsNote({ count: 2, leftOff: {}, toLine: 'forwarded' }))
+      .toBe('Everyone on the original e-mail: 2 people. To line not used: the ticket came from an agent\'s forward');
+    expect(originalRecipientsNote({ count: 0, leftOff: {}, toLine: 'too_long' }))
+      .toBe('Everyone on the original e-mail: 0 people. To line not used: more than 10 people on it');
+  });
+
+  test('an unreadable mailbox list reaches nobody, and says so', () => {
+    expect(originalRecipientsNote({ count: 0, leftOff: {}, unavailable: true }))
+      .toBe('Everyone on the original e-mail: nobody this time, our mailbox list could not be read');
   });
 
   test('nothing when the step did not use it', () => {

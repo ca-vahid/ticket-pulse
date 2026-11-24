@@ -127,15 +127,13 @@ export function terminalMirrorError(message) {
  * that is also cc'd). `undefined` when empty so compactObject/updateTicket
  * drop the key instead of sending `[]`.
  */
-export function mirrorCcEmails(ticket, { leaveOut = [] } = {}) {
+export function mirrorCcEmails(ticket) {
   const requester = String(ticket?.requester?.email || '').trim().toLowerCase();
-  // The create job's mail-in Cc (see enqueueTicketCreate) stays off the copy.
-  const skip = new Set((Array.isArray(leaveOut) ? leaveOut : []).map((a) => String(a || '').trim().toLowerCase()));
   const seen = new Set();
   const out = [];
   for (const raw of Array.isArray(ticket?.ccEmails) ? ticket.ccEmails : []) {
     const address = String(raw || '').trim().toLowerCase();
-    if (!address || address === requester || seen.has(address) || skip.has(address)) continue;
+    if (!address || address === requester || seen.has(address)) continue;
     seen.add(address);
     out.push(address);
   }
@@ -262,17 +260,8 @@ class MirrorService {
 
   // ---------------------------------------------------------------- enqueue
 
-  /**
-   * `mailCcEmails` (24 Nov 2026): Cc addresses a mail-in ticket got at creation
-   * from the arriving e-mail (createTicket's `mailRecipients`). The FreshService
-   * copy is created without them, as before that change (the ingest used to
-   * write the Cc after the copy was usually made), so FreshService never sends
-   * its own new-ticket notice to them. Later field syncs carry the Cc as before.
-   */
-  async enqueueTicketCreate(ticket, { mailCcEmails = [] } = {}) {
-    const leaveOut = (Array.isArray(mailCcEmails) ? mailCcEmails : [])
-      .map((a) => String(a || '').trim().toLowerCase()).filter(Boolean);
-    return this._enqueue(ticket.workspaceId, ticket.id, 'create_ticket', null, leaveOut.length ? { mailCcEmails: leaveOut } : null);
+  async enqueueTicketCreate(ticket) {
+    return this._enqueue(ticket.workspaceId, ticket.id, 'create_ticket');
   }
 
   /** Idempotent snapshot push — one pending update job per ticket is enough. */
@@ -849,9 +838,7 @@ class MirrorService {
       // "Also for" additional requesters (Phase MR5): the FS copy carries them
       // as cc_emails so FS-side replies reach them too (before MR the
       // fallback copy silently lost every additional requester).
-      // A mail-in ticket's own Cc (job.payload.mailCcEmails) is left off the
-      // create, exactly as before 24 Nov 2026 (see enqueueTicketCreate).
-      cc_emails: mirrorCcEmails(ticket, { leaveOut: job?.payload?.mailCcEmails }),
+      cc_emails: mirrorCcEmails(ticket),
       // The support address the copy replies from (6 Nov 2026): without it FreshService uses the
       // workspace default, so an Accounts Receivable copy answered as Accounts Payable.
       email_config_id: await import('../utils/fsEmailConfig.js')
