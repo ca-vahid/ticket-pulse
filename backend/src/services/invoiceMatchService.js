@@ -23,8 +23,10 @@ import {
  *  2. A match is an OPEN ticket (not Resolved / Closed / Deleted / Spam, by its
  *     base status) of the same workspace, created in the last 120 days, with a
  *     document whose invoice number normalises to the same value AND whose
- *     vendor is the same: the same normalised name, or the same sender domain
- *     (never a billing platform, free mail or our own domain).
+ *     vendor is the same: the same normalised name (or its first whole words),
+ *     or, only when one side names no vendor, the same sender domain (never a
+ *     billing platform, free mail or our own domain). "INV-12345" and "12345"
+ *     are the same document only for exactly the same vendor name.
  *  3. Never an invoice number: fewer than 4 characters, a bare year or date, a
  *     project number (2000010.02.11), a number written as an account /
  *     customer number, or a number on documents of 8+ open tickets (the same
@@ -40,7 +42,9 @@ import {
  *
  * Cost: nothing at all unless the mail yields a plausible invoice number; then
  * one bounded SQL query (tickets of the workspace created in the window, not
- * closed by name, joined to their attachments by ticket_id, LIMIT 200).
+ * closed by any status name based on Resolved / Closed, joined to their
+ * attachments by ticket_id, newest first, LIMIT 200). After intake the work
+ * runs through a small queue (2 at a time, 200 waiting).
  */
 
 export const MODES = Object.freeze(['off', 'shadow', 'live']);
@@ -119,46 +123,86 @@ function compactDate(n) {
   return y >= 2000 && y <= 2099 && m >= 1 && m <= 12 && d >= 1 && d <= 31;
 }
 
+/** Uppercase letters and digits, split into a leading letter prefix and the rest without leading zeros. */
+function splitNumber(compact) {
+  const prefix = /^[A-Z]*/.exec(compact)[0];
+  const core = compact.slice(prefix.length).replace(/^0+/, '');
+  return { prefix, core };
+}
+
 /**
- * An invoice number as a key: uppercase, letters and digits only. null when it
- * is not one: shorter than 4, no digit, a bare year or a compact date, a project
- * number, or (given the text it came from) written as an account number.
+ * An invoice number as a key: uppercase, letters and digits only, leading zeros
+ * of the number part dropped (INV-000123 → INV123, 0042117 → 42117). null when
+ * it is not one: shorter than 4, no digit, a bare year or a compact date, a
+ * project number, or (given the text it came from) written as an account number.
  */
 export function normaliseInvoiceNumber(raw, context = '') {
   const s = String(raw ?? '').trim();
   if (!s) return null;
   if (projectNumbers(s).length) return null; // 2000010.02.11, 2636058-03.01
-  const n = s.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  if (n.length < MIN_NUMBER_CHARS || n.length > 40) return null;
-  if (!/\d/.test(n)) return null;
-  if (/^(?:19|20)\d{2}$/.test(n)) return null; // a year
-  if (compactDate(n)) return null;
+  const compact = s.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!/\d/.test(compact) || compact.length > 40) return null;
+  if (/^(?:19|20)\d{2}$/.test(compact)) return null; // a year
+  if (compactDate(compact)) return null;
   // A seven-digit number the text also writes as a project number (2000010 and 2000010.02).
-  if (/^\d{7}$/.test(n) && projectNumbers(context).includes(n)) return null;
+  if (/^\d{7}$/.test(compact) && projectNumbers(context).includes(compact)) return null;
   if (context && writtenAsAccount(context, s)) return null;
-  return n;
+  const { prefix, core } = splitNumber(compact);
+  const key = `${prefix}${core}`;
+  if (key.length < MIN_NUMBER_CHARS || !/\d/.test(core)) return null;
+  return key;
 }
+
+/**
+ * The number part of a key without its letter prefix (INV12345 → 12345): two
+ * documents with the same core but different prefixes ("INV-12345" and
+ * "12345") are the same document only when the vendor names are exactly equal.
+ */
+export function invoiceCore(key) {
+  return key ? splitNumber(String(key)).core : null;
+}
+
+/** The SQL twin of invoiceCore(normalised): letters and digits, uppercase, leading letters and zeros dropped. */
+const SQL_CORE = "ltrim(regexp_replace(upper(regexp_replace(coalesce(a.name_details->>'invoiceNumber', ''), '[^A-Za-z0-9]', '', 'g')), '^[A-Z]+', ''), '0')";
 
 const VENDOR_SUFFIX = /\s+(?:inc|incorporated|ltd|limited|llc|corp|corporation|co|company|ulc)$/;
 
-/** A vendor name as a key: lowercase, punctuation gone, Inc/Ltd/LLC/Corp/Co/ULC suffixes dropped, no spaces. */
-export function normaliseVendor(name) {
+/** A vendor name's words: lowercase, punctuation gone, trailing Inc/Ltd/LLC/Corp/Co/ULC dropped. */
+export function vendorWords(name) {
   let v = String(name || '').toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
   for (let i = 0; i < 4; i += 1) {
     const next = v.replace(VENDOR_SUFFIX, '').trim();
     if (next === v) break;
     v = next;
   }
-  return v.replace(/\s+/g, '');
+  return v ? v.split(' ') : [];
 }
 
-/** The same vendor: equal keys, or one holds the other and the shorter has at least 5 characters. */
+/** A vendor name as a key: its words, without spaces. */
+export function normaliseVendor(name) {
+  return vendorWords(name).join('');
+}
+
+/**
+ * The same vendor: the same words, or the shorter name's words are the first
+ * whole words of the longer one ("Northwind Traders" / "Northwind Traders
+ * Canada") and the shorter has at least 5 characters. Never a part of a word
+ * ("Canon" is not "Canonical").
+ */
 export function vendorsMatch(a, b) {
+  const x = vendorWords(a);
+  const y = vendorWords(b);
+  if (!x.length || !y.length) return false;
+  if (x.join('') === y.join('')) return true;
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+  if (short.join('').length < 5) return false;
+  return short.every((w, i) => long[i] === w);
+}
+
+/** Exactly the same vendor name (after normalisation): needed when only the number part matches. */
+export function vendorsEqual(a, b) {
   const x = normaliseVendor(a);
-  const y = normaliseVendor(b);
-  if (!x || !y) return false;
-  if (x === y) return true;
-  return Math.min(x.length, y.length) >= 5 && (x.includes(y) || y.includes(x));
+  return Boolean(x) && x === normaliseVendor(b);
 }
 
 /** A sender domain that names a vendor: not a billing platform, free mail or our own domain. */
@@ -205,7 +249,7 @@ export function invoicePairs({ subject = '', fromEmail = '', fromName = null, bo
     const dedupe = `${key}|${normaliseVendor(vendor)}|${senderDomain || ''}`;
     if (seen.has(dedupe)) continue;
     seen.add(dedupe);
-    out.push({ vendor, invoiceNumber: raw, key, senderDomain, from: src.fileName ? 'file' : 'subject' });
+    out.push({ vendor, invoiceNumber: raw, key, core: invoiceCore(key), senderDomain, from: src.fileName ? 'file' : 'subject' });
     if (out.length >= MAX_NUMBERS) break;
   }
   return out;
@@ -228,6 +272,11 @@ async function workspaceContext(workspaceId) {
 
 // ------------------------------------------------------------ the lookup
 
+// The open-status filter runs in SQL, before the LIMIT: Resolved / Closed /
+// Deleted / Spam and every custom status whose base is Resolved or Closed ($3).
+// The number is compared by its core (letters prefix and leading zeros dropped,
+// SQL_CORE), so "INV-0012345" finds "12345"; the code then decides whether the
+// prefixes may differ (only for exactly the same vendor name).
 const LOOKUP_SQL = `
   SELECT a.id AS "attachmentId", a.ticket_id AS "ticketId", a.name_details AS "nameDetails",
          t.status, t.origin, t.native_number AS "nativeNumber", t.freshservice_ticket_id AS "freshserviceTicketId",
@@ -239,11 +288,17 @@ const LOOKUP_SQL = `
     AND t.status <> ALL($3::text[])
     AND a.workspace_id = $1
     AND a.name_details IS NOT NULL
-    AND upper(regexp_replace(coalesce(a.name_details->>'invoiceNumber', ''), '[^A-Za-z0-9]', '', 'g')) = ANY($4::text[])
+    AND ${SQL_CORE} = ANY($4::text[])
     AND NOT (a.id = ANY($5::int[]))
     AND NOT (t.id = ANY($6::int[]))
   ORDER BY t.created_at DESC, a.id DESC
   LIMIT ${MAX_ROWS}`;
+
+/** The status names that are not open: the fixed ones and every custom status based on Resolved or Closed. */
+async function notOpenNames(workspaceId) {
+  const custom = await soft(() => statusService.statusNamesForBase(workspaceId, TERMINAL_BASES), []);
+  return [...new Set([...NOT_OPEN_NAMES, ...(Array.isArray(custom) ? custom : [])].filter(Boolean).map(String))];
+}
 
 /** Which statuses count as open: by the workspace's base status (custom names too). */
 async function openStatuses(workspaceId, statuses, isOpen) {
@@ -261,45 +316,67 @@ async function openStatuses(workspaceId, statuses, isOpen) {
 }
 
 /**
- * Open tickets that already hold one of these documents.
+ * Does this mail's pair name this document? Returns how, or null.
+ *  - the same number (key) and the same vendor by name; when both sides name a
+ *    vendor and the names differ, nothing else counts;
+ *  - the same number and the same vendor sender domain, only when one side
+ *    names no vendor;
+ *  - the same number part with different letter prefixes ("INV-12345" and
+ *    "12345") only for exactly the same vendor name.
+ */
+export function pairNamesDocument(p, d, theirKey, theirDomain) {
+  const theirCore = invoiceCore(theirKey);
+  if (p.key !== theirKey) {
+    if (p.core && p.core === theirCore && p.core.length >= MIN_NUMBER_CHARS && vendorsEqual(p.vendor, d.vendor)) return 'vendor_exact';
+    return null;
+  }
+  if (p.vendor && d.vendor) return vendorsMatch(p.vendor, d.vendor) ? 'vendor' : null;
+  if (p.senderDomain && theirDomain && sameDomain(p.senderDomain, theirDomain)) return 'sender_domain';
+  return null;
+}
+
+/**
+ * Open tickets that already hold one of these documents. Throws when the lookup
+ * fails (findInvoiceMatches and evaluate catch it).
  * @returns {Promise<Array<{ ticketId, displayRef, vendor, invoiceNumber, attachmentId, matchedBy }>>}
  */
 export async function matchPairs(workspaceId, pairs, { internalDomains = [], excludeTicketIds = [], excludeAttachmentIds = [], now = Date.now(), isOpen = null } = {}) {
   const ws = Number(workspaceId);
   const wanted = (pairs || []).filter((p) => p?.key);
   if (!ws || !wanted.length || typeof prisma.$queryRawUnsafe !== 'function') return [];
-  const keys = [...new Set(wanted.map((p) => p.key))];
+  const cores = [...new Set(wanted.map((p) => p.core || invoiceCore(p.key)).filter(Boolean))];
   const since = new Date(now - WINDOW_DAYS * DAY);
   const ints = (list) => [...new Set((list || []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
-  const rows = await prisma.$queryRawUnsafe(LOOKUP_SQL, ws, since, NOT_OPEN_NAMES, keys, ints(excludeAttachmentIds), ints(excludeTicketIds));
+  const rows = await prisma.$queryRawUnsafe(LOOKUP_SQL, ws, since, await notOpenNames(ws), cores, ints(excludeAttachmentIds), ints(excludeTicketIds));
   if (!Array.isArray(rows) || !rows.length) return [];
 
+  // The SQL filter is by name; a status's base is checked here too (a name the registry does not list).
   const open = await openStatuses(ws, rows.map((r) => r.status), isOpen);
   // A number on documents of many open tickets is an account number, not one document.
-  const ticketsPerKey = new Map();
+  const ticketsPerCore = new Map();
   const candidates = [];
   for (const r of rows) {
     const d = r.nameDetails && typeof r.nameDetails === 'object' ? r.nameDetails : null;
     if (!d || !open.has(r.status)) continue;
     const theirKey = normaliseInvoiceNumber(d.invoiceNumber);
     if (!theirKey) continue;
-    if (!ticketsPerKey.has(theirKey)) ticketsPerKey.set(theirKey, new Set());
-    ticketsPerKey.get(theirKey).add(Number(r.ticketId));
-    candidates.push({ r, d, theirKey });
+    const core = invoiceCore(theirKey);
+    if (!ticketsPerCore.has(core)) ticketsPerCore.set(core, new Set());
+    ticketsPerCore.get(core).add(Number(r.ticketId));
+    candidates.push({ r, d, theirKey, core });
   }
 
   const out = [];
   const seenTickets = new Set();
-  for (const { r, d, theirKey } of candidates) {
-    if ((ticketsPerKey.get(theirKey)?.size || 0) >= COMMON_NUMBER_TICKETS) continue;
+  for (const { r, d, theirKey, core } of candidates) {
+    if ((ticketsPerCore.get(core)?.size || 0) >= COMMON_NUMBER_TICKETS) continue;
     const ticketId = Number(r.ticketId);
     if (seenTickets.has(ticketId)) continue;
     const theirDomain = vendorDomain(d.senderDomain, internalDomains);
     let hit = null;
     for (const p of wanted) {
-      if (p.key !== theirKey) continue;
-      if (p.vendor && d.vendor && vendorsMatch(p.vendor, d.vendor)) { hit = { p, matchedBy: 'vendor' }; break; }
-      if (p.senderDomain && theirDomain && sameDomain(p.senderDomain, theirDomain)) { hit = { p, matchedBy: 'sender_domain' }; break; }
+      const matchedBy = pairNamesDocument(p, d, theirKey, theirDomain);
+      if (matchedBy) { hit = { p, matchedBy }; break; }
     }
     if (!hit) continue;
     seenTickets.add(ticketId);
@@ -333,32 +410,52 @@ export async function findInvoiceMatches({ workspaceId, subject = '', fromEmail 
   }
 }
 
-/** The pairs and the matches together (Shadow keeps both). Never throws. */
+/**
+ * The pairs and the matches together (Shadow keeps both). Never throws. A
+ * failed lookup keeps the pairs already found and says so in `error`, so the
+ * report counts it as a failure, never as "nothing".
+ */
 export async function evaluate(input = {}) {
+  let pairs = [];
   try {
     const { aliases, internalDomains } = await workspaceContext(input.workspaceId);
-    const pairs = invoicePairs({ ...input, aliases, internalDomains });
+    pairs = invoicePairs({ ...input, aliases, internalDomains });
     const matches = pairs.length ? await matchPairs(input.workspaceId, pairs, { ...input, internalDomains }) : [];
     return { pairs, matches };
   } catch (err) {
-    logger.warn(`Invoice match: evaluation failed for workspace ${input.workspaceId} (treated as no match): ${err.message}`);
-    return { pairs: [], matches: [], error: String(err.message).slice(0, 200) };
+    logger.warn(`Invoice match: evaluation failed for workspace ${input.workspaceId}: ${err.message}`);
+    return { pairs, matches: [], error: String(err.message || 'lookup failed').slice(0, 200) };
   }
 }
 
 // --------------------------------------------------------- attachment names
 
-const NAMES_TIMEOUT_MS = 8000;
+export const NAMES_TIMEOUT_MS = 8000;
+/** Live, inline in intake: the Graph read may take at most this long. */
+export const LIVE_NAMES_TIMEOUT_MS = 2000;
+
+/** The document names already in the mail payload (the ingest's own object), or null when it carries none. */
+export function payloadAttachmentNames(email) {
+  if (Array.isArray(email?.attachmentNames)) return email.attachmentNames.slice(0, MAX_ATTACHMENT_NAMES);
+  if (Array.isArray(email?.attachments)) {
+    const names = email.attachments
+      .filter((a) => a && isNameableDocument({ fileName: a.name || a.fileName, contentType: a.contentType }))
+      .map((a) => String(a.name || a.fileName));
+    return names.slice(0, MAX_ATTACHMENT_NAMES);
+  }
+  return null;
+}
 
 /**
  * The file names a mail carries, without downloading anything: names the
  * e-mail object already holds, else one Graph metadata read
- * (`/attachments?$select=name,contentType,isInline`), at most 30, 8 s.
- * [] on any failure. Used only where the files are not stored yet (held mail,
- * the Live forward check).
+ * (`/attachments?$select=name,contentType,isInline`), at most 30, within
+ * `timeoutMs` (8 s after intake; 2 s inline in Live). [] on any failure. Used
+ * only where the files are not stored yet (held mail, the Live forward check).
  */
-export async function attachmentNamesFor(connection, email) {
-  if (Array.isArray(email?.attachmentNames)) return email.attachmentNames.slice(0, MAX_ATTACHMENT_NAMES);
+export async function attachmentNamesFor(connection, email, { timeoutMs = NAMES_TIMEOUT_MS } = {}) {
+  const own = payloadAttachmentNames(email);
+  if (own) return own;
   if (!email?.hasAttachments || !email?.id || !connection?.address) return [];
   return soft(async () => {
     const { default: graphMailClient } = await import('../integrations/graphMailClient.js');
@@ -366,7 +463,7 @@ export async function attachmentNamesFor(connection, email) {
     const client = graphMailClient._getClient();
     const read = client.api(`/users/${connection.address}/messages/${email.id}/attachments`).select('name,contentType,isInline').top(30).get();
     let timer;
-    const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), NAMES_TIMEOUT_MS); timer.unref?.(); });
+    const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), timeoutMs); timer.unref?.(); });
     try {
       const response = await Promise.race([read, timeout]);
       return (response?.value || [])
@@ -381,29 +478,46 @@ export async function attachmentNamesFor(connection, email) {
 
 // ----------------------------------------------------------- Shadow record
 
-/** 'attach_to TP-x' for the newest match, else 'nothing'. */
-export function wouldHaveFor(matches) {
+/** 'attach_to TP-x' for the newest match, 'lookup_failed' when the lookup failed, else 'nothing'. */
+export function wouldHaveFor(matches, error = null) {
+  if (error) return 'lookup_failed';
   return Array.isArray(matches) && matches.length ? `attach_to ${matches[0].displayRef}` : 'nothing';
 }
 
-/** Did intake do what the match says? true / false; null for held mail (a person or Mail triage decides). */
+/**
+ * Did intake do what the match says? null for held mail (a person or Mail
+ * triage decides) and for a failed lookup. A new ticket agrees when nothing
+ * matched; a reply agrees when its ticket is ANY of the matches.
+ */
 export function agreement(record) {
-  if (!record || record.actual === 'held') return null;
-  if (record.wouldHave === 'nothing') return record.actual === 'new_ticket';
-  return record.actual === `reply_to ${String(record.wouldHave).replace(/^attach_to /, '')}`;
+  if (!record || record.actual === 'held' || record.error) return null;
+  const matches = Array.isArray(record.matches) ? record.matches : [];
+  if (record.actual === 'new_ticket') return matches.length === 0;
+  if (!matches.length) return false;
+  const actualId = Number(record.actualTicketId);
+  if (actualId) return matches.some((m) => Number(m.ticketId) === actualId);
+  return matches.some((m) => record.actual === `reply_to ${m.displayRef}`);
 }
 
-export function buildRecord({ mode, pairs = [], matches = [], actual, actualTicketId = null, attachmentNames = [], ms = null, at = new Date() }) {
+/**
+ * The Shadow record. `wouldHave` is what the match says; `liveWouldAct` is
+ * whether Live would actually have acted on it: intake took a path Live checks
+ * (a follow-up check, or a non-agent's FW/Fwd new mail) AND something matched.
+ */
+export function buildRecord({ mode, pairs = [], matches = [], actual, actualTicketId = null, attachmentNames = [], ms = null, at = new Date(), error = null, intakeKind = null, liveEligible = false }) {
   const record = {
     mode,
     matches,
-    wouldHave: wouldHaveFor(matches),
+    wouldHave: wouldHaveFor(matches, error),
     actual,
     ...(actualTicketId ? { actualTicketId } : {}),
+    intakeKind: intakeKind || null,
+    liveWouldAct: Boolean(liveEligible) && !error && matches.length > 0,
     pairs: pairs.map((p) => ({ vendor: p.vendor || null, invoiceNumber: p.invoiceNumber, from: p.from })),
     attachmentNames: attachmentNames.slice(0, MAX_ATTACHMENT_NAMES),
     checkedAt: (at instanceof Date ? at : new Date(at)).toISOString(),
     ...(ms !== null ? { ms } : {}),
+    ...(error ? { error: String(error).slice(0, 200) } : {}),
   };
   record.agrees = agreement(record);
   return record;
@@ -434,9 +548,11 @@ async function writeOnHeld(heldId, record) {
  * beside it, changing nothing else. `outcome` is intake's: 'created' | 'reply' | 'held'.
  *   created / reply  the mail's first thread entry (by its Message-ID): raw_payload.invoiceMatch
  *   held             the held row: decision.invoiceMatch
+ * intakeKind is the intake classification (null when the mail matched a
+ * ticket before it); liveEligible is whether Live checks mail on that path.
  * Never throws. Returns the record, or null when nothing was written.
  */
-export async function recordAfterIntake(connection, email, outcome, { attachmentNames = null, now = Date.now() } = {}) {
+export async function recordAfterIntake(connection, email, outcome, { attachmentNames = null, now = Date.now(), intakeKind = null, liveEligible = false } = {}) {
   const started = Date.now();
   try {
     const workspaceId = Number(connection?.workspaceId);
@@ -444,6 +560,7 @@ export async function recordAfterIntake(connection, email, outcome, { attachment
     const mode = await getMode(workspaceId);
     if (mode === 'off') return null;
     const messageId = String(email?.internetMessageId || '').trim();
+    const live = { intakeKind, liveEligible };
     const base = { workspaceId, subject: email?.subject || '', fromEmail: email?.from || '', fromName: email?.fromName || null, bodyText: email?.bodyText || email?.bodyPreview || null, now };
 
     if (outcome === 'held') {
@@ -451,8 +568,8 @@ export async function recordAfterIntake(connection, email, outcome, { attachment
       const held = await prisma.mailboxHeldMessage.findFirst({ where: { connectionId: connection.id, internetMessageId: key.slice(0, 255) }, select: { id: true } });
       if (!held) return null;
       const names = Array.isArray(attachmentNames) ? attachmentNames : await attachmentNamesFor(connection, email);
-      const { pairs, matches } = await evaluate({ ...base, attachmentNames: names });
-      const record = buildRecord({ mode, pairs, matches, actual: 'held', attachmentNames: names, ms: Date.now() - started });
+      const { pairs, matches, error } = await evaluate({ ...base, attachmentNames: names });
+      const record = buildRecord({ mode, pairs, matches, error, ...live, actual: 'held', attachmentNames: names, ms: Date.now() - started });
       await writeOnHeld(held.id, record);
       return record;
     }
@@ -479,7 +596,7 @@ export async function recordAfterIntake(connection, email, outcome, { attachment
       take: 30,
     });
     const names = (own || []).map((a) => a.fileName);
-    const { pairs, matches } = await evaluate({
+    const { pairs, matches, error } = await evaluate({
       ...base,
       attachmentNames: names,
       excludeAttachmentIds: (own || []).map((a) => a.id),
@@ -488,7 +605,7 @@ export async function recordAfterIntake(connection, email, outcome, { attachment
     });
     const ref = ticket ? ticketDisplayRef({ ...ticket, freshserviceTicketId: ticket.freshserviceTicketId === null || ticket.freshserviceTicketId === undefined ? null : String(ticket.freshserviceTicketId) }) : `TP-ID-${entry.ticketId}`;
     const record = buildRecord({
-      mode, pairs, matches,
+      mode, pairs, matches, error, ...live,
       actual: isNew ? 'new_ticket' : `reply_to ${ref}`,
       actualTicketId: entry.ticketId,
       attachmentNames: names,
@@ -501,6 +618,55 @@ export async function recordAfterIntake(connection, email, outcome, { attachment
     return null;
   }
 }
+
+// The after-intake jobs run through a small queue: at most 2 at a time and 200
+// waiting, so a burst of mail never piles up lookups. A full queue drops the job
+// (a Shadow record is a measurement, not a duty) and logs it once a minute.
+export const QUEUE_CONCURRENCY = 2;
+export const QUEUE_MAX_WAITING = 200;
+const jobQueue = [];
+let jobsRunning = 0;
+let lastDropLogAt = 0;
+
+function pumpJobs() {
+  while (jobsRunning < QUEUE_CONCURRENCY && jobQueue.length) {
+    const job = jobQueue.shift();
+    jobsRunning += 1;
+    Promise.resolve()
+      .then(() => recordAfterIntake(...job.args))
+      .catch(() => null)
+      .then((result) => {
+        jobsRunning -= 1;
+        job.resolve(result ?? null);
+        pumpJobs();
+      });
+  }
+}
+
+/**
+ * Queue the after-intake record. Synchronous for the caller and never throws;
+ * the promise settles with the record (or null: dropped, off, nothing written).
+ */
+export function queueRecordAfterIntake(connection, email, outcome, options = {}) {
+  try {
+    if (!['created', 'reply', 'held'].includes(outcome) || !connection?.workspaceId) return Promise.resolve(null);
+    if (jobQueue.length >= QUEUE_MAX_WAITING) {
+      if (Date.now() - lastDropLogAt > 60_000) {
+        lastDropLogAt = Date.now();
+        logger.warn(`Invoice match: the after-intake queue is full (${QUEUE_MAX_WAITING} waiting); records are skipped until it drains`);
+      }
+      return Promise.resolve(null);
+    }
+    return new Promise((resolve) => {
+      jobQueue.push({ args: [connection, email, outcome, options], resolve });
+      pumpJobs();
+    });
+  } catch {
+    return Promise.resolve(null);
+  }
+}
+
+export const _queueStateForTests = () => ({ running: jobsRunning, waiting: jobQueue.length });
 
 // ------------------------------------------------------------------ report
 
@@ -576,6 +742,10 @@ export async function shadowReport(workspaceId, { days = 7, limit = 500 } = {}) 
     total: rows.length,
     withNumber: rows.filter((r) => Array.isArray(r.pairs) && r.pairs.length).length,
     withMatch: withMatch.length,
+    // Where Live would actually have acted (its paths only), apart from what the match says.
+    liveWouldAct: rows.filter((r) => r.liveWouldAct === true).length,
+    // The lookup failed: neither "nothing" nor a match.
+    failed: rows.filter((r) => Boolean(r.error)).length,
     agree: rows.filter((r) => r.agrees === true).length,
     disagree: rows.filter((r) => r.agrees === false).length,
     // The cases to judge: a match where intake made a new ticket or filed it elsewhere.
@@ -589,5 +759,5 @@ export async function shadowReport(workspaceId, { days = 7, limit = 500 } = {}) 
 
 export default {
   MODES, WINDOW_DAYS, settingsKey, getMode, setMode, normalizeMode, normaliseInvoiceNumber, normaliseVendor, vendorsMatch,
-  invoicePairs, matchPairs, findInvoiceMatches, evaluate, attachmentNamesFor, recordAfterIntake, shadowReport, buildRecord,
+  invoicePairs, matchPairs, findInvoiceMatches, evaluate, attachmentNamesFor, recordAfterIntake, queueRecordAfterIntake, shadowReport, buildRecord,
 };

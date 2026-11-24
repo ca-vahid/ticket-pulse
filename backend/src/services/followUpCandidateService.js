@@ -84,7 +84,7 @@ async function onboardingIds(tickets) {
  */
 export async function findFollowUpCandidates(workspaceId, { subject, normalize, isOpen = null, now = Date.now(), invoiceMatches = [] } = {}) {
   try {
-    const invoice = invoiceCandidates(invoiceMatches);
+    const invoice = await keptInvoice(workspaceId, invoiceCandidates(invoiceMatches));
     const key = followUpSubjectKey(typeof normalize === 'function' ? normalize(subject) : subject);
     const numbers = referenceIdentities(subject, { now }).slice(0, MAX_NUMBERS);
     const fragment = key.length >= MIN_SUBJECT_KEY ? searchFragment(key) : '';
@@ -159,6 +159,28 @@ function invoiceCandidates(matches) {
     out.push({ ticketId, why: `same invoice number ${m.invoiceNumber || ''}${from} on an open ticket`.replace(/\s+/g, ' ') });
   }
   return out;
+}
+
+/**
+ * Invoice candidates after the same exclusions as every other candidate: the
+ * ticket must be in this workspace and not deleted or spam, not a Security
+ * ticket, and not part of the onboarding / offboarding process. A failed read
+ * drops them (the mail then goes on as without the match).
+ */
+async function keptInvoice(workspaceId, invoice) {
+  if (!invoice.length) return invoice;
+  const rows = await soft(() => prisma.ticket.findMany({
+    where: { workspaceId: Number(workspaceId), id: { in: invoice.map((i) => i.ticketId) } },
+    select: {
+      id: true, subject: true, status: true, category: true,
+      internalCategory: { select: { name: true, parent: { select: { name: true } } } },
+    },
+    take: FOLLOW_UP_MAX_CANDIDATES * 2,
+  }), []);
+  const ok = (Array.isArray(rows) ? rows : []).filter((t) => !['Deleted', 'Spam'].includes(t.status) && !isSecurity(t));
+  const family = ok.length ? await onboardingIds(ok) : new Set();
+  const keep = new Set(ok.filter((t) => !family.has(t.id)).map((t) => t.id));
+  return invoice.filter((i) => keep.has(i.ticketId));
 }
 
 /**

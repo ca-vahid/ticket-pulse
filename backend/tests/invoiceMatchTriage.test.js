@@ -54,7 +54,12 @@ beforeEach(() => {
 });
 
 describe('the follow-up finder', () => {
+  const T880 = { id: 880, subject: 'Invoice INV-20417 from Acme Supplies', status: 'Open', category: null, internalCategory: null };
+  /** The matched ticket, read by id for the exclusions; `rows` answers the subject / number search. */
+  const tickets = (byId, rows = []) => prismaMock.ticket.findMany.mockImplementation(async ({ where }) => (where?.id?.in ? byId.filter((t) => where.id.in.includes(t.id)) : rows));
+
   test('an invoice match alone is a candidate (rule same_invoice), the best guess, open', async () => {
+    tickets([T880]);
     const found = await findFollowUpCandidates(WS, { subject: 'FW: Documents', normalize, invoiceMatches: [MATCH] });
     expect(found).toEqual({
       candidates: [{ ticketId: 880, why: 'same invoice number INV-20417 from Acme Supplies on an open ticket' }],
@@ -64,7 +69,7 @@ describe('the follow-up finder', () => {
 
   test('with subject candidates: the invoice ticket first; a ticket found both ways is one row with both reasons', async () => {
     const closed = (id, subject) => ({ id, subject, status: 'Closed', createdAt: new Date(), category: null, internalCategory: null });
-    prismaMock.ticket.findMany.mockResolvedValue([closed(891, 'Statement for October'), closed(880, 'Statement for October')]);
+    tickets([T880], [closed(891, 'Statement for October'), closed(880, 'Statement for October')]);
     const found = await findFollowUpCandidates(WS, { subject: 'RE: Statement for October', normalize, invoiceMatches: [MATCH] });
     expect(found.candidates).toEqual([
       { ticketId: 880, why: 'same invoice number INV-20417 from Acme Supplies on an open ticket; same subject' },
@@ -75,6 +80,27 @@ describe('the follow-up finder', () => {
 
   test('no invoice matches: exactly as before', async () => {
     expect(await findFollowUpCandidates(WS, { subject: 'FW: Documents', normalize })).toBeNull();
+  });
+
+  test('invoice matches pass the same exclusions: Security, onboarding / offboarding, deleted / spam, another workspace', async () => {
+    const find = () => findFollowUpCandidates(WS, { subject: 'FW: Documents', normalize, invoiceMatches: [MATCH] });
+    tickets([{ ...T880, internalCategory: { name: 'Phishing', parent: { name: 'Security' } } }]);
+    expect(await find()).toBeNull();
+    tickets([{ ...T880, category: 'Security' }]);
+    expect(await find()).toBeNull();
+    tickets([{ ...T880, subject: 'Child ticket - Laptop for the new accountant' }]);
+    expect(await find()).toBeNull();
+    tickets([T880]);
+    prismaMock.hrLifecycleFamilyMember.findMany.mockResolvedValue([{ ticketId: 880 }]);
+    expect(await find()).toBeNull();
+    prismaMock.hrLifecycleFamilyMember.findMany.mockResolvedValue([]);
+    tickets([{ ...T880, status: 'Spam' }]);
+    expect(await find()).toBeNull();
+    tickets([]); // not in this workspace: the read is scoped to it
+    expect(await find()).toBeNull();
+    expect(prismaMock.ticket.findMany.mock.calls.at(-1)[0].where).toEqual({ workspaceId: WS, id: { in: [880] } });
+    tickets([T880]);
+    expect((await find()).candidates).toEqual([{ ticketId: 880, why: expect.stringContaining('same invoice number INV-20417') }]);
   });
 });
 
