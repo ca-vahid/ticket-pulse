@@ -1403,6 +1403,37 @@ html[data-motion="reduce"] .tp-side-fade { transition: none; }
   50% { transform: scale(0.7); opacity: 0.5; }
 }
 
+/* Attachment thumbnails (24 Nov 2026): a soft sweep while a first page loads
+   (steady tint under reduced motion), and the tiny Word "page" type scale. */
+.tp-thumb-shimmer {
+  background: linear-gradient(100deg, transparent 30%, hsl(var(--card) / 0.6) 50%, transparent 70%);
+  background-size: 220% 100%;
+  animation: tpThumbShimmer 1.4s linear infinite;
+}
+@keyframes tpThumbShimmer {
+  from { background-position: 130% 0; }
+  to { background-position: -130% 0; }
+}
+html[data-motion="reduce"] .tp-thumb-shimmer {
+  animation: none;
+  background: hsl(var(--card) / 0.35);
+}
+.tp-thumb-doc {
+  font-family: Georgia, Cambria, 'Times New Roman', serif;
+  font-size: 7px;
+  line-height: 1.45;
+  color: hsl(var(--foreground) / 0.85);
+}
+.tp-thumb-doc > * + * { margin-top: 0.5em; }
+.tp-thumb-doc h1 { font-size: 1.7em; font-weight: 700; line-height: 1.2; color: hsl(var(--foreground)); }
+.tp-thumb-doc h2 { font-size: 1.4em; font-weight: 700; line-height: 1.2; color: hsl(var(--foreground)); }
+.tp-thumb-doc :is(h3, h4, h5, h6) { font-size: 1.15em; font-weight: 700; color: hsl(var(--foreground)); }
+.tp-thumb-doc ul { list-style: disc; padding-left: 1.3em; }
+.tp-thumb-doc ol { list-style: decimal; padding-left: 1.3em; }
+.tp-thumb-doc table { border-collapse: collapse; }
+.tp-thumb-doc :is(td, th) { border: 1px solid hsl(var(--border)); padding: 0.1em 0.35em; }
+.tp-thumb-doc :is(td, th) p { margin: 0; }
+
 /* Completion: the assignee box itself pops — springs in with a lift, then a
    green ring blooms off it. One effect, on the element that changed
    (QA 07-10: earlier attempts decorated the row/subject instead). */

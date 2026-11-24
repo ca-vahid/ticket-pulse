@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.4.11-preview';
+export const APP_VERSION = '4.4.12-preview';
 
 export const changelog = [
+  {
+    version: '4.4.12-preview',
+    date: 'November 24, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Thumbnails on the Attachments tab</strong> &mdash; PDFs show their first page, Word files their opening lines, spreadsheets and CSV files their first rows, and text files and attached e-mails their first lines, instead of just an icon. Thumbnails load as you scroll, a couple at a time, and files over 10 MB keep the icon.' },
+    ],
+  },
   {
     version: '4.4.11-preview',
     date: 'November 24, 2026',
