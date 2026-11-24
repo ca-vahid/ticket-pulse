@@ -8,6 +8,9 @@ const prismaMock = {
   ticket: {
     findUnique: jest.fn(),
   },
+  // 24 Nov 2026: a workflow e-mail checks our own mailboxes first (none here).
+  mailboxConnection: { findMany: jest.fn(async () => []) },
+  appSettings: { findUnique: jest.fn(async () => null) },
 };
 
 // Mega 08-31 Phase MB-1a: the workflow/lifecycle engine no longer imports

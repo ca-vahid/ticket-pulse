@@ -64,8 +64,11 @@ jest.unstable_mockModule('../src/services/prisma.js', () => ({
   default: prismaMock,
 }));
 
+// Shadow asks what Live would take off (24 Nov 2026 mail-loop guard); nothing by default.
+const ownMailboxSplitMock = jest.fn(async (to = [], cc = [], bcc = []) => ({ to, cc, bcc, removed: [] }));
 jest.unstable_mockModule('../src/services/notificationDeliveryService.js', () => ({
   processDelivery: processDeliveryMock,
+  ownMailboxSplit: ownMailboxSplitMock,
 }));
 
 jest.unstable_mockModule('../src/services/notificationWorkflowRepository.js', () => ({
@@ -307,6 +310,20 @@ describe('workflow e-mail recorded in the conversation', () => {
     expect(processDeliveryMock.mock.invocationCallOrder[0]).toBeLessThan(prismaMock.ticketThreadEntry.create.mock.invocationCallOrder[0]);
   });
 
+  test('24 Nov 2026: an e-mail the delivery did not send (only our own mailboxes, or machine senders, on To) is not recorded', async () => {
+    processDeliveryMock.mockResolvedValue({ id: 1234, success: true, skipped: 'own_mailbox' });
+    const result = await runLive(definitionWith({ recordInConversation: true }));
+    expect(result.status).toBe('completed');
+    expect(prismaMock.ticketThreadEntry.create).not.toHaveBeenCalled();
+    expect(sendOutput(result)).toMatchObject({ skipped: true, reason: 'Not sent: every recipient is one of our own mailboxes', deliveryId: 1234 });
+    expect(sendOutput(result).conversationRecord).toBeUndefined();
+
+    processDeliveryMock.mockResolvedValue({ id: 1235, success: true, skipped: 'machine_sender' });
+    const again = await runLive(definitionWith({ recordInConversation: true }), { eventContext: { ...eventContext, event: { ...eventContext.event, dedupeStamp: 'machine' } } });
+    expect(prismaMock.ticketThreadEntry.create).not.toHaveBeenCalled();
+    expect(sendOutput(again)).toMatchObject({ skipped: true, reason: 'Not sent: every recipient is a machine sender' });
+  });
+
   test('it never starts another workflow and is never mirrored to FreshService', async () => {
     await runLive(definitionWith({ recordInConversation: true }));
     expect(recorded()).toHaveLength(1);
@@ -323,6 +340,21 @@ describe('workflow e-mail recorded in the conversation', () => {
     expect(out).toMatchObject({ mocked: true, skipped: true, wouldRecordInConversation: true });
     expect(processDeliveryMock).not.toHaveBeenCalled();
     expect(prismaMock.ticketThreadEntry.create).not.toHaveBeenCalled();
+  });
+
+  test('24 Nov 2026: Shadow records on the delivery which of our own mailboxes Live would take off', async () => {
+    ownMailboxSplitMock.mockResolvedValueOnce({ to: [], cc: [], bcc: [], removed: [{ address: 'requester@example.com', field: 'to' }] });
+    await executeDefinition({
+      workflow: namedWorkflow, definition: definitionWith(), eventContext, dryRun: true, executionMode: 'mock', triggerSource: 'test',
+    });
+    const row = prismaMock.notificationDelivery.create.mock.calls[0][0].data;
+    expect(row.status).toBe('mocked');
+    expect(row.payload).toMatchObject({
+      mockMode: true,
+      ownMailboxWouldRemove: [{ address: 'requester@example.com', field: 'to' }],
+      wouldSkip: 'own_mailbox',
+    });
+    expect(processDeliveryMock).not.toHaveBeenCalled();
   });
 
   test('the send failed: nothing is recorded', async () => {

@@ -51,6 +51,9 @@ export const HOLD_REASONS = Object.freeze([
   // 11 Nov 2026: it would have become a new ticket, but a ticket about the same matter exists
   // (same subject, or a shared invoice / PO number), open or closed. candidates = [{ ticketId, why }].
   'possible_follow_up',
+  // 24 Nov 2026 (mail-loop guard): a new ticket would have been filed for one of our own
+  // mailboxes (a hand-off from one team mailbox to another). A person files it for the right person.
+  'own_mailbox_requester',
 ]);
 
 /** Short labels for the review screens. */
@@ -64,6 +67,7 @@ export const HOLD_REASON_LABELS = Object.freeze({
   ingest_error: 'Could not be filed',
   meeting_invite: 'Meeting invite',
   possible_follow_up: 'Looks like a follow-up to an existing ticket',
+  own_mailbox_requester: 'From one of our own team mailboxes',
 });
 
 export const HOLD_STATUSES = Object.freeze(['held', 'attached', 'created', 'discarded']);
@@ -831,6 +835,7 @@ export const REASON_WORDS = {
   ingest_error: 'it could not be filed',
   meeting_invite: 'a meeting invite',
   possible_follow_up: 'it looks like a follow-up to an existing ticket',
+  own_mailbox_requester: 'it would have been a ticket for one of our own team mailboxes',
 };
 
 const FONT = "font-family:Calibri,'Segoe UI',Arial,sans-serif;";

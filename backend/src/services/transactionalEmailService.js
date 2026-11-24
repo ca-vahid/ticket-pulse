@@ -128,6 +128,9 @@ const LABEL_KIND = Object.freeze({
   'auto-help handover': 'notice',
 });
 
+/** The header that marks mail Ticket Pulse sent itself (intake reads it as `email.ticketPulseMail`). */
+export const OWN_MAIL_HEADER = 'X-Ticket-Pulse-Mail';
+
 export function systemSenderName(label) {
   const key = String(label || '').trim().toLowerCase();
   if (!key) return null;
@@ -157,6 +160,10 @@ export async function deliverTransactionalEmail({
   // 22 Nov 2026: the ticket the e-mail is about, for the team-mailbox pick
   // only (no threading — that stays with `ticket`). See teamTicketFor.
   mailboxTicket = null,
+  // 24 Nov 2026 (mail loop): an automatic e-mail (a workflow's). It carries
+  // `X-Ticket-Pulse-Mail: workflow` on both lanes and, on SendGrid (Graph only
+  // takes X- names), the RFC 3834 `Auto-Submitted: auto-generated`.
+  automated = false,
 }) {
   const teamTicket = teamTicketFor(workspaceId, mailboxTicket);
   const recipients = normalizeList(to);
@@ -214,6 +221,7 @@ export async function deliverTransactionalEmail({
           replyTo,
           inReplyTo: threading.inReplyTo,
           references: threading.references,
+          ...(automated ? { headers: { [OWN_MAIL_HEADER]: 'workflow' } } : {}),
         });
         await emailHealthService.recordSuccess({
           workspaceId, channel: 'email', context: label, provider: 'msgraph',
@@ -272,6 +280,7 @@ export async function deliverTransactionalEmail({
       ticketIdForMessageId: ticket?.id || null,
       inReplyTo: threading.inReplyTo,
       references: threading.references,
+      ...(automated ? { headers: { 'Auto-Submitted': 'auto-generated', [OWN_MAIL_HEADER]: 'workflow' } } : {}),
     });
     const messageId = result?.messageId || null;
     if (threadEntryId && messageId) await storeEntryMessageId(threadEntryId, messageId);

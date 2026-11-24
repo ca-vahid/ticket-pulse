@@ -3646,6 +3646,25 @@ async function executeNode({
     }
 
     const isMock = executionMode === EXECUTION_MODE_MOCK;
+    // Shadow records what Live would take off (24 Nov 2026 mail-loop guard): our
+    // own mailboxes never get a workflow e-mail. Best effort: a failure records nothing.
+    let ownMailboxPreview = null;
+    if (isMock) {
+      try {
+        const { ownMailboxSplit } = await import('./notificationDeliveryService.js');
+        if (typeof ownMailboxSplit === 'function') {
+          const split = await ownMailboxSplit(toRecipients, ccRecipients, bccRecipients);
+          if (split?.removed?.length) {
+            ownMailboxPreview = {
+              ownMailboxWouldRemove: split.removed,
+              ...(split.to.some((a) => String(a || '').includes('@')) ? {} : { wouldSkip: 'own_mailbox' }),
+            };
+          }
+        }
+      } catch (error) {
+        logger.debug(`Shadow own-mailbox preview skipped: ${error.message}`);
+      }
+    }
     const dedupeKey = buildDeliveryDedupeKey({
       workflow,
       run,
@@ -3700,17 +3719,21 @@ async function executeNode({
           // A Shadow row (never sent) records the address it would have left from.
           fromAddress: (isMock ? plannedFromAddress : null) || node.data?.fromAddress || null,
           dedupeKey,
-          payload: sanitizeWorkflowAuditPayload(safeJson({
-            mockMode: isMock,
-            wouldSend: isMock,
-            workflowId: workflow.id,
-            workflowVersion: workflow.publishedVersion,
-            nodeId: node.id,
-            event: eventContext.event,
-            actionLinks: output.actionLinks || {},
-            branding: output.branding || {},
-            brandingWarnings: output.brandingWarnings || [],
-          })),
+          payload: {
+            ...sanitizeWorkflowAuditPayload(safeJson({
+              mockMode: isMock,
+              wouldSend: isMock,
+              workflowId: workflow.id,
+              workflowVersion: workflow.publishedVersion,
+              nodeId: node.id,
+              event: eventContext.event,
+              actionLinks: output.actionLinks || {},
+              branding: output.branding || {},
+              brandingWarnings: output.brandingWarnings || [],
+            })),
+            // Addresses, like the row's own recipient lists (not the step's audit copy).
+            ...(ownMailboxPreview || {}),
+          },
         },
       });
     } catch (error) {
@@ -3747,6 +3770,11 @@ async function executeNode({
       throw new Error(deliveryResult.error || 'Email delivery failed');
     }
     let conversationRecord = null;
+    // 24 Nov 2026: an e-mail that was not sent (every To a machine sender or
+    // one of our own mailboxes) is not recorded as sent in the conversation.
+    if (deliveryResult.skipped) {
+      return { ...output, deliveryId: delivery.id, deliveryResult, skipped: true, reason: deliveryResult.skipped === 'own_mailbox' ? 'Not sent: every recipient is one of our own mailboxes' : 'Not sent: every recipient is a machine sender' };
+    }
     if (recordInConversation) {
       // The mail is already out: a failure to record it must not fail the step
       // (a failed step would be retried and the customer mailed twice).

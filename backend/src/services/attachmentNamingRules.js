@@ -505,7 +505,8 @@ export function tidyVendor(raw) {
 export function formatAttachmentName({ vendor, invoiceNumber = null, date, ext }) {
   let v = cleanNamePart(tidyVendor(vendor));
   if (!v) return null;
-  let inv = cpSlice(cleanNamePart(invoiceNumber), MAX_INVOICE_CHARS).trim();
+  // Spaces printed inside a number ("328 9392") never belong in a file name.
+  let inv = cpSlice(cleanNamePart(invoiceNumber).replace(/\s+/g, ''), MAX_INVOICE_CHARS).trim();
   if (inv && inv.toLowerCase() === v.toLowerCase()) inv = '';
   const datePart = /^\d{4}-\d{2}-\d{2}$/.test(String(date || '')) ? String(date).replace(/-/g, '_') : '';
   const fixed = [inv, datePart].filter(Boolean).join('_');
