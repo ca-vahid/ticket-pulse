@@ -279,10 +279,18 @@ class AzureAdService {
    * address IS the UPN. Two live BGC addresses (skumar@, aschevers@) are
    * aliases on other mailboxes, so a UPN-only check would have called them
    * phantoms and rejected two real employees' tickets.
+   *
+   * `timeoutMs` (24 Nov 2026, optional): a per-request limit on each Graph
+   * call, for callers that must never stall (workflow recipients inside ticket
+   * creation). A timeout is "unavailable". Default: no limit, as before.
+   * Found and alias answers carry `accountEnabled` (null when Graph left it out).
    */
-  async resolveAddress(email) {
+  async resolveAddress(email, { timeoutMs = null } = {}) {
     const address = String(email || '').trim().toLowerCase();
     if (!address || !address.includes('@')) return { status: 'absent' };
+    const timeout = Number(timeoutMs) > 0 ? { timeout: Number(timeoutMs) } : {};
+    // OData string literal: a quote is doubled (o'brien@ → o''brien@).
+    const odataAddress = address.replace(/'/g, "''");
 
     let token;
     try {
@@ -296,9 +304,11 @@ class AzureAdService {
       const res = await axios.get(`${this.graphApiUrl}/users/${encodeURIComponent(address)}`, {
         headers: { Authorization: `Bearer ${token}` },
         params: { $select: 'displayName,userPrincipalName,mail,jobTitle,department,accountEnabled,businessPhones,mobilePhone,officeLocation' },
+        ...timeout,
       });
       return {
         status: 'found',
+        accountEnabled: typeof res.data.accountEnabled === 'boolean' ? res.data.accountEnabled : null,
         owner: res.data.userPrincipalName || res.data.mail || address,
         displayName: res.data.displayName || null,
         jobTitle: res.data.jobTitle || null,
@@ -318,18 +328,20 @@ class AzureAdService {
     // 404 on the direct lookup. Try the alias surfaces before concluding the
     // address does not exist.
     for (const filter of [
-      `proxyAddresses/any(x:x eq 'smtp:${address}')`,
-      `otherMails/any(x:x eq '${address}')`,
+      `proxyAddresses/any(x:x eq 'smtp:${odataAddress}')`,
+      `otherMails/any(x:x eq '${odataAddress}')`,
     ]) {
       try {
         const res = await axios.get(`${this.graphApiUrl}/users`, {
           headers: { Authorization: `Bearer ${token}`, ConsistencyLevel: 'eventual' },
-          params: { $filter: filter, $select: 'displayName,userPrincipalName,jobTitle,department', $count: true, $top: 1 },
+          params: { $filter: filter, $select: 'displayName,userPrincipalName,jobTitle,department,accountEnabled', $count: true, $top: 1 },
+          ...timeout,
         });
         const hit = res.data?.value?.[0];
         if (hit) {
           return {
             status: 'alias',
+            accountEnabled: typeof hit.accountEnabled === 'boolean' ? hit.accountEnabled : null,
             owner: hit.userPrincipalName,
             displayName: hit.displayName || null,
             jobTitle: hit.jobTitle || null,

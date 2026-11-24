@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.4.09-preview';
+export const APP_VERSION = '4.4.10-preview';
 
 export const changelog = [
+  {
+    version: '4.4.10-preview',
+    date: 'November 24, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>&ldquo;Everyone on the original e-mail&rdquo;</strong> &mdash; the workflow recipient once called &ldquo;Original Cc&rsquo;s&rdquo; now reaches the people on the original e-mail&rsquo;s To line as well as Cc (and anyone added to Cc since), leaving out our own mailboxes, our agents, the requester, automated addresses and anything on our own domains that isn&rsquo;t a person. The To line is used only when the e-mail came straight to us with 10 people or fewer. Someone an agent takes off the Cc stops getting workflow mail. &ldquo;Ticket arrived&rdquo; now sees the e-mail&rsquo;s Cc on new tickets.' },
+    ],
+  },
   {
     version: '4.4.09-preview',
     date: 'November 24, 2026',

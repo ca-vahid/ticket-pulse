@@ -260,6 +260,22 @@ const emailListSchema = z.preprocess(
 );
 
 /**
+ * createTicket's `mailRecipients` (24 Nov 2026) as the in-memory hand-off to
+ * the ticket.created workflows: { toEmails, ccEmails, viaMailbox }, or null.
+ */
+export function cleanMailRecipients(mailRecipients) {
+  if (!mailRecipients || typeof mailRecipients !== 'object') return null;
+  const clean = (list) => [...new Set((Array.isArray(list) ? list : [])
+    .map((a) => String(a || '').trim().toLowerCase())
+    .filter((a) => a.includes('@')))];
+  return {
+    toEmails: clean(mailRecipients.toEmails),
+    ccEmails: clean(mailRecipients.ccEmails),
+    viaMailbox: mailRecipients.viaMailbox === true,
+  };
+}
+
+/**
  * Reply recipients (Phase MR4): the ticket's "Also for" list ∪ the composer's
  * cc, deduped case-insensitively, the requester excluded (they are the To).
  * Runs server-side as the safety net — the composer seeds the same union,
@@ -3945,6 +3961,12 @@ class TicketService {
     // description become attachments. Mail, API, Teams and automation intakes
     // keep their description exactly as before.
     liftPastedImages = false,
+    // Mail intake only (24 Nov 2026): the arriving e-mail's To/Cc (cleaned by
+    // the ingest) and whether it came straight to the mailbox. NOT written to
+    // the row (the ingest stores them after, as before); handed to the
+    // ticket.created workflows in memory, like createdVia, so "Everyone on the
+    // original e-mail" can reach them. Internal: never read from the request body.
+    mailRecipients = null,
   } = {}) {
     const workspace = await this._getWorkspace(workspaceId);
     if (!workspace.nativeTicketingEnabled) {
@@ -4223,11 +4245,15 @@ class TicketService {
 
     if (createdVia) ticket.createdVia = createdVia;
     if (suppressRequesterAck) ticket.suppressRequesterAck = true;
+    const originalEmailRecipients = cleanMailRecipients(mailRecipients);
+    if (originalEmailRecipients) ticket.originalEmailRecipients = originalEmailRecipients;
     await this._notifyLifecycle(null, ticket, {
       allow: data.notifyRequester,
       suppressRequesterAck: suppressRequesterAck === true,
       actorKind: actorKindOf(actor),
     });
+    // In memory for the ticket.created workflows only: never broadcast or returned.
+    delete ticket.originalEmailRecipients;
     // Category/group watchers + custom agent alerts (both fire-and-forget;
     // creation never blocks on them).
     watcherNotificationService.notify('created', ticket.id).catch(() => {});
@@ -5964,8 +5990,15 @@ class TicketService {
         ...(cc.length ? { cc_emails: cc } : {}),
       }
       : {};
+    // 24 Nov 2026: the people the agent took off this reply's Cc are kept with
+    // it (`cc_removed`), so a later workflow e-mail to "everyone on the original
+    // e-mail" leaves them off too, until an agent adds them back.
+    const ccRemovedKept = !isPrivate
+      ? (parsed.data.ccRemoved || []).filter((address) => !cc.includes(address))
+      : [];
     const recipientsMerged = {
       ...recipientsBase,
+      ...(ccRemovedKept.length ? { cc_removed: ccRemovedKept } : {}),
       ...(outboundSubject ? { subject: outboundSubject } : {}),
       ...(idempotencyKey ? { idempotencyKey } : {}),
     };

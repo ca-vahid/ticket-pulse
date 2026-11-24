@@ -2144,7 +2144,36 @@ class MailboxIngestService {
       runAiTriage: true,
       ...this._routingDefaults(connection),
     };
-    const options = { sourceChannel: TICKET_SOURCE.EMAIL, createdVia };
+    // Persist who the email was addressed to (QA 08-05 #3): graphMailClient
+    // already fetched to/cc. A meeting invite (QA 11-09 #8) never carries its
+    // attendees into the ticket. Worked out before the ticket exists (24 Nov
+    // 2026): the "Ticket arrived" workflows run inside createTicket, so the
+    // lists are handed to them in memory (mailRecipients). The row still gets
+    // them below, after creation, exactly as before.
+    const recipients = this._withoutAttendees(emailRecipients(email), email, connection);
+    let ccEmails = [];
+    if (recipients) {
+      // A8 (helpdesk): the people copied, without the mailbox itself, the sender or the agents, ten at most.
+      // A side mailbox keeps storing the Cc line as it arrived, up to MAX_CARRIED_CC.
+      ccEmails = this._capCarriedCc(recipients.cc_emails, `"${subject}"`);
+      if (helpdesk) {
+        const agents = await prisma.technician.findMany({ where: { workspaceId: connection.workspaceId, isActive: true, email: { not: null } }, select: { email: true } })
+          .then((rows) => rows.map((r) => String(r.email || '').toLowerCase())).catch(() => []);
+        const onBehalf = email.onBehalfOf?.email ? [email.onBehalfOf.email] : [];
+        ccEmails = mergeInboundCc([], { cc: [...(recipients.cc_emails || []), ...onBehalf] }, { mailboxAddress: ownAddresses(connection), exclude: [String(email.from || '').toLowerCase(), ...agents] }).next;
+      }
+    }
+    // Did the mail come straight to this mailbox (its address or an alias on
+    // To/Cc)? Not, for a list or an unknown alias (typically a released held
+    // mail): then its To line is nobody we should copy.
+    const mailboxOwn = ownAddresses(connection);
+    const viaMailbox = Boolean(recipients)
+      && [...(recipients.to_emails || []), ...(recipients.cc_emails || [])].some((a) => isOwnAddress(a, mailboxOwn));
+    const options = {
+      sourceChannel: TICKET_SOURCE.EMAIL,
+      createdVia,
+      ...(recipients ? { mailRecipients: { toEmails: recipients.to_emails, ccEmails, viaMailbox } } : {}),
+    };
     let ticket;
     try {
       ticket = await ticketService.createTicket(connection.workspaceId, payload, SYSTEM_ACTOR, options);
@@ -2182,21 +2211,9 @@ class MailboxIngestService {
       ? { heldMessageId: intake.heldMessageId, resolvedBy: intake.resolvedBy || null, ...(forcedRequester ? { forcedRequester } : {}) }
       : null;
 
-    // Persist who the email was addressed to (QA 08-05 #3): graphMailClient
-    // already fetched to/cc — store them on the ticket row (same columns FS
-    // sync fills) instead of discarding them. Non-fatal on failure.
-    // A meeting invite (QA 11-09 #8) never carries its attendees into the ticket.
-    const recipients = this._withoutAttendees(emailRecipients(email), email, connection);
+    // The recipients worked out above, stored on the row (same columns FS sync
+    // fills). Non-fatal on failure.
     if (recipients) {
-      // A8 (helpdesk): the people copied, without the mailbox itself, the sender or the agents, ten at most.
-      // A side mailbox keeps storing the Cc line as it arrived, up to MAX_CARRIED_CC.
-      let ccEmails = this._capCarriedCc(recipients.cc_emails, `"${subject}" (${ticket.displayRef || ticket.id})`);
-      if (helpdesk) {
-        const agents = await prisma.technician.findMany({ where: { workspaceId: connection.workspaceId, isActive: true, email: { not: null } }, select: { email: true } })
-          .then((rows) => rows.map((r) => String(r.email || '').toLowerCase())).catch(() => []);
-        const onBehalf = email.onBehalfOf?.email ? [email.onBehalfOf.email] : [];
-        ccEmails = mergeInboundCc([], { cc: [...(recipients.cc_emails || []), ...onBehalf] }, { mailboxAddress: ownAddresses(connection), exclude: [String(email.from || '').toLowerCase(), ...agents] }).next;
-      }
       await prisma.ticket.update({
         where: { id: ticket.id },
         data: { toEmails: recipients.to_emails, ccEmails },

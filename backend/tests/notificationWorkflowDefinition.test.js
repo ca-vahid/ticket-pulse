@@ -32,6 +32,14 @@ const prismaMock = {
   ticketThreadEntry: {
     findMany: jest.fn(),
   },
+  // "Everyone on the original e-mail" (24 Nov 2026) reads our mailbox list in
+  // full before it reaches anyone: none connected here.
+  mailboxConnection: { findMany: jest.fn().mockResolvedValue([]) },
+  appSettings: { findUnique: jest.fn().mockResolvedValue(null) },
+  // …and its safety checks (agents, requesters, Cc history) must be readable.
+  technician: { findMany: jest.fn().mockResolvedValue([]) },
+  requester: { findMany: jest.fn().mockResolvedValue([]) },
+  ticketActivity: { findMany: jest.fn().mockResolvedValue([]) },
 };
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({

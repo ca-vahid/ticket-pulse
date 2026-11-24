@@ -2584,6 +2584,22 @@ function addNoteSampleValue(definition) {
  */
 // Mirrors the backend's RECIPIENT_CUSTOM_EMAILS_MAX (notificationWorkflowDefinition.js).
 const RECIPIENT_CUSTOM_EMAILS_MAX = 25;
+// The `original_ccs` recipient (24 Nov 2026): was "Original CCs" and read only
+// the Cc lists; it now reaches the To line too.
+export const ORIGINAL_RECIPIENTS_LABEL = 'Everyone on the original e-mail';
+// Why a Preview or Shadow run did not use the original e-mail's To line.
+const ORIGINAL_TO_LINE_REASONS = {
+  forwarded: 'To line not used: the ticket came from an agent\'s forward',
+  not_direct: 'To line not used: the e-mail did not come straight to our mailbox',
+  too_long: 'To line not used: more than 10 people on it',
+};
+export const ORIGINAL_RECIPIENTS_HELP = 'Everyone on the original e-mail\'s To and Cc lines, plus anyone added to Cc since. Leaves out our own mailboxes, our agents, the requester, automated addresses and anyone on our own domains who isn\'t a person. The To line is used only when the e-mail came straight to us with 10 people or fewer.';
+// Why a run reached nobody from the original e-mail: a check that protects people could not be done.
+const ORIGINAL_UNAVAILABLE_REASONS = {
+  mailboxes: 'our mailbox list could not be read',
+  agents: 'our agent list could not be read',
+  cc_history: 'who agents took off the Cc could not be read',
+};
 
 export function RecipientsNodeEditor({ data = {}, onChange, customFieldDefs = [], groups = [] }) {
   const setRecipientList = (field, value, checked) => {
@@ -2645,7 +2661,8 @@ export function RecipientsNodeEditor({ data = {}, onChange, customFieldDefs = []
       label: 'Cc Recipients',
       values: cc,
       options: [
-        ['original_ccs', 'Original CCs'],
+        // Token value kept as `original_ccs` for saved workflows (24 Nov 2026).
+        ['original_ccs', ORIGINAL_RECIPIENTS_LABEL, ORIGINAL_RECIPIENTS_HELP],
       ],
       custom: { key: 'ccCustomEmails', list: ccCustomEmails, show: true, label: 'Cc custom email recipients' },
     },
@@ -2663,15 +2680,22 @@ export function RecipientsNodeEditor({ data = {}, onChange, customFieldDefs = []
         <div key={group.key}>
           <label className="text-xs font-medium uppercase text-muted-foreground">{group.label}</label>
           <div className="mt-2 grid grid-cols-1 gap-2 text-sm">
-            {group.options.map(([value, label]) => (
-              <label key={value} className="flex items-center gap-2 rounded-md border border-border px-3 py-2">
+            {group.options.map(([value, label, help]) => (
+              <label key={value} className={`flex gap-2 rounded-md border border-border px-3 py-2 ${help ? 'items-start' : 'items-center'}`}>
                 <input
                   type="checkbox"
                   checked={group.values.includes(value)}
                   onChange={(event) => setRecipientList(group.key, value, event.target.checked)}
-                  className="h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
+                  aria-labelledby={help ? `recipient-label-${group.key}-${value}` : undefined}
+                  aria-describedby={help ? `recipient-help-${group.key}-${value}` : undefined}
+                  className={`h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300 ${help ? 'mt-0.5' : ''}`}
                 />
-                <span>{label}</span>
+                <span>
+                  <span id={help ? `recipient-label-${group.key}-${value}` : undefined} className="block">{label}</span>
+                  {help && (
+                    <span id={`recipient-help-${group.key}-${value}`} className="mt-0.5 block text-[11px] text-muted-foreground">{help}</span>
+                  )}
+                </span>
               </label>
             ))}
             <label className="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2">
@@ -3163,6 +3187,36 @@ export function AddNoteNodeEditor({ data = {}, defs = [], variables = [], workfl
   );
 }
 
+/**
+ * One plain line for a Preview or Shadow run: how many people "Everyone on the
+ * original e-mail" reached and who was left out, e.g.
+ * "Everyone on the original e-mail: 4 people (left out: 1 of our mailboxes, the requester)".
+ */
+export function originalRecipientsNote(summary) {
+  if (!summary || typeof summary !== 'object') return null;
+  const n = Number(summary.count) || 0;
+  const off = summary.leftOff || {};
+  const plural = (count, one, many) => `${count} ${count === 1 ? one : many}`;
+  const parts = [
+    off.ownMailbox ? `${off.ownMailbox} of our mailboxes` : null,
+    off.agent ? `${off.agent} of our agents` : null,
+    off.requester ? 'the requester' : null,
+    off.automated ? plural(off.automated, 'automated address', 'automated addresses') : null,
+    off.unattended ? plural(off.unattended, 'automation mailbox', 'automation mailboxes') : null,
+    off.removedByAgent ? plural(off.removedByAgent, 'person an agent took off the Cc', 'people an agent took off the Cc') : null,
+    off.notAPerson ? plural(off.notAPerson, 'address on our domain that is not a person', 'addresses on our domain that are not a person') : null,
+    off.unchecked ? plural(off.unchecked, 'outside address that could not be checked', 'outside addresses that could not be checked') : null,
+    off.overRecipientLimit ? `${off.overRecipientLimit} over the 25-recipient limit` : null,
+  ].filter(Boolean);
+  if (summary.unavailable) {
+    const why = ORIGINAL_UNAVAILABLE_REASONS[summary.unavailable] || 'a safety check could not be done';
+    return `${ORIGINAL_RECIPIENTS_LABEL}: nobody this time, ${why}`;
+  }
+  const head = `${ORIGINAL_RECIPIENTS_LABEL}: ${plural(n, 'person', 'people')}`;
+  const toLine = ORIGINAL_TO_LINE_REASONS[summary.toLine] || '';
+  return `${head}${parts.length ? ` (left out: ${parts.join(', ')})` : ''}${toLine ? `. ${toLine}` : ''}`;
+}
+
 function summarizePreviewStep(step) {
   const output = step?.output || {};
   if (step?.nodeType === 'trigger') return output.eventType || 'Workflow started';
@@ -3179,6 +3233,7 @@ function summarizePreviewStep(step) {
       `To: ${(recipients.to || []).join(', ') || 'none'}`,
       (recipients.cc || []).length ? `Cc: ${recipients.cc.join(', ')}` : null,
       (recipients.bcc || []).length ? `Bcc: ${recipients.bcc.join(', ')}` : null,
+      originalRecipientsNote(output.originalRecipients),
     ].filter(Boolean).join(' · ');
   }
   if (step?.nodeType === 'llm_generate') {
