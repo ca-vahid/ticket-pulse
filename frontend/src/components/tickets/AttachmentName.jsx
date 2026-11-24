@@ -11,7 +11,7 @@ const ILLEGAL_TYPED = /[\\/:*?"<>|]/;
 /**
  * An attachment's name on the Attachments tab (4.4.08): the name people see
  * (the automatic vendor name when there is one), the original underneath in
- * muted text ("was INV-100234.pdf"), and for agents who can edit the ticket
+ * muted text ("Named automatically · was INV-100234.pdf"), and for agents who can edit the ticket
  * "Edit name" and "Revert". Edit opens an inline box with the extension fixed;
  * Enter saves, Escape cancels. A short line confirms what changed.
  *
@@ -118,7 +118,7 @@ export default function AttachmentName({ ticketId, a, variant = 'grid', canRenam
       {editing ? (
         <form onSubmit={(e) => { e.preventDefault(); save(); }} className="flex min-w-0 flex-col gap-1" aria-label={`Rename ${name}`}>
           <label htmlFor={inputId} className={`${subText} font-semibold text-foreground`}>New name</label>
-          <div className={`flex min-w-0 items-center rounded-md border bg-card focus-within:ring-2 focus-within:ring-ring ${liveProblem ? 'border-red-500 dark:border-red-400' : 'border-input'}`}>
+          <div className={`flex min-w-0 items-center rounded-md border bg-card focus-within:ring-2 focus-within:ring-ring ${liveProblem ? 'border-destructive' : 'border-input'}`}>
             <input
               ref={inputRef}
               id={inputId}
@@ -136,7 +136,7 @@ export default function AttachmentName({ ticketId, a, variant = 'grid', canRenam
             {ext && <span className={`flex-none select-none pr-2 ${small ? 'text-xs' : 'text-sm'} text-muted-foreground`} aria-hidden="true">{ext}</span>}
           </div>
           <span id={hintId} className="sr-only">{ext ? `The name ends in ${ext}, which stays. ` : ''}Enter saves, Escape cancels.</span>
-          {liveProblem && <p id={errorId} role="alert" className={`${subText} text-red-700 dark:text-red-300`}>{liveProblem}</p>}
+          {liveProblem && <p id={errorId} role="alert" className={`${subText} text-destructive`}>{liveProblem}</p>}
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <button type="submit" disabled={busy === 'edit'} className={`tp-focus-ring inline-flex items-center gap-1 rounded ${subText} font-semibold text-primary hover:underline disabled:opacity-60`}>
               {busy === 'edit' ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" /> : <Check className="h-3 w-3" aria-hidden="true" />}
@@ -157,9 +157,12 @@ export default function AttachmentName({ ticketId, a, variant = 'grid', canRenam
             )
             : <span className={`block truncate ${nameText} text-foreground`} title={name}>{name}</span>}
           {original && (
-            <span className={`block truncate ${subText} text-muted-foreground`} title={`Original name: ${original}`} data-testid="attachment-original-name">
+            // "Named automatically" leads, so a long original name can't push it
+            // out of view; the line wraps (a long name breaks anywhere) instead
+            // of truncating.
+            <span className={`block ${subText} text-muted-foreground [overflow-wrap:anywhere]`} title={`Original name: ${original}`} data-testid="attachment-original-name">
+              {auto && <span title={namedAutomaticallyTitle(a)}>Named automatically · </span>}
               was {original}
-              {auto && <span title={namedAutomaticallyTitle(a)} className="text-muted-foreground/75"> · named automatically</span>}
             </span>
           )}
         </>
@@ -196,7 +199,7 @@ export default function AttachmentName({ ticketId, a, variant = 'grid', canRenam
       {note && (
         <p
           role={note.tone === 'error' ? 'alert' : 'status'}
-          className={`mt-0.5 ${subText} ${note.tone === 'error' ? 'text-red-700 dark:text-red-300' : 'text-emerald-700 dark:text-emerald-300'}`}
+          className={`mt-0.5 ${subText} ${note.tone === 'error' ? 'text-destructive' :'text-emerald-700 dark:text-emerald-300'}`}
           data-testid="attachment-name-note"
         >
           {note.text}

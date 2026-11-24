@@ -65,7 +65,7 @@ export default function PriorityRaisesTab() {
   return (
     <section className="tp-card rounded-xl p-4 sm:p-5" aria-labelledby="priority-raises-heading" data-testid="priority-raises-tab">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <h2 id="priority-raises-heading" className="text-base font-bold text-foreground">Raised by the requester</h2>
+        <h2 id="priority-raises-heading" className="text-base font-bold text-foreground">Raised by requester</h2>
         <div className="ml-auto flex items-center gap-1" role="group" aria-label="Period">
           {PERIODS.map((d) => (
             <button key={d} type="button" aria-pressed={days === d} onClick={() => setDays(d)}

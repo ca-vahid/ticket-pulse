@@ -88,8 +88,9 @@ describe('Attachments tab · names (4.4.08)', () => {
     const name = screen.getByTestId('attachment-name');
     expect(within(name).getByText(NEW_NAME)).toBeInTheDocument();
     const was = within(name).getByTestId('attachment-original-name');
-    expect(was).toHaveTextContent('was INV-100234.pdf · named automatically');
-    expect(within(was).getByText(/named automatically/)).toHaveAttribute('title', expect.stringContaining('Vendor: Acme Supplies'));
+    // "Named automatically" leads, so a long original name can't cut it off.
+    expect(was).toHaveTextContent(/^Named automatically · was INV-100234\.pdf$/);
+    expect(within(was).getByText(/Named automatically/)).toHaveAttribute('title', expect.stringContaining('Vendor: Acme Supplies'));
     expect(screen.getByRole('button', { name: `Download ${NEW_NAME}` })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('radio', { name: 'List' }));
@@ -162,6 +163,7 @@ describe('Attachments tab · names (4.4.08)', () => {
     expect(screen.getByText('Acme Supplies November.pdf')).toBeInTheDocument();
     // A person's name is not "named automatically".
     expect(screen.getByTestId('attachment-original-name')).toHaveTextContent(/^was INV-100234\.pdf$/);
+    expect(screen.getByTestId('attachment-original-name')).not.toHaveTextContent(/named automatically/i);
     expect(onRenamed).toHaveBeenCalledWith(1, expect.objectContaining({ displayName: 'Acme Supplies November.pdf', nameSource: 'manual' }), expect.any(Object));
   });
 
@@ -209,6 +211,40 @@ describe('Attachments tab · names (4.4.08)', () => {
     expect(ticketsAPI.renameAttachment).not.toHaveBeenCalled();
     fireEvent.change(box, { target: { value: 'Acme invoice' } });
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  test('polish 11-24: the error and the box edge use the destructive token', async () => {
+    renderTab();
+    fireEvent.click(screen.getByRole('button', { name: /Edit name/ }));
+    const box = screen.getByRole('textbox', { name: 'New name' });
+    fireEvent.change(box, { target: { value: 'Acme: invoice?' } });
+    const error = screen.getByRole('alert');
+    expect(error).toHaveClass('text-destructive');
+    expect(error.className).not.toMatch(/red-/);
+    expect(box.parentElement).toHaveClass('border-destructive');
+    expect(box.parentElement.className).not.toMatch(/red-/);
+    fireEvent.change(box, { target: { value: 'Acme invoice' } });
+    expect(box.parentElement).toHaveClass('border-input');
+    expect(box.parentElement).not.toHaveClass('border-destructive');
+    // A failed revert reads in the same token.
+    fireEvent.keyDown(box, { key: 'Escape' });
+    ticketsAPI.renameAttachment.mockRejectedValue(new Error('Attachment not found'));
+    fireEvent.click(screen.getByRole('button', { name: /^Revert/ }));
+    const note = await screen.findByRole('alert');
+    expect(note).toHaveClass('text-destructive');
+    expect(note.className).not.toMatch(/red-/);
+  });
+
+  test('polish 11-24: a long original name wraps instead of hiding "Named automatically"', () => {
+    const long = `INV-100234_${'scanned-copy-'.repeat(12)}final.pdf`;
+    renderTab({ attachments: [renamed({ fileName: long, originalName: long })] });
+    const was = screen.getByTestId('attachment-original-name');
+    expect(was).toHaveTextContent(`Named automatically · was ${long}`);
+    expect(was.textContent.startsWith('Named automatically')).toBe(true);
+    expect(was).not.toHaveClass('truncate');
+    expect(was.className).toMatch(/overflow-wrap:anywhere/);
+    // The label is still "Revert" (the product owner's word).
+    expect(screen.getByRole('button', { name: /^Revert/ })).toHaveTextContent(/^Revert$/);
   });
 
   test('an unchanged name closes the box without a request', () => {

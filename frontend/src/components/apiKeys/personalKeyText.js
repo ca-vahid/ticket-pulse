@@ -184,6 +184,16 @@ export const STATUS_TONE = {
  * Expired or Revoked, the separate status word is dropped.
  */
 export function keySummaryLine(key, now = Date.now()) {
+  const { text, from } = keySummaryParts(key, now);
+  return from ? `${text} ${from}` : text;
+}
+
+/**
+ * The same line in two parts, so "from 10.1.2.3" can be kept whole when the
+ * line wraps at phone width: { text: 'On · Expires … · Last used 2 hours ago',
+ * from: 'from 10.1.2.3' | null }.
+ */
+export function keySummaryParts(key, now = Date.now()) {
   let lead;
   if (key?.status === 'revoked') {
     lead = key.revokedAt && formatDate(key.revokedAt) !== '—' ? `Revoked ${formatDate(key.revokedAt)}` : 'Revoked';
@@ -193,7 +203,9 @@ export function keySummaryLine(key, now = Date.now()) {
   } else {
     lead = `${STATUS_WORDS[key?.status] || key?.status || '—'} · ${expiryShort(key, now)}`;
   }
-  return `${lead} · ${lastUsedPhrase(key, now)}`;
+  if (!agoWords(key?.lastUsedAt, now)) return { text: `${lead} · ${lastUsedPhrase(key, now)}`, from: null };
+  const { when, from } = lastUsedParts(key, now);
+  return { text: `${lead} · Last used ${when}`, from };
 }
 
 /** A key still holding the person's one slot (on, or switched off by an admin). */

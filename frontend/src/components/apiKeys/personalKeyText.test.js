@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { activityActorKind, isMachineActivity } from '../tickets/activityKind.jsx';
 import {
-  abilitiesOf, abilitySentence, agoWords, expiryParts, expiryShort, expiryWords, formatDayShort, keySummaryLine,
+  abilitiesOf, abilitySentence, agoWords, expiryParts, expiryShort, expiryWords, formatDayShort, keySummaryLine, keySummaryParts,
   lastUsedParts, lastUsedPhrase, lastUsedWords, parseIpList, personalKeyNameOf, rotationExpiry,
 } from './personalKeyText';
 
@@ -67,6 +67,17 @@ describe('personal key words', () => {
       .toBe('Expired Oct 24, 2026 · Last used Oct 9, 2026 from 203.0.113.9');
     expect(keySummaryLine({ status: 'revoked', revokedAt: '2026-11-02T19:00:00.000Z', expiresAt: ends, lastUsedAt: null }, NOW)).toBe('Revoked Nov 2, 2026 · Not used yet');
     expect(keySummaryLine({ status: 'revoked', expiresAt: ends, lastUsedAt: null }, NOW)).toBe('Revoked · Not used yet');
+  });
+
+  test('polish 11-24: the stacked line in two parts, "from <ip>" kept whole', () => {
+    const used = { lastUsedAt: new Date(NOW - 2 * HOUR).toISOString(), lastUsedIp: '203.0.113.24' };
+    const ends = new Date(NOW + 90 * 24 * HOUR).toISOString();
+    expect(keySummaryParts({ ...used, status: 'active', expiresAt: ends }, NOW))
+      .toEqual({ text: 'On · Expires Feb 20, 2027 · Last used 2 hours ago', from: 'from 203.0.113.24' });
+    expect(keySummaryParts({ lastUsedAt: '2026-10-09T19:00:00.000Z', status: 'expired', expiresAt: '2026-10-24T19:00:00.000Z' }, NOW))
+      .toEqual({ text: 'Expired Oct 24, 2026 · Last used Oct 9, 2026', from: null });
+    expect(keySummaryParts({ status: 'revoked', lastUsedAt: null, lastUsedIp: '203.0.113.24' }, NOW))
+      .toEqual({ text: 'Revoked · Not used yet', from: null });
   });
 
   test('rotation restarts the same length from today', () => {
