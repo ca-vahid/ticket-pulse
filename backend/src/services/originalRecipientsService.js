@@ -68,6 +68,8 @@ export const DIRECTORY_BUDGET_MS = 6000;
 let ownCache = null; // { value: string[], at }
 let lastGoodOwn = null; // the last list that loaded, kept past the TTL (staleOk callers)
 let ownWorkspaceIds = []; // workspaces of the enabled mailboxes in that list
+let ownFailure = null; // { error, at }: a failed read, remembered OWN_FAILURE_TTL_MS
+export const OWN_FAILURE_TTL_MS = 10 * 1000;
 const directoryCache = new Map(); // address -> { person, until }
 
 const lc = (v) => String(v || '').trim().toLowerCase();
@@ -182,11 +184,23 @@ export function filterOriginalRecipients(candidates, {
  * list that loaded is returned however old it is, and only when none ever
  * loaded does the call throw. "Everyone on the original e-mail" leaves it off:
  * a failure there still reaches nobody.
+ *
+ * A failed read is remembered for OWN_FAILURE_TTL_MS (10 s): until then every
+ * caller gets the same failure without asking the database again, so an outage
+ * does not cost a query per message and per delivery.
  */
 export async function ownMailboxAddresses({ fresh = false, staleOk = false } = {}) {
   if (!fresh && ownCache && Date.now() - ownCache.at < OWN_CACHE_TTL_MS) return ownCache.value;
   try {
-    return await loadOwnMailboxAddresses();
+    if (!fresh && ownFailure && Date.now() - ownFailure.at < OWN_FAILURE_TTL_MS) throw ownFailure.error;
+    try {
+      return await loadOwnMailboxAddresses();
+    } catch (err) {
+      // Only once a list has loaded: at start-up every caller keeps asking, so a
+      // blip right after a restart can't fail workflow e-mail for 10 s.
+      if (lastGoodOwn) ownFailure = { error: err, at: Date.now() };
+      throw err;
+    }
   } catch (err) {
     if (staleOk && lastGoodOwn) {
       logger.warn(`Own-mailbox list could not be read (${err.message}); using the last list that loaded (${lastGoodOwn.value.length} addresses, ${Math.round((Date.now() - lastGoodOwn.at) / 1000)} s old)`);
@@ -214,6 +228,7 @@ async function loadOwnMailboxAddresses() {
   const value = [...own];
   ownCache = { value, at: Date.now() };
   lastGoodOwn = ownCache;
+  ownFailure = null;
   ownWorkspaceIds = [...new Set(listOf(boxes).map((b) => Number(b?.workspaceId)).filter((n) => Number.isInteger(n) && n > 0))];
   return value;
 }
@@ -223,9 +238,16 @@ export function ownMailboxWorkspaceIds() {
   return [...ownWorkspaceIds];
 }
 
-/** `{ keepLastGood: true }` keeps the stale fallback (tests of a read failure after a good read). */
+/**
+ * Forget the cached list (and a remembered failure), so the next call reads
+ * again. Called when a mailbox connection is created, enabled, disabled,
+ * deleted or its aliases change. `{ keepLastGood: true }` keeps the last list
+ * that loaded as the fallback for a failed read (what those callers want: a
+ * slightly old list beats none).
+ */
 export function invalidateOwnMailboxCache({ keepLastGood = false } = {}) {
   ownCache = null;
+  ownFailure = null;
   if (!keepLastGood) {
     lastGoodOwn = null;
     ownWorkspaceIds = [];

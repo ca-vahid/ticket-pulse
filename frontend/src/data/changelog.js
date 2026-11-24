@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.4.14-preview';
+export const APP_VERSION = '4.4.15-preview';
 
 export const changelog = [
+  {
+    version: '4.4.15-preview',
+    date: 'November 24, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Dates written day-first</strong> &mdash; when a document says &ldquo;12/11/2026&rdquo; and means 12 November, the attachment&rsquo;s new name now uses 12 November instead of 11 December. A date well after the e-mail arrived is read the other way round when that gives a recent date.' },
+      { type: 'improved', html: '<strong>Our own mailboxes are never a ticket&rsquo;s requester</strong> &mdash; creating a ticket from held mail now asks who the ticket is for when it would otherwise be filed under one of our team mailboxes, and every intake path follows the same rule.' }
+    ],
+  },
   {
     version: '4.4.14-preview',
     date: 'November 24, 2026',

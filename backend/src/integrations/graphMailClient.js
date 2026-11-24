@@ -4,6 +4,7 @@ import { TokenCredentialAuthenticationProvider } from '@microsoft/microsoft-grap
 import config from '../config/index.js';
 import logger from '../utils/logger.js';
 import { paragraphSpacing, prepareOutboundEmail } from '../utils/emailHtmlHardening.js';
+import { rememberSentMessageId } from '../utils/recentSentMessageIds.js';
 
 class GraphMailClient {
   constructor() {
@@ -365,6 +366,7 @@ class GraphMailClient {
       const customHeaders = Object.entries(headers && typeof headers === 'object' ? headers : {})
         .filter(([name, value]) => /^x-[a-z0-9-]{1,60}$/i.test(String(name)) && String(value ?? '').trim())
         .map(([name, value]) => ({ name: String(name), value: String(value).replace(/[\r\n]+/g, ' ').trim().slice(0, 500) }));
+      rememberSentMessageId(internetMessageId); // before the send (see the draft path)
       try {
         await client.api(`/users/${mailbox}/sendMail`).post({
           message: {
@@ -420,6 +422,10 @@ class GraphMailClient {
         logger.debug('Graph API: reply draft Message-ID not read (non-fatal)', { mailbox, error: error.message });
       }
     }
+
+    // Remembered BEFORE the send: the reply can land in another of our mailboxes
+    // before the delivery row that records its id is written.
+    if (draft.internetMessageId) rememberSentMessageId(draft.internetMessageId);
 
     try {
       await client.api(`/users/${mailbox}/messages/${draft.id}/send`).post({});

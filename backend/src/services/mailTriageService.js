@@ -414,6 +414,9 @@ export function guardDecision(parsed, candidates = [], ctx = {}) {
     if (target.pendingApproval) noAuto.push('The ticket has an approval waiting, so it is never reopened without a person.');
   }
   if (ctx.priorUndone) noAuto.push('An earlier decision on this mail was undone.');
+  // A hand-off from one of our own team mailboxes (24 Nov 2026): a person picks who the
+  // new ticket is for; it is never created on its own (the mailbox can't be the requester).
+  if (holdReason === 'own_mailbox_requester' && action === 'create') noAuto.push('It came from one of our own team mailboxes, so a person picks who the ticket is for.');
 
   const evidence = (Array.isArray(parsed.evidence) ? parsed.evidence : []).map((e) => clip(e, 160)).filter(Boolean).slice(0, 8);
   const candidateNotes = (Array.isArray(parsed.candidateNotes) ? parsed.candidateNotes : [])

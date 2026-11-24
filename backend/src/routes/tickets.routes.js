@@ -961,6 +961,18 @@ async function resolveMailboxRouting(req) {
   return out;
 }
 
+/**
+ * Which addresses are "our own mailboxes" (the mail-loop guard, 24 Nov 2026) is
+ * cached for a minute: forget it when a connection is created, changed
+ * (enabled, disabled, aliases) or deleted. The last good list stays as the
+ * fallback for a failed read. Never throws.
+ */
+async function forgetOwnMailboxes() {
+  await import('../services/originalRecipientsService.js')
+    .then((m) => m.invalidateOwnMailboxCache({ keepLastGood: true }))
+    .catch(() => {});
+}
+
 router.post('/mailboxes', requireTicketingAdmin, requireNativeTicketing, asyncHandler(async (req, res) => {
   const address = String(req.body?.address || '').trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address)) throw new ValidationError('A valid mailbox address is required');
@@ -987,6 +999,7 @@ router.post('/mailboxes', requireTicketingAdmin, requireNativeTicketing, asyncHa
     const { setPrimaryMailbox } = await import('../services/mailboxPicker.js');
     mailbox = await setPrimaryMailbox(req.workspaceId, mailbox.id, true);
   }
+  await forgetOwnMailboxes();
   res.status(201).json({ success: true, data: presentMailbox(mailbox) });
 }));
 
@@ -1028,6 +1041,7 @@ router.patch('/mailboxes/:mailboxId', requireTicketingAdmin, asyncHandler(async 
     const { setPrimaryMailbox } = await import('../services/mailboxPicker.js');
     mailbox = await setPrimaryMailbox(req.workspaceId, id, req.body.isPrimary === true);
   }
+  if (req.body?.isEnabled !== undefined || req.body?.aliases !== undefined) await forgetOwnMailboxes();
   res.json({ success: true, data: { ...presentMailbox(mailbox), aliases: await aliasService.getMailboxAliases(id) } });
 }));
 
@@ -1037,6 +1051,7 @@ router.delete('/mailboxes/:mailboxId', requireTicketingAdmin, asyncHandler(async
   if (!existing) throw new ValidationError('Mailbox not found in this workspace');
   await prisma.mailboxConnection.delete({ where: { id } });
   await import('../services/mailboxAliasService.js').then((m) => m.clearMailboxAliases(id)).catch(() => {});
+  await forgetOwnMailboxes();
   res.json({ success: true });
 }));
 

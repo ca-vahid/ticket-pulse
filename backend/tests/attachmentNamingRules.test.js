@@ -1,5 +1,5 @@
 import {
-  cleanNamePart, contentDisposition, extensionFor, extractFromRules, formatAttachmentName, holdsToken, isNameableDocument,
+  cleanNamePart, contentDisposition, dayMonthCorrected, extensionFor, extractFromRules, formatAttachmentName, holdsToken, isNameableDocument,
   mightBePdf, normaliseEditedName, pacificDate, startsLikePdf, tidyVendor, uniqueName, vendorFromEditedName, withNameFields, MAX_NAME_CHARS, MAX_STEM_CHARS,
 } from '../src/services/attachmentNamingRules.js';
 
@@ -340,5 +340,27 @@ describe('payload and download header', () => {
     const header = contentDisposition('a"b\r\nSet-Cookie: x.pdf');
     expect(header).not.toMatch(/[\r\n]/);
     expect(header.startsWith('attachment; filename="a_b Set-Cookie: x.pdf"')).toBe(true);
+  });
+});
+
+describe('day and month written the other way round', () => {
+  test('a date more than a week after arrival is read day-first when that fits', () => {
+    expect(dayMonthCorrected('2026-12-11', '2026-11-24')).toBe('2026-11-12');
+  });
+  test('a date within a week of arrival is kept', () => {
+    expect(dayMonthCorrected('2026-11-26', '2026-11-24')).toBe('2026-11-26');
+    expect(dayMonthCorrected('2026-12-01', '2026-11-24')).toBe('2026-12-01');
+  });
+  test('no swap when the day is over 12, day equals month, or the swap is also too late', () => {
+    expect(dayMonthCorrected('2026-12-15', '2026-11-24')).toBe('2026-12-15');
+    expect(dayMonthCorrected('2026-12-12', '2026-11-24')).toBe('2026-12-12');
+    expect(dayMonthCorrected('2026-01-12', '2025-11-24')).toBe('2026-01-12');
+  });
+  test('an invoice really dated weeks ahead is not swapped months back', () => {
+    expect(dayMonthCorrected('2026-12-03', '2026-11-24')).toBe('2026-12-03');
+  });
+  test('past dates and missing values are left alone', () => {
+    expect(dayMonthCorrected('2026-03-04', '2026-11-24')).toBe('2026-03-04');
+    expect(dayMonthCorrected(null, '2026-11-24')).toBeNull();
   });
 });

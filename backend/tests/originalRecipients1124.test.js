@@ -304,10 +304,17 @@ describe('our mailbox list must be read in full', () => {
     failAliases = false;
     jest.clearAllMocks();
     prismaMock.notificationDelivery.create.mockImplementation(({ data }) => Promise.resolve({ id: 701, ...data }));
-    // Next run reads again (nothing cached) and it@ is known as ours.
-    const second = await resolve({ toEmails: ['it@example.com', 'priya.nair@example.com'] });
-    expect(second.cc).toEqual(['priya.nair@example.com']);
-    expect(prismaMock.mailboxConnection.findMany).toHaveBeenCalled();
+    // No list had loaded yet, so the failure is not remembered (24 Nov 2026):
+    // the next run reads again (nothing partial was cached) and it@ is known as ours.
+    const realNow = Date.now;
+    try {
+      prismaMock.notificationDelivery.create.mockClear();
+      const second = await resolve({ toEmails: ['it@example.com', 'priya.nair@example.com'] });
+      expect(second.cc).toEqual(['priya.nair@example.com']);
+      expect(prismaMock.mailboxConnection.findMany).toHaveBeenCalled();
+    } finally {
+      Date.now = realNow;
+    }
   });
 });
 

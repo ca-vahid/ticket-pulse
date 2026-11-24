@@ -579,6 +579,13 @@ describe('the guards', () => {
     { id: 6, hard: true, strong: true, closed: false, open: true, sameSender: true },
   ];
 
+  test('a hand-off held from one of our own mailboxes is never created on its own', () => {
+    const d = guardDecision(answer({ action: 'create', confidence: 'sure' }), cands, { holdReason: 'own_mailbox_requester' });
+    expect(d.autoApply).toBe(false);
+    expect(d.noAuto).toContain('It came from one of our own team mailboxes, so a person picks who the ticket is for.');
+    expect(d.fallback).toBeNull();
+  });
+
   test('a ticket outside the candidates becomes "not sure"', () => {
     const d = guardDecision(answer({ action: 'attach', ticketId: 999, reopen: true }), cands);
     expect(d).toMatchObject({ action: 'unsure', confidence: 'unsure', ticketId: null, reopen: false });
