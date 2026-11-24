@@ -122,7 +122,7 @@ export function buildPrompt({ subject, senderName, senderDomain, fileName, rules
     '',
     'Return:',
     `- vendor: the company that issued the document, written as on the document (its letterhead or "from"). Never the recipient${us}, and never a payment or billing platform such as Balance, QuickBooks, Bill.com or Xero: name the business it was sent for. null when unclear.`,
-    '- invoiceNumber: the invoice or document number exactly as printed on this document, or null.',
+    '- invoiceNumber: the invoice or document number exactly as printed on this document, or null. On a payment remittance (remittance advice, payment advice: a customer telling us they paid), use the invoice number being paid, not the payment document, payment run or cheque number; when it pays several invoices, use the first invoice listed.',
     '- documentDate: the invoice or statement date as YYYY-MM-DD, or null.',
     '- confidence: high, medium or low, for the vendor.',
   ].join('\n');
