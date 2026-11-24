@@ -8,6 +8,8 @@ import MergePdfDialog from './MergePdfDialog';
 import { mergeBlocker } from './attachmentMerge';
 import AttachmentName from './AttachmentName';
 import { attachmentName } from './attachmentNames';
+import AttachmentThumbnail from './attachmentPreview/AttachmentThumbnail';
+import { canThumb } from './attachmentPreview/thumbnails';
 
 /**
  * Attachments tab (30 Sep 2026): every file on the ticket in one place,
@@ -17,6 +19,8 @@ import { attachmentName } from './attachmentNames';
  * downloads, "Show in conversation" jumps to the message it came with.
  * 4.4.08: a file named automatically shows its new name with the original
  * under it; editors can edit the name or revert it (AttachmentName).
+ * 24 Nov 2026: grid cards show a first-page thumbnail for PDFs, Word, sheets,
+ * text and e-mails too (AttachmentThumbnail — lazy, cached, 2 at a time).
  */
 const isImage = (a) => /^image\//i.test(a?.contentType || '') || /\.(png|jpe?g|gif|webp|bmp|svg|heic|avif)$/i.test(a?.fileName || '');
 const ext = (name) => (String(name || '').match(/\.([a-z0-9]{1,5})$/i)?.[1] || 'file').toUpperCase();
@@ -52,18 +56,20 @@ export function attachmentKind(a, entryById) {
   return incoming ? 'requester' : 'reply';
 }
 
-function Thumb({ a, url }) {
+function Thumb({ ticketId, a, url }) {
   if (isImage(a)) {
     return url
       ? <img src={url} alt={attachmentName(a)} loading="lazy" className="h-full w-full object-cover" />
       : <ImageIcon className="h-6 w-6 text-muted-foreground/50" aria-hidden="true" />;
   }
-  return (
+  const icon = (
     <span className="flex flex-col items-center gap-1">
       <FileText className="h-7 w-7 text-muted-foreground/70" aria-hidden="true" />
       <span className="text-[10px] font-bold tracking-wide text-muted-foreground">{ext(a.fileName)}</span>
     </span>
   );
+  // 24 Nov 2026: PDFs, Word, sheets, text and e-mails get a first-page thumbnail.
+  return canThumb(a) ? <AttachmentThumbnail ticketId={ticketId} attachment={a} fallback={icon} /> : icon;
 }
 
 export default function TicketAttachmentsTab({
@@ -249,9 +255,9 @@ export default function TicketAttachmentsTab({
               {canMerge && (
                 <span className="absolute left-1.5 top-1.5 z-10 flex rounded bg-card/90 p-1 shadow-subtle">{selectBox(a)}</span>
               )}
-              <button type="button" onClick={() => onPreview?.(a, shown.map((r) => r.a))} title={`Preview ${attachmentName(a)}`}
+              <button type="button" onClick={() => onPreview?.(a, shown.map((r) => r.a))} title={`Preview ${attachmentName(a)}`} aria-label={`Preview ${attachmentName(a)}`}
                 className="tp-focus-ring flex h-28 items-center justify-center overflow-hidden bg-muted/50 transition-colors hover:bg-muted">
-                <Thumb a={a} url={urls[a.id]} />
+                <Thumb ticketId={ticketId} a={a} url={urls[a.id]} />
               </button>
               <div className="flex min-w-0 flex-1 flex-col gap-0.5 p-2.5">
                 <AttachmentName ticketId={ticketId} a={a} variant="grid" canRename={canRename} onChanged={nameChanged} />
