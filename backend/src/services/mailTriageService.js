@@ -105,6 +105,7 @@ const HOLD_REASON_LABELS = Object.freeze({
   meeting_invite: 'A meeting invite or response',
   agent_bcc_mailbox: 'The mailbox was not in To or Cc',
   possible_follow_up: 'It looks like a follow-up to an existing ticket',
+  own_mailbox_requester: 'It came from one of our own team mailboxes',
 });
 export function holdReasonLabel(reason) {
   return HOLD_REASON_LABELS[reason] || String(reason || '').replace(/_/g, ' ') || null;

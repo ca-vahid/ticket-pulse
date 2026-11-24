@@ -120,11 +120,13 @@ async function machineSplitForDelivery(delivery, to, cc, bcc) {
  * (originalRecipientsService.ownMailboxAddresses / isOwnAddress). A workflow
  * e-mail to one of them came back in as a new ticket from "our other mailbox",
  * whose acknowledgement came back again: 39 e-mails and 19 tickets in Accounting.
- * Throws when the list cannot be read: the caller does not send (fail safe).
+ * A failed read uses the last list that loaded; only when none ever loaded does
+ * it throw, and the caller does not send (fail safe). Disabled connections are
+ * not ours. Also used by Shadow to record what Live would take off.
  */
-async function ownMailboxSplit(to, cc, bcc) {
+export async function ownMailboxSplit(to = [], cc = [], bcc = []) {
   const { ownMailboxAddresses, isOwnAddress, bareAddress } = await import('./originalRecipientsService.js');
-  const own = await ownMailboxAddresses();
+  const own = await ownMailboxAddresses({ staleOk: true });
   const removed = [];
   const keep = (list, field) => list.filter((raw) => {
     const address = bareAddress(raw) || String(raw || '').trim().toLowerCase();
@@ -146,10 +148,11 @@ async function sendDelivery(delivery) {
     let bccRecipients = [...listFromDelivery(delivery, 'bccRecipients')];
     // Never e-mail our own mailboxes from a workflow (24 Nov 2026), whichever
     // token put them there (the requester, Cc, a fixed address). With nobody
-    // left on To the e-mail is not sent. When the list cannot be read nobody
+    // left on To the e-mail is not sent. When no list has ever loaded nobody
     // can be checked, so nothing is sent: the delivery fails and can be retried.
+    // The editor's test send gets the same strip.
     let ownRemoved = [];
-    if (delivery.workflowRunId) {
+    if (isWorkflowEmail(delivery)) {
       let split;
       try {
         split = await ownMailboxSplit(toRecipients, ccRecipients, bccRecipients);

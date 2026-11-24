@@ -54,6 +54,12 @@ export const HOLD_REASON_META = {
     tone: 'sky',
     help: 'A meeting invitation or calendar reply sent to the mailbox. It was held so it does not open a ticket; attach it, create a ticket, or discard it.',
   },
+  // 24 Nov 2026 (mail-loop guard): never a ticket for one of our own mailboxes.
+  own_mailbox_requester: {
+    label: 'From our own mailbox',
+    tone: 'amber',
+    help: 'It would have opened a ticket for one of our own team mailboxes (a hand-off from another team, say). Ticket Pulse never files a ticket for its own mailbox, so a person decides: attach it, create a ticket for the right person, or discard it.',
+  },
 };
 
 const TONE = {

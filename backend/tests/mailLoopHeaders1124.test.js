@@ -13,11 +13,22 @@ const axiosPostMock = jest.fn();
 const sendMailMock = jest.fn();
 const settingsRepositoryMock = { getSendGridConfig: jest.fn() };
 const calls = [];
+let anchorFound = false; // the message being answered exists in the mailbox (createReply path)
 const fakeClient = {
   api: (path) => ({
-    post: async (body) => { calls.push({ method: 'POST', path, body }); return {}; },
+    post: async (body) => {
+      calls.push({ method: 'POST', path, body });
+      // An Exchange reply draft that comes back without its Message-ID.
+      if (path.endsWith('/createReply')) return { id: 'draft-9', conversationId: 'conv-9' };
+      return {};
+    },
+    patch: async (body) => { calls.push({ method: 'PATCH', path, body }); return { id: 'draft-9' }; },
     filter() { return this; }, select() { return this; }, top() { return this; },
-    get: async () => ({ value: [] }),
+    get: async () => {
+      calls.push({ method: 'GET', path });
+      if (path.endsWith('/messages/draft-9')) return { internetMessageId: '<DM6PR01MB9999@DM6PR01MB9999.prod.outlook.example>' };
+      return { value: anchorFound ? [{ id: 'orig-1' }] : [] };
+    },
   }),
 };
 
@@ -39,6 +50,7 @@ const AUTOMATIC = { 'Auto-Submitted': 'auto-generated', 'X-Ticket-Pulse-Mail': '
 beforeEach(() => {
   jest.clearAllMocks();
   calls.length = 0;
+  anchorFound = false;
   axiosPostMock.mockResolvedValue({ headers: { 'x-message-id': 'sg-1' } });
   sendMailMock.mockResolvedValue({ messageId: '<smtp-1@ourco.example>' });
 });
@@ -84,6 +96,16 @@ describe('Graph lane', () => {
   test('no headers asked for: none sent (as before)', async () => {
     await graphMailClient.sendMailAsMailbox('ap@ourco.example', { to: ['jo.park@client.example'], subject: 'Hi', html: '<p>Hi</p>' });
     expect(calls.find((c) => c.path.endsWith('/sendMail')).body.message.internetMessageHeaders).toBeUndefined();
+  });
+
+  test('a createReply send that came back without its Message-ID reads it off the draft before sending, and returns it', async () => {
+    anchorFound = true;
+    const sent = await graphMailClient.sendMailAsMailbox('ap@ourco.example', {
+      to: ['ar@ourco.example'], subject: 'RE: Invoice question', html: '<p>Assigned</p>', inReplyTo: '<earlier@client.example>',
+    });
+    expect(sent).toMatchObject({ threadedVia: 'createReply', internetMessageId: '<DM6PR01MB9999@DM6PR01MB9999.prod.outlook.example>' });
+    const order = calls.map((c) => `${c.method} ${c.path.replace('/users/ap@ourco.example', '')}`);
+    expect(order.indexOf('GET /messages/draft-9')).toBeLessThan(order.indexOf('POST /messages/draft-9/send'));
   });
 
   test('intake mapping reads our mark back', () => {

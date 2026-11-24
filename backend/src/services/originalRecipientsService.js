@@ -66,6 +66,8 @@ const DIRECTORY_LOOKUPS_PER_RUN = 10;
 export const DIRECTORY_CALL_TIMEOUT_MS = 3000;
 export const DIRECTORY_BUDGET_MS = 6000;
 let ownCache = null; // { value: string[], at }
+let lastGoodOwn = null; // the last list that loaded, kept past the TTL (staleOk callers)
+let ownWorkspaceIds = []; // workspaces of the enabled mailboxes in that list
 const directoryCache = new Map(); // address -> { person, until }
 
 const lc = (v) => String(v || '').trim().toLowerCase();
@@ -170,15 +172,32 @@ export function filterOriginalRecipients(candidates, {
 }
 
 /**
- * Every address that is a mailbox of ours: each connected mailbox in any
- * workspace (enabled or not), its also-known-as addresses, and the global
- * sender (the sendgrid_from_email setting, then the environment). Cached for a
- * minute, and only when every read succeeded: any failure throws and caches
- * nothing.
+ * Every address that is a mailbox of ours: each ENABLED connected mailbox in
+ * any workspace (a disabled connection is no longer ours, 24 Nov 2026), its
+ * also-known-as addresses, and the global sender (the sendgrid_from_email
+ * setting, then the environment). Cached for a minute, and only when every
+ * read succeeded: any failure throws and caches nothing.
+ *
+ * `staleOk` (the mail-loop guard, 24 Nov 2026): when a read fails, the last
+ * list that loaded is returned however old it is, and only when none ever
+ * loaded does the call throw. "Everyone on the original e-mail" leaves it off:
+ * a failure there still reaches nobody.
  */
-export async function ownMailboxAddresses({ fresh = false } = {}) {
+export async function ownMailboxAddresses({ fresh = false, staleOk = false } = {}) {
   if (!fresh && ownCache && Date.now() - ownCache.at < OWN_CACHE_TTL_MS) return ownCache.value;
-  const boxes = await prisma.mailboxConnection.findMany({ select: { id: true, address: true } });
+  try {
+    return await loadOwnMailboxAddresses();
+  } catch (err) {
+    if (staleOk && lastGoodOwn) {
+      logger.warn(`Own-mailbox list could not be read (${err.message}); using the last list that loaded (${lastGoodOwn.value.length} addresses, ${Math.round((Date.now() - lastGoodOwn.at) / 1000)} s old)`);
+      return lastGoodOwn.value;
+    }
+    throw err;
+  }
+}
+
+async function loadOwnMailboxAddresses() {
+  const boxes = await prisma.mailboxConnection.findMany({ where: { isEnabled: true }, select: { id: true, address: true, workspaceId: true } });
   const own = new Set();
   for (const box of listOf(boxes)) {
     const address = bareAddress(box?.address);
@@ -194,11 +213,23 @@ export async function ownMailboxAddresses({ fresh = false } = {}) {
   }
   const value = [...own];
   ownCache = { value, at: Date.now() };
+  lastGoodOwn = ownCache;
+  ownWorkspaceIds = [...new Set(listOf(boxes).map((b) => Number(b?.workspaceId)).filter((n) => Number.isInteger(n) && n > 0))];
   return value;
 }
 
-export function invalidateOwnMailboxCache() {
+/** Workspaces with an enabled mailbox, from the last list that loaded ([] before one did). */
+export function ownMailboxWorkspaceIds() {
+  return [...ownWorkspaceIds];
+}
+
+/** `{ keepLastGood: true }` keeps the stale fallback (tests of a read failure after a good read). */
+export function invalidateOwnMailboxCache({ keepLastGood = false } = {}) {
   ownCache = null;
+  if (!keepLastGood) {
+    lastGoodOwn = null;
+    ownWorkspaceIds = [];
+  }
   directoryCache.clear();
 }
 
@@ -533,5 +564,5 @@ export function trimOriginalToCap({ to = [], cc = [], bcc = [] }, originalList =
 
 export default {
   bareAddress, originalRecipientCandidates, isOwnAddress, filterOriginalRecipients, ownMailboxAddresses,
-  invalidateOwnMailboxCache, agentRemovedFromHistory, resolveOriginalRecipients, trimOriginalToCap, MAX_TO_LINE,
+  invalidateOwnMailboxCache, ownMailboxWorkspaceIds, agentRemovedFromHistory, resolveOriginalRecipients, trimOriginalToCap, MAX_TO_LINE,
 };

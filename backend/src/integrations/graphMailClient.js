@@ -409,6 +409,18 @@ class GraphMailClient {
       }
     }
 
+    // The reply's own Message-ID is what intake recognises as ours when it comes
+    // back into another of our mailboxes (24 Nov 2026 mail-loop guard): read it
+    // off the draft when neither createReply nor the PATCH returned it. Best effort.
+    if (!draft.internetMessageId) {
+      try {
+        const read = await client.api(`/users/${mailbox}/messages/${draft.id}`).select('internetMessageId').get();
+        if (read?.internetMessageId) draft = { ...draft, internetMessageId: read.internetMessageId };
+      } catch (error) {
+        logger.debug('Graph API: reply draft Message-ID not read (non-fatal)', { mailbox, error: error.message });
+      }
+    }
+
     try {
       await client.api(`/users/${mailbox}/messages/${draft.id}/send`).post({});
     } catch (error) {

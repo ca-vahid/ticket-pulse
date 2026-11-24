@@ -3646,6 +3646,25 @@ async function executeNode({
     }
 
     const isMock = executionMode === EXECUTION_MODE_MOCK;
+    // Shadow records what Live would take off (24 Nov 2026 mail-loop guard): our
+    // own mailboxes never get a workflow e-mail. Best effort: a failure records nothing.
+    let ownMailboxPreview = null;
+    if (isMock) {
+      try {
+        const { ownMailboxSplit } = await import('./notificationDeliveryService.js');
+        if (typeof ownMailboxSplit === 'function') {
+          const split = await ownMailboxSplit(toRecipients, ccRecipients, bccRecipients);
+          if (split?.removed?.length) {
+            ownMailboxPreview = {
+              ownMailboxWouldRemove: split.removed,
+              ...(split.to.some((a) => String(a || '').includes('@')) ? {} : { wouldSkip: 'own_mailbox' }),
+            };
+          }
+        }
+      } catch (error) {
+        logger.debug(`Shadow own-mailbox preview skipped: ${error.message}`);
+      }
+    }
     const dedupeKey = buildDeliveryDedupeKey({
       workflow,
       run,
@@ -3700,17 +3719,21 @@ async function executeNode({
           // A Shadow row (never sent) records the address it would have left from.
           fromAddress: (isMock ? plannedFromAddress : null) || node.data?.fromAddress || null,
           dedupeKey,
-          payload: sanitizeWorkflowAuditPayload(safeJson({
-            mockMode: isMock,
-            wouldSend: isMock,
-            workflowId: workflow.id,
-            workflowVersion: workflow.publishedVersion,
-            nodeId: node.id,
-            event: eventContext.event,
-            actionLinks: output.actionLinks || {},
-            branding: output.branding || {},
-            brandingWarnings: output.brandingWarnings || [],
-          })),
+          payload: {
+            ...sanitizeWorkflowAuditPayload(safeJson({
+              mockMode: isMock,
+              wouldSend: isMock,
+              workflowId: workflow.id,
+              workflowVersion: workflow.publishedVersion,
+              nodeId: node.id,
+              event: eventContext.event,
+              actionLinks: output.actionLinks || {},
+              branding: output.branding || {},
+              brandingWarnings: output.brandingWarnings || [],
+            })),
+            // Addresses, like the row's own recipient lists (not the step's audit copy).
+            ...(ownMailboxPreview || {}),
+          },
         },
       });
     } catch (error) {
