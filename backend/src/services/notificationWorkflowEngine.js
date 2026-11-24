@@ -2128,7 +2128,11 @@ function recipientFromToken(token, context, customEmails) {
   // Approval events (approval.requested/decided) carry the requesting agent's
   // email in event.extra.requestedBy — lets workflows email the requester.
   if (value === 'approval_requester') return [context.event?.extra?.requestedBy];
+  // "Everyone on the original e-mail" (24 Nov 2026): To + Cc + reply Cc, cleaned
+  // by originalRecipientsService before the resolver gets here. Without that
+  // list (nothing resolved it) the old, Cc-only reading stands.
   if (value === 'original_ccs') {
+    if (Array.isArray(context.originalRecipients)) return context.originalRecipients;
     return [
       ...(Array.isArray(context.ticket?.ccEmails) ? context.ticket.ccEmails : []),
       ...(Array.isArray(context.ticket?.replyCcEmails) ? context.ticket.replyCcEmails : []),
@@ -2954,9 +2958,23 @@ async function executeNode({
     const groupEmails = await resolveInternalGroupEmails(allTokens);
     // last_replying_agent / watchers (TU-8): DB-backed tokens, resolved once.
     const dynamic = await resolveDynamicRecipientTokens(allTokens, eventContext);
+    // "Everyone on the original e-mail" (`original_ccs`, 24 Nov 2026): the To
+    // line joins the Cc lists, less our mailboxes, the requester, automated
+    // addresses and anyone an agent took off the Cc. Resolved once, here, so
+    // Preview, Shadow and live runs list the same people.
+    let original = null;
+    if (allTokens.some((t) => String(t || '').trim() === 'original_ccs')) {
+      try {
+        const { resolveOriginalRecipients } = await import('./originalRecipientsService.js');
+        original = await resolveOriginalRecipients(eventContext, { workspaceId: workflow?.workspaceId ?? eventContext.workspace?.id });
+      } catch (err) {
+        logger.warn(`recipient_resolver: original recipients not resolved (the Cc lists stand): ${err.message}`);
+      }
+    }
+    const recipientContext = original ? { ...eventContext, originalRecipients: original.list } : eventContext;
     const resolveWithGroups = (tokens, fallbackTokens) => {
       const list = Array.isArray(tokens) ? tokens : (fallbackTokens || []);
-      const direct = resolveRecipientList(list, eventContext, customEmails);
+      const direct = resolveRecipientList(list, recipientContext, customEmails);
       const hasGroupToken = list.some((t) => /^internal_group:\d+$/.test(String(t || '')));
       const extra = list.flatMap((t) => dynamic[String(t || '')] || []);
       return hasGroupToken || extra.length ? uniqueEmails([direct, hasGroupToken ? groupEmails : [], extra]) : direct;
@@ -2989,15 +3007,32 @@ async function executeNode({
       if (alsoFor.length) cc = uniqueEmails([cc, alsoFor]);
     }
     const bcc = dropExcluded(excludeExistingEmails(uniqueEmails([resolveWithGroups(node.data?.bcc || []), bccCustom]), [...to, ...cc]));
-    const recipients = {
+    let recipients = {
       to,
       cc,
       bcc,
     };
+    // A long To line must not push the whole e-mail past the send cap (a live
+    // run refuses a list over 25 and the requester would get nothing): people
+    // who are here only from the original e-mail are left off, last first.
+    let originalTrimmed = 0;
+    if (original?.list?.length) {
+      const { trimOriginalToCap } = await import('./originalRecipientsService.js');
+      const trimmed = trimOriginalToCap(recipients, original.list, MAX_EMAIL_RECIPIENTS);
+      originalTrimmed = trimmed.trimmed;
+      if (originalTrimmed) recipients = { to: trimmed.to, cc: trimmed.cc, bcc: trimmed.bcc };
+    }
     state.recipients = recipients;
     return {
       recipients,
       ...(alsoFor.length ? { additionalRequesters: alsoFor } : {}),
+      ...(original ? {
+        originalRecipients: {
+          count: original.list.length - originalTrimmed,
+          leftOff: { ...original.leftOff, ...(originalTrimmed ? { overRecipientLimit: originalTrimmed } : {}) },
+          ...(original.toLineSkipped ? { toLineSkipped: true } : {}),
+        },
+      } : {}),
       ...exclusions.output,
     };
   }

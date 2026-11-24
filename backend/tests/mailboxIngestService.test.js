@@ -843,7 +843,8 @@ describe('agent forwards (Phase FW)', () => {
     const [, input, , options] = ticketServiceMock.createTicket.mock.calls[0];
     expect(input.requesterEmail).toBe('someone@customer.example');
     expect(input.subject).toBe('FW: Invoice 4471 still unpaid');
-    expect(options).toEqual({ sourceChannel: 1, createdVia: 'email' });
+    // 24 Nov 2026: the mail's To/Cc ride along so the row has them at creation.
+    expect(options).toEqual({ sourceChannel: 1, createdVia: 'email', mailRecipients: { toEmails: ['helpdesk-pilot@example.com'], ccEmails: [] } });
     const original = prismaMock.ticketThreadEntry.create.mock.calls[0][0].data;
     expect(original.rawPayload?.forwarded).toBeUndefined();
     expect(activityMock.create).not.toHaveBeenCalledWith(expect.objectContaining({ activityType: 'forwarded_intake' }));
@@ -1106,7 +1107,7 @@ describe('hold-queue callbacks (RL-4 contract)', () => {
     });
     expect(ticketServiceMock.createTicket).toHaveBeenCalledWith(1, expect.objectContaining({
       requesterEmail: 'chosen.person@customer.example', requesterName: null, subject: 'Printer on 3rd floor jammed',
-    }), expect.objectContaining({ role: 'system' }), { sourceChannel: 1, createdVia: 'held_reply' });
+    }), expect.objectContaining({ role: 'system' }), { sourceChannel: 1, createdVia: 'held_reply', mailRecipients: { toEmails: ['helpdesk-pilot@example.com'], ccEmails: [] } });
     const original = prismaMock.ticketThreadEntry.create.mock.calls[0][0].data;
     expect(original).toEqual(expect.objectContaining({ eventType: 'original_email', actorEmail: 'rita@example.com', emailMessageId: '<held-1@example.com>' }));
     expect(original.rawPayload).toEqual({
