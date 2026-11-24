@@ -182,8 +182,8 @@ export function validIsoDate(value, now = new Date()) {
  * A document date read the wrong way round. Canadian senders often write
  * DD/MM/YYYY, so "12/11/2026" can come back as 11 December when they meant
  * 12 November. When the date is more than a week after the e-mail arrived and
- * swapping day and month gives a real date that is not, the swap is what they
- * meant (24 Nov 2026). Anything else is returned unchanged.
+ * swapping day and month gives a real date from the 60 days before it arrived,
+ * the swap is what they meant (24 Nov 2026). Anything else is returned unchanged.
  */
 export function dayMonthCorrected(isoDate, receivedDate) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDate || ''));
@@ -196,7 +196,10 @@ export function dayMonthCorrected(isoDate, receivedDate) {
   if (Number(m[3]) > 12 || m[2] === m[3]) return isoDate;
   const swapped = `${m[1]}-${m[3]}-${m[2]}`;
   if (!validIsoDate(swapped, new Date(received + WEEK))) return isoDate;
-  return at(m[1], m[3], m[2]) <= received + WEEK ? swapped : isoDate;
+  // The swap must land shortly before arrival (within 60 days): an invoice really
+  // dated ahead (3 December, arriving 24 November) must not become 12 March.
+  const s = at(m[1], m[3], m[2]);
+  return s <= received + WEEK && s >= received - 60 * 86400_000 ? swapped : isoDate;
 }
 
 /** Remove what file names can't hold, collapse whitespace, trim stray dots and separators. */

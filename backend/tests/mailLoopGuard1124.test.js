@@ -502,24 +502,35 @@ describe('5. follow-ups: the createReply race, the failure cache, person reasons
     expect(await ingest.processEmail(apBox, fromAr({ internetMessageId: '<SN6PR01MB0000@x.prod.outlook.example>' }))).toBe('held');
   });
 
-  test('a failed list read is remembered for ten seconds: no query per message or delivery, then read again', async () => {
+  test('a failed list read is remembered for ten seconds once a list has loaded: no query per message or delivery, then read again', async () => {
     const realNow = Date.now;
     let now = realNow();
     Date.now = () => now;
     try {
+      prismaMock.mailboxConnection.findMany.mockImplementation(async () => BOXES.filter((b) => b.isEnabled));
+      expect(await ownMailboxAddresses()).toContain(AR);
+      invalidateOwnMailboxCache({ keepLastGood: true });
       prismaMock.mailboxConnection.findMany.mockRejectedValue(new Error('db down'));
       await expect(ownMailboxAddresses()).rejects.toThrow('db down');
-      await expect(ownMailboxAddresses({ staleOk: true })).rejects.toThrow('db down');
+      expect(await ownMailboxAddresses({ staleOk: true })).toContain(AR);
       await processDelivery(delivery({ recipient: CLIENT, toRecipients: [CLIENT] }));
       await ingest.processEmail(apBox, mail());
-      expect(prismaMock.mailboxConnection.findMany).toHaveBeenCalledTimes(1);
+      expect(prismaMock.mailboxConnection.findMany).toHaveBeenCalledTimes(2);
       now += OWN_FAILURE_TTL_MS;
       prismaMock.mailboxConnection.findMany.mockImplementation(async () => BOXES.filter((b) => b.isEnabled));
       expect(await ownMailboxAddresses()).toContain(AR);
-      expect(prismaMock.mailboxConnection.findMany).toHaveBeenCalledTimes(2);
+      expect(prismaMock.mailboxConnection.findMany).toHaveBeenCalledTimes(3);
     } finally {
       Date.now = realNow;
     }
+  });
+
+  test('before any list has loaded, a failure is not remembered: the next call asks again', async () => {
+    prismaMock.mailboxConnection.findMany.mockRejectedValueOnce(new Error('db down'));
+    await expect(ownMailboxAddresses()).rejects.toThrow('db down');
+    prismaMock.mailboxConnection.findMany.mockImplementation(async () => BOXES.filter((b) => b.isEnabled));
+    expect(await ownMailboxAddresses()).toContain(AR);
+    expect(prismaMock.mailboxConnection.findMany).toHaveBeenCalledTimes(2);
   });
 
   test('own_mailbox_requester holds are a person’s mail in the held-mail groups', () => {

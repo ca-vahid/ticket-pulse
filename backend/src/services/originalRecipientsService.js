@@ -196,7 +196,9 @@ export async function ownMailboxAddresses({ fresh = false, staleOk = false } = {
     try {
       return await loadOwnMailboxAddresses();
     } catch (err) {
-      ownFailure = { error: err, at: Date.now() };
+      // Only once a list has loaded: at start-up every caller keeps asking, so a
+      // blip right after a restart can't fail workflow e-mail for 10 s.
+      if (lastGoodOwn) ownFailure = { error: err, at: Date.now() };
       throw err;
     }
   } catch (err) {
