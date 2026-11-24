@@ -1,6 +1,6 @@
 import {
-  contentDisposition, extractFromRules, formatAttachmentName, isNameableDocument, normaliseEditedName,
-  pacificDate, uniqueName, vendorFromEditedName, withNameFields, MAX_STEM_CHARS,
+  cleanNamePart, contentDisposition, extensionFor, extractFromRules, formatAttachmentName, isNameableDocument,
+  normaliseEditedName, pacificDate, uniqueName, vendorFromEditedName, withNameFields, MAX_NAME_CHARS, MAX_STEM_CHARS,
 } from '../src/services/attachmentNamingRules.js';
 
 /**
@@ -84,8 +84,8 @@ describe('rules: vendor and invoice number from subject, sender and file name', 
 
 describe('name format', () => {
   test('Vendor_Invoice_YYYY_MM_DD.ext, spaces and capitals kept', () => {
-    expect(formatAttachmentName({ vendor: 'Active Glass', invoiceNumber: 'INV-100234', date: '2026-11-23', ext: 'pdf' }))
-      .toBe('Active Glass_INV-100234_2026_11_23.pdf');
+    expect(formatAttachmentName({ vendor: 'Acme Glass', invoiceNumber: 'INV-100234', date: '2026-11-23', ext: 'pdf' }))
+      .toBe('Acme Glass_INV-100234_2026_11_23.pdf');
   });
 
   test('no invoice number → Vendor_YYYY_MM_DD.ext', () => {
@@ -123,8 +123,102 @@ describe('name format', () => {
     expect(normaliseEditedName('Acme_12.PDF', 'INV-12.pdf')).toBe('Acme_12.pdf');
     expect(normaliseEditedName('Acme v2.1', 'INV-12.pdf')).toBe('Acme v2.1.pdf');
     expect(normaliseEditedName('   ', 'INV-12.pdf')).toBeNull();
+    expect(normaliseEditedName(42, 'INV-12.pdf')).toBeNull();
+    expect(normaliseEditedName(['Acme'], 'INV-12.pdf')).toBeNull();
+  });
+
+  test('an extension is 1–8 letters or digits; otherwise it comes from the content type', () => {
+    expect(extensionFor('INV-12.pdf', 'application/pdf')).toBe('pdf');
+    expect(extensionFor('Statement on Demand.XLSX', null)).toBe('xlsx');
+    expect(extensionFor('Remittance for Acme Supplies Inc.', 'application/pdf')).toBe('pdf');
+    expect(extensionFor('scan.final version', 'application/pdf')).toBe('pdf');
+    expect(extensionFor('noext', 'application/x-unknown')).toBe('');
+    expect(normaliseEditedName('Acme_12', 'Remittance for Acme Supplies Inc.', 'application/pdf')).toBe('Acme_12.pdf');
+    expect(formatAttachmentName({ vendor: 'Acme', date: '2026-11-23', ext: 'not an ext!' })).toBe('Acme_2026_11_23');
+  });
+
+  test('the whole name stays within 200 characters, " (n)" included', () => {
+    const long = `${'Acme Supplies '.repeat(30)}.pdf`;
+    const n = normaliseEditedName(long, 'a.pdf');
+    expect(Array.from(n).length).toBeLessThanOrEqual(MAX_NAME_CHARS);
+    const taken = [n];
+    const twin = uniqueName(n, taken);
+    expect(Array.from(twin).length).toBeLessThanOrEqual(MAX_NAME_CHARS);
+    const wide = uniqueName(`${'x'.repeat(196)}.pdf`, [`${'x'.repeat(196)}.pdf`]);
+    expect(wide.length).toBe(MAX_NAME_CHARS);
+    expect(wide.endsWith(' (2).pdf')).toBe(true);
+  });
+
+  test('Windows-reserved base names get a trailing "_"', () => {
+    expect(normaliseEditedName('CON', 'a.pdf')).toBe('CON_.pdf');
+    expect(normaliseEditedName('lpt1', 'a.pdf')).toBe('lpt1_.pdf');
+    expect(normaliseEditedName('nul.backup', 'a.pdf')).toBe('nul.backup_.pdf');
+    expect(normaliseEditedName('Console', 'a.pdf')).toBe('Console.pdf');
+    expect(formatAttachmentName({ vendor: 'AUX', date: null, ext: 'pdf' })).toBe('AUX_.pdf');
+  });
+
+  test('direction marks and control characters are stripped', () => {
+    expect(cleanNamePart('Acme‮FDP.exe')).toBe('AcmeFDP.exe');
+    expect(cleanNamePart('Acme⁦Supplies⁩‎‏')).toBe('AcmeSupplies');
+    expect(cleanNamePart('Acme\u0001\u001fSupplies\u0085')).toBe('Acme Supplies');
+  });
+
+  test('truncation never splits a surrogate pair', () => {
+    const vendor = '\u{1F4C4}'.repeat(200); // 200 code points, 400 UTF-16 units
+    const name = formatAttachmentName({ vendor, invoiceNumber: null, date: '2026-11-23', ext: 'pdf' });
+    expect(name).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+    expect(Array.from(name).length).toBe(MAX_STEM_CHARS + 4);
+    const edited = normaliseEditedName('\u{1F4C4}'.repeat(150), 'a.pdf');
+    expect(edited).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+  });
+});
+
+describe('learning from a person\'s edit', () => {
+  test('only the Vendor_<something with a digit> shape teaches', () => {
     expect(vendorFromEditedName('Acme Supplies_INV-12_2026_11_23.pdf')).toBe('Acme Supplies');
+    expect(vendorFromEditedName('Northwind Traders_28401.pdf')).toBe('Northwind Traders');
     expect(vendorFromEditedName('just a name.pdf')).toBeNull();
+    expect(vendorFromEditedName('Copy_of_invoice.pdf')).toBeNull();
+    expect(vendorFromEditedName('Acme Supplies_terms.pdf')).toBeNull();
+  });
+
+  test('generic words, our own company and platforms never teach', () => {
+    expect(vendorFromEditedName('Signed_W9.pdf')).toBeNull();
+    expect(vendorFromEditedName('Scanned_2026_11_23.pdf')).toBeNull();
+    expect(vendorFromEditedName('Invoice_12345.pdf')).toBeNull();
+    expect(vendorFromEditedName('Document_1.pdf')).toBeNull();
+    expect(vendorFromEditedName('Final_2.pdf')).toBeNull();
+    expect(vendorFromEditedName('OurCo_12.pdf', internalDomains)).toBeNull();
+    expect(vendorFromEditedName('QuickBooks_12.pdf')).toBeNull();
+  });
+});
+
+describe('a subject\'s invoice number on a mail with several documents', () => {
+  const mail = { subject: 'Invoice 28401 from Northwind Traders', fromEmail: 'ar@northwind.example' };
+
+  test('only the file whose own name holds the number gets it; the others ask Claude', () => {
+    const inv = rules({ ...mail, fileName: 'Invoice_28401.pdf', documentCount: 3 });
+    expect(inv.invoice).toMatchObject({ value: '28401', confidence: 'high', from: 'subject+file' });
+    expect(inv.rulesSufficient).toBe(true);
+
+    const terms = rules({ ...mail, fileName: 'Terms and conditions.pdf', documentCount: 3 });
+    expect(terms.vendor).toMatchObject({ value: 'Northwind Traders' });
+    expect(terms.invoice).toBeNull();
+    expect(terms.subjectInvoiceHint).toBe('28401');
+    expect(terms.rulesSufficient).toBe(false);
+  });
+
+  test('the mail\'s only document takes the subject\'s number', () => {
+    const only = rules({ ...mail, fileName: 'document.pdf', documentCount: 1 });
+    expect(only.invoice).toMatchObject({ value: '28401', confidence: 'high', from: 'subject' });
+    expect(only.rulesSufficient).toBe(true);
+  });
+
+  test('a vendor-list entry alone never makes the rules enough', () => {
+    const out = rules({ subject: 'x', fromEmail: 'ar@acme.example', fileName: 'INV-77.pdf', aliases: { 'acme.example': { vendor: 'Acme Supplies', learnedAt: '2026-11-20T00:00:00Z', by: 'Dana Fox' } } });
+    expect(out.vendor).toMatchObject({ value: 'Acme Supplies', from: 'vendor_list' });
+    expect(out.invoice).toMatchObject({ value: 'INV-77', confidence: 'high' });
+    expect(out.rulesSufficient).toBe(false);
   });
 });
 

@@ -5,9 +5,10 @@ import settingsRepository from './settingsRepository.js';
 import anthropicProvider from './aiProviders/anthropicProvider.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import {
-  emailDomain, extractFromRules, fileExtension, formatAttachmentName, isFreeMailDomain,
+  aliasEntryFor, emailDomain, extensionFor, extractFromRules, formatAttachmentName, isFreeMailDomain,
   isInternalDomain, isNameableDocument, isPaymentPlatformDomain, isPdf, normaliseEditedName,
-  pacificDate, shownName, uniqueName, validIsoDate, vendorFromEditedName, withNameFields,
+  pacificDate, plausibleVendor, sameVendor, shownName, uniqueName, validIsoDate, vendorFromEditedName,
+  withNameFields,
 } from './attachmentNamingRules.js';
 
 export { withNameFields };
@@ -17,12 +18,15 @@ export { withNameFields };
  * arrive by e-mail, with Revert and Edit.
  *
  * - Runs in the background after mailboxIngestService stores an e-mail file.
- *   Mail intake never waits for it. At most 2 jobs run at a time, and a
- *   ticket's files are named one after another so two of them never get the
- *   same name.
+ *   Mail intake never waits for it. At most 2 jobs run at a time (queue capped
+ *   at 500), and a ticket's files are named one after another so two of them
+ *   never get the same name. A catch-up on boot and once a day picks up files
+ *   from the last 48 hours that a restart left unchecked.
  * - The first pass uses rules (attachmentNamingRules.js) and the learned vendor
- *   list. For a PDF, Claude reads the document unless the rules alone give a
- *   vendor AND an invoice number with high confidence.
+ *   list. For a PDF, Claude reads the document unless the mail itself gives a
+ *   vendor AND an invoice number with high confidence (the vendor list alone
+ *   never skips Claude, and a high-confidence Claude vendor that disagrees with
+ *   the list wins).
  * - Only `display_name` and friends change. `file_name`, the stored blob and
  *   the FreshService mirror keep the original name.
  *
@@ -30,7 +34,7 @@ export { withNameFields };
  * PDF document block), using the AI provider layer's Anthropic client and key
  * (anthropicProvider.getClient()). The provider gateway's failover can fall
  * back to OpenAI, which has no document blocks in this shape, so it is not
- * used. Usage is recorded in ai_provider_attempts (operation
+ * used. Every attempt is recorded in ai_provider_attempts (operation
  * 'attachment_naming'), which feeds the token usage report.
  */
 
@@ -38,6 +42,10 @@ export const OPERATION = 'attachment_naming';
 export const DEFAULT_MODEL = 'claude-opus-5-5';
 export const MAX_AI_PDF_BYTES = 10 * 1024 * 1024;
 export const MAX_CONCURRENT = 2;
+export const MAX_QUEUE = 500;
+export const CLAUDE_TIMEOUT_MS = 60_000;
+export const CATCH_UP_HOURS = 48;
+export const CATCH_UP_LIMIT = 500;
 const ACTOR_NAME = 'Ticket Pulse';
 
 export const modeKey = (workspaceId) => `attachment_naming_ws${Number(workspaceId) || 0}`;
@@ -55,6 +63,7 @@ export async function namingMode(workspaceId) {
   return String(raw || '').trim().toLowerCase() === 'live' ? 'live' : 'off';
 }
 
+/** The learned vendor list: { "<domain>": { vendor, learnedAt, by } } (bare strings from older writes read too). */
 export async function readAliases(workspaceId) {
   const raw = await soft(() => settingsRepository.get(aliasesKey(workspaceId)), null);
   if (!raw) return {};
@@ -64,6 +73,10 @@ export async function readAliases(workspaceId) {
   } catch {
     return {};
   }
+}
+
+async function writeAliases(workspaceId, aliases) {
+  await soft(() => settingsRepository.set(aliasesKey(workspaceId), JSON.stringify(aliases)), null);
 }
 
 async function namingModel() {
@@ -102,10 +115,13 @@ export function buildPrompt({ subject, senderName, senderDomain, fileName, rules
     `Sender: ${senderName || '(no name)'}${senderDomain ? ` <${senderDomain}>` : ''}`,
     `Original file name: ${fileName}`,
     `First guess from simple rules (may be wrong): ${guess}`,
+    ...(rules?.subjectInvoiceHint
+      ? [`The subject mentions number ${rules.subjectInvoiceHint}, but the mail had several documents: use it only if it is printed on this one.`]
+      : []),
     '',
     'Return:',
     `- vendor: the company that issued the document, written as on the document (its letterhead or "from"). Never the recipient${us}, and never a payment or billing platform such as Balance, QuickBooks, Bill.com or Xero: name the business it was sent for. null when unclear.`,
-    '- invoiceNumber: the invoice or document number exactly as printed, or null.',
+    '- invoiceNumber: the invoice or document number exactly as printed on this document, or null.',
     '- documentDate: the invoice or statement date as YYYY-MM-DD, or null.',
     '- confidence: high, medium or low, for the vendor.',
   ].join('\n');
@@ -130,16 +146,17 @@ export function validateAiAnswer(value) {
 
 function classifyAnthropicError(err) {
   // Most specific first. APIConnectionError extends APIError (with no status),
-  // so the status branch only takes errors that carry one.
+  // so the status branch only takes errors that carry one. Retry only rate
+  // limits, 5xx and connection failures (timeouts are connection errors).
   if (err instanceof Anthropic.RateLimitError) return { errorClass: 'rate_limit', retryable: true };
   if (err instanceof Anthropic.APIError && typeof err.status === 'number') {
-    return { errorClass: `api_${err.status}`, retryable: err.status >= 500 || err.status === 408 || err.status === 409 };
+    return { errorClass: `api_${err.status}`, retryable: err.status >= 500 };
   }
   if (err instanceof Anthropic.APIConnectionError) return { errorClass: 'connection', retryable: true };
   return { errorClass: 'unknown', retryable: false };
 }
 
-async function recordAttempt({ workspaceId, model, status, startedAt, response = null, errorClass = null, errorMessage = null, meta = {} }) {
+async function recordAttempt({ workspaceId, model, attemptNumber, status, startedAt, response = null, errorClass = null, errorMessage = null, meta = {} }) {
   const usage = response?.usage || {};
   await soft(() => prisma.aiProviderAttempt.create({
     data: {
@@ -147,7 +164,7 @@ async function recordAttempt({ workspaceId, model, status, startedAt, response =
       operation: OPERATION,
       provider: 'anthropic',
       model,
-      attemptNumber: 1,
+      attemptNumber,
       status,
       errorClass,
       errorMessage: errorMessage ? String(errorMessage).slice(0, 1000) : null,
@@ -169,7 +186,9 @@ export function _setRetryDelayForTests(ms) { retryDelayMs = ms; }
 
 /**
  * Ask Claude to read one PDF. Returns { ok: true, answer, model } or
- * { ok: false, reason } and never throws. One retry on a retryable failure.
+ * { ok: false, reason } and never throws. 60 s per attempt, no SDK retries;
+ * our own single retry for rate limits, 5xx and connection failures. Every
+ * attempt is recorded.
  */
 export async function readPdfWithClaude({ workspaceId, buffer, prompt, model, meta = {} }) {
   let client;
@@ -194,10 +213,10 @@ export async function readPdfWithClaude({ workspaceId, buffer, prompt, model, me
     const startedAt = new Date();
     let response;
     try {
-      response = await client.messages.create(request);
+      response = await client.messages.create(request, { timeout: CLAUDE_TIMEOUT_MS, maxRetries: 0 });
     } catch (err) {
       const { errorClass, retryable } = classifyAnthropicError(err);
-      await recordAttempt({ workspaceId, model, status: 'failed', startedAt, errorClass, errorMessage: err?.message, meta: { ...meta, attempt } });
+      await recordAttempt({ workspaceId, model, attemptNumber: attempt, status: 'failed', startedAt, errorClass, errorMessage: err?.message, meta });
       logger.warn(`Attachment naming: Claude call failed (${errorClass}, attempt ${attempt}): ${err?.message}`);
       if (retryable && attempt === 1) {
         await new Promise((r) => { setTimeout(r, retryDelayMs); });
@@ -207,7 +226,7 @@ export async function readPdfWithClaude({ workspaceId, buffer, prompt, model, me
     }
     // Check why it stopped before reading anything.
     if (response?.stop_reason === 'refusal' || response?.stop_reason === 'max_tokens') {
-      await recordAttempt({ workspaceId, model, status: 'failed', startedAt, response, errorClass: response.stop_reason, meta: { ...meta, attempt } });
+      await recordAttempt({ workspaceId, model, attemptNumber: attempt, status: 'failed', startedAt, response, errorClass: response.stop_reason, meta });
       return { ok: false, reason: response.stop_reason };
     }
     const text = (response?.content || []).find((b) => b?.type === 'text')?.text;
@@ -218,10 +237,10 @@ export async function readPdfWithClaude({ workspaceId, buffer, prompt, model, me
       answer = null;
     }
     if (!answer) {
-      await recordAttempt({ workspaceId, model, status: 'failed', startedAt, response, errorClass: 'invalid_output', meta: { ...meta, attempt } });
+      await recordAttempt({ workspaceId, model, attemptNumber: attempt, status: 'failed', startedAt, response, errorClass: 'invalid_output', meta });
       return { ok: false, reason: 'invalid_output' };
     }
-    await recordAttempt({ workspaceId, model, status: 'succeeded', startedAt, response, meta: { ...meta, attempt } });
+    await recordAttempt({ workspaceId, model, attemptNumber: attempt, status: 'succeeded', startedAt, response, meta });
     return { ok: true, answer, model };
   }
   return { ok: false, reason: 'exhausted' };
@@ -230,19 +249,32 @@ export async function readPdfWithClaude({ workspaceId, buffer, prompt, model, me
 // ----------------------------------------------------------------- decide
 
 /**
- * Combine the rules and Claude's reading into one decision. Returns null when
- * there is no vendor (leave the original name).
- * Vendor: the learned list (people's spelling) > Claude (unless low) > rules (medium or better).
+ * Combine the rules and Claude's reading into one decision. Returns
+ * { name, details } or null when there is no vendor (leave the original name).
+ * Vendor: the learned list (people's spelling) unless a high-confidence
+ * Claude vendor disagrees with it; else Claude (unless low); else the rules
+ * (medium or better). Claude's vendor is filtered like any other candidate
+ * (not generic, not our own company, not a payment platform).
  */
-export function decideName({ rules, ai = null, aiModel = null, fileName, receivedAt, now = new Date() }) {
-  const aiUsable = ai && ai.confidence !== 'low';
+export function decideName({ rules, ai = null, aiModel = null, fileName, contentType = null, receivedAt, internalDomains = [], now = new Date() }) {
+  const aiVendor = ai?.vendor ? plausibleVendor(ai.vendor, internalDomains) : null;
+  const aiUsable = Boolean(ai) && ai.confidence !== 'low';
   let vendor = null;
-  let usedAi = false;
-  if (rules?.vendor?.from === 'vendor_list') vendor = rules.vendor.value;
-  else if (aiUsable && ai.vendor) { vendor = ai.vendor; usedAi = true; }
-  else if (rules?.vendor && rules.vendor.confidence !== 'low') vendor = rules.vendor.value;
+  let vendorFrom = null;
+  if (rules?.vendor?.from === 'vendor_list') {
+    if (aiVendor && ai.confidence === 'high' && !sameVendor(aiVendor, rules.vendor.value)) {
+      vendor = aiVendor; vendorFrom = 'ai';
+    } else {
+      vendor = rules.vendor.value; vendorFrom = 'vendor_list';
+    }
+  } else if (aiUsable && aiVendor) {
+    vendor = aiVendor; vendorFrom = 'ai';
+  } else if (rules?.vendor && rules.vendor.confidence !== 'low') {
+    vendor = rules.vendor.value; vendorFrom = rules.vendor.from;
+  }
   if (!vendor) return null;
 
+  let usedAi = vendorFrom === 'ai';
   let invoiceNumber = null;
   if (ai?.invoiceNumber && (aiUsable || !rules?.invoice)) { invoiceNumber = ai.invoiceNumber; usedAi = true; } else if (rules?.invoice) invoiceNumber = rules.invoice.value;
 
@@ -251,8 +283,8 @@ export function decideName({ rules, ai = null, aiModel = null, fileName, receive
   const date = docDate || pacificDate(receivedAt || now);
   const usedRules = Boolean(rules?.vendor || rules?.invoice);
   const method = usedAi ? (usedRules ? 'rules+ai' : 'ai') : 'rules';
-  const confidence = usedAi && ai ? ai.confidence : (rules?.vendor?.confidence || 'medium');
-  const name = formatAttachmentName({ vendor, invoiceNumber, date, ext: fileExtension(fileName) });
+  const confidence = vendorFrom === 'ai' ? ai.confidence : (rules?.vendor?.confidence || 'medium');
+  const name = formatAttachmentName({ vendor, invoiceNumber, date, ext: extensionFor(fileName, contentType) });
   if (!name) return null;
   return {
     name,
@@ -263,6 +295,7 @@ export function decideName({ rules, ai = null, aiModel = null, fileName, receive
       dateFrom: docDate ? 'document' : 'received',
       method,
       confidence,
+      vendorFrom,
       ...(ai && aiModel ? { model: aiModel } : {}),
       senderDomain: rules?.senderDomain || null,
     },
@@ -291,6 +324,19 @@ async function namesTakenOnTicket(ticketId, exceptId) {
     select: { fileName: true, displayName: true },
   }), []);
   return rows.map((r) => r.displayName || r.fileName);
+}
+
+/** How many documents the same mail carried (catch-up jobs have no e-mail in hand). */
+async function documentsInSameMail(row) {
+  const rows = await soft(() => prisma.ticketAttachment.findMany({
+    where: { ticketId: row.ticketId, threadEntryId: row.threadEntryId ?? null, source: 'email' },
+    select: { id: true, fileName: true, contentType: true, createdAt: true },
+  }), null);
+  if (!Array.isArray(rows)) return 1;
+  const at = new Date(row.createdAt || 0).getTime();
+  const near = rows.filter((r) => Math.abs(new Date(r.createdAt || 0).getTime() - at) <= 5 * 60_000
+    && isNameableDocument({ fileName: r.fileName, contentType: r.contentType }));
+  return Math.max(1, near.length);
 }
 
 async function writeActivity({ ticketId, attachmentId, action, from, to, originalName, details = null, actorName, actorEmail = null }) {
@@ -325,7 +371,7 @@ async function broadcastRename(workspaceId, ticketId, attachmentId) {
 
 /**
  * Name one stored e-mail attachment. Returns { renamed, name?, reason? }.
- * `context` = { subject, fromEmail, fromName, bodyText, receivedAt }.
+ * `context` = { subject, fromEmail, fromName, bodyText, receivedAt, documentCount }.
  */
 export async function nameAttachment(attachmentId, context = {}) {
   const row = await soft(() => prisma.ticketAttachment.findUnique({ where: { id: attachmentId } }), null);
@@ -341,6 +387,7 @@ export async function nameAttachment(attachmentId, context = {}) {
     const t = await soft(() => prisma.ticket.findUnique({ where: { id: row.ticketId }, select: { subject: true } }), null);
     subject = t?.subject || '';
   }
+  const documentCount = Number(context.documentCount) > 0 ? Number(context.documentCount) : await documentsInSameMail(row);
   const rules = extractFromRules({
     subject,
     fromEmail: context.fromEmail || row.uploadedBy,
@@ -349,10 +396,12 @@ export async function nameAttachment(attachmentId, context = {}) {
     bodyText: context.bodyText,
     aliases,
     internalDomains,
+    documentCount,
   });
 
   let ai = null;
   let aiModel = null;
+  let aiFailed = false;
   if (isPdf(row) && !rules.rulesSufficient) {
     if (row.sizeBytes > MAX_AI_PDF_BYTES) {
       logger.info(`Attachment naming: ${row.fileName} (id ${row.id}) is over 10 MB, rules only`);
@@ -369,14 +418,39 @@ export async function nameAttachment(attachmentId, context = {}) {
           meta: { ticketId: row.ticketId, attachmentId: row.id },
         });
         if (result.ok) { ai = result.answer; aiModel = result.model; } else {
+          aiFailed = true;
           logger.info(`Attachment naming: Claude gave no answer for ${row.fileName} (id ${row.id}): ${result.reason}; rules only`);
         }
+      } else {
+        aiFailed = true;
       }
     }
   }
 
-  const decision = decideName({ rules, ai, aiModel, fileName: row.fileName, receivedAt: context.receivedAt || row.createdAt });
-  if (!decision) return { renamed: false, reason: 'no_vendor' };
+  const decision = decideName({
+    rules, ai, aiModel, fileName: row.fileName, contentType: row.contentType,
+    receivedAt: context.receivedAt || row.createdAt, internalDomains,
+  });
+  if (!decision) {
+    // Checked, nothing found: say so, so the catch-up never asks again. A
+    // failed Claude read is left unmarked so the next catch-up retries it.
+    if (!aiFailed) {
+      await soft(() => prisma.ticketAttachment.updateMany({
+        where: { id: row.id, nameSource: null },
+        data: {
+          nameDetails: {
+            vendor: null,
+            invoiceNumber: ai?.invoiceNumber || rules.invoice?.value || null,
+            outcome: 'no_vendor',
+            checkedAt: new Date().toISOString(),
+            ...(aiModel ? { model: aiModel } : {}),
+            senderDomain: rules.senderDomain || null,
+          },
+        },
+      }), null);
+    }
+    return { renamed: false, reason: aiFailed ? 'no_vendor_ai_failed' : 'no_vendor' };
+  }
 
   return withTicketLock(row.ticketId, async () => {
     const taken = await namesTakenOnTicket(row.ticketId, row.id);
@@ -401,6 +475,7 @@ export async function nameAttachment(attachmentId, context = {}) {
 // ------------------------------------------------------------------ queue
 
 const queue = [];
+const queuedIds = new Set();
 let running = 0;
 
 function pump() {
@@ -412,6 +487,7 @@ function pump() {
       .catch((err) => logger.warn(`Attachment naming failed for attachment ${job.attachmentId} (original name kept): ${err.message}`))
       .finally(() => {
         running -= 1;
+        queuedIds.delete(job.attachmentId);
         job.resolve?.();
         pump();
       });
@@ -422,19 +498,27 @@ function pump() {
  * The mail-intake hook: queue a freshly stored e-mail file for naming. Cheap
  * and synchronous for the caller; it never throws. Agent uploads, FreshService
  * files and inline pictures are skipped here; the workspace switch is read in
- * the job. Returns a promise that settles when the job ends (tests await it).
+ * the job. Returns a promise that settles when the job ends (tests await it):
+ * true when it ran, false when it was not queued.
  */
-export function queueEmailAttachment(row, { email = null, isInline = false } = {}) {
+export function queueEmailAttachment(row, { email = null, isInline = false, documentCount = null } = {}) {
   try {
     if (!row?.id || row.source !== 'email') return Promise.resolve(false);
     if (!isNameableDocument({ fileName: row.fileName, contentType: row.contentType, isInline })) return Promise.resolve(false);
+    if (queuedIds.has(row.id)) return Promise.resolve(false);
+    if (queue.length >= MAX_QUEUE) {
+      logger.warn(`Attachment naming queue is full (${MAX_QUEUE}); attachment ${row.id} keeps its original name for now (the daily catch-up retries it)`);
+      return Promise.resolve(false);
+    }
     const context = {
       subject: email?.subject || null,
       fromEmail: email?.from || row.uploadedBy || null,
       fromName: email?.fromName || null,
       bodyText: email?.bodyText || email?.bodyPreview || null,
       receivedAt: email?.receivedAt || null,
+      documentCount: Number(documentCount) > 0 ? Number(documentCount) : null,
     };
+    queuedIds.add(row.id);
     return new Promise((resolve) => {
       queue.push({ attachmentId: row.id, context, resolve: () => resolve(true) });
       pump();
@@ -447,18 +531,70 @@ export function queueEmailAttachment(row, { email = null, isInline = false } = {
 
 export const _queueStateForTests = () => ({ running, waiting: queue.length });
 
+/**
+ * Catch-up after a restart (and once a day): e-mail documents from the last
+ * 48 hours in live workspaces that were never checked (no name source, no
+ * name details). Bounded at 500 per run. Returns { workspaces, found, queued }.
+ */
+export async function catchUpRecentAttachments({ hours = CATCH_UP_HOURS, limit = CATCH_UP_LIMIT, now = new Date() } = {}) {
+  const settingsRows = await soft(() => prisma.appSettings.findMany({
+    where: { key: { startsWith: 'attachment_naming_ws' } },
+    select: { key: true, value: true },
+  }), []);
+  const workspaceIds = (settingsRows || [])
+    .filter((s) => String(s.value || '').trim().toLowerCase() === 'live')
+    .map((s) => Number(String(s.key).replace('attachment_naming_ws', '')))
+    .filter((n) => Number.isInteger(n) && n > 0);
+  if (!workspaceIds.length) return { workspaces: 0, found: 0, queued: 0 };
+
+  const since = new Date(now.getTime() - hours * 3600_000);
+  const rows = await soft(() => prisma.ticketAttachment.findMany({
+    where: { workspaceId: { in: workspaceIds }, source: 'email', nameSource: null, createdAt: { gte: since } },
+    orderBy: { id: 'asc' },
+    take: limit * 4,
+    select: { id: true, workspaceId: true, ticketId: true, fileName: true, contentType: true, source: true, uploadedBy: true, nameDetails: true },
+  }), []);
+  const unchecked = (rows || [])
+    .filter((r) => r.nameDetails === null || r.nameDetails === undefined)
+    .filter((r) => isNameableDocument({ fileName: r.fileName, contentType: r.contentType }))
+    .slice(0, limit);
+  let queued = 0;
+  for (const r of unchecked) {
+    if (queuedIds.has(r.id) || queue.length >= MAX_QUEUE) continue;
+    queueEmailAttachment(r).catch(() => {});
+    queued += 1;
+  }
+  if (unchecked.length) logger.info(`Attachment naming catch-up: ${unchecked.length} unchecked file(s) in ${workspaceIds.length} workspace(s), ${queued} queued`);
+  return { workspaces: workspaceIds.length, found: unchecked.length, queued };
+}
+
 // ------------------------------------------------------------ Revert / Edit
 
-async function teachVendor(row, vendor, details) {
+/** Learn domain → vendor from a person's edit. Never for internal, free-mail or platform domains. */
+async function teachVendor(row, vendor, details, actorName) {
   const domain = String(details?.senderDomain || emailDomain(row.uploadedBy) || '').toLowerCase();
   if (!vendor || !domain || row.source !== 'email') return false;
   const internalDomains = await internalDomainsFor(row.workspaceId);
   if (isInternalDomain(domain, internalDomains) || isFreeMailDomain(domain) || isPaymentPlatformDomain(domain)) return false;
   const aliases = await readAliases(row.workspaceId);
-  if (aliases[domain] === vendor) return false;
-  aliases[domain] = vendor;
-  await soft(() => settingsRepository.set(aliasesKey(row.workspaceId), JSON.stringify(aliases)), null);
+  const current = aliases[domain];
+  if ((typeof current === 'string' ? current : current?.vendor) === vendor) return false;
+  aliases[domain] = { vendor, learnedAt: new Date().toISOString(), by: actorName };
+  await writeAliases(row.workspaceId, aliases);
   logger.info(`Attachment naming: vendor list learned ${domain} → ${vendor} (workspace ${row.workspaceId})`);
+  return true;
+}
+
+/** A Revert of a name that came from the vendor list removes that list entry. */
+async function forgetVendor(row) {
+  const details = row.nameDetails && typeof row.nameDetails === 'object' ? row.nameDetails : null;
+  if (row.nameSource !== 'auto' || details?.vendorFrom !== 'vendor_list' || !details.senderDomain) return false;
+  const aliases = await readAliases(row.workspaceId);
+  const entry = aliasEntryFor(details.senderDomain, aliases);
+  if (!entry || !sameVendor(entry.vendor, details.vendor)) return false;
+  delete aliases[entry.key];
+  await writeAliases(row.workspaceId, aliases);
+  logger.info(`Attachment naming: vendor list forgot ${entry.key} → ${entry.vendor} after a Revert (workspace ${row.workspaceId})`);
   return true;
 }
 
@@ -468,6 +604,7 @@ async function teachVendor(row, vendor, details) {
  */
 export async function applyManualName({ ticketId, attachmentId, workspaceId, action, name, actor }) {
   if (!['revert', 'edit'].includes(action)) throw new ValidationError('Unknown action. Use "revert" or "edit".');
+  if (action === 'edit' && typeof name !== 'string') throw new ValidationError('Type a name for the file.');
   const row = await prisma.ticketAttachment.findFirst({ where: { id: attachmentId, ticketId, workspaceId } });
   if (!row) throw new NotFoundError('Attachment not found');
   const actorName = actor?.name || actor?.email || 'Someone';
@@ -476,6 +613,7 @@ export async function applyManualName({ ticketId, attachmentId, workspaceId, act
 
   if (action === 'revert') {
     if (!row.displayName) return withNameFields(row);
+    const snapshot = { ...row }; // as it was, for the vendor-list check after the write
     const updated = await prisma.ticketAttachment.update({
       where: { id: row.id },
       data: { displayName: null, nameSource: 'reverted', namedAt: new Date(), namedBy: actorName },
@@ -484,17 +622,20 @@ export async function applyManualName({ ticketId, attachmentId, workspaceId, act
       ticketId, attachmentId: row.id, action: 'revert', from: before, to: row.fileName,
       originalName: row.fileName, details: row.nameDetails, actorName, actorEmail,
     });
+    await soft(() => forgetVendor(snapshot), false);
     return withNameFields(updated);
   }
 
-  const normalised = normaliseEditedName(name, row.fileName);
+  const normalised = normaliseEditedName(name, row.fileName, row.contentType);
   if (!normalised) throw new ValidationError('Type a name for the file.');
+  const internalDomains = await internalDomainsFor(workspaceId);
   return withTicketLock(ticketId, async () => {
     const taken = await namesTakenOnTicket(ticketId, row.id);
     const finalName = uniqueName(normalised, taken);
-    const vendor = vendorFromEditedName(finalName);
+    const vendor = vendorFromEditedName(finalName, internalDomains);
     const prev = row.nameDetails && typeof row.nameDetails === 'object' ? row.nameDetails : {};
     const details = { ...prev, vendor: vendor || prev.vendor || null, method: 'manual' };
+    delete details.outcome;
     const updated = await prisma.ticketAttachment.update({
       where: { id: row.id },
       data: { displayName: finalName, nameSource: 'manual', nameDetails: details, namedAt: new Date(), namedBy: actorName },
@@ -503,7 +644,7 @@ export async function applyManualName({ ticketId, attachmentId, workspaceId, act
       ticketId, attachmentId: row.id, action: 'edit', from: before, to: finalName,
       originalName: row.fileName, details, actorName, actorEmail,
     });
-    if (vendor) await teachVendor(row, vendor, prev);
+    if (vendor) await soft(() => teachVendor(row, vendor, prev, actorName), false);
     return withNameFields(updated);
   });
 }
@@ -512,6 +653,7 @@ export default {
   queueEmailAttachment,
   nameAttachment,
   applyManualName,
+  catchUpRecentAttachments,
   withNameFields,
   readAliases,
   namingMode,

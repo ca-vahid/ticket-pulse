@@ -21,6 +21,7 @@ jest.unstable_mockModule('../src/services/attachmentService.js', () => ({ defaul
 jest.unstable_mockModule('../src/services/attachmentNamingService.js', () => ({ queueEmailAttachment, default: { queueEmailAttachment } }));
 
 const { default: svc } = await import('../src/services/mailboxIngestService.js');
+const { default: graphMailClient } = await import('../src/integrations/graphMailClient.js');
 
 const connection = { id: 1, workspaceId: 2, address: 'ap@ourco.example' };
 const email = { id: 'AAMk', subject: 'New Invoice from Acme Supplies', from: 'noreply@getbalance.com', fromName: 'Acme Supplies via Balance', hasAttachments: true };
@@ -44,8 +45,31 @@ describe('e-mail attachments go to the naming queue', () => {
     expect(upload.mock.calls[0][0]).toMatchObject({ source: 'email', fileName: 'INV-100234.pdf' });
     expect(queueEmailAttachment).toHaveBeenCalledTimes(2);
     expect(queueEmailAttachment.mock.calls[0][0]).toMatchObject({ fileName: 'INV-100234.pdf', source: 'email' });
-    expect(queueEmailAttachment.mock.calls[0][1]).toEqual({ email, isInline: false });
+    expect(queueEmailAttachment.mock.calls[0][1]).toEqual({ email, isInline: false, documentCount: 1 });
     expect(queueEmailAttachment.mock.calls[1][1]).toMatchObject({ isInline: true });
+  });
+
+  test('a PDF that Apple Mail flagged inline is still a document; the mail\'s document count is passed', async () => {
+    // A mail with no body pictures: the files come straight from Graph, and
+    // Apple Mail's attached W9 carries isInline: true.
+    jest.spyOn(graphMailClient, 'getMessageAttachments').mockResolvedValueOnce({
+      skipped: [],
+      files: [
+        { name: 'Invoice_28401.pdf', contentType: 'application/pdf', buffer: Buffer.from('x'), isInline: false },
+        { name: 'Terms.pdf', contentType: 'application/pdf', buffer: Buffer.from('y'), isInline: false },
+        { name: 'W9.pdf', contentType: 'application/pdf', buffer: Buffer.from('z'), isInline: true },
+        { name: 'logo.png', contentType: 'image/png', buffer: Buffer.from('p'), isInline: true },
+      ],
+    });
+    await svc._captureAttachments(connection, email, { id: 1042, workspaceId: 2 }, 7);
+    await flush();
+    const calls = queueEmailAttachment.mock.calls.map(([row, opts]) => [row.fileName, opts.isInline, opts.documentCount]);
+    expect(calls).toEqual([
+      ['Invoice_28401.pdf', false, 3],
+      ['Terms.pdf', false, 3],
+      ['W9.pdf', false, 3],
+      ['logo.png', false, 3], // queued, and skipped there as a picture by type and extension
+    ]);
   });
 
   test('a naming failure never fails intake', async () => {

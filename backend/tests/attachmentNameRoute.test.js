@@ -105,7 +105,7 @@ describe('POST /api/tickets/:id/attachments/:attId/name', () => {
     const res = await request(buildApp(agent)).post(`/api/tickets/1042/attachments/${row.id}/name`).send({ action: 'edit', name: 'Acme Supplies_INV-100234' }).expect(200);
     expect(res.body.data).toMatchObject({ displayName: 'Acme Supplies_INV-100234.pdf', nameSource: 'manual', originalName: 'INV-100234.pdf', namedBy: 'Dana Fox' });
     expect(activities[0].details).toMatchObject({ action: 'edit', from: 'INV-100234.pdf', to: 'Acme Supplies_INV-100234.pdf', actorEmail: 'dana.fox@ourco.example' });
-    expect(JSON.parse(settings.get('attachment_vendor_aliases_ws7'))).toEqual({ 'acme.example': 'Acme Supplies' });
+    expect(JSON.parse(settings.get('attachment_vendor_aliases_ws7'))).toEqual({ 'acme.example': { vendor: 'Acme Supplies', learnedAt: expect.any(String), by: 'Dana Fox' } });
   });
 
   test('another ticket\'s attachment is a 404, and nothing changes', async () => {
@@ -127,6 +127,10 @@ describe('POST /api/tickets/:id/attachments/:attId/name', () => {
     await request(buildApp(agent)).post(`/api/tickets/1042/attachments/${row.id}/name`).send({ action: 'rename' }).expect(400);
     const empty = await request(buildApp(agent)).post(`/api/tickets/1042/attachments/${row.id}/name`).send({ action: 'edit', name: '  ' }).expect(400);
     expect(empty.body.message).toBe('Type a name for the file.');
+    await request(buildApp(agent)).post(`/api/tickets/1042/attachments/${row.id}/name`).send({ action: 'edit', name: 123 }).expect(400);
+    await request(buildApp(agent)).post(`/api/tickets/1042/attachments/${row.id}/name`).send({ action: 'edit', name: ['Acme_1'] }).expect(400);
+    await request(buildApp(agent)).post(`/api/tickets/1042/attachments/${row.id}/name`).send({ action: 'edit' }).expect(400);
+    expect(rows[0].displayName).toBeNull();
     await request(buildApp(agent)).post('/api/tickets/1042/attachments/abc/name').send({ action: 'revert' }).expect(404);
   });
 

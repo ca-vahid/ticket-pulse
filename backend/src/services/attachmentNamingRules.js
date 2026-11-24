@@ -11,7 +11,13 @@
 
 export const NAMING_TIMEZONE = 'America/Vancouver';
 export const MAX_STEM_CHARS = 120;
+// The whole name, extension and any " (2)" included: well inside VARCHAR(255).
+export const MAX_NAME_CHARS = 200;
 const MAX_INVOICE_CHARS = 40;
+
+// Code-point-safe helpers: never split a surrogate pair.
+const cpLength = (s) => Array.from(String(s)).length;
+const cpSlice = (s, n) => Array.from(String(s)).slice(0, Math.max(0, n)).join('');
 
 // Billing platforms send on a vendor's behalf: their domain and display name
 // never name the vendor, and their domain is never taught to the vendor list.
@@ -37,21 +43,53 @@ const NOT_A_DOCUMENT = /(\.(html?|ics|vcf|p7s|p7m|eml|msg)$)|(^winmail\.dat$)|(^
 
 const MONTHS = 'january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec';
 // A "vendor" that is really a generic word ("September Invoice", "Your Invoice").
-const GENERIC_VENDOR = new RegExp(`^(?:${MONTHS}|new|your|our|the|an?|my|monthly|weekly|annual|final|past due|overdue|outstanding|open|unpaid|paid|proforma|pro forma|sales|tax|commercial|rental|copy of|re|fw|fwd|invoice|invoices|statement|receipt|bill|payment|remittance|attached|please find|reminder|updated|revised|corrected|draft|credit|debit|ar|ap)$`, 'i');
+const GENERIC_VENDOR = new RegExp(`^(?:${MONTHS}|new|your|our|the|an?|my|monthly|weekly|annual|final|past due|overdue|outstanding|open|unpaid|paid|proforma|pro forma|sales|tax|commercial|rental|copy|copy of|re|fw|fwd|invoice|invoices|statement|statements|receipt|receipts|bill|payment|remittance|attached|please find|reminder|updated|revised|corrected|draft|credit|debit|ar|ap|signed|scan|scanned|doc|docs|document|documents|file|files|form|forms|attachment|image|page|pages|untitled|printout|print)$`, 'i');
 
 // ---------------------------------------------------------------- helpers
+
+// An extension is 1–8 letters or digits ("pdf", "xlsx"); anything else after
+// the last dot is part of the name ("Acme v2.final draft").
+const EXT_RE = /^[A-Za-z0-9]{1,8}$/;
 
 export function fileExtension(name) {
   const base = String(name || '');
   const idx = base.lastIndexOf('.');
-  return idx > 0 && idx < base.length - 1 ? base.slice(idx + 1) : '';
+  if (idx <= 0 || idx >= base.length - 1) return '';
+  const ext = base.slice(idx + 1);
+  return EXT_RE.test(ext) ? ext : '';
 }
 
 export function fileStem(name) {
   const base = String(name || '');
-  const idx = base.lastIndexOf('.');
-  return idx > 0 ? base.slice(0, idx) : base;
+  const ext = fileExtension(base);
+  return ext ? base.slice(0, base.length - ext.length - 1) : base;
 }
+
+const EXT_BY_TYPE = {
+  'application/pdf': 'pdf',
+  'application/msword': 'doc',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+  'application/vnd.ms-excel': 'xls',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+  'application/vnd.ms-powerpoint': 'ppt',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+  'text/csv': 'csv',
+  'text/plain': 'txt',
+  'application/rtf': 'rtf',
+  'application/zip': 'zip',
+  'application/xml': 'xml',
+  'text/xml': 'xml',
+};
+
+/** The extension a name keeps: the file's own (1–8 letters/digits), else from its content type. */
+export function extensionFor(fileName, contentType) {
+  const own = fileExtension(fileName);
+  if (own) return own.toLowerCase();
+  const type = String(contentType || '').split(';')[0].trim().toLowerCase();
+  return EXT_BY_TYPE[type] || '';
+}
+
+const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 
 export function emailDomain(address) {
   const at = String(address || '').trim().toLowerCase().lastIndexOf('@');
@@ -104,11 +142,26 @@ export function validIsoDate(value, now = new Date()) {
 /** Remove what file names can't hold, collapse whitespace, trim stray dots and separators. */
 export function cleanNamePart(value) {
   return String(value ?? '')
+    // Direction overrides and marks (U+202A–202E, U+2066–2069, U+200E/F) can
+    // disguise a name ("invoice<RLO>fdp.exe"); control characters are never a name.
+    .replace(/[‪-‮⁦-⁩‎‏]/g, '')
     // eslint-disable-next-line no-control-regex
-    .replace(/[\\/:*?"<>|\u0000-\u001f\u007f]+/g, ' ')
+    .replace(/[\\/:*?"<>|\u0000-\u001f\u007f-\u009f]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/^[.\s_-]+|[.\s_-]+$/g, '');
+}
+
+/** A name's stem made safe on Windows: "CON" → "CON_". */
+function safeStem(stem) {
+  const s = String(stem || '');
+  return WINDOWS_RESERVED.test(s.split('.')[0].trim()) ? `${s}_` : s;
+}
+
+/** Stem + extension, the whole thing capped at MAX_NAME_CHARS code points. */
+function joinName(stem, ext) {
+  const e = ext ? `.${ext}` : '';
+  return `${cpSlice(safeStem(stem), MAX_NAME_CHARS - cpLength(e)).trim()}${e}`;
 }
 
 /** Our own company written as a vendor ("Acme Corp" when we are acmecorp.example). */
@@ -129,7 +182,7 @@ export function plausibleVendor(raw, internalDomains = []) {
   v = v.replace(/_(?=[^_]*\d)[\s\S]*$/, '').replace(/\s+[-–|]\s+[\s\S]*$/, '').replace(/\s*\(.*$/, '').trim();
   v = v.replace(/\s+(?:for|regarding|re|dated|on|due)\b[\s\S]*$/i, '').trim();
   v = v.replace(/[.,;:]+$/, '').trim();
-  if (v.length < 2 || v.length > 80) return null;
+  if (cpLength(v) < 2 || cpLength(v) > 80) return null;
   if (!/[A-Za-z]/.test(v)) return null;
   if (/^[#\d]/.test(v)) return null;
   if (/\d{1,2}\/\d{1,2}\/\d{2,4}/.test(v)) return null; // "from 11/16/2026"
@@ -167,16 +220,33 @@ export function quotedOriginalSender(bodyText) {
   return { name: (m[1] || '').replace(/\*/g, '').trim() || null, email: m[2].toLowerCase() };
 }
 
-/** Look a domain (or any parent domain) up in the learned vendor list. */
-export function aliasFor(domain, aliases = {}) {
+/** A vendor-list entry's vendor: entries are `{ vendor, learnedAt, by }` (a bare string is read too). */
+export const aliasVendor = (entry) => {
+  const v = typeof entry === 'string' ? entry : entry?.vendor;
+  return typeof v === 'string' && v.trim() ? v.trim() : null;
+};
+
+/** Look a domain (or any parent domain) up in the learned vendor list: { key, vendor } or null. */
+export function aliasEntryFor(domain, aliases = {}) {
   if (!domain || !aliases || typeof aliases !== 'object') return null;
   const parts = String(domain).toLowerCase().split('.');
   for (let i = 0; i <= parts.length - 2; i += 1) {
     const key = parts.slice(i).join('.');
-    const hit = aliases[key];
-    if (typeof hit === 'string' && hit.trim()) return hit.trim();
+    const vendor = aliasVendor(aliases[key]);
+    if (vendor) return { key, vendor };
   }
   return null;
+}
+
+export const aliasFor = (domain, aliases = {}) => aliasEntryFor(domain, aliases)?.vendor || null;
+
+/** Two spellings of one vendor ("Acme Supplies" / "ACME SUPPLIES LTD")? */
+export function sameVendor(a, b) {
+  const sq = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const x = sq(a);
+  const y = sq(b);
+  if (!x || !y) return false;
+  return x === y || (Math.min(x.length, y.length) >= 4 && (x.includes(y) || y.includes(x)));
 }
 
 // ------------------------------------------------------------------ rules
@@ -270,10 +340,17 @@ function fromDisplayName(name, domain, internalDomains) {
 }
 
 /**
- * The quick first pass. Returns { vendor, invoice, senderDomain, senderName, rulesSufficient }
+ * The quick first pass. Returns { vendor, invoice, senderDomain, senderName, rulesSufficient, … }
  * where vendor/invoice are { value, confidence, from } or null.
+ *
+ * `documentCount` is how many documents the mail carried. A number from the
+ * subject belongs to one of them, so on a mail with several documents it is
+ * only used for a file whose own name holds it (the others ask Claude).
+ * `rulesSufficient` (skip Claude) needs a vendor AND a number, both with high
+ * confidence from the mail itself: a learned vendor-list entry alone never
+ * skips Claude, so Claude can correct a wrong entry.
  */
-export function extractFromRules({ subject, fromEmail, fromName, fileName, bodyText = null, aliases = {}, internalDomains = [] } = {}) {
+export function extractFromRules({ subject, fromEmail, fromName, fileName, bodyText = null, aliases = {}, internalDomains = [], documentCount = 1 } = {}) {
   let senderEmail = String(fromEmail || '').toLowerCase();
   let senderName = fromName || null;
   let domain = emailDomain(senderEmail);
@@ -303,20 +380,32 @@ export function extractFromRules({ subject, fromEmail, fromName, fileName, bodyT
   // A forward's subject is the colleague's words, not a template: one step less sure.
   if (vendor && forwarded && vendor.from === 'subject' && vendor.confidence === 'high') vendor = { ...vendor, confidence: 'medium' };
 
-  let invoice = better(subj.invoice, file.invoice);
-  // Subject and file name agreeing on the number makes it certain.
-  if (subj.invoice && file.invoice && subj.invoice.value.toLowerCase() === file.invoice.value.toLowerCase()) {
-    invoice = { ...subj.invoice, confidence: 'high', from: 'subject+file' };
+  let subjectInvoice = subj.invoice;
+  let subjectInvoiceHint = null;
+  if (subjectInvoice) {
+    const inOwnName = fileStem(fileName).toLowerCase().includes(subjectInvoice.value.toLowerCase());
+    if (inOwnName) {
+      // Subject and file name agreeing on the number makes it certain.
+      subjectInvoice = { ...subjectInvoice, confidence: 'high', from: 'subject+file' };
+    } else if (Number(documentCount) > 1) {
+      // One mail, several documents: the subject's number is one file's, not every file's.
+      subjectInvoiceHint = subjectInvoice.value;
+      subjectInvoice = null;
+    }
   }
+  const invoice = subjectInvoice?.from === 'subject+file' ? subjectInvoice : better(subjectInvoice, file.invoice);
 
+  const strongVendor = vendor?.confidence === 'high' && (vendor.from === 'subject' || vendor.from === 'file');
+  const strongInvoice = invoice?.confidence === 'high';
   return {
     vendor,
     invoice,
+    subjectInvoiceHint,
     senderDomain: domain || null,
     senderName: senderName || null,
     forwarded,
     domainKind: internal ? 'internal' : platform ? 'platform' : freeMail ? 'free_mail' : (domain ? 'vendor' : 'unknown'),
-    rulesSufficient: Boolean(vendor?.confidence === 'high' && invoice?.confidence === 'high'),
+    rulesSufficient: Boolean(strongVendor && strongInvoice),
   };
 }
 
@@ -329,28 +418,30 @@ export function extractFromRules({ subject, fromEmail, fromName, fileName, bodyT
 export function formatAttachmentName({ vendor, invoiceNumber = null, date, ext }) {
   let v = cleanNamePart(vendor);
   if (!v) return null;
-  let inv = cleanNamePart(invoiceNumber).slice(0, MAX_INVOICE_CHARS).trim();
+  let inv = cpSlice(cleanNamePart(invoiceNumber), MAX_INVOICE_CHARS).trim();
   if (inv && inv.toLowerCase() === v.toLowerCase()) inv = '';
   const datePart = /^\d{4}-\d{2}-\d{2}$/.test(String(date || '')) ? String(date).replace(/-/g, '_') : '';
   const fixed = [inv, datePart].filter(Boolean).join('_');
-  const room = MAX_STEM_CHARS - (fixed ? fixed.length + 1 : 0);
-  if (v.length > room) v = v.slice(0, Math.max(room, 1)).trim();
-  const stem = [v, fixed].filter(Boolean).join('_').slice(0, MAX_STEM_CHARS);
-  const e = cleanNamePart(ext).replace(/\s+/g, '').toLowerCase();
-  return e ? `${stem}.${e}` : stem;
+  const room = MAX_STEM_CHARS - (fixed ? cpLength(fixed) + 1 : 0);
+  if (cpLength(v) > room) v = cpSlice(v, Math.max(room, 1)).trim();
+  const stem = cpSlice([v, fixed].filter(Boolean).join('_'), MAX_STEM_CHARS);
+  const e = String(ext || '').trim().toLowerCase();
+  return joinName(stem, EXT_RE.test(e) ? e : '');
 }
 
 /**
- * A person's typed name: the original's extension is always kept. A trailing
- * copy of that extension is dropped first; returns null when nothing is left.
+ * A person's typed name: the original's extension is always kept (from its
+ * content type when the original has none). A trailing copy of that extension
+ * is dropped first; returns null when nothing is left.
  */
-export function normaliseEditedName(typed, originalFileName) {
-  const ext = fileExtension(originalFileName);
-  let stem = String(typed ?? '').trim();
+export function normaliseEditedName(typed, originalFileName, contentType = null) {
+  if (typeof typed !== 'string') return null;
+  const ext = extensionFor(originalFileName, contentType);
+  let stem = typed.trim();
   if (ext && stem.toLowerCase().endsWith(`.${ext.toLowerCase()}`)) stem = stem.slice(0, -(ext.length + 1));
-  stem = cleanNamePart(stem).slice(0, MAX_STEM_CHARS).trim();
+  stem = cpSlice(cleanNamePart(stem), MAX_STEM_CHARS).trim();
   if (!stem) return null;
-  return ext ? `${stem}.${ext}` : stem;
+  return joinName(stem, ext);
 }
 
 /** Add " (2)", " (3)"… until the name is not one of `taken` (case-insensitive). */
@@ -360,19 +451,28 @@ export function uniqueName(name, taken = []) {
   const ext = fileExtension(name);
   const stem = ext ? fileStem(name) : name;
   for (let i = 2; i < 1000; i += 1) {
-    const candidate = ext ? `${stem} (${i}).${ext}` : `${stem} (${i})`;
+    const suffix = ` (${i})${ext ? `.${ext}` : ''}`;
+    const candidate = `${cpSlice(stem, MAX_NAME_CHARS - cpLength(suffix))}${suffix}`;
     if (!used.has(candidate.toLowerCase())) return candidate;
   }
   return name;
 }
 
-/** The vendor a person typed: the part before the first "_", when it reads like a name. */
-export function vendorFromEditedName(name) {
-  const stem = fileStem(name);
-  if (!stem.includes('_')) return null;
-  const head = cleanNamePart(stem.split('_')[0]);
-  if (!head || head.length > 80 || !/[A-Za-z]/.test(head) || /^\d/.test(head)) return null;
-  return head;
+/**
+ * The vendor a person typed, worth learning for the sender's domain. Only a
+ * name in the house shape counts: `Vendor_<something with a digit>…`
+ * ("Acme Supplies_INV-12_2026_11_23.pdf"), never "Signed_W9.pdf" or
+ * "Copy_of_invoice.pdf". The head must pass plausibleVendor (not generic, not
+ * us, not a platform).
+ */
+export function vendorFromEditedName(name, internalDomains = []) {
+  const parts = fileStem(name).split('_');
+  if (parts.length < 2) return null;
+  if (!parts.slice(1).some((p) => /\d/.test(p))) return null;
+  const head = cleanNamePart(parts[0]);
+  if (!head || /^\d/.test(head)) return null;
+  const vendor = plausibleVendor(head, internalDomains);
+  return vendor && vendor === head ? vendor : null;
 }
 
 // ----------------------------------------------------------------- payload

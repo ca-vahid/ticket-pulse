@@ -14,7 +14,12 @@ const settings = new Map();
 
 const match = (row, where = {}) => Object.entries(where).every(([k, v]) => {
   if (k === 'NOT') return !match(row, v);
-  return row[k] === v;
+  if (v && typeof v === 'object' && !(v instanceof Date)) {
+    if ('in' in v) return v.in.includes(row[k]);
+    if ('gte' in v) return new Date(row[k]) >= v.gte;
+    if ('startsWith' in v) return String(row[k]).startsWith(v.startsWith);
+  }
+  return (row[k] ?? null) === v;
 });
 
 const prismaMock = {
@@ -37,6 +42,7 @@ const prismaMock = {
   ticket: { findUnique: jest.fn(async () => ({ subject: 'Ticket subject' })) },
   workspace: { findUnique: jest.fn(async () => ({ internalDomains: ['ourco.example'] })) },
   aiProviderAttempt: { create: jest.fn(async ({ data }) => { attempts.push(data); return data; }) },
+  appSettings: { findMany: jest.fn(async ({ where }) => [...settings.entries()].map(([key, value]) => ({ key, value })).filter((s) => match(s, where))) },
 };
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
@@ -105,6 +111,7 @@ describe('the Claude call', () => {
 
     expect(out).toEqual({ renamed: true, name: 'Acme Supplies_INV-100234_2026_11_20.pdf' });
     const req = createMock.mock.calls[0][0];
+    expect(createMock.mock.calls[0][1]).toEqual({ timeout: 60_000, maxRetries: 0 });
     expect(req.model).toBe('claude-test-model');
     expect(req.max_tokens).toBe(1024);
     expect(req).not.toHaveProperty('thinking');
@@ -146,16 +153,17 @@ describe('the Claude call', () => {
     createMock.mockResolvedValueOnce({ stop_reason: 'max_tokens', content: [{ type: 'text', text: '{"vendor":"Half' }], usage: {} });
     const row = addRow();
     const out = await svc.nameAttachment(row.id, { subject: 'Invoice attached', fromEmail: 'ar@vendor.example' });
-    expect(out).toEqual({ renamed: false, reason: 'no_vendor' });
+    expect(out).toEqual({ renamed: false, reason: 'no_vendor_ai_failed' });
     expect(rows[0].displayName).toBeNull();
   });
 
-  test('a refusal with no rules vendor → no rename, original name stays', async () => {
+  test('a refusal with no rules vendor → no rename, original name stays, left unmarked for the catch-up', async () => {
     createMock.mockResolvedValueOnce({ stop_reason: 'refusal', content: [], usage: {} });
     const row = addRow();
     const out = await svc.nameAttachment(row.id, { subject: 'Invoice attached', fromEmail: 'ar@vendor.example' });
-    expect(out).toEqual({ renamed: false, reason: 'no_vendor' });
+    expect(out).toEqual({ renamed: false, reason: 'no_vendor_ai_failed' });
     expect(rows[0].nameSource).toBeNull();
+    expect(rows[0].nameDetails).toBeNull();
     expect(activities).toHaveLength(0);
   });
 
@@ -174,7 +182,7 @@ describe('the Claude call', () => {
   test('an API status error (400) is not retried; connection errors are, then give up → rules', async () => {
     createMock.mockRejectedValueOnce(new APIError(400, 'bad request'));
     const a = addRow({ fileName: 'a.pdf' });
-    expect(await svc.nameAttachment(a.id, { subject: 'x', fromEmail: 'ar@vendor.example' })).toEqual({ renamed: false, reason: 'no_vendor' });
+    expect(await svc.nameAttachment(a.id, { subject: 'x', fromEmail: 'ar@vendor.example' })).toEqual({ renamed: false, reason: 'no_vendor_ai_failed' });
     expect(createMock).toHaveBeenCalledTimes(1);
     expect(attempts[0].errorClass).toBe('api_400');
 
@@ -198,10 +206,60 @@ describe('the Claude call', () => {
     expect(attempts.map((x) => x.errorClass)).toEqual(['invalid_output', 'invalid_output']);
   });
 
-  test('low confidence and no rules vendor → no rename', async () => {
+  test('low confidence and no rules vendor → no rename; the file is marked checked', async () => {
     createMock.mockResolvedValueOnce(aiReply({ vendor: 'Maybe Acme', invoiceNumber: '991', documentDate: '2026-11-01', confidence: 'low' }));
     const row = addRow();
     expect(await svc.nameAttachment(row.id, { subject: 'x', fromEmail: 'ar@vendor.example' })).toEqual({ renamed: false, reason: 'no_vendor' });
+    expect(rows[0]).toMatchObject({ displayName: null, nameSource: null });
+    expect(rows[0].nameDetails).toMatchObject({ vendor: null, outcome: 'no_vendor', model: expect.any(String) });
+  });
+
+  test('a 5xx is retried once; a 408 is not', async () => {
+    createMock.mockRejectedValueOnce(new APIError(503, 'overloaded')).mockResolvedValueOnce(aiReply({ vendor: 'Acme Supplies', invoiceNumber: null, documentDate: null, confidence: 'high' }));
+    const a = addRow({ fileName: 'a.pdf' });
+    expect((await svc.nameAttachment(a.id, { subject: 'x', fromEmail: 'ar@vendor.example' })).renamed).toBe(true);
+    expect(createMock).toHaveBeenCalledTimes(2);
+    createMock.mockClear();
+    createMock.mockRejectedValueOnce(new APIError(408, 'timeout'));
+    const b = addRow({ fileName: 'b.pdf' });
+    await svc.nameAttachment(b.id, { subject: 'x', fromEmail: 'ar@vendor.example' });
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(attempts.map((x) => [x.status, x.attemptNumber])).toEqual([['failed', 1], ['succeeded', 2], ['failed', 1]]);
+  });
+
+  test('Claude\'s vendor is filtered: our own company or a platform is never the name', async () => {
+    createMock.mockResolvedValueOnce(aiReply({ vendor: 'OurCo Engineering', invoiceNumber: 'INV-4', documentDate: null, confidence: 'high' }));
+    const a = addRow({ fileName: 'a.pdf' });
+    expect((await svc.nameAttachment(a.id, { subject: 'x', fromEmail: 'ar@vendor.example' })).renamed).toBe(false);
+    createMock.mockResolvedValueOnce(aiReply({ vendor: 'QuickBooks', invoiceNumber: 'INV-5', documentDate: null, confidence: 'high' }));
+    const b = addRow({ fileName: 'b.pdf' });
+    expect((await svc.nameAttachment(b.id, { subject: 'x', fromEmail: 'quickbooks@notification.intuit.com' })).renamed).toBe(false);
+    expect(rows.map((r) => r.displayName)).toEqual([null, null]);
+  });
+
+  test('one mail with an invoice, terms and a W9: the subject\'s number lands only on the invoice', async () => {
+    const mail = { subject: 'Invoice 28401 from Northwind Traders', fromEmail: 'ar@northwind.example', receivedAt: new Date('2026-11-23T18:00:00Z'), documentCount: 3 };
+    const inv = addRow({ id: 81, fileName: 'Invoice_28401.pdf', uploadedBy: 'ar@northwind.example' });
+    const terms = addRow({ id: 82, fileName: 'Terms.pdf', uploadedBy: 'ar@northwind.example' });
+    const w9 = addRow({ id: 83, fileName: 'W9.pdf', uploadedBy: 'ar@northwind.example' });
+    createMock
+      .mockResolvedValueOnce(aiReply({ vendor: 'Northwind Traders', invoiceNumber: null, documentDate: null, confidence: 'high' }))
+      .mockResolvedValueOnce(aiReply({ vendor: 'Northwind Traders', invoiceNumber: null, documentDate: null, confidence: 'high' }));
+
+    expect((await svc.nameAttachment(inv.id, mail)).name).toBe('Northwind Traders_28401_2026_11_23.pdf');
+    expect(createMock).not.toHaveBeenCalled(); // its own name holds the number: the rules are enough
+    expect((await svc.nameAttachment(terms.id, mail)).name).toBe('Northwind Traders_2026_11_23.pdf');
+    expect((await svc.nameAttachment(w9.id, mail)).name).toBe('Northwind Traders_2026_11_23 (2).pdf');
+    expect(createMock).toHaveBeenCalledTimes(2);
+    expect(createMock.mock.calls[0][0].messages[0].content[1].text).toMatch(/mentions number 28401, but the mail had several documents/);
+  });
+
+  test('without the e-mail in hand, the document count comes from the same message\'s stored files', async () => {
+    const mail = { subject: 'Invoice 28401 from Northwind Traders', fromEmail: 'ar@northwind.example', receivedAt: new Date('2026-11-23T18:00:00Z') };
+    addRow({ id: 91, fileName: 'Invoice_28401.pdf', threadEntryId: 5 });
+    const terms = addRow({ id: 92, fileName: 'Terms.pdf', threadEntryId: 5 });
+    createMock.mockResolvedValueOnce(aiReply({ vendor: 'Northwind Traders', invoiceNumber: null, documentDate: null, confidence: 'high' }));
+    expect((await svc.nameAttachment(terms.id, mail)).name).toBe('Northwind Traders_2026_11_23.pdf');
   });
 
   test('PDFs over 10 MB skip Claude (rules only)', async () => {
@@ -221,43 +279,43 @@ describe('the Claude call', () => {
 });
 
 describe('the mail-intake hook', () => {
-  const instacartLike = () => email({ subject: 'New Invoice from Acme Supplies', from: 'noreply@getbalance.com' });
+  const acmeInvoiceMail = () => email({ subject: 'New Invoice from Acme Supplies', from: 'noreply@getbalance.com' });
 
   test('Accounting live → named in the background', async () => {
     const row = addRow({ uploadedBy: 'noreply@getbalance.com' });
-    expect(await svc.queueEmailAttachment(row, { email: instacartLike() })).toBe(true);
+    expect(await svc.queueEmailAttachment(row, { email: acmeInvoiceMail() })).toBe(true);
     expect(rows[0].displayName).toBe('Acme Supplies_INV-100234_2026_11_23.pdf');
   });
 
   test('a workspace that is off (the default) is left alone', async () => {
     settings.delete('attachment_naming_ws2');
     const row = addRow({ uploadedBy: 'noreply@getbalance.com' });
-    await svc.queueEmailAttachment(row, { email: instacartLike() });
+    await svc.queueEmailAttachment(row, { email: acmeInvoiceMail() });
     expect(rows[0].displayName).toBeNull();
     expect(prismaMock.ticketAttachment.updateMany).not.toHaveBeenCalled();
   });
 
   test('another workspace without its own switch is left alone', async () => {
     const row = addRow({ workspaceId: 1, uploadedBy: 'noreply@getbalance.com' });
-    await svc.queueEmailAttachment(row, { email: instacartLike() });
+    await svc.queueEmailAttachment(row, { email: acmeInvoiceMail() });
     expect(rows[0].displayName).toBeNull();
   });
 
   test('agent uploads and FreshService files are never queued', async () => {
-    expect(await svc.queueEmailAttachment(addRow({ source: 'upload' }), { email: instacartLike() })).toBe(false);
-    expect(await svc.queueEmailAttachment(addRow({ source: 'freshservice' }), { email: instacartLike() })).toBe(false);
+    expect(await svc.queueEmailAttachment(addRow({ source: 'upload' }), { email: acmeInvoiceMail() })).toBe(false);
+    expect(await svc.queueEmailAttachment(addRow({ source: 'freshservice' }), { email: acmeInvoiceMail() })).toBe(false);
     expect(prismaMock.ticketAttachment.findUnique).not.toHaveBeenCalled();
   });
 
   test('inline images are skipped', async () => {
-    expect(await svc.queueEmailAttachment(addRow({ fileName: 'picture-1-ABC-image.png', contentType: 'image/png' }), { email: instacartLike(), isInline: true })).toBe(false);
-    expect(await svc.queueEmailAttachment(addRow({ fileName: 'logo.png', contentType: 'image/png' }), { email: instacartLike() })).toBe(false);
-    expect(await svc.queueEmailAttachment(addRow({ fileName: 'scan.pdf' }), { email: instacartLike(), isInline: true })).toBe(false);
+    expect(await svc.queueEmailAttachment(addRow({ fileName: 'picture-1-ABC-image.png', contentType: 'image/png' }), { email: acmeInvoiceMail(), isInline: true })).toBe(false);
+    expect(await svc.queueEmailAttachment(addRow({ fileName: 'logo.png', contentType: 'image/png' }), { email: acmeInvoiceMail() })).toBe(false);
+    expect(await svc.queueEmailAttachment(addRow({ fileName: 'scan.pdf' }), { email: acmeInvoiceMail(), isInline: true })).toBe(false);
   });
 
   test('a file someone already named or reverted is never renamed', async () => {
     const row = addRow({ nameSource: 'reverted', uploadedBy: 'noreply@getbalance.com' });
-    await svc.queueEmailAttachment(row, { email: instacartLike() });
+    await svc.queueEmailAttachment(row, { email: acmeInvoiceMail() });
     expect(rows[0].displayName).toBeNull();
   });
 
@@ -277,11 +335,65 @@ describe('the mail-intake hook', () => {
     createMock.mockReset();
   });
 
+  test('the queue holds at most 500 waiting jobs; extras are dropped with a log line', async () => {
+    settings.delete('attachment_naming_ws2'); // jobs finish fast
+    const jobs = [];
+    for (let n = 0; n < 503; n += 1) jobs.push(svc.queueEmailAttachment(addRow({ id: 10_000 + n, fileName: `scan-${n}.pdf` }), { email: email() }));
+    const results = await Promise.all(jobs);
+    expect(results.filter((r) => r === true)).toHaveLength(502); // 2 running + 500 waiting
+    expect(results[502]).toBe(false);
+  });
+
+  test('the same file is never queued twice at once', async () => {
+    settings.delete('attachment_naming_ws2');
+    const row = addRow();
+    const [first, second] = await Promise.all([svc.queueEmailAttachment(row, { email: email() }), svc.queueEmailAttachment(row, { email: email() })]);
+    expect([first, second]).toEqual([true, false]);
+  });
+
   test('a failing job keeps the original name and does not throw', async () => {
     bufferFor.mockRejectedValueOnce(new Error('blob gone'));
     const row = addRow();
     await expect(svc.queueEmailAttachment(row, { email: email() })).resolves.toBe(true);
     expect(rows[0].displayName).toBeNull();
+  });
+});
+
+describe('catch-up after a restart', () => {
+  const now = new Date('2026-11-24T18:00:00Z');
+
+  test('queues unchecked e-mail documents from the last 48 hours in live workspaces only', async () => {
+    settings.set('attachment_naming_ws5', 'off');
+    const fresh = addRow({ id: 1, createdAt: new Date('2026-11-24T10:00:00Z'), uploadedBy: 'noreply@getbalance.com' });
+    addRow({ id: 2, createdAt: new Date('2026-11-21T10:00:00Z') }); // too old
+    addRow({ id: 3, createdAt: new Date('2026-11-24T10:00:00Z'), nameDetails: { outcome: 'no_vendor' } }); // already checked
+    addRow({ id: 4, createdAt: new Date('2026-11-24T10:00:00Z'), nameSource: 'reverted' });
+    addRow({ id: 5, createdAt: new Date('2026-11-24T10:00:00Z'), source: 'upload' });
+    addRow({ id: 6, createdAt: new Date('2026-11-24T10:00:00Z'), fileName: 'logo.png', contentType: 'image/png' });
+    addRow({ id: 7, createdAt: new Date('2026-11-24T10:00:00Z'), workspaceId: 5 }); // workspace off
+    prismaMock.ticket.findUnique.mockResolvedValueOnce({ subject: 'New Invoice from Acme Supplies' });
+
+    const out = await svc.catchUpRecentAttachments({ now });
+    expect(out).toEqual({ workspaces: 1, found: 1, queued: 1 });
+    await new Promise((r) => { setTimeout(r, 20); });
+    expect(fresh.displayName).toBe('Acme Supplies_INV-100234_2026_11_24.pdf');
+  });
+
+  test('bounded by the limit', async () => {
+    settings.delete('attachment_naming_ws2');
+    settings.set('attachment_naming_ws2', 'live');
+    for (let n = 0; n < 8; n += 1) addRow({ id: 200 + n, ticketId: 3000 + n, createdAt: new Date('2026-11-24T10:00:00Z'), fileName: `x-${n}.pdf` });
+    createMock.mockResolvedValue(aiReply({ vendor: null, invoiceNumber: null, documentDate: null, confidence: 'low' }));
+    const out = await svc.catchUpRecentAttachments({ now, limit: 3 });
+    expect(out).toMatchObject({ found: 3, queued: 3 });
+    await new Promise((r) => { setTimeout(r, 30); });
+    createMock.mockReset();
+  });
+
+  test('no live workspace → nothing read', async () => {
+    settings.clear();
+    expect(await svc.catchUpRecentAttachments({ now })).toEqual({ workspaces: 0, found: 0, queued: 0 });
+    expect(prismaMock.ticketAttachment.findMany).not.toHaveBeenCalled();
   });
 });
 
@@ -309,13 +421,61 @@ describe('Revert and Edit', () => {
     expect(out).toMatchObject({ displayName: 'Acme Supplies_INV-100234.pdf', nameSource: 'manual', originalName: 'INV-100234.pdf' });
     expect(out.nameDetails).toMatchObject({ vendor: 'Acme Supplies', method: 'manual' });
     expect(activities[0].details).toMatchObject({ action: 'edit', from: 'INV-100234.pdf', to: 'Acme Supplies_INV-100234.pdf' });
-    expect(JSON.parse(settings.get('attachment_vendor_aliases_ws2'))).toEqual({ 'acme.example': 'Acme Supplies' });
+    expect(JSON.parse(settings.get('attachment_vendor_aliases_ws2'))).toEqual({
+      'acme.example': { vendor: 'Acme Supplies', learnedAt: expect.any(String), by: 'Dana Fox' },
+    });
 
-    // The next mail from that domain uses the taught name with no Claude call needed for the vendor.
+    // The next mail from that domain: Claude still reads it, agrees, and the people's spelling is kept.
     createMock.mockResolvedValueOnce(aiReply({ vendor: 'ACME SUPPLIES LTD', invoiceNumber: 'INV-5', documentDate: null, confidence: 'high' }));
     const next = addRow({ fileName: 'INV-5.pdf' });
     const named = await svc.nameAttachment(next.id, { subject: 'x', fromEmail: 'ar@acme.example', receivedAt: new Date('2026-11-23T18:00:00Z') });
+    expect(createMock).toHaveBeenCalledTimes(1);
     expect(named.name).toBe('Acme Supplies_INV-5_2026_11_23.pdf');
+    expect(rows[1].nameDetails.vendorFrom).toBe('vendor_list');
+  });
+
+  test('edits that are not in the Vendor_<number> shape teach nothing', async () => {
+    for (const name of ['Signed_W9', 'Copy_of_invoice', 'Scanned_2026_11_23', 'OurCo_12']) {
+      const row = addRow({ uploadedBy: 'billing@acme.example' });
+      await svc.applyManualName({ ticketId: 1042, attachmentId: row.id, workspaceId: 2, action: 'edit', name, actor });
+    }
+    expect(settings.has('attachment_vendor_aliases_ws2')).toBe(false);
+  });
+
+  test('a high-confidence Claude vendor beats a learned entry that disagrees; a medium one does not', async () => {
+    settings.set('attachment_vendor_aliases_ws2', JSON.stringify({ 'acme.example': { vendor: 'Signed', learnedAt: '2026-11-20T00:00:00Z', by: 'Eli Park' } }));
+    createMock.mockResolvedValueOnce(aiReply({ vendor: 'Acme Supplies', invoiceNumber: 'INV-6', documentDate: null, confidence: 'high' }));
+    const a = addRow({ fileName: 'INV-6.pdf' });
+    expect((await svc.nameAttachment(a.id, { subject: 'x', fromEmail: 'ar@acme.example', receivedAt: new Date('2026-11-23T18:00:00Z') })).name)
+      .toBe('Acme Supplies_INV-6_2026_11_23.pdf');
+    expect(rows[0].nameDetails.vendorFrom).toBe('ai');
+
+    createMock.mockResolvedValueOnce(aiReply({ vendor: 'Northwind Traders', invoiceNumber: 'INV-7', documentDate: null, confidence: 'medium' }));
+    const b = addRow({ fileName: 'INV-7.pdf' });
+    expect((await svc.nameAttachment(b.id, { subject: 'x', fromEmail: 'ar@acme.example', receivedAt: new Date('2026-11-23T18:00:00Z') })).name)
+      .toBe('Signed_INV-7_2026_11_23.pdf');
+  });
+
+  test('reverting a name that came from the vendor list removes that entry', async () => {
+    settings.set('attachment_vendor_aliases_ws2', JSON.stringify({
+      'acme.example': { vendor: 'Acme Supplies', learnedAt: '2026-11-20T00:00:00Z', by: 'Eli Park' },
+      'northwind.example': { vendor: 'Northwind Traders', learnedAt: '2026-11-20T00:00:00Z', by: 'Eli Park' },
+    }));
+    createMock.mockResolvedValueOnce(aiReply({ vendor: null, invoiceNumber: 'INV-8', documentDate: null, confidence: 'medium' }));
+    const row = addRow({ fileName: 'INV-8.pdf' });
+    await svc.nameAttachment(row.id, { subject: 'x', fromEmail: 'ar@mail.acme.example', receivedAt: new Date('2026-11-23T18:00:00Z') });
+    expect(rows[0]).toMatchObject({ displayName: 'Acme Supplies_INV-8_2026_11_23.pdf', nameDetails: { vendorFrom: 'vendor_list', senderDomain: 'mail.acme.example' } });
+
+    await svc.applyManualName({ ticketId: 1042, attachmentId: row.id, workspaceId: 2, action: 'revert', actor });
+    expect(Object.keys(JSON.parse(settings.get('attachment_vendor_aliases_ws2')))).toEqual(['northwind.example']);
+  });
+
+  test('a name that is not text is a 400', async () => {
+    const row = addRow();
+    for (const name of [42, null, ['Acme'], { a: 1 }]) {
+      await expect(svc.applyManualName({ ticketId: 1042, attachmentId: row.id, workspaceId: 2, action: 'edit', name, actor }))
+        .rejects.toMatchObject({ statusCode: 400 });
+    }
   });
 
   test('edit never teaches internal, free-mail or platform domains', async () => {
