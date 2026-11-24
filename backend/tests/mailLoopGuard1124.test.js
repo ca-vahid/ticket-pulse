@@ -81,6 +81,9 @@ const { aliasSettingKey, invalidateAliasCache } = await import('../src/services/
 const { invalidateMachineSenderCache } = await import('../src/services/machineSenderService.js');
 const { invalidateObserverCache } = await import('../src/services/workflowMailObserverService.js');
 const { DEFAULT_MESSAGE_ID_DOMAIN } = await import('../src/services/emailThreadingService.js');
+const { rememberSentMessageId, wasRecentlySent, clearRecentSentMessageIds, RECENT_SENT_TTL_MS } = await import('../src/utils/recentSentMessageIds.js');
+const { ownMailboxAddresses, OWN_FAILURE_TTL_MS } = await import('../src/services/originalRecipientsService.js');
+const { senderKindFor, PERSON_REASONS } = await import('../src/utils/heldAlertGroups.js');
 
 // Accounting's mailboxes: AP (with the "acc" alias) and AR; IT in another workspace;
 // an old connection that was switched off.
@@ -137,6 +140,7 @@ beforeEach(() => {
   sentEntryIds.clear();
   threadRefs.clear();
   invalidateOwnMailboxCache();
+  clearRecentSentMessageIds();
   invalidateAliasCache();
   invalidateMachineSenderCache();
   invalidateObserverCache();
@@ -442,5 +446,84 @@ describe('3. intake: a new ticket is never filed for one of our own mailboxes; a
     expect(await ingest.processEmail(apBox, fromAr({ subject: 'Vendor statement' }))).toBe('skipped');
     expect(ticketServiceMock.createTicket).not.toHaveBeenCalled();
     expect(skippedWith()).toEqual(['own_mailbox_requester']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('4. follow-ups: every create path refuses a ticket for one of our mailboxes', () => {
+  const intake = { kind: 'fresh', agent: null, decision: { rule: 'external_reply_unknown', details: {} } };
+
+  test('_holdOrFallback with the hold queue down (policy create): never created, recorded as skipped', async () => {
+    holdMock.holdMessage.mockRejectedValue(new Error('hold table missing'));
+    const outcome = await ingest._holdOrFallback(apBox, fromAr({ subject: 'RE: Statement' }), intake, 'unknown_reference', new Map());
+    expect(outcome).toBe('skipped');
+    expect(ticketServiceMock.createTicket).not.toHaveBeenCalled();
+    expect(skippedWith()).toEqual(['own_mailbox_requester']);
+  });
+
+  test('_holdOrFallback with the hold queue down: a person’s mail is still created as before', async () => {
+    holdMock.holdMessage.mockRejectedValue(new Error('hold table missing'));
+    expect(await ingest._holdOrFallback(apBox, mail({ subject: 'RE: Statement' }), intake, 'unknown_reference', new Map())).toBe('created');
+    expect(created()[0]).toMatchObject({ requesterEmail: CLIENT });
+  });
+
+  test('"Create ticket" on held mail (a person, or Live Mail triage from a possible_follow_up hold): refused for our mailbox, fine once someone is chosen', async () => {
+    const email = fromAr({ subject: 'Remittance' });
+    const held = { kind: 'fresh', createdVia: 'held_reply', heldMessageId: 77, resolvedBy: 'Mail triage' };
+    await expect(ingest.createTicketFromEmail(apBox, email, held)).rejects.toMatchObject({
+      statusCode: 400,
+      details: { code: 'own_mailbox_requester', requester: AR },
+    });
+    expect(ticketServiceMock.createTicket).not.toHaveBeenCalled();
+    // Mail triage passes a requester only when it is not one of our mailboxes; with none it is the sender (AR): refused.
+    await expect(ingest.createTicketFromEmail(apBox, email, { ...held, forcedRequester: AR })).rejects.toMatchObject({ statusCode: 400 });
+    await ingest.createTicketFromEmail(apBox, email, { ...held, forcedRequester: CLIENT });
+    expect(created()[0]).toMatchObject({ requesterEmail: CLIENT });
+  });
+});
+
+describe('5. follow-ups: the createReply race, the failure cache, person reasons', () => {
+  test('recentSentMessageIds: remembered ids (with or without brackets) for ten minutes', () => {
+    const t0 = 1_800_000_000_000;
+    rememberSentMessageId(EXCHANGE_ID, t0);
+    expect(wasRecentlySent(EXCHANGE_ID, t0 + 1000)).toBe(true);
+    expect(wasRecentlySent(EXCHANGE_ID.slice(1, -1).toUpperCase(), t0 + 1000)).toBe(true);
+    expect(wasRecentlySent('<other@ourco.example>', t0 + 1000)).toBe(false);
+    expect(wasRecentlySent(EXCHANGE_ID, t0 + RECENT_SENT_TTL_MS)).toBe(false);
+    expect(wasRecentlySent('', t0)).toBe(false);
+  });
+
+  test('an ack whose Message-ID was remembered before the send, back before its delivery row exists: skipped', async () => {
+    rememberSentMessageId(EXCHANGE_ID);
+    expect(await ingest.processEmail(apBox, fromAr({ internetMessageId: EXCHANGE_ID }))).toBe('skipped');
+    expect(skippedWith()).toEqual(['self_send']);
+    // Without it (and no rows) the same mail is an unproven hand-off: held.
+    clearRecentSentMessageIds();
+    expect(await ingest.processEmail(apBox, fromAr({ internetMessageId: '<SN6PR01MB0000@x.prod.outlook.example>' }))).toBe('held');
+  });
+
+  test('a failed list read is remembered for ten seconds: no query per message or delivery, then read again', async () => {
+    const realNow = Date.now;
+    let now = realNow();
+    Date.now = () => now;
+    try {
+      prismaMock.mailboxConnection.findMany.mockRejectedValue(new Error('db down'));
+      await expect(ownMailboxAddresses()).rejects.toThrow('db down');
+      await expect(ownMailboxAddresses({ staleOk: true })).rejects.toThrow('db down');
+      await processDelivery(delivery({ recipient: CLIENT, toRecipients: [CLIENT] }));
+      await ingest.processEmail(apBox, mail());
+      expect(prismaMock.mailboxConnection.findMany).toHaveBeenCalledTimes(1);
+      now += OWN_FAILURE_TTL_MS;
+      prismaMock.mailboxConnection.findMany.mockImplementation(async () => BOXES.filter((b) => b.isEnabled));
+      expect(await ownMailboxAddresses()).toContain(AR);
+      expect(prismaMock.mailboxConnection.findMany).toHaveBeenCalledTimes(2);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  test('own_mailbox_requester holds are a person’s mail in the held-mail groups', () => {
+    expect(PERSON_REASONS).toContain('own_mailbox_requester');
+    expect(senderKindFor({ sender: AR, reasons: ['own_mailbox_requester'] })).toBe('person');
   });
 });

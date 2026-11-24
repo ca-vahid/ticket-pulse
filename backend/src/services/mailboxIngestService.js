@@ -22,6 +22,8 @@ import { longNumbersDiffer, maskCounters } from '../utils/subjectIdentity.js';
 import { ticketEndedAt } from '../utils/ticketEndedAt.js';
 import { looksAutomated } from './ticketGrouping/rules.js';
 import { DEFAULT_MESSAGE_ID_DOMAIN } from './emailThreadingService.js';
+import { ValidationError } from '../utils/errors.js';
+import { wasRecentlySent } from '../utils/recentSentMessageIds.js';
 
 /**
  * A forward that Live invoice matching may hold (24 Nov 2026): NEW mail (intake
@@ -823,11 +825,14 @@ class MailboxIngestService {
    * Our own mail coming back (24 Nov 2026 mail loop): the proof, or null.
    * See ownMailProof; mail From one of our mailboxes is also ours when its own
    * Message-ID is one our sends recorded (a Graph createReply send carries no
-   * header and an Exchange Message-ID).
+   * header and an Exchange Message-ID). A Message-ID this process remembered
+   * just before sending counts From anyone: it closes the gap before the
+   * delivery row is written.
    */
   async _provenOwnMail(email, own) {
     const proof = ownMailProof(email, own);
     if (proof) return proof;
+    if (wasRecentlySent(email?.internetMessageId)) return 'recently_sent';
     const from = String(email?.from || '').trim().toLowerCase();
     if (!from || !isOwnAddress(from, own)) return null;
     return (await this._sentByUs(email?.internetMessageId)) ? 'sent_message_id' : null;
@@ -839,6 +844,13 @@ class MailboxIngestService {
    * own_mailbox_requester), never created. When the hold queue is unavailable
    * it is recorded as skipped instead, still never created. Never throws.
    */
+  /** The requester a new ticket from this mail would get, when that is one of our own mailboxes; else null. */
+  async _ownMailboxRequester(connection, email, intake) {
+    const requester = intendedRequester(email, intake);
+    if (!requester) return null;
+    return isOwnAddress(requester, await this._allOwnAddresses(connection)) ? requester : null;
+  }
+
   async _holdOwnRequester(connection, email, intake, requester) {
     recordIngestSkip(connection.workspaceId, 'own_mailbox_requester');
     logger.warn(`Mailbox ingest decision: hold (own_mailbox_requester) for "${email.subject}" from ${email.from} → ${connection.address}: the requester would be ${requester}, one of our own mailboxes (rule ${intake?.decision?.rule})`);
@@ -1071,14 +1083,7 @@ class MailboxIngestService {
       break;
     }
 
-    // A ticket is never filed for one of our own mailboxes (24 Nov 2026 mail
-    // loop): its acknowledgement would go to that mailbox and come back. Held
-    // (reason own_mailbox_requester) so a person sees it and files it.
-    const requester = intendedRequester(email, intake);
-    if (requester && isOwnAddress(requester, await this._allOwnAddresses(connection))) {
-      return this._holdOwnRequester(connection, email, intake, requester);
-    }
-
+    // A ticket for one of our own mailboxes is refused in _createWithCap (held).
     return this._createWithCap(connection, email, relatedTicketId ? { ...intake, relatedTicketId } : intake, senderCreates);
   }
 
@@ -1129,8 +1134,16 @@ class MailboxIngestService {
    * different subjects from one sender only from the 26th (9 Nov 2026).
    * The same words with different long numbers (invoices, or alerts that each
    * carry an incident id) are held from the 11th (11 Nov 2026).
+   *
+   * Every ingest create comes through here, the hold queue's "create when the
+   * queue is down" fallback too. A ticket is never filed for one of our own
+   * mailboxes (24 Nov 2026 mail loop: its acknowledgement would go to that
+   * mailbox and come back): held (reason own_mailbox_requester) so a person
+   * files it, or recorded as skipped when the hold queue is down; never created.
    */
   async _createWithCap(connection, email, intake, senderCreates) {
+    const requester = await this._ownMailboxRequester(connection, email, intake);
+    if (requester) return this._holdOwnRequester(connection, email, intake, requester);
     const { senderKey, subjectKey, shapeKey } = senderBurstKeys(email);
     const sameSubject = senderCreates.get(subjectKey) || 0;
     const sameShape = shapeKey ? (senderCreates.get(shapeKey) || 0) : 0;
@@ -2323,6 +2336,17 @@ class MailboxIngestService {
    */
   async createTicketFromEmail(connection, email, intake = null) {
     connection = await this._withAliases(connection);
+    // The last line (24 Nov 2026 mail loop): every ticket made from a mail comes
+    // through here, a person's or Mail triage's "Create ticket" on held mail too.
+    // A ticket for one of our own mailboxes is refused; choosing who it is for works.
+    const ownRequester = await this._ownMailboxRequester(connection, email, intake);
+    if (ownRequester) {
+      logger.warn(`Mailbox ingest: refused a ticket for ${ownRequester}, one of our own mailboxes ("${email?.subject}")`);
+      throw new ValidationError(
+        `This e-mail would become a ticket for ${ownRequester}, one of our own team mailboxes. Choose who the ticket is for.`,
+        { code: 'own_mailbox_requester', requester: ownRequester },
+      );
+    }
     if (intake?.kind === 'forward') return this._createFromForward(connection, email, intake);
     if (intake?.kind === 'agent_cc') return this._createFromAgentCc(connection, email, intake);
     return this._createFresh(connection, email, intake);

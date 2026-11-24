@@ -17,7 +17,8 @@ let anchorFound = false; // the message being answered exists in the mailbox (cr
 const fakeClient = {
   api: (path) => ({
     post: async (body) => {
-      calls.push({ method: 'POST', path, body });
+      // What intake would know at the moment the mail leaves (the createReply race).
+      calls.push({ method: 'POST', path, body, rememberedAtSend: wasRecentlySent('<DM6PR01MB9999@DM6PR01MB9999.prod.outlook.example>') });
       // An Exchange reply draft that comes back without its Message-ID.
       if (path.endsWith('/createReply')) return { id: 'draft-9', conversationId: 'conv-9' };
       return {};
@@ -44,6 +45,7 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: { info: jes
 
 const { sendEmail } = await import('../src/services/sendgridNotificationService.js');
 const { default: graphMailClient, mapGraphMessageForIngest } = await import('../src/integrations/graphMailClient.js');
+const { wasRecentlySent, clearRecentSentMessageIds } = await import('../src/utils/recentSentMessageIds.js');
 
 const AUTOMATIC = { 'Auto-Submitted': 'auto-generated', 'X-Ticket-Pulse-Mail': 'workflow' };
 
@@ -51,6 +53,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   calls.length = 0;
   anchorFound = false;
+  clearRecentSentMessageIds();
   axiosPostMock.mockResolvedValue({ headers: { 'x-message-id': 'sg-1' } });
   sendMailMock.mockResolvedValue({ messageId: '<smtp-1@ourco.example>' });
 });
@@ -62,6 +65,7 @@ describe('SendGrid lane', () => {
     const payload = axiosPostMock.mock.calls[0][1];
     expect(payload.headers).toMatchObject(AUTOMATIC);
     expect(payload.headers['Message-ID']).toMatch(/^<tp-3101-/);
+    expect(wasRecentlySent(payload.headers['Message-ID'])).toBe(true);
   });
 
   test('API: other mail is unchanged (no headers at all without threading)', async () => {
@@ -106,6 +110,14 @@ describe('Graph lane', () => {
     expect(sent).toMatchObject({ threadedVia: 'createReply', internetMessageId: '<DM6PR01MB9999@DM6PR01MB9999.prod.outlook.example>' });
     const order = calls.map((c) => `${c.method} ${c.path.replace('/users/ap@ourco.example', '')}`);
     expect(order.indexOf('GET /messages/draft-9')).toBeLessThan(order.indexOf('POST /messages/draft-9/send'));
+    // Remembered BEFORE /send, so intake can prove it ours before any delivery row exists.
+    expect(calls.find((c) => c.path.endsWith('/draft-9/send')).rememberedAtSend).toBe(true);
+  });
+
+  test('sendMail: the minted Message-ID is remembered before the send', async () => {
+    await graphMailClient.sendMailAsMailbox('ap@ourco.example', { to: ['jo.park@client.example'], subject: 'Hi', html: '<p>Hi</p>' });
+    const minted = calls.find((c) => c.path.endsWith('/sendMail')).body.message.internetMessageId;
+    expect(wasRecentlySent(minted)).toBe(true);
   });
 
   test('intake mapping reads our mark back', () => {

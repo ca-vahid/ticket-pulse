@@ -15,9 +15,12 @@ const prismaMock = {
   technician: { findFirst: jest.fn(), findMany: jest.fn() },
   workspaceAccess: { findUnique: jest.fn(), findFirst: jest.fn(), findMany: jest.fn() },
   ticket: { findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn() },
-  mailboxConnection: { findMany: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
+  mailboxConnection: { findMany: jest.fn(), findFirst: jest.fn(), update: jest.fn(), create: jest.fn(), delete: jest.fn() },
   $queryRaw: jest.fn(),
 };
+// The mail-loop guard's "our own mailboxes" cache (24 Nov 2026).
+const invalidateOwnMock = jest.fn();
+jest.unstable_mockModule('../src/services/originalRecipientsService.js', () => ({ invalidateOwnMailboxCache: invalidateOwnMock }));
 const holdMock = {
   list: jest.fn(), count: jest.fn(), attach: jest.fn(), createTicket: jest.fn(), discard: jest.fn(),
   listGroups: jest.fn(), bulk: jest.fn(), getBurstFoldMode: jest.fn(), setBurstFoldMode: jest.fn(),
@@ -196,6 +199,26 @@ describe('mailbox connection routes (RL-2 / RL-4 / RL-7)', () => {
 
     const bad = await request(buildApp(ADMIN)).patch('/api/tickets/mailboxes/11').send({ newTicketPolicy: 'yolo' }).expect(400);
     expect(bad.body.message).toMatch(/newTicketPolicy must be one of create, replies_only, hold_unmatched/);
+    // A policy change does not touch which addresses are ours.
+    expect(invalidateOwnMock).not.toHaveBeenCalled();
+  });
+
+  test('24 Nov 2026: the own-mailbox list is forgotten (last good list kept) when a mailbox is created, enabled/disabled or deleted', async () => {
+    prismaMock.mailboxConnection.create.mockImplementation(({ data }) => Promise.resolve({ id: 12, isEnabled: true, ...data }));
+    await request(buildApp(ADMIN)).post('/api/tickets/mailboxes').send({ address: 'ar@ourco.example' }).expect(201);
+    expect(invalidateOwnMock).toHaveBeenCalledTimes(1);
+    expect(invalidateOwnMock).toHaveBeenLastCalledWith({ keepLastGood: true });
+
+    prismaMock.mailboxConnection.findFirst.mockResolvedValue({ id: 12, workspaceId: 7, address: 'ar@ourco.example', mode: 'both', isEnabled: true });
+    prismaMock.mailboxConnection.update.mockImplementation(({ data }) => Promise.resolve({ id: 12, workspaceId: 7, mode: 'both', ...data }));
+    await request(buildApp(ADMIN)).patch('/api/tickets/mailboxes/12').send({ isEnabled: false }).expect(200);
+    expect(invalidateOwnMock).toHaveBeenCalledTimes(2);
+    await request(buildApp(ADMIN)).patch('/api/tickets/mailboxes/12').send({ isEnabled: true }).expect(200);
+    expect(invalidateOwnMock).toHaveBeenCalledTimes(3);
+
+    prismaMock.mailboxConnection.delete.mockResolvedValue({ id: 12 });
+    await request(buildApp(ADMIN)).delete('/api/tickets/mailboxes/12').expect(200);
+    expect(invalidateOwnMock).toHaveBeenCalledTimes(4);
   });
 
   test('GET /mailboxes carries the Graph send-lane state in meta', async () => {

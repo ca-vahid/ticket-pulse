@@ -7,6 +7,7 @@ import { ExternalAPIError, ValidationError } from '../utils/errors.js';
 import { formatSender, sanitizeFromName } from '../utils/emailSender.js';
 import { prepareOutboundEmail } from '../utils/emailHtmlHardening.js';
 import { buildOutboundMessageId, domainOfAddress, normalizeMessageId } from './emailThreadingService.js';
+import { rememberSentMessageId } from '../utils/recentSentMessageIds.js';
 
 function trim(value) {
   const text = String(value || '').trim();
@@ -364,6 +365,8 @@ export async function sendEmail({
     inReplyTo,
     references,
   };
+  // Our minted Message-ID, remembered before the send (24 Nov 2026 mail-loop guard).
+  if (threading.messageId) rememberSentMessageId(threading.messageId);
   const startedAt = Date.now();
   try {
     const deliveryParams = {
