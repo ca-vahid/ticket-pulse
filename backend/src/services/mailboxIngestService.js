@@ -20,6 +20,18 @@ import { freshserviceWillIngest } from './fsHelpdeskAddressService.js';
 import { judgeMeetingMail } from '../utils/meetingInvite.js';
 import { longNumbersDiffer, maskCounters } from '../utils/subjectIdentity.js';
 import { ticketEndedAt } from '../utils/ticketEndedAt.js';
+import { looksAutomated } from './ticketGrouping/rules.js';
+
+/**
+ * A forward that Live invoice matching may hold (24 Nov 2026): NEW mail (intake
+ * kind `fresh`) from someone who is not an agent of the workspace, whose
+ * subject starts with FW:/Fwd: (after an optional [tag]). An agent's parsed
+ * forward (kind `forward`) is never held for a match: it keeps today's path.
+ */
+export function isForwardMail(email, intake, agent = null) {
+  if (intake?.kind !== 'fresh' || agent) return false;
+  return /^\s*(?:\[[^\]]{0,40}\]\s*)?(?:fw|fwd)\s*:/i.test(String(email?.subject || ''));
+}
 
 // In-memory memory of messages handed to the hold queue (RL-4) so the delta
 // poller does not re-fetch them every catch-up round; bounded, process-local
@@ -606,6 +618,67 @@ class MailboxIngestService {
     } finally {
       if (key) this._inFlight.delete(key);
       this._count(connection, outcome);
+      this._invoiceMatchAfterIntake(connection, email, outcome);
+    }
+  }
+
+  /**
+   * Invoice match, Shadow and Live (24 Nov 2026, invoiceMatchService): after intake
+   * decided, match the mail and record the result beside it (the thread entry's
+   * raw_payload.invoiceMatch, or the held row's decision.invoiceMatch). Nothing
+   * else changes. Fire-and-forget after the mail is stored: intake never waits
+   * for it and it never throws. Off (the default) costs one cached setting read.
+   */
+  _invoiceMatchAfterIntake(connection, email, outcome) {
+    const id = email?.internetMessageId || '';
+    const trace = (id && this._invoiceTrace?.get(id)) || {};
+    if (id) this._invoiceTrace?.delete(id);
+    if (!['created', 'reply', 'held'].includes(outcome) || !connection?.workspaceId) return null;
+    const job = Promise.resolve()
+      .then(() => import('./invoiceMatchService.js'))
+      .then(({ queueRecordAfterIntake }) => queueRecordAfterIntake(connection, email, outcome, {
+        attachmentNames: Array.isArray(trace.attachmentNames) ? trace.attachmentNames : null,
+        intakeKind: trace.intakeKind || null,
+        liveEligible: trace.liveEligible === true,
+      }))
+      .catch((err) => { logger.debug(`Invoice match after intake skipped (non-fatal): ${err.message}`); return null; });
+    this._lastInvoiceMatchJob = job; // tests await it
+    return job;
+  }
+
+  /** What intake learned about a mail for its after-intake invoice record (bounded, per Message-ID). */
+  _traceInvoice(email, patch) {
+    const id = email?.internetMessageId;
+    if (!id) return;
+    if (!this._invoiceTrace || this._invoiceTrace.size >= 500) this._invoiceTrace = new Map();
+    this._invoiceTrace.set(id, { ...(this._invoiceTrace.get(id) || {}), ...patch });
+  }
+
+  /**
+   * Live invoice matches for a mail intake is deciding on, or null when the
+   * workspace is not Live. Inline in intake, so it stays quick: the subject and
+   * the file names already in the mail payload, and only when the mail has
+   * files the payload does not name, one Graph metadata read capped at 2 s.
+   * The names are kept for the after-intake record. Never throws.
+   */
+  async _invoiceMatchesNow(connection, email) {
+    try {
+      const service = await import('./invoiceMatchService.js');
+      if (await service.getMode(connection.workspaceId) !== 'live') return null;
+      const attachmentNames = await service.attachmentNamesFor(connection, email, { timeoutMs: service.LIVE_NAMES_TIMEOUT_MS || 2000 });
+      this._traceInvoice(email, { attachmentNames });
+      const matches = await service.findInvoiceMatches({
+        workspaceId: connection.workspaceId,
+        subject: email.subject,
+        fromEmail: email.from,
+        fromName: email.fromName || null,
+        bodyText: email.bodyText || email.bodyPreview || null,
+        attachmentNames,
+      });
+      return { matches, attachmentNames };
+    } catch (err) {
+      logger.warn(`Mailbox ingest: invoice match failed for "${email?.subject}" (${err.message}) — continuing`);
+      return null;
     }
   }
 
@@ -781,8 +854,18 @@ class MailboxIngestService {
     // Fresh mail from a requester is left alone: a repeating alert or a common
     // subject would hold in bulk, and ticket grouping already judges those.
     const mayBeFollowUp = intake.kind === 'agent_cc' || (intake.kind === 'external_reply_unknown' && policy === 'create');
-    if (mayBeFollowUp) {
-      const found = await this._followUpCandidates(connection, email, ctx);
+    // Invoice match, Live only (24 Nov 2026): the same invoice from the same vendor on an
+    // OPEN ticket is a hard link. It joins the follow-up candidates above, and a
+    // non-agent's FW/Fwd new mail is held as a possible follow-up of that ticket (Mail
+    // triage then attaches it when it is "sure"). An agent's parsed forward and
+    // automatic senders keep today's path. Off and Shadow change nothing here; the
+    // after-intake record notes whether Live would have acted on this mail.
+    const forwardLike = isForwardMail(email, intake, agent) && !looksAutomated(email.from);
+    this._traceInvoice(email, { intakeKind: intake.kind, liveEligible: mayBeFollowUp || forwardLike });
+    const invoice = mayBeFollowUp || forwardLike ? await this._invoiceMatchesNow(connection, email) : null;
+    const invoiceMatches = invoice?.matches || [];
+    if (mayBeFollowUp || (forwardLike && invoiceMatches.length)) {
+      const found = await this._followUpCandidates(connection, email, ctx, invoiceMatches);
       if (found) {
         logger.info(`Mailbox ingest: "${email.subject}" from ${email.from} looks like a follow-up (${found.rules.join(' + ')}; ${found.total} ticket(s)) — held instead of a new ticket`);
         return this._holdOrFallback(connection, email, {
@@ -793,11 +876,13 @@ class MailboxIngestService {
             rule: 'possible_follow_up',
             details: {
               ...intake.decision.details,
-              matched: found.rules, // same_subject | shared_number
+              matched: found.rules, // same_subject | shared_number | same_invoice
               candidateCount: found.total,
               bestGuessOpen: found.bestGuessOpen,
               insteadOf: intake.decision.rule,
             },
+            // What the match saw, for Mail triage (it reads the file names from here).
+            ...(invoice ? { invoiceMatch: { mode: 'live', matches: invoiceMatches, attachmentNames: invoice.attachmentNames } } : {}),
           },
         }, 'possible_follow_up', senderCreates);
       }
@@ -826,13 +911,14 @@ class MailboxIngestService {
   }
 
   /** Tickets this mail may be following up on (followUpCandidateService), or null. Never throws. */
-  async _followUpCandidates(connection, email, ctx = null) {
+  async _followUpCandidates(connection, email, ctx = null, invoiceMatches = []) {
     try {
       const { findFollowUpCandidates } = await import('./followUpCandidateService.js');
       return await findFollowUpCandidates(connection.workspaceId, {
         subject: ctx?.subjectForMatch || email.subject,
         normalize: normalizeSubjectForMatch,
         isOpen: async (status) => ['Open', 'Pending'].includes(await statusService.resolveBaseStatus(connection.workspaceId, status)),
+        invoiceMatches,
       });
     } catch (err) {
       logger.warn(`Mailbox ingest: follow-up check failed for "${email.subject}" (${err.message}) — continuing`);

@@ -24,7 +24,8 @@ import { dashedReferences, projectNumbers } from '../utils/subjectIdentity.js';
  *
  *  1. Candidates are found WITHOUT a model (findCandidates): reply headers and
  *     message ids, the same normalised subject, shared long reference numbers,
- *     the same people in the last 90 days and the nearest tickets by the stored
+ *     the same invoice from the same vendor on an open ticket (invoice match,
+ *     Live only), the same people in the last 90 days and the nearest tickets by the stored
  *     embedding. Same workspace only, open and closed, at most eight. Deleted,
  *     spam, onboarding / offboarding and Security tickets are never candidates.
  *  2. ONE model call per e-mail (operation `mail_triage`, through the provider
@@ -650,7 +651,8 @@ class MailTriageService {
    * and closed, at most eight, best first; each says why it was considered.
    *
    * `hard`   a link the code can stand on: a thread / header match, a shared
-   *          reference number, or the same (non-staff) person.
+   *          reference number, the same (non-staff) person, or (invoice match
+   *          Live) the same invoice from the same vendor on an open ticket.
    * `strong` a header, reference-number or exact-subject match (the people
    *          source alone only says "this person has tickets").
    */
@@ -698,6 +700,14 @@ class MailTriageService {
       add(ticketId, 'held', clip(why, 200) || 'found when the e-mail was held', 40, { strong: true });
     }
     if (Number(held.bestGuessTicketId) > 0) add(Number(held.bestGuessTicketId), 'best_guess', 'the best guess when the e-mail was held', 20);
+
+    // 1c. Invoice match (invoice_match_ws<N> = live, 24 Nov 2026): an open ticket that already holds
+    // a document with the same invoice number from the same vendor. A hard link, so "sure" can stand.
+    const invoice = await soft(() => this._invoiceMatches(workspaceId, held, email), []);
+    for (const m of invoice || []) {
+      const from = m.vendor ? `from ${m.vendor}` : 'from the same sender';
+      add(m.ticketId, 'invoice', `the same invoice number ${m.invoiceNumber} ${from} on an open ticket`, 90, { hard: true, strong: true });
+    }
 
     // 2 + 3. The same normalised subject, and shared long reference numbers (one indexed full-text query each).
     // The subject key is the follow-up finder's (followUpCandidateService): normalised, with the
@@ -806,6 +816,26 @@ class MailTriageService {
       sameSender: Boolean(sender && lc(c.ticket.requester?.email) === sender),
     }));
     return { candidates, key: candidateKey(candidates.map((c) => c.ticket.id)), mailboxes: ownAddr.mailboxes };
+  }
+
+  /**
+   * Live invoice matches for a held mail (invoiceMatchService), [] unless the
+   * workspace's invoice_match mode is `live`. The file names come from what the
+   * ingest recorded on the held row (decision.invoiceMatch.attachmentNames);
+   * nothing is downloaded here.
+   */
+  async _invoiceMatches(workspaceId, held, email) {
+    const service = await import('./invoiceMatchService.js');
+    if (await service.getMode(workspaceId) !== 'live') return [];
+    const names = held?.decision?.invoiceMatch?.attachmentNames;
+    return service.findInvoiceMatches({
+      workspaceId,
+      subject: email.subject,
+      fromEmail: email.from,
+      fromName: email.fromName,
+      bodyText: email.bodyText || email.bodyPreview || null,
+      attachmentNames: Array.isArray(names) ? names : (Array.isArray(email.attachmentNames) ? email.attachmentNames : []),
+    });
   }
 
   /**

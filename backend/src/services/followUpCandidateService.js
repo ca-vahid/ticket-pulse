@@ -23,6 +23,12 @@ import { referenceIdentities } from '../utils/subjectIdentity.js';
  * Never a candidate: deleted and spam tickets, tickets of the onboarding /
  * offboarding process, and tickets whose top-level category is Security.
  *
+ * (c) Invoice match, Live only (24 Nov 2026, invoiceMatchService): the caller
+ *     passes `invoiceMatches`, open tickets that already hold a document with
+ *     the same invoice number from the same vendor. Each is a candidate (rule
+ *     `same_invoice`), listed first and the best guess: it is a hard link, the
+ *     same document on an open ticket.
+ *
  * Read-only. Never throws: a failed lookup is "no candidates", and the mail
  * goes on to become a ticket as before.
  */
@@ -73,10 +79,12 @@ async function onboardingIds(tickets) {
  * @param {string} args.subject            the mail's subject as it arrived
  * @param {(s: string) => string} args.normalize  the ingest's subject normaliser
  * @param {(status: string) => Promise<boolean>} [args.isOpen]  is this status Open or Pending?
+ * @param {Array<{ticketId:number, displayRef?:string, vendor?:string, invoiceNumber?:string}>} [args.invoiceMatches]  Live invoice matches (open tickets)
  * @returns {Promise<null | { candidates: {ticketId:number, why:string}[], bestGuessTicketId:number, rules:string[], total:number }>}
  */
-export async function findFollowUpCandidates(workspaceId, { subject, normalize, isOpen = null, now = Date.now() } = {}) {
+export async function findFollowUpCandidates(workspaceId, { subject, normalize, isOpen = null, now = Date.now(), invoiceMatches = [] } = {}) {
   try {
+    const invoice = await keptInvoice(workspaceId, invoiceCandidates(invoiceMatches));
     const key = followUpSubjectKey(typeof normalize === 'function' ? normalize(subject) : subject);
     const numbers = referenceIdentities(subject, { now }).slice(0, MAX_NUMBERS);
     const fragment = key.length >= MIN_SUBJECT_KEY ? searchFragment(key) : '';
@@ -84,7 +92,7 @@ export async function findFollowUpCandidates(workspaceId, { subject, normalize, 
       ...(fragment.length >= MIN_SUBJECT_KEY ? [{ subject: { contains: fragment, mode: 'insensitive' } }] : []),
       ...numbers.map((n) => ({ subject: { contains: n } })),
     ];
-    if (!or.length) return null;
+    if (!or.length) return invoice.length ? withInvoice(null, invoice) : null;
     const since = new Date(now - FOLLOW_UP_WINDOW_DAYS * 24 * 60 * 60 * 1000);
     const rows = await prisma.ticket.findMany({
       where: {
@@ -99,7 +107,7 @@ export async function findFollowUpCandidates(workspaceId, { subject, normalize, 
       orderBy: { createdAt: 'desc' },
       take: FETCH,
     });
-    if (!Array.isArray(rows) || !rows.length) return null;
+    if (!Array.isArray(rows) || !rows.length) return withInvoice(null, invoice);
 
     const matched = [];
     for (const t of rows) {
@@ -114,10 +122,10 @@ export async function findFollowUpCandidates(workspaceId, { subject, normalize, 
         why: [sameSubject ? 'same subject' : null, shared.length ? `same reference number ${shared.join(', ')}` : null].filter(Boolean).join('; '),
       });
     }
-    if (!matched.length) return null;
+    if (!matched.length) return withInvoice(null, invoice);
     const family = await onboardingIds(matched.map((m) => m.ticket));
     const kept = matched.filter((m) => !family.has(m.ticket.id));
-    if (!kept.length) return null;
+    if (!kept.length) return withInvoice(null, invoice);
 
     // Newest first (the query's order). The best guess: an open one, else the newest.
     const open = [];
@@ -128,17 +136,75 @@ export async function findFollowUpCandidates(workspaceId, { subject, normalize, 
       if (yes) open.push(m);
     }
     const best = open[0] || kept[0];
-    return {
+    return withInvoice({
       candidates: kept.slice(0, FOLLOW_UP_MAX_CANDIDATES).map((m) => ({ ticketId: m.ticket.id, why: m.why })),
       bestGuessTicketId: best.ticket.id,
       bestGuessOpen: open.length > 0,
       rules: [...new Set(kept.flatMap((m) => m.rules))],
       total: kept.length,
-    };
+    }, invoice);
   } catch (err) {
     logger.warn(`followUpCandidateService: lookup failed (treated as no candidates): ${err.message}`);
     return null;
   }
+}
+
+/** Live invoice matches as candidates: [{ ticketId, why }], one per ticket. */
+function invoiceCandidates(matches) {
+  const out = [];
+  for (const m of Array.isArray(matches) ? matches : []) {
+    const ticketId = Number(m?.ticketId);
+    if (!Number.isInteger(ticketId) || ticketId <= 0 || out.some((c) => c.ticketId === ticketId)) continue;
+    const from = m.vendor ? ` from ${m.vendor}` : ' from the same sender';
+    out.push({ ticketId, why: `same invoice number ${m.invoiceNumber || ''}${from} on an open ticket`.replace(/\s+/g, ' ') });
+  }
+  return out;
+}
+
+/**
+ * Invoice candidates after the same exclusions as every other candidate: the
+ * ticket must be in this workspace and not deleted or spam, not a Security
+ * ticket, and not part of the onboarding / offboarding process. A failed read
+ * drops them (the mail then goes on as without the match).
+ */
+async function keptInvoice(workspaceId, invoice) {
+  if (!invoice.length) return invoice;
+  const rows = await soft(() => prisma.ticket.findMany({
+    where: { workspaceId: Number(workspaceId), id: { in: invoice.map((i) => i.ticketId) } },
+    select: {
+      id: true, subject: true, status: true, category: true,
+      internalCategory: { select: { name: true, parent: { select: { name: true } } } },
+    },
+    take: FOLLOW_UP_MAX_CANDIDATES * 2,
+  }), []);
+  const ok = (Array.isArray(rows) ? rows : []).filter((t) => !['Deleted', 'Spam'].includes(t.status) && !isSecurity(t));
+  const family = ok.length ? await onboardingIds(ok) : new Set();
+  const keep = new Set(ok.filter((t) => !family.has(t.id)).map((t) => t.id));
+  return invoice.filter((i) => keep.has(i.ticketId));
+}
+
+/**
+ * The subject / number result with the invoice matches added: invoice
+ * candidates first (they are open and a hard link), the best guess the newest
+ * of them, rule `same_invoice`. A ticket found both ways keeps one row with
+ * both reasons.
+ */
+function withInvoice(result, invoice) {
+  if (!invoice.length) return result;
+  const rest = (result?.candidates || []).filter((c) => !invoice.some((i) => i.ticketId === c.ticketId));
+  const merged = invoice.map((i) => {
+    const also = (result?.candidates || []).find((c) => c.ticketId === i.ticketId);
+    return also ? { ticketId: i.ticketId, why: `${i.why}; ${also.why}` } : i;
+  });
+  const candidates = [...merged, ...rest];
+  return {
+    candidates: candidates.slice(0, FOLLOW_UP_MAX_CANDIDATES),
+    bestGuessTicketId: invoice[0].ticketId,
+    bestGuessOpen: true,
+    rules: [...new Set(['same_invoice', ...(result?.rules || [])])],
+    total: candidates.length,
+    invoiceTicketIds: invoice.map((i) => i.ticketId),
+  };
 }
 
 export default { findFollowUpCandidates, followUpSubjectKey, FOLLOW_UP_WINDOW_DAYS, FOLLOW_UP_MAX_CANDIDATES };

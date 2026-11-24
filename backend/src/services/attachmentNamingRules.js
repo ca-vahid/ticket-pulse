@@ -474,8 +474,36 @@ export function extractFromRules({ subject, fromEmail, fromName, fileName, bodyT
  * `Vendor_Invoice_YYYY_MM_DD.ext`, at most 120 characters before the extension.
  * Returns null without a vendor (no rename).
  */
+/**
+ * A vendor as it should read in a file name (24 Nov 2026):
+ * - a bilingual name written twice ("ACME PARC CANADA INC. ACME PARK CANADA INC",
+ *   "Acme Ltée / Acme Ltd") keeps its first version;
+ * - an all-capitals name of several words reads in normal capitals
+ *   ("BEER WORKS INC" → "Beer Works Inc"), keeping short letter-only codes such
+ *   as BHP, LLC or ULC in capitals. One-word names (IBM, BHP) are left alone.
+ */
+const TITLE_SHORT = new Set(['INC', 'LTD', 'CO', 'CORP', 'LTÉE', 'LTEE', 'CIE', 'THE', 'AND', 'OF']);
+export function tidyVendor(raw) {
+  let v = String(raw ?? '').replace(/\s+/g, ' ').trim();
+  if (!v) return v;
+  const parts = v.split(/\s*\/\s*|\s+\|\s+|(?<=\b(?:inc|ltd|ltée|ltee|corp|llc|ulc)\.?)\s+(?=\S)/i).map((s) => s.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    const first = (s) => s.split(' ')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (first(parts[0]) && first(parts[0]) === first(parts[1])) v = parts[0];
+  }
+  const letters = v.replace(/[^A-Za-zÀ-ÿ]/g, '');
+  if (letters.length >= 4 && letters === letters.toUpperCase() && /\s/.test(v)) {
+    v = v.split(' ').map((w) => {
+      const bare = w.replace(/[^A-Za-zÀ-ÿ]/g, '');
+      if (bare.length <= 3 && !TITLE_SHORT.has(bare.toUpperCase())) return w;
+      return w.charAt(0) + w.slice(1).toLowerCase();
+    }).join(' ');
+  }
+  return v.replace(/[.,;:]+$/, '').trim();
+}
+
 export function formatAttachmentName({ vendor, invoiceNumber = null, date, ext }) {
-  let v = cleanNamePart(vendor);
+  let v = cleanNamePart(tidyVendor(vendor));
   if (!v) return null;
   let inv = cpSlice(cleanNamePart(invoiceNumber), MAX_INVOICE_CHARS).trim();
   if (inv && inv.toLowerCase() === v.toLowerCase()) inv = '';

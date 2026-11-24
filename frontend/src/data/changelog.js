@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.4.12-preview';
+export const APP_VERSION = '4.4.13-preview';
 
 export const changelog = [
+  {
+    version: '4.4.13-preview',
+    date: 'November 24, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Matching mail by invoice number (Shadow)</strong> &mdash; when an e-mail arrives in Accounting, Ticket Pulse reads its vendor and invoice number and checks whether an open ticket already holds a document with the same vendor and number. For now it only records what it would have matched, so the results can be checked before it is switched on.' },
+      { type: 'improved', html: '<strong>Tidier vendor names on attachments</strong> &mdash; vendors written in all capitals read in normal capitals, and a vendor&rsquo;s name written in two languages keeps one.' }
+    ],
+  },
   {
     version: '4.4.12-preview',
     date: 'November 24, 2026',

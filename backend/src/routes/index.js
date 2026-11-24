@@ -43,6 +43,7 @@ import assignmentSpreadRoutes from './assignmentSpread.routes.js';
 import assignmentLevelMatchRoutes from './assignmentLevelMatch.routes.js';
 import assignmentSharesRoutes from './assignmentShares.routes.js';
 import assignmentPriorityRaisesRoutes from './assignmentPriorityRaises.routes.js'; // QA 11-23
+import invoiceMatchRoutes from './invoiceMatch.routes.js';
 import { requireWorkspace } from '../middleware/workspace.js';
 import usageRoutes from './usage.routes.js';
 import siteStatsRoutes from './siteStats.routes.js';
@@ -197,6 +198,9 @@ router.use('/backup', backupRoutes);
 router.use('/knowledge', knowledgeRoutes);
 router.use('/tone', toneRoutes);
 router.use('/hand-backs', handBacksRoutes); // QA 09-25 item 3
+// Invoice-number matching for mail (24 Nov 2026): the Shadow report and the
+// Off/Shadow/Live switch, workspace admins (requireAdmin inside the router).
+router.use('/mail-triage', invoiceMatchRoutes);
 // Onboarding / Offboarding (plans/HR_LIFECYCLE_PLAN.md): /status for members,
 // everything else workspace-admin + HR_LIFECYCLE_WORKSPACE_IDS inside the router.
 router.use('/hr-lifecycle', hrLifecycleRoutes);
