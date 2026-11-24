@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.4.13-preview';
+export const APP_VERSION = '4.4.14-preview';
 
 export const changelog = [
+  {
+    version: '4.4.14-preview',
+    date: 'November 24, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Workflow e-mails never go to our own mailboxes</strong> &mdash; a workflow e-mail is no longer sent to any of Ticket Pulse&rsquo;s connected team mailboxes, and an e-mail sent by one of our mailboxes never becomes a new ticket in another. Workflow e-mails are now marked as automatic, so other systems don&rsquo;t answer them either. This stops acknowledgements bouncing between two team mailboxes.' },
+      { type: 'improved', html: '<strong>Small fixes</strong> &mdash; invoice numbers printed with spaces (&ldquo;328 9392&rdquo;) appear without them in attachment names; the invoice-matching Shadow report no longer counts a reply that was already filed on its ticket as a disagreement.' }
+    ],
+  },
   {
     version: '4.4.13-preview',
     date: 'November 24, 2026',
