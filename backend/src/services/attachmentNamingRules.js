@@ -194,6 +194,26 @@ export function plausibleVendor(raw, internalDomains = []) {
 
 const INVOICE_TOKEN = '([A-Z]{0,8}[-_]?\\d[A-Z0-9\\-_/]{2,})';
 
+/**
+ * Does `text` hold `token` as a whole token ("INV-7701" in "INV-7701.pdf", not
+ * in "Statement INV-77012")? Letters and digits on either side break the match.
+ */
+export function holdsToken(text, token) {
+  const t = String(token || '').trim();
+  if (!t) return false;
+  const escaped = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![A-Za-z0-9])${escaped}(?![A-Za-z0-9])`, 'i').test(String(text || ''));
+}
+
+// A bare year ("#2026", "Invoice 2026") is a period, not an invoice number.
+const BARE_YEAR = /^(?:19|20)\d{2}$/;
+
+/** An invoice number from the subject: as plausibleInvoice, and never a bare year. */
+function subjectInvoiceValue(raw) {
+  const v = plausibleInvoice(raw);
+  return v && !BARE_YEAR.test(v) ? v : null;
+}
+
 function plausibleInvoice(raw) {
   const v = cleanNamePart(raw).replace(/[_]+$/, '');
   if (!v || v.length < 3 || v.length > MAX_INVOICE_CHARS) return null;
@@ -261,7 +281,7 @@ function fromSubject(subject, internalDomains) {
   let m = new RegExp(`^(?:new\\s+)?(?:invoice|bill|facture)\\s*(?:#|no\\.?|number)?\\s*:?\\s*${INVOICE_TOKEN}\\s+from\\s+(.+)$`, 'i').exec(s);
   if (m) {
     const vendor = plausibleVendor(m[2], internalDomains);
-    const invoice = plausibleInvoice(m[1]);
+    const invoice = subjectInvoiceValue(m[1]);
     if (vendor) out.vendor = { value: vendor, confidence: 'high', from: 'subject' };
     if (invoice) out.invoice = { value: invoice, confidence: 'high', from: 'subject' };
     return out;
@@ -279,7 +299,7 @@ function fromSubject(subject, internalDomains) {
   }
   const inv = new RegExp(`(?:invoice|inv|facture|bill)\\s*(?:#|no\\.?|number|num)?\\s*:?\\s*${INVOICE_TOKEN}`, 'i').exec(s)
     || /#\s*(\d{4,}[A-Z0-9-]*)/i.exec(s);
-  const invoice = inv ? plausibleInvoice(inv[1]) : null;
+  const invoice = inv ? subjectInvoiceValue(inv[1]) : null;
   if (invoice) out.invoice = { value: invoice, confidence: 'medium', from: 'subject' };
   return out;
 }
@@ -383,7 +403,7 @@ export function extractFromRules({ subject, fromEmail, fromName, fileName, bodyT
   let subjectInvoice = subj.invoice;
   let subjectInvoiceHint = null;
   if (subjectInvoice) {
-    const inOwnName = fileStem(fileName).toLowerCase().includes(subjectInvoice.value.toLowerCase());
+    const inOwnName = holdsToken(fileStem(fileName), subjectInvoice.value);
     if (inOwnName) {
       // Subject and file name agreeing on the number makes it certain.
       subjectInvoice = { ...subjectInvoice, confidence: 'high', from: 'subject+file' };

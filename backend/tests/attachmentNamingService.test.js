@@ -14,7 +14,14 @@ const settings = new Map();
 
 const match = (row, where = {}) => Object.entries(where).every(([k, v]) => {
   if (k === 'NOT') return !match(row, v);
+  if (k === 'OR') return v.some((w) => match(row, w));
+  if (k === 'AND') return v.every((w) => match(row, w));
   if (v && typeof v === 'object' && !(v instanceof Date)) {
+    if ('equals' in v) {
+      if (v.path) return (v.path.reduce((o, p) => o?.[p], row[k]) ?? null) === v.equals;
+      if (v.equals && typeof v.equals === 'object') return (row[k] ?? null) === null; // Prisma.DbNull
+      return row[k] === v.equals;
+    }
     if ('in' in v) return v.in.includes(row[k]);
     if ('gte' in v) return new Date(row[k]) >= v.gte;
     if ('startsWith' in v) return String(row[k]).startsWith(v.startsWith);
@@ -63,11 +70,17 @@ const createMock = jest.fn();
 class APIError extends Error { constructor(status, message) { super(message); this.status = status; } }
 class RateLimitError extends APIError { constructor(message) { super(429, message); } }
 class APIConnectionError extends APIError { constructor(message) { super(undefined, message); } }
+class APIConnectionTimeoutError extends APIConnectionError {}
 class Anthropic { constructor() { this.messages = { create: createMock }; } }
 Anthropic.APIError = APIError;
 Anthropic.RateLimitError = RateLimitError;
 Anthropic.APIConnectionError = APIConnectionError;
-jest.unstable_mockModule('@anthropic-ai/sdk', () => ({ default: Anthropic, APIError, RateLimitError, APIConnectionError }));
+Anthropic.APIConnectionTimeoutError = APIConnectionTimeoutError;
+jest.unstable_mockModule('@anthropic-ai/sdk', () => ({ default: Anthropic, APIError, RateLimitError, APIConnectionError, APIConnectionTimeoutError }));
+
+// The shared @prisma/client test mock has no null sentinels; the real DbNull is an object.
+const Prisma = { DbNull: Object.freeze({ toString: () => 'Prisma.DbNull' }) };
+jest.unstable_mockModule('@prisma/client', () => ({ Prisma, PrismaClient: class {} }));
 
 const svc = await import('../src/services/attachmentNamingService.js');
 
@@ -157,14 +170,66 @@ describe('the Claude call', () => {
     expect(rows[0].displayName).toBeNull();
   });
 
-  test('a refusal with no rules vendor → no rename, original name stays, left unmarked for the catch-up', async () => {
+  test('a refusal with no rules vendor → no rename; the billed failure is counted on the file', async () => {
     createMock.mockResolvedValueOnce({ stop_reason: 'refusal', content: [], usage: {} });
     const row = addRow();
     const out = await svc.nameAttachment(row.id, { subject: 'Invoice attached', fromEmail: 'ar@vendor.example' });
     expect(out).toEqual({ renamed: false, reason: 'no_vendor_ai_failed' });
-    expect(rows[0].nameSource).toBeNull();
-    expect(rows[0].nameDetails).toBeNull();
+    expect(rows[0]).toMatchObject({ nameSource: null, displayName: null });
+    expect(rows[0].nameDetails).toMatchObject({ vendor: null, outcome: 'ai_failed', tries: 1, reason: 'refusal' });
     expect(activities).toHaveLength(0);
+  });
+
+  test.each([
+    ['max_tokens', () => createMock.mockResolvedValueOnce({ stop_reason: 'max_tokens', content: [], usage: {} })],
+    ['invalid_output', () => createMock.mockResolvedValueOnce({ stop_reason: 'end_turn', content: [{ type: 'text', text: 'not json' }], usage: {} })],
+    ['timeout', () => createMock.mockRejectedValueOnce(new APIConnectionTimeoutError('Request timed out.'))],
+  ])('billed failure %s: marked ai_failed, not retried, counted', async (reason, arrange) => {
+    arrange();
+    const row = addRow();
+    await svc.nameAttachment(row.id, { subject: 'Invoice attached', fromEmail: 'ar@vendor.example' });
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(rows[0].nameDetails).toMatchObject({ outcome: 'ai_failed', tries: 1, reason });
+  });
+
+  test.each([
+    ['rate_limit', () => createMock.mockRejectedValue(new RateLimitError('slow down'))],
+    ['api_503', () => createMock.mockRejectedValue(new APIError(503, 'overloaded'))],
+    ['connection', () => createMock.mockRejectedValue(new APIConnectionError('reset'))],
+  ])('unbilled failure %s: left unmarked so the catch-up retries for free', async (_reason, arrange) => {
+    arrange();
+    const row = addRow();
+    const out = await svc.nameAttachment(row.id, { subject: 'Invoice attached', fromEmail: 'ar@vendor.example' });
+    expect(out.reason).toBe('no_vendor_ai_unavailable');
+    expect(rows[0].nameDetails).toBeNull();
+    createMock.mockReset();
+  });
+
+  test('missing file bytes are unbilled too: left unmarked', async () => {
+    bufferFor.mockResolvedValueOnce(null);
+    const row = addRow();
+    expect((await svc.nameAttachment(row.id, { subject: 'x', fromEmail: 'ar@vendor.example' })).reason).toBe('no_vendor_ai_unavailable');
+    expect(createMock).not.toHaveBeenCalled();
+    expect(rows[0].nameDetails).toBeNull();
+  });
+
+  test('a billed failure falls back to the rules when they name a vendor', async () => {
+    createMock.mockResolvedValueOnce({ stop_reason: 'refusal', content: [], usage: {} });
+    const row = addRow({ fileName: 'doc.pdf' });
+    const out = await svc.nameAttachment(row.id, { subject: 'Northwind Rentals Invoice', fromEmail: 'ar@northwind.example', receivedAt: new Date('2026-11-23T18:00:00Z') });
+    expect(out.name).toBe('Northwind Rentals_2026_11_23.pdf');
+    expect(rows[0].nameDetails).toMatchObject({ method: 'rules', aiFailed: 'refusal' });
+  });
+
+  test('the second billed failure is the last: tries 2, and Claude is never asked a third time', async () => {
+    createMock.mockResolvedValue({ stop_reason: 'refusal', content: [], usage: {} });
+    const row = addRow({ nameDetails: { vendor: null, outcome: 'ai_failed', tries: 1, reason: 'refusal' } });
+    await svc.nameAttachment(row.id, { subject: 'Invoice attached', fromEmail: 'ar@vendor.example' });
+    expect(rows[0].nameDetails).toMatchObject({ outcome: 'ai_failed', tries: 2 });
+    createMock.mockClear();
+    await svc.nameAttachment(row.id, { subject: 'Invoice attached', fromEmail: 'ar@vendor.example' });
+    expect(createMock).not.toHaveBeenCalled();
+    createMock.mockReset();
   });
 
   test('a rate limit is retried once', async () => {
@@ -377,6 +442,29 @@ describe('catch-up after a restart', () => {
     expect(out).toEqual({ workspaces: 1, found: 1, queued: 1 });
     await new Promise((r) => { setTimeout(r, 20); });
     expect(fresh.displayName).toBe('Acme Supplies_INV-100234_2026_11_24.pdf');
+  });
+
+  test('checked files are left out in the query itself; one billed failure is asked again, two are not', async () => {
+    const when = new Date('2026-11-24T10:00:00Z');
+    addRow({ id: 301, createdAt: when, nameDetails: { outcome: 'no_vendor' } });
+    addRow({ id: 302, createdAt: when, nameDetails: { outcome: 'ai_failed', tries: 2 } });
+    addRow({ id: 303, ticketId: 4003, createdAt: when, fileName: 'retry.pdf', nameDetails: { outcome: 'ai_failed', tries: 1, reason: 'refusal' } });
+    addRow({ id: 304, ticketId: 4004, createdAt: when, fileName: 'fresh.pdf' });
+    createMock.mockResolvedValue(aiReply({ vendor: 'Acme Supplies', invoiceNumber: null, documentDate: null, confidence: 'high' }));
+
+    const out = await svc.catchUpRecentAttachments({ now });
+    expect(out).toMatchObject({ found: 2, queued: 2 });
+    const { where } = prismaMock.ticketAttachment.findMany.mock.calls[0][0];
+    expect(where.OR[0]).toEqual({ nameDetails: { equals: Prisma.DbNull } });
+    expect(where.OR[1].AND).toEqual([
+      { nameDetails: { path: ['outcome'], equals: 'ai_failed' } },
+      { nameDetails: { path: ['tries'], equals: 1 } },
+    ]);
+    await new Promise((r) => { setTimeout(r, 30); });
+    expect(rows.find((r) => r.id === 303).displayName).toBe('Acme Supplies_2026_11_24.pdf');
+    expect(rows.find((r) => r.id === 304).displayName).toBe('Acme Supplies_2026_11_24.pdf');
+    expect(rows.find((r) => r.id === 302).displayName).toBeNull();
+    createMock.mockReset();
   });
 
   test('bounded by the limit', async () => {

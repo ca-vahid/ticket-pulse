@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { Prisma } from '@prisma/client';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import settingsRepository from './settingsRepository.js';
@@ -146,15 +147,31 @@ export function validateAiAnswer(value) {
 
 function classifyAnthropicError(err) {
   // Most specific first. APIConnectionError extends APIError (with no status),
-  // so the status branch only takes errors that carry one. Retry only rate
-  // limits, 5xx and connection failures (timeouts are connection errors).
+  // so the status branch only takes errors that carry one; the timeout error
+  // extends APIConnectionError, so it is checked before it. Retry only rate
+  // limits, 5xx and connection failures. A timeout may already be billed (the
+  // model may have read the whole PDF), so it is not retried.
   if (err instanceof Anthropic.RateLimitError) return { errorClass: 'rate_limit', retryable: true };
   if (err instanceof Anthropic.APIError && typeof err.status === 'number') {
     return { errorClass: `api_${err.status}`, retryable: err.status >= 500 };
   }
+  if (Anthropic.APIConnectionTimeoutError && err instanceof Anthropic.APIConnectionTimeoutError) return { errorClass: 'timeout', retryable: false };
   if (err instanceof Anthropic.APIConnectionError) return { errorClass: 'connection', retryable: true };
   return { errorClass: 'unknown', retryable: false };
 }
+
+/**
+ * Failures worth trying again later at no cost: nothing was billed (rate
+ * limit, 5xx, connection, no key, file bytes missing). Every other failure
+ * (refusal, max_tokens, invalid output, timeout, a 4xx) is marked on the file
+ * so the catch-up does not pay for it again and again.
+ */
+export function isUnbilledTransient(reason) {
+  const r = String(reason || '');
+  return r === 'rate_limit' || r === 'connection' || r === 'not_configured' || r === 'no_bytes' || /^api_5\d\d$/.test(r);
+}
+
+export const MAX_AI_TRIES = 2;
 
 async function recordAttempt({ workspaceId, model, attemptNumber, status, startedAt, response = null, errorClass = null, errorMessage = null, meta = {} }) {
   const usage = response?.usage || {};
@@ -399,10 +416,14 @@ export async function nameAttachment(attachmentId, context = {}) {
     documentCount,
   });
 
+  // Billed Claude failures already counted on this file (catch-up re-runs).
+  const prev = row.nameDetails && typeof row.nameDetails === 'object' ? row.nameDetails : null;
+  const priorTries = prev?.outcome === 'ai_failed' ? Number(prev.tries) || 0 : 0;
+
   let ai = null;
   let aiModel = null;
-  let aiFailed = false;
-  if (isPdf(row) && !rules.rulesSufficient) {
+  let aiFailure = null; // { reason, billed }
+  if (isPdf(row) && !rules.rulesSufficient && priorTries < MAX_AI_TRIES) {
     if (row.sizeBytes > MAX_AI_PDF_BYTES) {
       logger.info(`Attachment naming: ${row.fileName} (id ${row.id}) is over 10 MB, rules only`);
     } else {
@@ -418,11 +439,11 @@ export async function nameAttachment(attachmentId, context = {}) {
           meta: { ticketId: row.ticketId, attachmentId: row.id },
         });
         if (result.ok) { ai = result.answer; aiModel = result.model; } else {
-          aiFailed = true;
+          aiFailure = { reason: result.reason, billed: !isUnbilledTransient(result.reason), model };
           logger.info(`Attachment naming: Claude gave no answer for ${row.fileName} (id ${row.id}): ${result.reason}; rules only`);
         }
-      } else {
-        aiFailed = true;
+      } else if (!buffer) {
+        aiFailure = { reason: 'no_bytes', billed: false };
       }
     }
   }
@@ -432,25 +453,33 @@ export async function nameAttachment(attachmentId, context = {}) {
     receivedAt: context.receivedAt || row.createdAt, internalDomains,
   });
   if (!decision) {
-    // Checked, nothing found: say so, so the catch-up never asks again. A
-    // failed Claude read is left unmarked so the next catch-up retries it.
-    if (!aiFailed) {
-      await soft(() => prisma.ticketAttachment.updateMany({
-        where: { id: row.id, nameSource: null },
-        data: {
-          nameDetails: {
-            vendor: null,
-            invoiceNumber: ai?.invoiceNumber || rules.invoice?.value || null,
-            outcome: 'no_vendor',
-            checkedAt: new Date().toISOString(),
-            ...(aiModel ? { model: aiModel } : {}),
-            senderDomain: rules.senderDomain || null,
-          },
-        },
-      }), null);
-    }
-    return { renamed: false, reason: aiFailed ? 'no_vendor_ai_failed' : 'no_vendor' };
+    // An unbilled, passing failure (rate limit, 5xx, connection, no key, no
+    // bytes) leaves the file unmarked so the catch-up tries again for free.
+    if (aiFailure && !aiFailure.billed) return { renamed: false, reason: 'no_vendor_ai_unavailable' };
+    // A billed failure is counted on the file (the catch-up stops at 2 tries);
+    // a clean read with no vendor is marked checked and never asked again.
+    const nameDetails = aiFailure
+      ? {
+        vendor: null,
+        outcome: 'ai_failed',
+        tries: priorTries + 1,
+        reason: aiFailure.reason,
+        checkedAt: new Date().toISOString(),
+        ...(aiFailure.model ? { model: aiFailure.model } : {}),
+        senderDomain: rules.senderDomain || null,
+      }
+      : {
+        vendor: null,
+        invoiceNumber: ai?.invoiceNumber || rules.invoice?.value || null,
+        outcome: 'no_vendor',
+        checkedAt: new Date().toISOString(),
+        ...(aiModel ? { model: aiModel } : {}),
+        senderDomain: rules.senderDomain || null,
+      };
+    await soft(() => prisma.ticketAttachment.updateMany({ where: { id: row.id, nameSource: null }, data: { nameDetails } }), null);
+    return { renamed: false, reason: aiFailure ? 'no_vendor_ai_failed' : 'no_vendor' };
   }
+  if (aiFailure?.billed) decision.details.aiFailed = aiFailure.reason;
 
   return withTicketLock(row.ticketId, async () => {
     const taken = await namesTakenOnTicket(row.ticketId, row.id);
@@ -548,14 +577,26 @@ export async function catchUpRecentAttachments({ hours = CATCH_UP_HOURS, limit =
   if (!workspaceIds.length) return { workspaces: 0, found: 0, queued: 0 };
 
   const since = new Date(now.getTime() - hours * 3600_000);
+  // Checked files are left out in the query itself, so they never crowd the
+  // window: only never-checked files (name_details IS NULL) and files with one
+  // billed Claude failure (outcome 'ai_failed', tries 1) come back.
   const rows = await soft(() => prisma.ticketAttachment.findMany({
-    where: { workspaceId: { in: workspaceIds }, source: 'email', nameSource: null, createdAt: { gte: since } },
+    where: {
+      workspaceId: { in: workspaceIds },
+      source: 'email',
+      nameSource: null,
+      createdAt: { gte: since },
+      OR: [
+        { nameDetails: { equals: Prisma.DbNull } },
+        { AND: [{ nameDetails: { path: ['outcome'], equals: 'ai_failed' } }, { nameDetails: { path: ['tries'], equals: 1 } }] },
+      ],
+    },
     orderBy: { id: 'asc' },
-    take: limit * 4,
+    take: limit * 2,
     select: { id: true, workspaceId: true, ticketId: true, fileName: true, contentType: true, source: true, uploadedBy: true, nameDetails: true },
   }), []);
   const unchecked = (rows || [])
-    .filter((r) => r.nameDetails === null || r.nameDetails === undefined)
+    .filter((r) => r.nameDetails === null || r.nameDetails === undefined || (r.nameDetails.outcome === 'ai_failed' && (Number(r.nameDetails.tries) || 0) < MAX_AI_TRIES))
     .filter((r) => isNameableDocument({ fileName: r.fileName, contentType: r.contentType }))
     .slice(0, limit);
   let queued = 0;

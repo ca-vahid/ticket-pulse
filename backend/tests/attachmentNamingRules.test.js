@@ -1,5 +1,5 @@
 import {
-  cleanNamePart, contentDisposition, extensionFor, extractFromRules, formatAttachmentName, isNameableDocument,
+  cleanNamePart, contentDisposition, extensionFor, extractFromRules, formatAttachmentName, holdsToken, isNameableDocument,
   normaliseEditedName, pacificDate, uniqueName, vendorFromEditedName, withNameFields, MAX_NAME_CHARS, MAX_STEM_CHARS,
 } from '../src/services/attachmentNamingRules.js';
 
@@ -206,6 +206,29 @@ describe('a subject\'s invoice number on a mail with several documents', () => {
     expect(terms.invoice).toBeNull();
     expect(terms.subjectInvoiceHint).toBe('28401');
     expect(terms.rulesSufficient).toBe(false);
+  });
+
+  test('the file\'s own name must hold the number as a whole token', () => {
+    expect(holdsToken('Statement INV-77012', 'INV-7701')).toBe(false);
+    expect(holdsToken('INV-7701', 'INV-7701')).toBe(true);
+    expect(holdsToken('Acme_inv-7701_final', 'INV-7701')).toBe(true); // "_" separates, as in Vendor_INV-7701
+    expect(holdsToken('Acme inv-7701 final', 'INV-7701')).toBe(true);
+    expect(holdsToken('A7701', '7701')).toBe(false);
+    expect(holdsToken('Invoice (1.5)', '1.5')).toBe(true); // regex characters are escaped
+    expect(holdsToken('Invoice 125', '1.5')).toBe(false);
+
+    const mail = { subject: 'Invoice INV-7701 from Northwind Traders', fromEmail: 'ar@northwind.example', documentCount: 2 };
+    expect(rules({ ...mail, fileName: 'Statement INV-77012.pdf' }).invoice?.value).not.toBe('INV-7701');
+    expect(rules({ ...mail, fileName: 'Statement INV-77012.pdf' }).subjectInvoiceHint).toBe('INV-7701');
+    expect(rules({ ...mail, fileName: 'INV-7701.pdf' }).invoice).toMatchObject({ value: 'INV-7701', confidence: 'high', from: 'subject+file' });
+  });
+
+  test('a bare year in the subject is never an invoice number', () => {
+    const out = rules({ subject: 'Acme Supplies statement #2026', fromEmail: 'ar@acme.example', fileName: 'Statement 2026-11.pdf', documentCount: 2 });
+    expect(out.invoice).toBeNull();
+    expect(out.subjectInvoiceHint).toBeNull();
+    expect(rules({ subject: 'Invoice 2026 from Northwind Traders', fromEmail: 'ar@northwind.example', fileName: 'a.pdf' }).invoice).toBeNull();
+    expect(rules({ subject: 'Invoice 20261 from Northwind Traders', fromEmail: 'ar@northwind.example', fileName: 'a.pdf' }).invoice).toMatchObject({ value: '20261' });
   });
 
   test('the mail\'s only document takes the subject\'s number', () => {
