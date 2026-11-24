@@ -116,6 +116,13 @@ beforeEach(() => {
 });
 
 describe('the Claude call', () => {
+  test('the prompt tells Claude a payment remittance takes the invoice number being paid (24 Nov 2026)', () => {
+    const prompt = svc.buildPrompt({ subject: 'Remittance advice', senderName: 'Northwind Traders', senderDomain: 'northwind.example', fileName: 'remit.pdf', rules: {} });
+    expect(prompt).toMatch(/payment remittance/i);
+    expect(prompt).toMatch(/invoice number being paid, not the payment document, payment run or cheque number/);
+    expect(prompt).toMatch(/several invoices, use the first invoice listed/);
+  });
+
   test('request shape: model from settings, structured output, low effort, no thinking, PDF before the text', async () => {
     settings.set('attachment_naming_model', 'claude-test-model');
     createMock.mockResolvedValueOnce(aiReply({ vendor: 'Acme Supplies', invoiceNumber: 'INV-100234', documentDate: '2026-11-20', confidence: 'high' }));

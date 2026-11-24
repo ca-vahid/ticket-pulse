@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.4.08-preview';
+export const APP_VERSION = '4.4.09-preview';
 
 export const changelog = [
+  {
+    version: '4.4.09-preview',
+    date: 'November 24, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Payment remittances named by the invoice paid</strong> &mdash; when a customer&rsquo;s remittance advice arrives in Accounting, its new name uses the invoice number being paid (the first one when several are paid), not the payment document number.' },
+    ],
+  },
   {
     version: '4.4.08-preview',
     date: 'November 24, 2026',
