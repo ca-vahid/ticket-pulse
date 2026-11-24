@@ -1,6 +1,18 @@
-export const APP_VERSION = '4.4.06-preview';
+export const APP_VERSION = '4.4.07-preview';
 
 export const changelog = [
+  {
+    version: '4.4.07-preview',
+    date: 'November 23, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Urgent texts open Ticket Pulse</strong> &mdash; priority and assignment alerts (text, e-mail, WhatsApp, phone call) name the ticket as TP-&hellip; and open it in Ticket Pulse, instead of linking to FreshService.' },
+      { type: 'new', html: '<strong>Who changed the priority, and why</strong> &mdash; every priority change writes a History line saying who changed it, from what, to what and how (the requester&rsquo;s status link, an agent, the AI, a workflow or the API), and the ticket shows a quiet &ldquo;Why this priority&rdquo; line. In Assignment Review the AI&rsquo;s earlier signals are labelled once a person has changed the priority, and a new Raised by requester tab lists tickets the AI rated Medium or Low that the requester then raised.' },
+      { type: 'fix', html: '<strong>Held e-mail digest switch for every workspace admin</strong> &mdash; Mail &amp; alerts now shows the switch to workspace admins, not only super admins.' },
+      { type: 'new', html: '<strong>Merge attachments into one PDF</strong> &mdash; tick files on the Attachments tab, set the order and name, and save one PDF (PDFs and pictures). The originals stay.' },
+      { type: 'improved', html: '<strong>&ldquo;Can&rsquo;t work at all&rdquo; is High</strong> &mdash; the AI rates one person who can&rsquo;t sign in or is locked out as High, even with no outage. The same problem reported again by the same person on the same day goes up one level (never to Urgent after hours), and a person&rsquo;s own change always wins.' },
+      { type: 'improved', html: '<strong>Fairer level matching</strong> &mdash; Level match no longer moves a ticket to someone with 5 or more extra open tickets for a one-ticket difference today, says the real reason for each move, and counts &ldquo;today&rdquo; the same way everywhere. Same-day follow-ups from one person show who would get them (Shadow).' }
+    ],
+  },
   {
     version: '4.4.06-preview',
     date: 'November 23, 2026',
