@@ -135,4 +135,40 @@ describe('Why this priority', () => {
     rerender(<PriorityReasonLine reason={null} priority={4} />);
     expect(container).toBeEmptyDOMElement();
   });
+
+  test('polish 11-24: a short note reads in full, with no More button', () => {
+    render(<PriorityReasonLine reason={{ level: 4, source: 'requester_link', actorName: 'Dana Fox', at: AT, note: 'The whole floor is down' }} priority={4} />);
+    const note = screen.getByTestId('priority-reason-note');
+    expect(note).not.toHaveClass('line-clamp-2');
+    expect(note).toHaveClass('block');
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  test('polish 11-24: a long AI rationale is held to two lines; More / Less is a keyboard button', () => {
+    const rationale = 'Several people on the second floor cannot print to the shared printer, and the request mentions a payroll deadline this afternoon. '
+      + 'The printer is the only one on that floor, so the impact is wider than one person, and the deadline makes it time sensitive.';
+    render(<PriorityReasonLine reason={{ level: 'High', source: 'ai_assessment', at: AT, note: rationale }} priority={3} />);
+    const note = screen.getByTestId('priority-reason-note');
+    expect(note).toHaveClass('line-clamp-2');
+    expect(note).not.toHaveClass('block');
+    // The whole text is there for screen readers and search, only clamped visually.
+    expect(note).toHaveTextContent(rationale);
+
+    const more = screen.getByRole('button', { name: 'More' });
+    expect(more).toHaveAttribute('type', 'button');
+    expect(more).toHaveAttribute('aria-expanded', 'false');
+    expect(more).toHaveAttribute('aria-controls', note.id);
+    expect(more).toHaveClass('tp-focus-ring');
+    more.focus();
+    expect(more).toHaveFocus();
+    fireEvent.click(more);
+
+    const less = screen.getByRole('button', { name: 'Less' });
+    expect(less).toHaveAttribute('aria-expanded', 'true');
+    expect(less).toHaveFocus();
+    expect(note).not.toHaveClass('line-clamp-2');
+    fireEvent.click(less);
+    expect(screen.getByRole('button', { name: 'More' })).toHaveAttribute('aria-expanded', 'false');
+    expect(note).toHaveClass('line-clamp-2');
+  });
 });

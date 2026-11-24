@@ -1,6 +1,6 @@
 import {
   cleanNamePart, contentDisposition, extensionFor, extractFromRules, formatAttachmentName, holdsToken, isNameableDocument,
-  normaliseEditedName, pacificDate, uniqueName, vendorFromEditedName, withNameFields, MAX_NAME_CHARS, MAX_STEM_CHARS,
+  mightBePdf, normaliseEditedName, pacificDate, startsLikePdf, uniqueName, vendorFromEditedName, withNameFields, MAX_NAME_CHARS, MAX_STEM_CHARS,
 } from '../src/services/attachmentNamingRules.js';
 
 /**
@@ -11,6 +11,13 @@ const internalDomains = ['ourco.example'];
 const rules = (over) => extractFromRules({ internalDomains, aliases: {}, ...over });
 
 describe('rules: vendor and invoice number from subject, sender and file name', () => {
+  test('words like "Original", "Returned", "Duplicate" in a file name are never taken as the vendor (24 Nov 2026)', () => {
+    for (const fileName of ['Original invoice.PDF', 'Returned invoice.pdf', 'Duplicate invoice 5521.pdf', 'Customer Invoice 12.pdf', 'Purchase Order 77.pdf']) {
+      const out = rules({ subject: 'Return of Invoice 4401', fromEmail: 'ap@client.example', fileName });
+      expect(out.vendor?.value ?? null).not.toMatch(/^(original|returned|duplicate|customer|purchase order)$/i);
+    }
+  });
+
   test('"New Invoice from Acme Supplies" from a payment platform names the vendor, not the platform', () => {
     const out = rules({ subject: 'New Invoice from Acme Supplies', fromEmail: 'noreply@getbalance.com', fromName: 'Balance', fileName: 'INV-100234.pdf' });
     expect(out.vendor).toEqual({ value: 'Acme Supplies', confidence: 'high', from: 'subject' });
@@ -254,6 +261,35 @@ describe('which files are named', () => {
     expect(isNameableDocument({ fileName: 'scan.pdf', contentType: 'application/pdf', isInline: true })).toBe(false);
     expect(isNameableDocument({ fileName: 'original-message.html', contentType: 'text/html' })).toBe(false);
     expect(isNameableDocument({ fileName: 'invite.ics', contentType: 'text/calendar' })).toBe(false);
+  });
+});
+
+describe('a PDF by its content (24 Nov 2026)', () => {
+  test('startsLikePdf: only bytes that begin with %PDF-', () => {
+    expect(startsLikePdf(Buffer.from('%PDF-1.7\n%invented'))).toBe(true);
+    expect(startsLikePdf(Buffer.from('%PDF'))).toBe(false);
+    expect(startsLikePdf(Buffer.from(' %PDF-1.4'))).toBe(false);
+    expect(startsLikePdf(Buffer.from('PK\u0003\u0004'))).toBe(false);
+    expect(startsLikePdf(null)).toBe(false);
+    expect(startsLikePdf(Buffer.alloc(0))).toBe(false);
+  });
+
+  test('mightBePdf: only when the name or type is ambiguous', () => {
+    // The text after the last dot mentions pdf.
+    expect(mightBePdf({ fileName: 'Report.pdf_', contentType: 'application/octet-stream' })).toBe(true);
+    expect(mightBePdf({ fileName: 'Report.PDFX', contentType: 'application/x-unknown' })).toBe(true);
+    // Generic type, and the name says nothing else.
+    expect(mightBePdf({ fileName: 'scan0042', contentType: 'application/octet-stream' })).toBe(true);
+    expect(mightBePdf({ fileName: 'scan0042.dat', contentType: 'application/octet-stream; name="scan0042.dat"' })).toBe(true);
+    expect(mightBePdf({ fileName: 'scan0042.bin', contentType: 'binary/octet-stream' })).toBe(true);
+    // Already a PDF by name or type: no need to look.
+    expect(mightBePdf({ fileName: 'INV-1.pdf', contentType: 'application/octet-stream' })).toBe(false);
+    expect(mightBePdf({ fileName: 'scan', contentType: 'application/pdf' })).toBe(false);
+    // Clearly something else.
+    expect(mightBePdf({ fileName: 'Statement.xlsx', contentType: 'application/octet-stream' })).toBe(false);
+    expect(mightBePdf({ fileName: 'Letter.docx', contentType: 'application/octet-stream' })).toBe(false);
+    expect(mightBePdf({ fileName: 'remit.csv', contentType: 'text/csv' })).toBe(false);
+    expect(mightBePdf({ fileName: 'notes', contentType: 'text/plain' })).toBe(false);
   });
 });
 

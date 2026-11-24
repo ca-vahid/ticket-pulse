@@ -350,6 +350,62 @@ describe('the Claude call', () => {
   });
 });
 
+describe('a PDF found by its content (24 Nov 2026)', () => {
+  const mail = { subject: 'Invoice attached', fromEmail: 'billing@acme.example', fromName: 'Dana Fox', receivedAt: new Date('2026-11-23T18:00:00Z') };
+  const acmeAnswer = { vendor: 'Acme Supplies', invoiceNumber: 'INV-100234', documentDate: '2026-11-20', confidence: 'high' };
+
+  test('"Report.pdf_" as octet-stream starting with %PDF-: fetched once, read by Claude, named .pdf', async () => {
+    createMock.mockResolvedValueOnce(aiReply(acmeAnswer));
+    const row = addRow({ fileName: 'Report.pdf_', contentType: 'application/octet-stream' });
+    const out = await svc.nameAttachment(row.id, mail);
+    expect(out).toEqual({ renamed: true, name: 'Acme Supplies_INV-100234_2026_11_20.pdf' });
+    expect(bufferFor).toHaveBeenCalledTimes(1);
+    const doc = createMock.mock.calls[0][0].messages[0].content[0];
+    expect(doc.source.media_type).toBe('application/pdf');
+    expect(Buffer.from(doc.source.data, 'base64').toString('latin1')).toMatch(/^%PDF-/);
+    expect(row.nameDetails.pdfByContent).toBe(true);
+  });
+
+  test('a PDF sent as octet-stream under another name gets .pdf, not its own extension', async () => {
+    createMock.mockResolvedValueOnce(aiReply(acmeAnswer));
+    const row = addRow({ fileName: 'scan0042.dat', contentType: 'application/octet-stream' });
+    expect((await svc.nameAttachment(row.id, mail)).name).toBe('Acme Supplies_INV-100234_2026_11_20.pdf');
+  });
+
+  test('when the mail alone names it (no Claude), the new name still ends in .pdf', async () => {
+    const row = addRow({ fileName: 'document.pdf_', contentType: 'application/octet-stream', uploadedBy: 'quickbooks@notification.intuit.com' });
+    const out = await svc.nameAttachment(row.id, { subject: 'Invoice 28401 from Northwind Traders', fromEmail: 'quickbooks@notification.intuit.com', receivedAt: new Date('2026-11-23T18:00:00Z') });
+    expect(createMock).not.toHaveBeenCalled();
+    expect(out.name).toBe('Northwind Traders_28401_2026_11_23.pdf');
+  });
+
+  test('bytes that are not a PDF: no Claude call, the name keeps the original extension', async () => {
+    bufferFor.mockResolvedValueOnce(Buffer.from('PK\u0003\u0004 not a pdf'));
+    const row = addRow({ fileName: 'Acme Supplies statement.bin', contentType: 'application/octet-stream' });
+    const out = await svc.nameAttachment(row.id, { ...mail, subject: 'Statement from Acme Supplies' });
+    expect(bufferFor).toHaveBeenCalledTimes(1);
+    expect(createMock).not.toHaveBeenCalled();
+    if (out.renamed) expect(out.name).toMatch(/\.bin$/);
+    expect(row.nameDetails?.pdfByContent).toBeUndefined();
+  });
+
+  test('over 10 MB: never fetched to check', async () => {
+    const row = addRow({ fileName: 'Report.pdf_', contentType: 'application/octet-stream', sizeBytes: 11 * 1024 * 1024 });
+    await svc.nameAttachment(row.id, mail);
+    expect(bufferFor).not.toHaveBeenCalled();
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
+  test('clearly typed files are not fetched to check', async () => {
+    const row = addRow({ fileName: 'Acme Supplies invoice.docx', contentType: 'application/octet-stream' });
+    await svc.nameAttachment(row.id, { ...mail, subject: 'Invoice from Acme Supplies' });
+    const csv = addRow({ fileName: 'remit.csv', contentType: 'text/csv' });
+    await svc.nameAttachment(csv.id, { ...mail, subject: 'Invoice from Acme Supplies' });
+    expect(bufferFor).not.toHaveBeenCalled();
+    expect(createMock).not.toHaveBeenCalled();
+  });
+});
+
 describe('the mail-intake hook', () => {
   const acmeInvoiceMail = () => email({ subject: 'New Invoice from Acme Supplies', from: 'noreply@getbalance.com' });
 

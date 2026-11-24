@@ -4,7 +4,7 @@ import { personalApiKeysAPI, settingsAPI } from '../../services/api';
 import { Switch } from '../ui/switch';
 import {
   STATUS_TONE, STATUS_WORDS, abilitySentence, errorText, expiryParts, formatDayShort, isLiveKey,
-  keySummaryLine, lastUsedParts,
+  keySummaryParts, lastUsedParts,
 } from '../apiKeys/personalKeyText';
 
 /**
@@ -184,6 +184,7 @@ function KeysTable({ keys, busyId, onSetDisabled, onRevoke }) {
             const who = ownerName(k);
             const end = expiryParts(k);
             const used = lastUsedParts(k);
+            const summary = keySummaryParts(k);
             // A key that no longer works is marked by its status word only:
             // no fading, so every line keeps AA contrast.
             const lead = live ? 'text-foreground/85' : 'text-muted-foreground';
@@ -197,7 +198,11 @@ function KeysTable({ keys, busyId, onSetDisabled, onRevoke }) {
                       <span className="block text-[11px] text-muted-foreground" data-testid="admin-key-made">made {formatDayShort(k.createdAt)}</span>
                     </div>
                     <div role="cell" className={`text-xs ${lead} xl:self-center`}>{abilitySentence(k)}</div>
-                    <p role="cell" className="text-xs text-muted-foreground xl:hidden" data-testid="admin-key-summary">{keySummaryLine(k)}</p>
+                    <p role="cell" className="text-xs text-muted-foreground xl:hidden" data-testid="admin-key-summary">
+                      {summary.text}
+                      {/* At phone width the IP moves down together with its "from". */}
+                      {summary.from && <>{' '}<span className="whitespace-nowrap" data-testid="admin-key-summary-from">{summary.from}</span></>}
+                    </p>
                     <div role="cell" className={`${wide} self-center whitespace-nowrap text-xs font-medium ${STATUS_TONE[k.status] || 'text-muted-foreground'}`}>{STATUS_WORDS[k.status] || k.status || '—'}</div>
                     <div role="cell" className={`${wide} self-center text-xs`} data-testid="admin-key-expires">
                       <span className={`block whitespace-nowrap ${lead}`}>{end.date}</span>

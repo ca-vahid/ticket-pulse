@@ -212,11 +212,16 @@ describe("Personal API keys — everyone's keys", () => {
     const summary = within(rows[0]).getByTestId('admin-key-summary');
     expect(summary).toHaveClass('xl:hidden', 'text-muted-foreground');
     expect(summary).toHaveTextContent(/^On · Expires [A-Z][a-z]{2} \d{1,2}, \d{4} · Last used 2 hours ago from 10\.1\.2\.3$/);
+    // Polish 11-24: at phone width the IP wraps together with its "from".
+    const from = within(summary).getByTestId('admin-key-summary-from');
+    expect(from).toHaveTextContent(/^from 10\.1\.2\.3$/);
+    expect(from).toHaveClass('whitespace-nowrap');
     expect(rows[0]).not.toHaveTextContent('Status:');
     // The revoked one is listed after, with nothing to switch.
     expect(rows[1]).toHaveTextContent('Eli Park');
     expect(rows[1]).toHaveTextContent('Revoked');
     expect(rows[1]).toHaveTextContent('Not used yet');
+    expect(within(rows[1]).queryByTestId('admin-key-summary-from')).not.toBeInTheDocument();
     expect(within(rows[1]).queryByRole('switch')).not.toBeInTheDocument();
     expect(within(rows[1]).queryByRole('button', { name: /Revoke/ })).not.toBeInTheDocument();
   });

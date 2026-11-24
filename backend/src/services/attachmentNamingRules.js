@@ -43,7 +43,7 @@ const NOT_A_DOCUMENT = /(\.(html?|ics|vcf|p7s|p7m|eml|msg)$)|(^winmail\.dat$)|(^
 
 const MONTHS = 'january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec';
 // A "vendor" that is really a generic word ("September Invoice", "Your Invoice").
-const GENERIC_VENDOR = new RegExp(`^(?:${MONTHS}|new|your|our|the|an?|my|monthly|weekly|annual|final|past due|overdue|outstanding|open|unpaid|paid|proforma|pro forma|sales|tax|commercial|rental|copy|copy of|re|fw|fwd|invoice|invoices|statement|statements|receipt|receipts|bill|payment|remittance|attached|please find|reminder|updated|revised|corrected|draft|credit|debit|ar|ap|signed|scan|scanned|doc|docs|document|documents|file|files|form|forms|attachment|image|page|pages|untitled|printout|print)$`, 'i');
+const GENERIC_VENDOR = new RegExp(`^(?:${MONTHS}|new|your|our|the|an?|my|monthly|weekly|annual|final|past due|overdue|outstanding|open|unpaid|paid|proforma|pro forma|sales|tax|commercial|rental|copy|copy of|re|fw|fwd|invoice|invoices|statement|statements|receipt|receipts|bill|payment|remittance|attached|please find|reminder|updated|revised|corrected|draft|credit|debit|ar|ap|signed|scan|scanned|doc|docs|document|documents|file|files|form|forms|attachment|image|page|pages|untitled|printout|print|original|originals|return|returned|returns|duplicate|reprint|reissued|amended|replacement|cancelled|canceled|void|voided|customer|client|vendor|supplier|summary|details|detail|confirmation|quote|quotation|estimate|order|purchase order|po|report)$`, 'i');
 
 // ---------------------------------------------------------------- helpers
 
@@ -119,6 +119,45 @@ export function isNameableDocument({ fileName, contentType, isInline = false } =
 }
 
 export const isPdf = ({ fileName, contentType } = {}) => /pdf/i.test(String(contentType || '')) || /\.pdf$/i.test(String(fileName || ''));
+
+// Every PDF starts with these five bytes.
+const PDF_MAGIC = Buffer.from('%PDF-', 'latin1');
+
+/** The bytes start like a PDF ("%PDF-"). */
+export function startsLikePdf(buffer) {
+  if (!buffer || typeof buffer.length !== 'number' || buffer.length < PDF_MAGIC.length) return false;
+  for (let i = 0; i < PDF_MAGIC.length; i += 1) {
+    if (buffer[i] !== PDF_MAGIC[i]) return false;
+  }
+  return true;
+}
+
+// A document extension that says what the file is (not a PDF), so a generic
+// content type alone is no reason to fetch it.
+const OTHER_DOCUMENT_EXT = new Set([
+  ...Object.values(EXT_BY_TYPE).filter((e) => e !== 'pdf'),
+  'xlsm', 'xlsb', 'docm', 'pptm', 'odt', 'ods', 'odp', 'json', '7z', 'rar',
+]);
+
+/**
+ * Worth reading the first bytes to see whether it is a PDF after all: the
+ * name and type don't say PDF, but the text after the last dot mentions it
+ * ("Report.pdf_", "scan.pdfx"), or the type is the generic
+ * application/octet-stream and the name doesn't say it is something else.
+ * Anything isPdf() already recognises, and every clearly typed file, is
+ * never fetched for this.
+ */
+export function mightBePdf({ fileName, contentType } = {}) {
+  if (isPdf({ fileName, contentType })) return false;
+  const name = String(fileName || '');
+  const dot = name.lastIndexOf('.');
+  const tail = dot > 0 ? name.slice(dot + 1) : '';
+  if (/pdf/i.test(tail)) return true;
+  const type = String(contentType || '').split(';')[0].trim().toLowerCase();
+  if (!/^(?:application|binary)\/octet-stream$/.test(type)) return false;
+  const own = fileExtension(name).toLowerCase();
+  return !own || !OTHER_DOCUMENT_EXT.has(own);
+}
 
 /** YYYY-MM-DD for a moment, in Pacific time. */
 export function pacificDate(at = new Date()) {

@@ -71,8 +71,10 @@
     --muted-foreground: 215 20% 68%;
     --accent: 221 50% 20%;
     --accent-foreground: 213 94% 84%;
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 0 0% 100%;
+    /* 24 Nov 2026: text-destructive on card 4.86:1 (was 3.64), on background 5.35:1;
+       red fills take the dark ground as their text (5.35:1 on the new red). */
+    --destructive: 0 84% 62%;
+    --destructive-foreground: 222 47% 7%;
     --border: 216 24% 32%;
     --input: 216 26% 28%;
     --field-border: 216 20% 42%;

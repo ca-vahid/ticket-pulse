@@ -7,8 +7,8 @@ import anthropicProvider from './aiProviders/anthropicProvider.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import {
   aliasEntryFor, emailDomain, extensionFor, extractFromRules, formatAttachmentName, isFreeMailDomain,
-  isInternalDomain, isNameableDocument, isPaymentPlatformDomain, isPdf, normaliseEditedName,
-  pacificDate, plausibleVendor, sameVendor, shownName, uniqueName, validIsoDate, vendorFromEditedName,
+  isInternalDomain, isNameableDocument, isPaymentPlatformDomain, isPdf, mightBePdf, normaliseEditedName,
+  pacificDate, plausibleVendor, sameVendor, shownName, startsLikePdf, uniqueName, validIsoDate, vendorFromEditedName,
   withNameFields,
 } from './attachmentNamingRules.js';
 
@@ -28,6 +28,9 @@ export { withNameFields };
  *   vendor AND an invoice number with high confidence (the vendor list alone
  *   never skips Claude, and a high-confidence Claude vendor that disagrees with
  *   the list wins).
+ * - A file whose name or type is ambiguous ("Report.pdf_", octet-stream) is
+ *   read once (10 MB at most) to see whether it starts with "%PDF-"; if so it
+ *   is read by Claude like any PDF and its new name ends in .pdf (24 Nov 2026).
  * - Only `display_name` and friends change. `file_name`, the stored blob and
  *   the FreshService mirror keep the original name.
  *
@@ -273,7 +276,7 @@ export async function readPdfWithClaude({ workspaceId, buffer, prompt, model, me
  * (medium or better). Claude's vendor is filtered like any other candidate
  * (not generic, not our own company, not a payment platform).
  */
-export function decideName({ rules, ai = null, aiModel = null, fileName, contentType = null, receivedAt, internalDomains = [], now = new Date() }) {
+export function decideName({ rules, ai = null, aiModel = null, fileName, contentType = null, receivedAt, internalDomains = [], now = new Date(), pdfByContent = false }) {
   const aiVendor = ai?.vendor ? plausibleVendor(ai.vendor, internalDomains) : null;
   const aiUsable = Boolean(ai) && ai.confidence !== 'low';
   let vendor = null;
@@ -301,7 +304,9 @@ export function decideName({ rules, ai = null, aiModel = null, fileName, content
   const usedRules = Boolean(rules?.vendor || rules?.invoice);
   const method = usedAi ? (usedRules ? 'rules+ai' : 'ai') : 'rules';
   const confidence = vendorFrom === 'ai' ? ai.confidence : (rules?.vendor?.confidence || 'medium');
-  const name = formatAttachmentName({ vendor, invoiceNumber, date, ext: extensionFor(fileName, contentType) });
+  // A file found to be a PDF by its bytes is named as one ("Report.pdf_" → ….pdf).
+  const ext = pdfByContent ? 'pdf' : extensionFor(fileName, contentType);
+  const name = formatAttachmentName({ vendor, invoiceNumber, date, ext });
   if (!name) return null;
   return {
     name,
@@ -314,6 +319,7 @@ export function decideName({ rules, ai = null, aiModel = null, fileName, content
       confidence,
       vendorFrom,
       ...(ai && aiModel ? { model: aiModel } : {}),
+      ...(pdfByContent ? { pdfByContent: true } : {}),
       senderDomain: rules?.senderDomain || null,
     },
   };
@@ -420,15 +426,40 @@ export async function nameAttachment(attachmentId, context = {}) {
   const prev = row.nameDetails && typeof row.nameDetails === 'object' ? row.nameDetails : null;
   const priorTries = prev?.outcome === 'ai_failed' ? Number(prev.tries) || 0 : 0;
 
+  // A PDF whose name and type don't say so ("Report.pdf_", octet-stream) is
+  // found by its first bytes. Only an ambiguous file is fetched for this, never
+  // one over 10 MB, and the bytes are kept for the Claude read below.
+  let pdf = isPdf(row);
+  let pdfByContent = false;
+  let fetched = null;
+  if (!pdf && mightBePdf(row)) {
+    if (row.sizeBytes > MAX_AI_PDF_BYTES) {
+      logger.info(`Attachment naming: ${row.fileName} (id ${row.id}) is over 10 MB, not checked for PDF content`);
+    } else {
+      const { default: attachmentService } = await import('./attachmentService.js');
+      fetched = await soft(() => attachmentService.bufferFor(row), null);
+      if (startsLikePdf(fetched)) {
+        pdf = true;
+        pdfByContent = true;
+        logger.info(`Attachment naming: ${row.fileName} (id ${row.id}) is a PDF by its content`);
+      } else {
+        fetched = null;
+      }
+    }
+  }
+
   let ai = null;
   let aiModel = null;
   let aiFailure = null; // { reason, billed }
-  if (isPdf(row) && !rules.rulesSufficient && priorTries < MAX_AI_TRIES) {
+  if (pdf && !rules.rulesSufficient && priorTries < MAX_AI_TRIES) {
     if (row.sizeBytes > MAX_AI_PDF_BYTES) {
       logger.info(`Attachment naming: ${row.fileName} (id ${row.id}) is over 10 MB, rules only`);
     } else {
-      const { default: attachmentService } = await import('./attachmentService.js');
-      const buffer = await soft(() => attachmentService.bufferFor(row), null);
+      let buffer = fetched;
+      if (!buffer) {
+        const { default: attachmentService } = await import('./attachmentService.js');
+        buffer = await soft(() => attachmentService.bufferFor(row), null);
+      }
       if (buffer && buffer.length <= MAX_AI_PDF_BYTES) {
         const model = await namingModel();
         const result = await readPdfWithClaude({
@@ -450,7 +481,7 @@ export async function nameAttachment(attachmentId, context = {}) {
 
   const decision = decideName({
     rules, ai, aiModel, fileName: row.fileName, contentType: row.contentType,
-    receivedAt: context.receivedAt || row.createdAt, internalDomains,
+    receivedAt: context.receivedAt || row.createdAt, internalDomains, pdfByContent,
   });
   if (!decision) {
     // An unbilled, passing failure (rate limit, 5xx, connection, no key, no
