@@ -136,6 +136,19 @@ function threadingHeaders({ messageId, inReplyTo, references }) {
   return headers;
 }
 
+/** Caller headers as a plain {name: value} map: safe names, values one line, at most 500 chars. */
+function cleanExtraHeaders(headers) {
+  if (!headers || typeof headers !== 'object') return {};
+  const out = {};
+  for (const [name, value] of Object.entries(headers)) {
+    const key = String(name || '').trim();
+    if (!/^[A-Za-z0-9-]{1,64}$/.test(key)) continue;
+    const text = String(value ?? '').replace(/[\r\n]+/g, ' ').trim().slice(0, 500);
+    if (text) out[key] = text;
+  }
+  return out;
+}
+
 function customArgsToHeaders(customArgs) {
   if (!customArgs || typeof customArgs !== 'object') return {};
   return Object.entries(customArgs).reduce((headers, [key, value]) => {
@@ -163,6 +176,7 @@ async function sendViaSendgridApi({
   customArgs,
   attachments,
   threading = {},
+  extraHeaders = {},
 }) {
   const personalization = { to: mapEmails(toRecipients) };
   const ccMapped = mapEmails(ccRecipients);
@@ -201,7 +215,8 @@ async function sendViaSendgridApi({
   // Custom headers ride the top-level `headers` map (SendGrid keeps a
   // caller-supplied Message-ID; custom_args stay on the personalization).
   const wireHeaders = threadingHeaders(threading);
-  if (Object.keys(wireHeaders).length > 0) payload.headers = wireHeaders;
+  const sentHeaders = { ...extraHeaders, ...wireHeaders };
+  if (Object.keys(sentHeaders).length > 0) payload.headers = sentHeaders;
 
   const response = await axios.post(
     'https://api.sendgrid.com/v3/mail/send',
@@ -238,6 +253,7 @@ async function sendViaSmtp({
   customArgs,
   attachments,
   threading = {},
+  extraHeaders = {},
 }) {
   const wireHeaders = threadingHeaders(threading);
   const transporter = nodemailer.createTransport({
@@ -264,7 +280,7 @@ async function sendViaSmtp({
     text: textBody || undefined,
     html: htmlBody || undefined,
     replyTo: trim(replyTo) || undefined,
-    headers: customArgsToHeaders(customArgs),
+    headers: { ...customArgsToHeaders(customArgs), ...extraHeaders },
     // nodemailer sets these as proper headers (and generates a Message-ID
     // of its own when we pass none).
     messageId: wireHeaders['Message-ID'] || undefined,
@@ -312,6 +328,9 @@ export async function sendEmail({
   ticketIdForMessageId = null,
   inReplyTo = null,
   references = [],
+  // 24 Nov 2026 (mail loop): extra headers for the wire, e.g. a workflow
+  // e-mail's `Auto-Submitted: auto-generated` + `X-Ticket-Pulse-Mail`.
+  headers: extraHeaders = null,
 }) {
   const toRecipients = normalizeEmailList(to);
   // Provider guard (Phase CC3): an address may appear in exactly one of
@@ -361,6 +380,7 @@ export async function sendEmail({
       customArgs,
       attachments,
       threading,
+      extraHeaders: cleanExtraHeaders(extraHeaders),
     };
     const result = smtpMode
       ? await sendViaSmtp(deliveryParams)

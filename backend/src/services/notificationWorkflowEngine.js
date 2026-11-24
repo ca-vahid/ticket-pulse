@@ -3747,6 +3747,11 @@ async function executeNode({
       throw new Error(deliveryResult.error || 'Email delivery failed');
     }
     let conversationRecord = null;
+    // 24 Nov 2026: an e-mail that was not sent (every To a machine sender or
+    // one of our own mailboxes) is not recorded as sent in the conversation.
+    if (deliveryResult.skipped) {
+      return { ...output, deliveryId: delivery.id, deliveryResult, skipped: true, reason: deliveryResult.skipped === 'own_mailbox' ? 'Not sent: every recipient is one of our own mailboxes' : 'Not sent: every recipient is a machine sender' };
+    }
     if (recordInConversation) {
       // The mail is already out: a failure to record it must not fail the step
       // (a failed step would be retried and the customer mailed twice).

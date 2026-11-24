@@ -209,6 +209,56 @@ export function looksLikeLoopMail(email, connectionAddress, { helpdesk = false }
   return null;
 }
 
+// The Message-IDs Ticket Pulse mints: `<tp-<epoch>-<random>@…>` (Graph sendMail) and
+// `<tp-<ticketId>-<base36>.<hex>@…>` (SendGrid lane).
+const OWN_MESSAGE_ID = /^<?tp-(?:\d+|x)-[a-z0-9.]+@[^@\s>]+>?$/i;
+
+/**
+ * Mail Ticket Pulse sent itself (24 Nov 2026 mail loop): our `X-Ticket-Pulse-*`
+ * header (graphMailClient maps it to `ticketPulseMail`), or a Message-ID we minted.
+ */
+export function carriesOwnMark(email) {
+  if (String(email?.ticketPulseMail || '').trim()) return true;
+  return OWN_MESSAGE_ID.test(String(email?.internetMessageId || '').trim());
+}
+
+/**
+ * Our own mail coming back in (24 Nov 2026 mail loop): 'self_send' or null.
+ * `own`: every address of ours — each connected mailbox in any workspace, its
+ * also-known-as addresses and the global sender (`+tag` variants count).
+ *
+ * Until now only mail From the RECEIVING mailbox was self-sent, so the AP
+ * mailbox's acknowledgement to the AR mailbox became a ticket there, and so on.
+ *   - our own mark (header or minted Message-ID): always self-sent;
+ *   - From one of our addresses: self-sent, unless a person sent it as or on
+ *     behalf of that address (a Sender that is not ours, e.g. an agent sending
+ *     as the mailbox's public address): that keeps today's path, which credits
+ *     the person as the writer. An Auto-Submitted header (not "no") on such
+ *     mail still makes it ours.
+ */
+export function selfSentReason(email, own = []) {
+  if (carriesOwnMark(email)) return 'self_send';
+  const from = String(email?.from || '').trim().toLowerCase();
+  if (!from || !isOwnAddress(from, own)) return null;
+  const sender = String(email?.sender || '').trim().toLowerCase();
+  const personSent = Boolean(sender) && sender !== from && !isOwnAddress(sender, own);
+  if (!personSent) return 'self_send';
+  const auto = String(email?.autoSubmitted || '').trim().toLowerCase();
+  return auto && auto !== 'no' ? 'self_send' : null;
+}
+
+/**
+ * Who a new ticket from this mail would be filed for (the same picks
+ * createTicketFromEmail makes): an agent's forward → the quoted From; an
+ * agent's copied mail → its requester; otherwise the sender (or a forced one).
+ */
+export function intendedRequester(email, intake = null) {
+  const pick = intake?.kind === 'forward' ? intake?.original?.email
+    : intake?.kind === 'agent_cc' ? intake?.requester?.email
+      : (intake?.forcedRequester || email?.from);
+  return String(pick || '').trim().toLowerCase() || null;
+}
+
 /** Extract candidate Message-IDs from In-Reply-To/References headers. */
 export function referencedMessageIds(email) {
   const raw = `${email.inReplyTo || ''} ${email.references || ''}`;
@@ -714,10 +764,42 @@ class MailboxIngestService {
     return Array.isArray(aliases) && aliases.length ? { ...connection, aliases } : connection;
   }
 
+  /**
+   * Every address of ours (24 Nov 2026): this mailbox and its aliases, plus each
+   * connected mailbox in any workspace with its aliases and the global sender
+   * (originalRecipientsService.ownMailboxAddresses, cached a minute). When that
+   * list cannot be read, this mailbox's own addresses only (today's check), logged.
+   */
+  async _allOwnAddresses(connection) {
+    const mine = ownAddresses(connection);
+    try {
+      const { ownMailboxAddresses } = await import('./originalRecipientsService.js');
+      const all = await ownMailboxAddresses();
+      return [...new Set([...mine, ...(Array.isArray(all) ? all : [])])];
+    } catch (err) {
+      logger.warn(`Mailbox ingest: our own-mailbox list could not be read (${err.message}); checking ${connection?.address}'s own addresses and Ticket Pulse's marks only`);
+      return mine;
+    }
+  }
+
   async _ingestOne(connection, email, senderCreates = new Map()) {
     connection = await this._withAliases(connection);
     const helpdesk = isHelpdeskMailbox(connection);
     const loopReason = looksLikeLoopMail(email, connection.address, { helpdesk });
+    // Our own mail coming back (24 Nov 2026 mail loop): From any mailbox of ours,
+    // in any workspace, or carrying Ticket Pulse's mark. Never a ticket or a
+    // reply; recorded as skipped on every mailbox, so a person can still file it.
+    // Mail From this very mailbox keeps today's path below.
+    if (loopReason !== 'self_send' && loopReason !== 'missing_sender') {
+      const own = await this._allOwnAddresses(connection);
+      const selfSent = selfSentReason(email, own);
+      if (selfSent) {
+        logger.info(`Mailbox ingest decision: skip (${selfSent}) for "${email.subject}" from ${email.from} → ${connection.address}: our own mail${carriesOwnMark(email) ? ' (Ticket Pulse mark)' : ''}`);
+        recordIngestSkip(connection.workspaceId, selfSent);
+        await this._recordSkipped(connection, email, selfSent);
+        return 'skipped';
+      }
+    }
     if (loopReason) {
       logger.debug(`Mailbox ingest skipping message (${loopReason}): ${email.subject}`);
       if (helpdesk) await this._recordSkipped(connection, email, loopReason);
@@ -905,6 +987,17 @@ class MailboxIngestService {
       return this._holdOrFallback(connection, email, intake, 'ambiguous_sender', senderCreates);
     default:
       break;
+    }
+
+    // A ticket is never filed for one of our own mailboxes (24 Nov 2026 mail
+    // loop): its acknowledgement would go to that mailbox and come back. Skipped
+    // and recorded (reason own_mailbox_requester), so a person can still file it.
+    const requester = intendedRequester(email, intake);
+    if (requester && isOwnAddress(requester, await this._allOwnAddresses(connection))) {
+      recordIngestSkip(connection.workspaceId, 'own_mailbox_requester');
+      logger.warn(`Mailbox ingest decision: skip (own_mailbox_requester) for "${email.subject}" from ${email.from} → ${connection.address}: the requester would be ${requester}, one of our own mailboxes (rule ${intake.decision?.rule})`);
+      await this._recordSkipped(connection, email, 'own_mailbox_requester');
+      return 'skipped';
     }
 
     return this._createWithCap(connection, email, relatedTicketId ? { ...intake, relatedTicketId } : intake, senderCreates);
@@ -1257,7 +1350,8 @@ class MailboxIngestService {
         }
         const helpdesk = isHelpdeskMailbox(connection);
         const loopReason = looksLikeLoopMail(email, connection.address, { helpdesk });
-        if (loopReason) { results.push({ ...base, outcome: 'skipped', reason: loopReason }); continue; }
+        const selfSent = loopReason === 'self_send' || loopReason === 'missing_sender' ? null : selfSentReason(email, await this._allOwnAddresses(connection));
+        if (selfSent || loopReason) { results.push({ ...base, outcome: 'skipped', reason: selfSent || loopReason }); continue; }
         const meeting = judgeMeetingMail(email);
         if (meeting?.action === 'skip') { results.push({ ...base, outcome: 'skipped', reason: 'meeting_invite', meeting: meeting.reason }); continue; }
         const agent = await agentIntake.resolveAgentSender(connection.workspaceId, email.from);

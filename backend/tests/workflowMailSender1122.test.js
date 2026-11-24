@@ -16,6 +16,8 @@ const prismaMock = {
   notificationWorkflowRun: { findUnique: jest.fn() },
   notificationDelivery: { update: jest.fn() },
   ticket: { findUnique: jest.fn() },
+  // 24 Nov 2026: a workflow e-mail checks our own mailboxes first (none here).
+  mailboxConnection: { findMany: jest.fn(async () => []) },
 };
 const deliverMock = jest.fn();
 

@@ -113,6 +113,28 @@ async function machineSplitForDelivery(delivery, to, cc, bcc) {
   }
 }
 
+/**
+ * Our own mailboxes taken off a workflow e-mail's To/Cc/Bcc (24 Nov 2026 mail
+ * loop): every connected mailbox in any workspace, its also-known-as addresses
+ * and `+tag` variants, the global sender and FreshService relay addresses
+ * (originalRecipientsService.ownMailboxAddresses / isOwnAddress). A workflow
+ * e-mail to one of them came back in as a new ticket from "our other mailbox",
+ * whose acknowledgement came back again: 39 e-mails and 19 tickets in Accounting.
+ * Throws when the list cannot be read: the caller does not send (fail safe).
+ */
+async function ownMailboxSplit(to, cc, bcc) {
+  const { ownMailboxAddresses, isOwnAddress, bareAddress } = await import('./originalRecipientsService.js');
+  const own = await ownMailboxAddresses();
+  const removed = [];
+  const keep = (list, field) => list.filter((raw) => {
+    const address = bareAddress(raw) || String(raw || '').trim().toLowerCase();
+    if (!isOwnAddress(address, own)) return true;
+    removed.push({ address, field });
+    return false;
+  });
+  return { to: keep(to, 'to'), cc: keep(cc, 'cc'), bcc: keep(bcc, 'bcc'), removed };
+}
+
 async function sendDelivery(delivery) {
   const message = bodyFromDelivery(delivery);
   const voiceMessage = payloadValue(delivery.payload, 'voiceMessage') || message;
@@ -122,6 +144,33 @@ async function sendDelivery(delivery) {
     let ccRecipients = listFromDelivery(delivery, 'ccRecipients');
     // A copy: the observer Bcc is pushed onto it below, never onto the row's own list.
     let bccRecipients = [...listFromDelivery(delivery, 'bccRecipients')];
+    // Never e-mail our own mailboxes from a workflow (24 Nov 2026), whichever
+    // token put them there (the requester, Cc, a fixed address). With nobody
+    // left on To the e-mail is not sent. When the list cannot be read nobody
+    // can be checked, so nothing is sent: the delivery fails and can be retried.
+    let ownRemoved = [];
+    if (delivery.workflowRunId) {
+      let split;
+      try {
+        split = await ownMailboxSplit(toRecipients, ccRecipients, bccRecipients);
+      } catch (err) {
+        logger.warn(`Delivery ${delivery.id} not sent: our own-mailbox list could not be read (${err.message})`);
+        const error = new Error(`Not sent: our own-mailbox list could not be read, so the recipients could not be checked (${err.message})`);
+        error.retryable = true;
+        error.errorClass = 'own_mailbox_unverified';
+        throw error;
+      }
+      if (split.removed.length) {
+        ownRemoved = split.removed;
+        toRecipients = split.to;
+        ccRecipients = split.cc;
+        bccRecipients = split.bcc;
+        logger.info(`Delivery ${delivery.id}: our own mailbox(es) taken off (${ownRemoved.map((r) => `${r.field}: ${r.address}`).join(', ')})`);
+        if (!toRecipients.some((a) => String(a || '').includes('@'))) {
+          return { skipped: 'own_mailbox', ownRemoved };
+        }
+      }
+    }
     // Machine senders (16 Nov 2026): BambooHR's new-hire notices, Darktrace's
     // alerts and no-reply addresses open real tickets, but a workflow e-mail to
     // them reaches nobody. They come off To/Cc and (22 Nov 2026) the step's own
@@ -136,7 +185,7 @@ async function sendDelivery(delivery) {
         ccRecipients = split.cc;
         bccRecipients = split.bcc;
         if (!toRecipients.some((a) => String(a || '').includes('@'))) {
-          return { skipped: 'machine_sender', machineRemoved };
+          return { skipped: 'machine_sender', machineRemoved, ...(ownRemoved.length ? { ownRemoved } : {}) };
         }
       }
     }
@@ -164,7 +213,7 @@ async function sendDelivery(delivery) {
     // are untouched (same subject/html/text/fromName as before); send-health
     // telemetry records on both lanes inside the transport.
     // A machine sender taken off means To no longer equals delivery.recipient: send the list.
-    const rich = hasWorkflowBody || toRecipients.length > 1 || ccRecipients.length > 0 || bccRecipients.length > 0 || machineRemoved.length > 0;
+    const rich = hasWorkflowBody || toRecipients.length > 1 || ccRecipients.length > 0 || bccRecipients.length > 0 || machineRemoved.length > 0 || ownRemoved.length > 0;
     const result = await deliverTransactionalEmail({
       workspaceId: delivery.workspaceId ?? null,
       to: rich ? toRecipients : [delivery.recipient],
@@ -183,8 +232,12 @@ async function sendDelivery(delivery) {
       } : null,
       ticket,
       ...(mailboxTicket ? { mailboxTicket } : {}),
+      // 24 Nov 2026: a workflow e-mail says it is automatic (Auto-Submitted /
+      // X-Ticket-Pulse-Mail), so our own intake, and other systems, never answer it.
+      ...(isWorkflowEmail(delivery) ? { automated: true } : {}),
     });
     const machineFromBcc = machineRemoved.some((r) => r.field === 'bcc');
+    const ownFromBcc = ownRemoved.some((r) => r.field === 'bcc');
     return {
       provider: result.provider,
       providerMessageId: result.providerMessageId,
@@ -194,8 +247,9 @@ async function sendDelivery(delivery) {
       replyTo: result.replyTo,
       status: 'accepted',
       ...(observerBcc.length ? { observerBcc } : {}),
-      ...(observerBcc.length || machineFromBcc ? { bccRecipients } : {}),
+      ...(observerBcc.length || machineFromBcc || ownFromBcc ? { bccRecipients } : {}),
       ...(machineRemoved.length ? { machineRemoved, toRecipients, ccRecipients } : {}),
+      ...(ownRemoved.length ? { ownRemoved, toRecipients, ccRecipients } : {}),
     };
   }
 
@@ -234,11 +288,28 @@ export async function processDelivery(delivery) {
         data: {
           status: 'skipped',
           error: null,
-          payload: { ...priorPayload, skippedReason: 'machine_sender', machineRemoved: result.machineRemoved },
+          payload: {
+            ...priorPayload,
+            skippedReason: 'machine_sender',
+            machineRemoved: result.machineRemoved,
+            ...(result.ownRemoved?.length ? { ownMailboxRemoved: result.ownRemoved } : {}),
+          },
         },
       });
       logger.info(`Delivery ${delivery.id} not sent: every recipient is a machine sender (${result.machineRemoved.map((r) => r.entry).join(', ')})`);
       return { id: delivery.id, success: true, skipped: 'machine_sender' };
+    }
+    if (result?.skipped === 'own_mailbox') {
+      await prisma.notificationDelivery.update({
+        where: { id: delivery.id },
+        data: {
+          status: 'skipped',
+          error: null,
+          payload: { ...priorPayload, skippedReason: 'own_mailbox', ownMailboxRemoved: result.ownRemoved },
+        },
+      });
+      logger.warn(`Delivery ${delivery.id} not sent: every recipient on To is one of our own mailboxes (${result.ownRemoved.map((r) => r.address).join(', ')})`);
+      return { id: delivery.id, success: true, skipped: 'own_mailbox' };
     }
     // 22 Nov 2026 review: the Graph lane always sends as its mailbox and ignores a
     // from address pinned on the step, so the pinned column can name an address
@@ -264,12 +335,13 @@ export async function processDelivery(delivery) {
         // So is a machine sender taken off the Bcc (22 Nov 2026).
         ...(Array.isArray(result.bccRecipients) ? { bccRecipients: result.bccRecipients } : {}),
         // Who actually got it: machine senders taken off are recorded, not silently lost.
-        ...(result.machineRemoved?.length ? { toRecipients: result.toRecipients, ccRecipients: result.ccRecipients } : {}),
-        ...(result.observerBcc?.length || result.machineRemoved?.length || sentFromDiffers ? {
+        ...(result.machineRemoved?.length || result.ownRemoved?.length ? { toRecipients: result.toRecipients, ccRecipients: result.ccRecipients } : {}),
+        ...(result.observerBcc?.length || result.machineRemoved?.length || result.ownRemoved?.length || sentFromDiffers ? {
           payload: {
             ...priorPayload,
             ...(result.observerBcc?.length ? { observerBcc: result.observerBcc } : {}),
             ...(result.machineRemoved?.length ? { machineRemoved: result.machineRemoved } : {}),
+            ...(result.ownRemoved?.length ? { ownMailboxRemoved: result.ownRemoved } : {}),
             ...(sentFromDiffers ? { sentFrom: String(result.from) } : {}),
           },
         } : {}),

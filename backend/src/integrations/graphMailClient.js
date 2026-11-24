@@ -268,6 +268,11 @@ class GraphMailClient {
   async sendMailAsMailbox(mailbox, {
     to, cc = [], bcc = [], subject, html, attachments = [], fromName = null,
     replyTo = null, inReplyTo = null, references = [],
+    // 24 Nov 2026 (mail loop): extra headers. Graph takes only `X-` names, so
+    // `Auto-Submitted` cannot ride this lane; a workflow e-mail carries
+    // `X-Ticket-Pulse-Mail` instead (intake reads it back). Fresh sends only:
+    // a createReply draft's headers cannot be patched.
+    headers = null,
   }) {
     // Paragraph spacing + data: pictures as cid attachments, so the new Outlook reading pane shows both (31 Oct 2026).
     ({ html, attachments } = prepareOutboundEmail({ html, attachments }));
@@ -357,11 +362,15 @@ class GraphMailClient {
           // Inline (cid:) pictures — e.g. approval e-mail avatars — render in place instead of listing as files.
           ...(file.contentId ? { contentId: file.contentId, isInline: true } : {}),
         }));
+      const customHeaders = Object.entries(headers && typeof headers === 'object' ? headers : {})
+        .filter(([name, value]) => /^x-[a-z0-9-]{1,60}$/i.test(String(name)) && String(value ?? '').trim())
+        .map(([name, value]) => ({ name: String(name), value: String(value).replace(/[\r\n]+/g, ' ').trim().slice(0, 500) }));
       try {
         await client.api(`/users/${mailbox}/sendMail`).post({
           message: {
             ...draftPayload,
             internetMessageId,
+            ...(customHeaders.length ? { internetMessageHeaders: customHeaders } : {}),
             ...(inlineAttachments.length ? { attachments: inlineAttachments } : {}),
           },
           saveToSentItems: true,
@@ -772,6 +781,11 @@ export function mapGraphMessageForIngest(e) {
     references: headers.references || null,
     autoSubmitted: headers['auto-submitted'] || null,
     precedence: headers.precedence || null,
+    // 24 Nov 2026 (mail loop): Ticket Pulse's own mark — `X-Ticket-Pulse-Mail`
+    // on workflow e-mails, or any `X-Ticket-Pulse-*` header (the SMTP lane's
+    // delivery ids). Intake never makes a ticket of its own mail.
+    ticketPulseMail: headers['x-ticket-pulse-mail']
+      || (Object.keys(headers).some((name) => name.startsWith('x-ticket-pulse-')) ? 'header' : null),
     // Envelope-recipient headers (MB-1c): a reply to our plus-addressed
     // Reply-To (`mailbox+tp<n>@`) normally shows in toRecipients, but
     // forwarding/relay hops keep the original in these instead.
