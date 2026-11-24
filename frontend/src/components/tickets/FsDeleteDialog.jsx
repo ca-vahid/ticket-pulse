@@ -55,7 +55,7 @@ export default function FsDeleteDialog({ fsRef, subject = '', busy = false, erro
             onClick={onConfirm}
             disabled={busy}
             data-testid="fs-delete-confirm"
-            className="tp-focus-ring inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-lg bg-destructive text-destructive-foreground hover:bg-red-700 disabled:opacity-60"
+            className="tp-focus-ring inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-lg bg-destructive text-destructive-foreground hover:bg-destructive/90 disabled:opacity-60"
           >
             {busy ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Trash2 className="w-4 h-4" aria-hidden="true" />}
             Delete in FreshService
