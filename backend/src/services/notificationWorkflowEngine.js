@@ -2971,7 +2971,7 @@ async function executeNode({
         original = await resolveOriginalRecipients(eventContext, { workspaceId: workflow?.workspaceId ?? eventContext.workspace?.id });
       } catch (err) {
         logger.warn(`recipient_resolver: original recipients not resolved (nobody from the original e-mail this time): ${err.message}`);
-        original = { list: [], leftOff: {}, toLine: 'none', unavailable: true };
+        original = { list: [], leftOff: {}, toLine: 'none', unavailable: 'error' };
       }
     }
     const recipientContext = original ? { ...eventContext, originalRecipients: original.list } : eventContext;
@@ -3042,7 +3042,8 @@ async function executeNode({
         count: original.list.filter((email) => sent.has(email) && !others.has(email)).length,
         leftOff: { ...original.leftOff, ...(originalTrimmed ? { overRecipientLimit: originalTrimmed } : {}) },
         ...(original.toLine && original.toLine !== 'used' && original.toLine !== 'none' ? { toLine: original.toLine } : {}),
-        ...(original.unavailable ? { unavailable: true } : {}),
+        // Which safety check could not be done ('mailboxes' | 'agents' | 'cc_history' | 'error'): nobody was reached.
+        ...(original.unavailable ? { unavailable: original.unavailable } : {}),
       };
     }
     state.recipients = recipients;

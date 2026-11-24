@@ -31,14 +31,17 @@
  *   - anyone an agent took off the Cc (a reply's `cc_removed`, or an "Also
  *     for" removal), until an agent adds them back;
  *   - an address on one of our own domains that is not a person: kept only
- *     when it is an active requester, a member, or a person in the directory
- *     (a distribution list or shared mailbox is not);
+ *     when it is a requester the directory described (not marked missing, with
+ *     a job title or department), a member, or an enabled directory account
+ *     with a job title or department (a list or shared mailbox is not). The
+ *     directory gets 3 s per call and 6 s per run; the rest stay out;
  *   - repeats, compared case-insensitively.
  *
- * Never throws. When our mailbox list cannot be read in full, nobody is
- * reached (an empty list): a partial list could mail a mailbox of ours. Other
- * failed lookups skip that one check, except the person check, which leaves an
- * unresolved internal address out.
+ * Never throws, and fails safe. Nobody is reached (an empty list, with
+ * `unavailable` naming the check) when our mailbox list, the agent check or
+ * the "taken off the Cc" history cannot be read. A failed requester check
+ * leaves out every address outside our domains (it could be an automation's
+ * mailbox). Other failed lookups skip that one check.
  */
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
@@ -55,10 +58,15 @@ export const MAX_TO_LINE = 10; // the same ten as MAX_CC_EMAILS
 const OWN_CACHE_TTL_MS = 60 * 1000;
 const HISTORY_ROWS = 100;
 const DIRECTORY_TTL_MS = 6 * 60 * 60 * 1000;
+const DIRECTORY_UNAVAILABLE_TTL_MS = 10 * 60 * 1000;
 const DIRECTORY_CACHE_MAX = 1000;
 const DIRECTORY_LOOKUPS_PER_RUN = 10;
+// Directory lookups run inside ticket creation: each Graph call gets 3 s, and
+// all of one run's lookups 6 s; what is left unchecked is left out.
+export const DIRECTORY_CALL_TIMEOUT_MS = 3000;
+export const DIRECTORY_BUDGET_MS = 6000;
 let ownCache = null; // { value: string[], at }
-const directoryCache = new Map(); // address -> { person, at }
+const directoryCache = new Map(); // address -> { person, until }
 
 const lc = (v) => String(v || '').trim().toLowerCase();
 const listOf = (value) => (Array.isArray(value) ? value : []);
@@ -120,7 +128,7 @@ export function isOwnAddress(address, own) {
 }
 
 const emptyLeftOff = () => ({
-  ownMailbox: 0, agent: 0, requester: 0, automated: 0, unattended: 0, removedByAgent: 0, notAPerson: 0,
+  ownMailbox: 0, agent: 0, requester: 0, automated: 0, unattended: 0, removedByAgent: 0, notAPerson: 0, unchecked: 0,
 });
 
 /**
@@ -131,7 +139,7 @@ const emptyLeftOff = () => ({
  */
 export function filterOriginalRecipients(candidates, {
   own = [], requesterEmail = null, machineEntries = [], unattended = new Set(), removedByAgent = new Set(),
-  agents = new Set(), internalDomains = [], persons = new Set(),
+  agents = new Set(), internalDomains = [], persons = new Set(), externalUnchecked = false,
 } = {}) {
   const requester = bareAddress(requesterEmail);
   const leftOff = emptyLeftOff();
@@ -149,7 +157,13 @@ export function filterOriginalRecipients(candidates, {
     if (ROBOT.test(address) || listOf(machineEntries).some((entry) => entryMatches(entry, address))) { leftOff.automated += 1; continue; }
     if (unattended.has(address)) { leftOff.unattended += 1; continue; }
     if (removedByAgent.has(address)) { leftOff.removedByAgent += 1; continue; }
-    if (isInternal(address) && !persons.has(address)) { leftOff.notAPerson += 1; continue; }
+    if (isInternal(address)) {
+      if (!persons.has(address)) { leftOff.notAPerson += 1; continue; }
+    } else if (externalUnchecked) {
+      // The requester check failed: an outside address could be an automation's mailbox.
+      leftOff.unchecked += 1;
+      continue;
+    }
     list.push(address);
   }
   return { list, leftOff };
@@ -226,22 +240,23 @@ const soft = (label, fn, fallback) => Promise.resolve().then(fn).catch((err) => 
   return fallback;
 });
 
+/** Fails loudly (the caller then reaches nobody): a missed removal would mail someone an agent took off. */
 async function agentRemovedCc(ticketId) {
   const id = Number(ticketId);
   if (!Number.isInteger(id) || id <= 0) return new Set();
   const [replies, ccChanges] = await Promise.all([
-    soft('reply history', () => prisma.ticketThreadEntry.findMany({
+    prisma.ticketThreadEntry.findMany({
       where: { ticketId: id, source: 'ticketpulse_user', eventType: 'reply', isPrivate: false },
       select: { occurredAt: true, rawPayload: true },
       orderBy: { occurredAt: 'desc' },
       take: HISTORY_ROWS,
-    }), []),
-    soft('Cc changes', () => prisma.ticketActivity.findMany({
+    }),
+    prisma.ticketActivity.findMany({
       where: { ticketId: id, activityType: 'cc_changed' },
       select: { performedAt: true, details: true },
       orderBy: { performedAt: 'desc' },
       take: HISTORY_ROWS,
-    }), []),
+    }),
   ]);
   return agentRemovedFromHistory(replies, ccChanges);
 }
@@ -257,32 +272,52 @@ async function originalEmailEntry(ticketId) {
   }), null);
 }
 
+/** Fails loudly (the caller then reaches nobody): a missed agent would get requester mail. */
 async function agentsAmong(workspaceId, addresses) {
   const id = Number(workspaceId);
   if (!addresses.length || !Number.isInteger(id) || id <= 0) return new Set();
-  const rows = await soft('agent check', () => prisma.technician.findMany({
+  const rows = await prisma.technician.findMany({
     where: { workspaceId: id, isActive: true, email: { in: addresses, mode: 'insensitive' } },
     select: { email: true },
-  }), []);
+  });
   return new Set(listOf(rows).map((r) => bareAddress(r.email)).filter(Boolean));
 }
 
-/** Requester rows: the unattended ones, and the active people. */
+/**
+ * A requester row is a person only when the directory described it: not
+ * marked missing there, and with a job title or department. Anything else
+ * (a list or shared mailbox that once wrote in) goes to the directory check.
+ */
+export function requesterIsPerson(row) {
+  if (!row || row.unattended === true || row.isActive === false || row.suppressedAt || row.entraMissingAt) return false;
+  return [row.entraJobTitle, row.entraDepartment, row.jobTitle, row.department].some((v) => String(v || '').trim());
+}
+
+/** Requester rows: the unattended ones, and the people. `failed` when they could not be read. */
 async function requestersAmong(addresses) {
   const unattended = new Set();
   const persons = new Set();
-  if (!addresses.length) return { unattended, persons };
-  const rows = await soft('requester check', () => prisma.requester.findMany({
-    where: { email: { in: addresses, mode: 'insensitive' } },
-    select: { email: true, unattended: true, isActive: true, suppressedAt: true },
-  }), []);
+  if (!addresses.length) return { unattended, persons, failed: false };
+  let rows;
+  try {
+    rows = await prisma.requester.findMany({
+      where: { email: { in: addresses, mode: 'insensitive' } },
+      select: {
+        email: true, unattended: true, isActive: true, suppressedAt: true, entraMissingAt: true,
+        entraJobTitle: true, entraDepartment: true, jobTitle: true, department: true,
+      },
+    });
+  } catch (err) {
+    logger.warn(`Original recipients: requester check failed, addresses outside our domains are left out this time: ${err.message}`);
+    return { unattended, persons, failed: true };
+  }
   for (const row of listOf(rows)) {
     const address = bareAddress(row.email);
     if (!address) continue;
     if (row.unattended === true) unattended.add(address);
-    else if (row.isActive !== false && !row.suppressedAt) persons.add(address);
+    else if (requesterIsPerson(row)) persons.add(address);
   }
-  return { unattended, persons };
+  return { unattended, persons, failed: false };
 }
 
 /** Members (anyone with access to a workspace) among the addresses. */
@@ -302,26 +337,40 @@ async function workspaceInternalDomains(workspaceId) {
   return listOf(ws?.internalDomains).map(lc).filter(Boolean);
 }
 
+/** Is this directory answer a person? An enabled account with a job title or department. */
+export function directoryAnswerIsPerson(result) {
+  return Boolean(result)
+    && (result.status === 'found' || result.status === 'alias')
+    && result.accountEnabled === true
+    && Boolean(String(result.jobTitle || '').trim() || String(result.department || '').trim());
+}
+
+const remember = (address, person, ttl) => {
+  if (directoryCache.size >= DIRECTORY_CACHE_MAX) directoryCache.delete(directoryCache.keys().next().value);
+  directoryCache.set(address, { person, until: Date.now() + ttl });
+};
+
 /**
- * Is this internal address a person in the directory? Found (or an alias of a
- * user) with a job title or department; a list or shared mailbox has neither.
- * Cached six hours, at most DIRECTORY_CACHE_MAX addresses; "unavailable" is
- * not cached and counts as not a person this time.
+ * Is this internal address a person in the directory? Shared mailboxes and
+ * lists are not (disabled account, or no title and no department). Answers
+ * are cached six hours; "unavailable" (or an error) ten minutes, as not a
+ * person. At most DIRECTORY_CACHE_MAX addresses.
  */
 async function directoryPerson(address, resolveAddress) {
   const hit = directoryCache.get(address);
-  if (hit && Date.now() - hit.at < DIRECTORY_TTL_MS) return hit.person;
+  if (hit && Date.now() < hit.until) return hit.person;
   let result;
   try {
     result = await resolveAddress(address);
   } catch {
+    result = { status: 'unavailable' };
+  }
+  if (!result || result.status === 'unavailable') {
+    remember(address, false, DIRECTORY_UNAVAILABLE_TTL_MS);
     return false;
   }
-  if (!result || result.status === 'unavailable') return false;
-  const person = (result.status === 'found' || result.status === 'alias')
-    && Boolean(String(result.jobTitle || '').trim() || String(result.department || '').trim());
-  if (directoryCache.size >= DIRECTORY_CACHE_MAX) directoryCache.delete(directoryCache.keys().next().value);
-  directoryCache.set(address, { person, at: Date.now() });
+  const person = directoryAnswerIsPerson(result);
+  remember(address, person, DIRECTORY_TTL_MS);
   return person;
 }
 
@@ -370,19 +419,27 @@ async function sourceLists(context, own) {
   return { cc, to: toLine === 'used' ? to : [], toLine };
 }
 
+const nobody = (toLine, unavailable) => ({ list: [], leftOff: emptyLeftOff(), toLine, unavailable });
+
 /**
  * Everyone on the original e-mail for this event's ticket, cleaned (see the
- * header). Returns { list, leftOff, toLine } plus `unavailable: true` when our
- * mailbox list could not be read (the list is then empty).
+ * header). Returns { list, leftOff, toLine }. When a check that protects
+ * people cannot be done the list is empty and `unavailable` names it:
+ * 'mailboxes' (our mailbox list), 'agents' (the agent check) or 'cc_history'
+ * (who an agent took off the Cc). A failed requester check leaves out the
+ * addresses outside our domains (leftOff.unchecked).
+ * `budgetMs`: the time all directory lookups of this run may take.
  */
-export async function resolveOriginalRecipients(context, { workspaceId = null, resolveAddress = null } = {}) {
+export async function resolveOriginalRecipients(context, {
+  workspaceId = null, resolveAddress = null, budgetMs = DIRECTORY_BUDGET_MS, callTimeoutMs = DIRECTORY_CALL_TIMEOUT_MS,
+} = {}) {
   const ticket = context?.ticket || {};
   let own;
   try {
     own = await ownMailboxAddresses();
   } catch (err) {
     logger.warn(`Original recipients: our mailboxes not read in full, nobody is reached this time: ${err.message}`);
-    return { list: [], leftOff: emptyLeftOff(), toLine: 'none', unavailable: true };
+    return nobody('none', 'mailboxes');
   }
   const { cc, to, toLine } = await sourceLists(context, own);
   const candidates = uniqueAddresses([...cc, ...to]);
@@ -390,28 +447,61 @@ export async function resolveOriginalRecipients(context, { workspaceId = null, r
   const requesterEmail = context?.requester?.email || ticket?.requester?.email || ticket?.requesterEmail || null;
   if (!candidates.length) return { list: [], leftOff: emptyLeftOff(), toLine };
 
-  const [machineEntries, requesters, removedByAgent, agents, members, wsDomains] = await Promise.all([
-    machineEntriesFor(wsId), requestersAmong(candidates), agentRemovedCc(ticket.id), agentsAmong(wsId, candidates),
-    membersAmong(candidates), workspaceInternalDomains(wsId),
-  ]);
+  const failedCheck = (name) => (err) => {
+    logger.warn(`Original recipients: ${name} check failed, nobody is reached this time: ${err.message}`);
+    throw Object.assign(new Error(name), { failedCheck: name });
+  };
+  let machineEntries;
+  let requesters;
+  let removedByAgent;
+  let agents;
+  let members;
+  let wsDomains;
+  try {
+    [machineEntries, requesters, removedByAgent, agents, members, wsDomains] = await Promise.all([
+      machineEntriesFor(wsId),
+      requestersAmong(candidates),
+      agentRemovedCc(ticket.id).catch(failedCheck('cc_history')),
+      agentsAmong(wsId, candidates).catch(failedCheck('agents')),
+      membersAmong(candidates),
+      workspaceInternalDomains(wsId),
+    ]);
+  } catch (err) {
+    return nobody(toLine, err.failedCheck || 'agents');
+  }
   // Our own domains: the workspace's, and those of our mailboxes.
   const internalDomains = [...new Set([...wsDomains, ...own.map(domainOf)])];
   const persons = new Set([...requesters.persons, ...members]);
   const options = {
     own, requesterEmail, machineEntries, unattended: requesters.unattended, removedByAgent, agents, internalDomains, persons,
+    externalUnchecked: requesters.failed === true,
   };
 
-  // Internal addresses not yet known as people: ask the directory (bounded).
+  // Internal addresses not yet known as people: ask the directory, at most
+  // DIRECTORY_LOOKUPS_PER_RUN addresses within budgetMs; the rest stay out.
   const pending = filterOriginalRecipients(candidates, options);
   const unknownInternal = candidates.filter((a) => !pending.list.includes(a)
-    && filterOriginalRecipients([a], { ...options, internalDomains: [] }).list.length === 1);
+    && filterOriginalRecipients([a], { ...options, internalDomains: [], externalUnchecked: false }).list.length === 1);
   if (unknownInternal.length) {
     const lookup = resolveAddress || await import('./azureAdService.js')
-      .then((m) => (typeof m.default?.resolveAddress === 'function' ? (a) => m.default.resolveAddress(a) : null))
+      .then((m) => (typeof m.default?.resolveAddress === 'function'
+        ? (a) => m.default.resolveAddress(a, { timeoutMs: callTimeoutMs })
+        : null))
       .catch(() => null);
     if (lookup) {
+      const deadline = Date.now() + Math.max(0, Number(budgetMs) || 0);
       for (const address of unknownInternal.slice(0, DIRECTORY_LOOKUPS_PER_RUN)) {
-        if (await directoryPerson(address, lookup)) persons.add(address);
+        const left = deadline - Date.now();
+        if (left <= 0) break;
+        let timer;
+        const outOfTime = new Promise((resolve) => { timer = setTimeout(() => resolve('out_of_time'), left); });
+        const answer = await Promise.race([directoryPerson(address, lookup), outOfTime]);
+        clearTimeout(timer);
+        if (answer === 'out_of_time') {
+          logger.info(`Original recipients: directory budget of ${budgetMs} ms used up; unchecked addresses on our domains are left out`);
+          break;
+        }
+        if (answer) persons.add(address);
       }
     }
   }

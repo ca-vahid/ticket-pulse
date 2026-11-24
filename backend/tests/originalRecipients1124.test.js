@@ -104,6 +104,13 @@ async function run(context, recipientData = {}, mode = 'live') {
 }
 const resolve = (ticket, recipientData = {}, mode = 'live') => run(eventContext(ticket), recipientData, mode);
 
+// A requester the directory described: a person.
+const personRow = (email, over = {}) => ({
+  email, unattended: false, isActive: true, suppressedAt: null, entraMissingAt: null,
+  entraJobTitle: 'Analyst', entraDepartment: null, jobTitle: null, department: null, ...over,
+});
+const enabled = (over = {}) => ({ status: 'found', accountEnabled: true, ...over });
+
 let replies = [];
 let ccChanges = [];
 let people = new Set();
@@ -149,7 +156,7 @@ beforeEach(() => {
   settings.set('mailbox_aliases_1', 'it@example.com');
   prismaMock.requester.findMany.mockImplementation(async ({ where }) => where.email.in
     .filter((a) => people.has(a))
-    .map((email) => ({ email, unattended: false, isActive: true, suppressedAt: null })));
+    .map((email) => personRow(email)));
   prismaMock.technician.findMany.mockResolvedValue([]);
   prismaMock.workspaceAccess.findMany.mockResolvedValue([]);
   prismaMock.workspace.findUnique.mockResolvedValue({ internalDomains: ['example.com'] });
@@ -262,8 +269,8 @@ describe('who is left out', () => {
 
   test('unattended requesters (an automation mailbox on the To line)', async () => {
     prismaMock.requester.findMany.mockResolvedValue([
-      { email: 'scanner@example.net', unattended: true, isActive: true, suppressedAt: null },
-      { email: 'priya.nair@example.com', unattended: false, isActive: true, suppressedAt: null },
+      personRow('scanner@example.net', { unattended: true }),
+      personRow('priya.nair@example.com'),
     ]);
     const delivery = await resolve({ toEmails: ['it@example.com', 'scanner@example.net', 'priya.nair@example.com'] });
     expect(delivery.cc).toEqual(['priya.nair@example.com']);
@@ -349,34 +356,93 @@ describe('addresses on our own domains must be a person', () => {
     expect(directoryMock.resolveAddress).not.toHaveBeenCalled();
   });
 
-  test('a suppressed or inactive requester is not a person', async () => {
+  test('a suppressed or inactive requester is not a person (and the directory does not know them)', async () => {
     people = new Set();
     prismaMock.requester.findMany.mockResolvedValue([
-      { email: 'old.hand@example.com', unattended: false, isActive: false, suppressedAt: null },
-      { email: 'qa.box@example.com', unattended: false, isActive: true, suppressedAt: new Date() },
+      personRow('old.hand@example.com', { isActive: false }),
+      personRow('qa.box@example.com', { suppressedAt: new Date() }),
     ]);
     const delivery = await resolve({ toEmails: ['it@example.com', 'old.hand@example.com', 'qa.box@example.com'] });
     expect(delivery.cc).toEqual([]);
   });
 
-  test('the directory decides the rest: a person with a title is kept; a list, a stranger or no answer is left out', async () => {
+  test('a requester row counts only when the directory described it (title or department, not marked missing)', () => {
+    expect(svc.requesterIsPerson(personRow('a@example.com'))).toBe(true);
+    expect(svc.requesterIsPerson(personRow('a@example.com', { entraJobTitle: null, department: 'Finance' }))).toBe(true);
+    expect(svc.requesterIsPerson(personRow('a@example.com', { entraJobTitle: null }))).toBe(false); // a list that once wrote in
+    expect(svc.requesterIsPerson(personRow('a@example.com', { entraMissingAt: new Date() }))).toBe(false);
+    expect(svc.requesterIsPerson(personRow('a@example.com', { unattended: true }))).toBe(false);
+  });
+
+  test('a requester row with no title goes to the directory: a shared mailbox there is left out', async () => {
+    people = new Set();
+    prismaMock.requester.findMany.mockResolvedValue([
+      personRow('projects@example.com', { entraJobTitle: null }),
+      personRow('lee.chen@example.com', { entraJobTitle: null, entraMissingAt: new Date() }),
+    ]);
+    directoryMock.resolveAddress.mockImplementation(async (address) => ({
+      'projects@example.com': enabled({ accountEnabled: false, department: 'Projects' }), // a shared mailbox: disabled sign-in
+      'lee.chen@example.com': enabled({ jobTitle: 'Geologist' }),
+    })[address]);
+    const delivery = await resolve({ toEmails: ['it@example.com', 'projects@example.com', 'lee.chen@example.com'] });
+    expect(delivery.cc).toEqual(['lee.chen@example.com']);
+    expect(directoryMock.resolveAddress).toHaveBeenCalledTimes(2);
+  });
+
+  test('the directory decides the rest: an enabled person with a title is kept; a list, a shared mailbox, a stranger or no answer is left out', async () => {
     people = new Set();
     directoryMock.resolveAddress.mockImplementation(async (address) => ({
-      'lee.chen@example.com': { status: 'found', jobTitle: 'Geologist', department: null },
-      'ada.ruiz@example.com': { status: 'alias', jobTitle: null, department: 'Finance' },
-      'all-hands@example.com': { status: 'found', jobTitle: null, department: null },
+      'lee.chen@example.com': enabled({ jobTitle: 'Geologist', department: null }),
+      'ada.ruiz@example.com': enabled({ status: 'alias', jobTitle: null, department: 'Finance' }),
+      'all-hands@example.com': enabled({ jobTitle: null, department: null }),
+      'front.desk@example.com': enabled({ accountEnabled: false, jobTitle: 'Reception' }),
+      'noflag@example.com': { status: 'found', jobTitle: 'Engineer' }, // accountEnabled missing: not proven a person
       'projects@example.com': { status: 'absent' },
       'sam.okafor@example.com': { status: 'unavailable' },
     })[address]);
     const delivery = await resolve({
-      toEmails: ['it@example.com', 'lee.chen@example.com', 'ada.ruiz@example.com', 'all-hands@example.com', 'projects@example.com', 'sam.okafor@example.com'],
+      toEmails: ['it@example.com', 'lee.chen@example.com', 'ada.ruiz@example.com', 'all-hands@example.com', 'front.desk@example.com', 'noflag@example.com', 'projects@example.com', 'sam.okafor@example.com'],
     });
     expect(delivery.cc).toEqual(['lee.chen@example.com', 'ada.ruiz@example.com']);
   });
 
+  test('the directory is asked with a 3-second limit per call', async () => {
+    people = new Set();
+    directoryMock.resolveAddress.mockResolvedValue(enabled({ jobTitle: 'Engineer' }));
+    await resolve({ toEmails: ['it@example.com', 'lee.chen@example.com'] });
+    expect(directoryMock.resolveAddress).toHaveBeenCalledWith('lee.chen@example.com', { timeoutMs: 3000 });
+  });
+
+  test('"unavailable" is remembered for ten minutes: no second call', async () => {
+    people = new Set();
+    directoryMock.resolveAddress.mockResolvedValue({ status: 'unavailable' });
+    await resolve({ toEmails: ['it@example.com', 'lee.chen@example.com'] });
+    jest.clearAllMocks();
+    prismaMock.notificationDelivery.create.mockImplementation(({ data }) => Promise.resolve({ id: 703, ...data }));
+    const again = await resolve({ toEmails: ['it@example.com', 'lee.chen@example.com'] });
+    expect(directoryMock.resolveAddress).not.toHaveBeenCalled();
+    expect(again.cc).toEqual([]);
+  });
+
+  test('the run\'s directory budget: when it runs out, unchecked addresses on our domains are left out', async () => {
+    people = new Set();
+    const lookup = jest.fn((address) => (address === 'slow@example.com'
+      ? new Promise(() => {}) // never answers
+      : Promise.resolve(enabled({ jobTitle: 'Engineer' }))));
+    const started = Date.now();
+    const result = await svc.resolveOriginalRecipients(
+      eventContext({ toEmails: ['it@example.com', 'fast@example.com', 'slow@example.com', 'later@example.com'] }),
+      { workspaceId: 1, resolveAddress: lookup, budgetMs: 50 },
+    );
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(result.list).toEqual(['fast@example.com']);
+    expect(result.leftOff.notAPerson).toBe(2);
+    expect(lookup).not.toHaveBeenCalledWith('later@example.com');
+  });
+
   test('directory answers are cached, and at most 10 lookups run per e-mail', async () => {
     people = new Set();
-    directoryMock.resolveAddress.mockResolvedValue({ status: 'found', jobTitle: 'Engineer' });
+    directoryMock.resolveAddress.mockResolvedValue(enabled({ jobTitle: 'Engineer' }));
     const many = Array.from({ length: 12 }, (_, i) => `staff${i}@example.com`);
     await resolve({ ccEmails: many, toEmails: ['it@example.com'] });
     expect(directoryMock.resolveAddress).toHaveBeenCalledTimes(10);
@@ -386,6 +452,37 @@ describe('addresses on our own domains must be a person', () => {
     const again = await resolve({ ccEmails: many.slice(0, 3), toEmails: ['it@example.com'] });
     expect(directoryMock.resolveAddress).not.toHaveBeenCalled();
     expect(again.cc).toEqual(many.slice(0, 3));
+  });
+});
+
+describe('failed checks fail safe', () => {
+  test('agent check fails: nobody from the original e-mail, and Preview says why', async () => {
+    prismaMock.technician.findMany.mockRejectedValue(new Error('db down'));
+    const delivery = await resolve({ toEmails: ['it@example.com', 'priya.nair@example.com'], ccEmails: ['manager@example.net'] });
+    expect(delivery).toEqual({ to: [REQUESTER], cc: [], bcc: [] });
+    const result = await executePreview({ workflow, definition: definition({}), eventContext: eventContext({ ccEmails: ['manager@example.net'] }) });
+    expect(result.steps.find((s) => s.nodeId === 'recipients').output.originalRecipients).toMatchObject({ count: 0, unavailable: 'agents' });
+  });
+
+  test('"taken off the Cc" history fails (replies or "Also for" log): nobody from the original e-mail', async () => {
+    prismaMock.ticketActivity.findMany.mockRejectedValue(new Error('db down'));
+    expect((await resolve({ ccEmails: ['manager@example.net'] })).cc).toEqual([]);
+    jest.clearAllMocks();
+    prismaMock.notificationDelivery.create.mockImplementation(({ data }) => Promise.resolve({ id: 704, ...data }));
+    prismaMock.ticketActivity.findMany.mockResolvedValue([]);
+    prismaMock.ticketThreadEntry.findMany.mockRejectedValue(new Error('db down'));
+    expect((await resolve({ ccEmails: ['manager@example.net'] })).cc).toEqual([]);
+  });
+
+  test('requester check fails: outside addresses are left out; people on our domains still go through the person check', async () => {
+    prismaMock.requester.findMany.mockRejectedValue(new Error('db down'));
+    prismaMock.workspaceAccess.findMany.mockResolvedValue([{ email: 'coord@example.com' }]);
+    const result = await svc.resolveOriginalRecipients(
+      eventContext({ toEmails: ['it@example.com', 'partner@example.net', 'coord@example.com'], ccEmails: ['manager@example.net'] }),
+      { workspaceId: 1 },
+    );
+    expect(result.list).toEqual(['coord@example.com']);
+    expect(result.leftOff.unchecked).toBe(2);
   });
 });
 
@@ -457,7 +554,7 @@ describe('Preview and Shadow list the widened recipients', () => {
     const step = result.steps.find((s) => s.nodeId === 'recipients');
     expect(step.output.originalRecipients).toEqual({
       count: 2,
-      leftOff: { ownMailbox: 1, agent: 0, requester: 1, automated: 1, unattended: 0, removedByAgent: 0, notAPerson: 0 },
+      leftOff: { ownMailbox: 1, agent: 0, requester: 1, automated: 1, unattended: 0, removedByAgent: 0, notAPerson: 0, unchecked: 0 },
     });
   });
 

@@ -2593,7 +2593,13 @@ const ORIGINAL_TO_LINE_REASONS = {
   not_direct: 'To line not used: the e-mail did not come straight to our mailbox',
   too_long: 'To line not used: more than 10 people on it',
 };
-export const ORIGINAL_RECIPIENTS_HELP = 'Everyone on the original e-mail\'s To and Cc lines, plus anyone added to Cc since. Leaves out our own mailboxes, our agents, the requester and automated addresses.';
+export const ORIGINAL_RECIPIENTS_HELP = 'Everyone on the original e-mail\'s To and Cc lines, plus anyone added to Cc since. Leaves out our own mailboxes, our agents, the requester, automated addresses and anyone on our own domains who isn\'t a person. The To line is used only when the e-mail came straight to us with 10 people or fewer.';
+// Why a run reached nobody from the original e-mail: a check that protects people could not be done.
+const ORIGINAL_UNAVAILABLE_REASONS = {
+  mailboxes: 'our mailbox list could not be read',
+  agents: 'our agent list could not be read',
+  cc_history: 'who agents took off the Cc could not be read',
+};
 
 export function RecipientsNodeEditor({ data = {}, onChange, customFieldDefs = [], groups = [] }) {
   const setRecipientList = (field, value, checked) => {
@@ -3199,9 +3205,13 @@ export function originalRecipientsNote(summary) {
     off.unattended ? plural(off.unattended, 'automation mailbox', 'automation mailboxes') : null,
     off.removedByAgent ? plural(off.removedByAgent, 'person an agent took off the Cc', 'people an agent took off the Cc') : null,
     off.notAPerson ? plural(off.notAPerson, 'address on our domain that is not a person', 'addresses on our domain that are not a person') : null,
+    off.unchecked ? plural(off.unchecked, 'outside address that could not be checked', 'outside addresses that could not be checked') : null,
     off.overRecipientLimit ? `${off.overRecipientLimit} over the 25-recipient limit` : null,
   ].filter(Boolean);
-  if (summary.unavailable) return `${ORIGINAL_RECIPIENTS_LABEL}: nobody this time, our mailbox list could not be read`;
+  if (summary.unavailable) {
+    const why = ORIGINAL_UNAVAILABLE_REASONS[summary.unavailable] || 'a safety check could not be done';
+    return `${ORIGINAL_RECIPIENTS_LABEL}: nobody this time, ${why}`;
+  }
   const head = `${ORIGINAL_RECIPIENTS_LABEL}: ${plural(n, 'person', 'people')}`;
   const toLine = ORIGINAL_TO_LINE_REASONS[summary.toLine] || '';
   return `${head}${parts.length ? ` (left out: ${parts.join(', ')})` : ''}${toLine ? `. ${toLine}` : ''}`;

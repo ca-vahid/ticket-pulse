@@ -30,13 +30,13 @@ const {
 
 afterEach(() => cleanup());
 
+const HELP = 'Everyone on the original e-mail\'s To and Cc lines, plus anyone added to Cc since. Leaves out our own mailboxes, our agents, the requester, automated addresses and anyone on our own domains who isn\'t a person. The To line is used only when the e-mail came straight to us with 10 people or fewer.';
+
 describe('the Recipients picker', () => {
   test('offers "Everyone on the original e-mail" with its plain help text', () => {
     render(<RecipientsNodeEditor data={{ to: ['requester'], cc: [] }} onChange={vi.fn()} />);
     const box = screen.getByRole('checkbox', { name: 'Everyone on the original e-mail' });
-    expect(box).toHaveAccessibleDescription(
-      'Everyone on the original e-mail\'s To and Cc lines, plus anyone added to Cc since. Leaves out our own mailboxes, our agents, the requester and automated addresses.',
-    );
+    expect(box).toHaveAccessibleDescription(HELP);
     expect(screen.queryByText(/Original CCs/i)).not.toBeInTheDocument();
   });
 
@@ -54,7 +54,7 @@ describe('the Recipients picker', () => {
 
   test('the wording', () => {
     expect(ORIGINAL_RECIPIENTS_LABEL).toBe('Everyone on the original e-mail');
-    expect(ORIGINAL_RECIPIENTS_HELP).toBe('Everyone on the original e-mail\'s To and Cc lines, plus anyone added to Cc since. Leaves out our own mailboxes, our agents, the requester and automated addresses.');
+    expect(ORIGINAL_RECIPIENTS_HELP).toBe(HELP);
   });
 });
 
@@ -89,9 +89,20 @@ describe('Preview and Shadow run line', () => {
       .toBe('Everyone on the original e-mail: 0 people. To line not used: more than 10 people on it');
   });
 
-  test('an unreadable mailbox list reaches nobody, and says so', () => {
-    expect(originalRecipientsNote({ count: 0, leftOff: {}, unavailable: true }))
+  test('a check that could not be done reaches nobody, and says which', () => {
+    expect(originalRecipientsNote({ count: 0, leftOff: {}, unavailable: 'mailboxes' }))
       .toBe('Everyone on the original e-mail: nobody this time, our mailbox list could not be read');
+    expect(originalRecipientsNote({ count: 0, leftOff: {}, unavailable: 'agents' }))
+      .toBe('Everyone on the original e-mail: nobody this time, our agent list could not be read');
+    expect(originalRecipientsNote({ count: 0, leftOff: {}, unavailable: 'cc_history' }))
+      .toBe('Everyone on the original e-mail: nobody this time, who agents took off the Cc could not be read');
+    expect(originalRecipientsNote({ count: 0, leftOff: {}, unavailable: 'error' }))
+      .toBe('Everyone on the original e-mail: nobody this time, a safety check could not be done');
+  });
+
+  test('outside addresses left out when the requester check failed are named', () => {
+    expect(originalRecipientsNote({ count: 1, leftOff: { unchecked: 2 } }))
+      .toBe('Everyone on the original e-mail: 1 person (left out: 2 outside addresses that could not be checked)');
   });
 
   test('nothing when the step did not use it', () => {
