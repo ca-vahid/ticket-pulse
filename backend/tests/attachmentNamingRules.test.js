@@ -11,6 +11,13 @@ const internalDomains = ['ourco.example'];
 const rules = (over) => extractFromRules({ internalDomains, aliases: {}, ...over });
 
 describe('rules: vendor and invoice number from subject, sender and file name', () => {
+  test('words like "Original", "Returned", "Duplicate" in a file name are never taken as the vendor (24 Nov 2026)', () => {
+    for (const fileName of ['Original invoice.PDF', 'Returned invoice.pdf', 'Duplicate invoice 5521.pdf', 'Customer Invoice 12.pdf', 'Purchase Order 77.pdf']) {
+      const out = rules({ subject: 'Return of Invoice 4401', fromEmail: 'ap@client.example', fileName });
+      expect(out.vendor?.value ?? null).not.toMatch(/^(original|returned|duplicate|customer|purchase order)$/i);
+    }
+  });
+
   test('"New Invoice from Acme Supplies" from a payment platform names the vendor, not the platform', () => {
     const out = rules({ subject: 'New Invoice from Acme Supplies', fromEmail: 'noreply@getbalance.com', fromName: 'Balance', fileName: 'INV-100234.pdf' });
     expect(out.vendor).toEqual({ value: 'Acme Supplies', confidence: 'high', from: 'subject' });

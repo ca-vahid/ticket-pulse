@@ -43,7 +43,7 @@ const NOT_A_DOCUMENT = /(\.(html?|ics|vcf|p7s|p7m|eml|msg)$)|(^winmail\.dat$)|(^
 
 const MONTHS = 'january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec';
 // A "vendor" that is really a generic word ("September Invoice", "Your Invoice").
-const GENERIC_VENDOR = new RegExp(`^(?:${MONTHS}|new|your|our|the|an?|my|monthly|weekly|annual|final|past due|overdue|outstanding|open|unpaid|paid|proforma|pro forma|sales|tax|commercial|rental|copy|copy of|re|fw|fwd|invoice|invoices|statement|statements|receipt|receipts|bill|payment|remittance|attached|please find|reminder|updated|revised|corrected|draft|credit|debit|ar|ap|signed|scan|scanned|doc|docs|document|documents|file|files|form|forms|attachment|image|page|pages|untitled|printout|print)$`, 'i');
+const GENERIC_VENDOR = new RegExp(`^(?:${MONTHS}|new|your|our|the|an?|my|monthly|weekly|annual|final|past due|overdue|outstanding|open|unpaid|paid|proforma|pro forma|sales|tax|commercial|rental|copy|copy of|re|fw|fwd|invoice|invoices|statement|statements|receipt|receipts|bill|payment|remittance|attached|please find|reminder|updated|revised|corrected|draft|credit|debit|ar|ap|signed|scan|scanned|doc|docs|document|documents|file|files|form|forms|attachment|image|page|pages|untitled|printout|print|original|originals|return|returned|returns|duplicate|reprint|reissued|amended|replacement|cancelled|canceled|void|voided|customer|client|vendor|supplier|summary|details|detail|confirmation|quote|quotation|estimate|order|purchase order|po|report)$`, 'i');
 
 // ---------------------------------------------------------------- helpers
 
