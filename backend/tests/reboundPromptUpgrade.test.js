@@ -92,6 +92,7 @@ Do not propose new top-level categories.
 Note (AFTER_HOURS_PRIORITY_QUEUE_V2): Full assignment finalization only runs during business hours. When after-hours priority assessment is enabled, Ticket Pulse may run a priority-assessment-only pass immediately, classify the ticket, write the assessed priority back to FreshService when workspace writeback is enabled, and then queue the full assignment run for business hours. If that priority-only pass determines the ticket is non-actionable noise/FYI, submit an empty recommendations array so the workspace noise-dismissal policy can close it instead of queueing assignment. Urgent after-hours escalation is workspace policy controlled by Ticket Pulse settings; do not decide whether to notify recipients from the prompt. The queued business-hours run reassesses the ticket before any assignment is finalized. You do not need to decide whether to defer based on business hours.
 
 ## Priority Definitions (PRIORITY_OUTPUT_V1)
+Rule (PRIORITY_CANNOT_WORK_V1): one person who cannot work at all is High (QA 11-23).
 Always populate assessedPriority, priorityRationale, and priorityConfidence.`;
 
     // This passes ONLY because we explicitly added the marker — proves the

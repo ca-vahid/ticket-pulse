@@ -1042,10 +1042,13 @@ describe('ticketService.updateTicketFields (due-date editing)', () => {
     }));
     expect(mirrorServiceMock.enqueueFieldSync).toHaveBeenCalledWith(1, 501);
     const auditTypes = ticketActivityRepositoryMock.create.mock.calls.map(([a]) => a.activityType);
-    expect(auditTypes).toEqual(expect.arrayContaining(['fields_updated', 'due_changed']));
-    // The generic entry must NOT double-report the due change.
-    const fieldsAudit = ticketActivityRepositoryMock.create.mock.calls.find(([a]) => a.activityType === 'fields_updated')[0];
-    expect(fieldsAudit.details.changes.dueBy).toBeUndefined();
+    // QA 11-23: the priority part is its own priority_changed row (no fields_updated
+    // row when priority was the only other field), and the due change stays in due_changed.
+    expect(auditTypes).toEqual(expect.arrayContaining(['priority_changed', 'due_changed']));
+    expect(auditTypes).not.toContain('fields_updated');
+    const priorityAudit = ticketActivityRepositoryMock.create.mock.calls.find(([a]) => a.activityType === 'priority_changed')[0];
+    expect(priorityAudit.details.dueBy).toBeUndefined();
+    expect(priorityAudit.details.to).toBe('Low');
   });
 
   test('frDueBy edits never touch the dueBy ownership marker', async () => {

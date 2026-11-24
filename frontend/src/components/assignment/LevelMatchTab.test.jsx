@@ -57,6 +57,25 @@ describe('LevelMatchTab', () => {
     expect(screen.getAllByText('Kept').length).toBe(2); // the tally and the row
   });
 
+  test('QA 11-23: the sentence is plain muted text in the row; a kept run shows its skip reason', async () => {
+    getSpy.mockResolvedValue({
+      data: {
+        ...DATA,
+        runs: [
+          RUNS[0],
+          { ...RUNS[1], sentence: null, skipReason: 'kept: Priya Nair has 9 more open tickets and only 1 fewer today' },
+        ],
+      },
+    });
+    mount();
+    const sentence = await screen.findByTestId('level-match-sentence');
+    expect(sentence).toHaveTextContent('Needs basic: Sam…');
+    expect(sentence).toHaveClass('text-muted-foreground', 'whitespace-normal');
+    expect(sentence.closest('tr')).not.toHaveAttribute('title');
+    fireEvent.click(screen.getByLabelText('Only tickets that would have moved'));
+    expect(screen.getByTestId('level-match-skip-reason')).toHaveTextContent('Kept: Priya Nair has 9 more open tickets and only 1 fewer today');
+  });
+
   test('the status is one muted line under the switch, plain text', async () => {
     mount();
     const status = await screen.findByTestId('level-match-status');

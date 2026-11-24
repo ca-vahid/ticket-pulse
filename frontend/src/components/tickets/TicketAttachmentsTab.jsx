@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Download, FileText, Image as ImageIcon, Inbox, LayoutGrid, List, Loader2, MessageSquare, Paperclip, Send, StickyNote, Upload } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Download, FileStack, FileText, Image as ImageIcon, Inbox, LayoutGrid, List, Loader2, MessageSquare, Paperclip, Send, StickyNote, Upload } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
 import { formatBytes, formatDayTime } from './ticketUi';
 import { DownloadAllButton, DownloadAllPanel } from './AttachmentsDownloadAll';
 import { useDownloadAll } from './useDownloadAll';
+import MergePdfDialog from './MergePdfDialog';
+import { mergeBlocker } from './attachmentMerge';
 
 /**
  * Attachments tab (30 Sep 2026): every file on the ticket in one place,
@@ -62,10 +64,16 @@ function Thumb({ a, url }) {
 
 export default function TicketAttachmentsTab({
   ticketId, attachments = [], signatureImages = [], entries = [], onPreview, onDownload, onJumpToEntry, canUpload = false, onUpload, uploading = false, nameForEmail = null, ticketRef = '', subject = '',
+  onMerged = null, loadPdfLib,
 }) {
   const [filter, setFilter] = useState('all');
   const [view, setView] = useState(() => { try { return localStorage.getItem('tp_attach_view') || 'grid'; } catch { return 'grid'; } });
   const [urls, setUrls] = useState({});
+  // QA 11-23 #5: ids in the order the agent ticked them — the merge order.
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const mergeButtonRef = useRef(null);
+  const canMerge = canUpload;
 
   const entryById = useMemo(() => new Map(entries.map((e) => [e.id, e])), [entries]);
   const rows = useMemo(() => attachments.map((a) => {
@@ -111,6 +119,28 @@ export default function TicketAttachmentsTab({
 
   const setViewSaved = (v) => { setView(v); try { localStorage.setItem('tp_attach_view', v); } catch { /* private window */ } };
 
+  // Selection survives filter changes; a file that leaves the ticket leaves it.
+  const byId = useMemo(() => new Map(attachments.map((a) => [a.id, a])), [attachments]);
+  useEffect(() => {
+    setSelectedIds((ids) => (ids.every((id) => byId.has(id)) ? ids : ids.filter((id) => byId.has(id))));
+  }, [byId]);
+  const selectedItems = useMemo(() => selectedIds.map((id) => byId.get(id)).filter(Boolean), [selectedIds, byId]);
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const toggleSelected = (id) => setSelectedIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
+  const clearSelection = () => setSelectedIds([]);
+  const selectionBlocker = selectedItems.length >= 2 ? mergeBlocker(selectedItems) : null;
+  const closeMerge = () => { setMergeOpen(false); setTimeout(() => mergeButtonRef.current?.focus(), 0); };
+
+  const selectBox = (a, extra = '') => canMerge && (
+    <input
+      type="checkbox"
+      checked={selectedSet.has(a.id)}
+      onChange={() => toggleSelected(a.id)}
+      aria-label={`Select ${a.fileName}`}
+      className={`tp-focus-ring h-4 w-4 flex-none cursor-pointer rounded border-input accent-blue-600 ${extra}`}
+    />
+  );
+
   return (
     <section className="tp-card rounded-xl p-4 sm:p-5" aria-labelledby="attachments-tab-heading" data-testid="ticket-attachments-tab">
       <div className="flex flex-wrap items-center gap-3">
@@ -154,6 +184,43 @@ export default function TicketAttachmentsTab({
         })}
       </div>
 
+      {canMerge && selectedItems.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg bg-muted/60 px-3 py-2 text-sm" role="region" aria-label="Selected attachments" data-testid="attachments-selection-bar">
+          <span className="font-semibold text-foreground" aria-live="polite">{selectedItems.length} selected</span>
+          <span className="text-xs text-muted-foreground">
+            {selectedItems.length < 2 ? 'Pick one more to merge.' : 'Merged in the order you picked them; you can change it next.'}
+          </span>
+          <span className="ml-auto flex items-center gap-2">
+            <button type="button" onClick={clearSelection} className="tp-focus-ring rounded px-2 py-1 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground">
+              Clear
+            </button>
+            <button
+              ref={mergeButtonRef}
+              type="button"
+              onClick={() => setMergeOpen(true)}
+              disabled={selectedItems.length < 2 || Boolean(selectionBlocker)}
+              aria-describedby={selectionBlocker ? 'attachments-merge-blocker' : undefined}
+              className="tp-focus-ring inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-blue-700 disabled:opacity-50"
+            >
+              <FileStack className="h-3.5 w-3.5" aria-hidden="true" /> Merge into one PDF
+            </button>
+          </span>
+          {selectionBlocker && (
+            <p id="attachments-merge-blocker" className="w-full text-xs text-red-700 dark:text-red-300" data-testid="attachments-merge-blocker">{selectionBlocker}</p>
+          )}
+        </div>
+      )}
+
+      {mergeOpen && (
+        <MergePdfDialog
+          ticketId={ticketId}
+          items={selectedItems}
+          loadPdfLib={loadPdfLib}
+          onClose={closeMerge}
+          onDone={(result) => { setMergeOpen(false); clearSelection(); onMerged?.(result); }}
+        />
+      )}
+
       {shown.length === 0 ? (
         <p className="py-10 text-center text-sm italic text-muted-foreground">
           {rows.length === 0 ? (signatureImages.length ? 'No attachments on this ticket, apart from signature logos.' : 'No attachments on this ticket yet.') : 'No attachments from this source.'}
@@ -161,7 +228,10 @@ export default function TicketAttachmentsTab({
       ) : view === 'grid' ? (
         <ul className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-6">
           {shown.map(({ a, kind, who, at, entryId }) => (
-            <li key={a.id} className="group flex min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
+            <li key={a.id} className={`group relative flex min-w-0 flex-col overflow-hidden rounded-lg border bg-card ${selectedSet.has(a.id) ? 'border-primary ring-1 ring-primary' : 'border-border'}`}>
+              {canMerge && (
+                <span className="absolute left-1.5 top-1.5 z-10 flex rounded bg-card/90 p-1 shadow-subtle">{selectBox(a)}</span>
+              )}
               <button type="button" onClick={() => onPreview?.(a, shown.map((r) => r.a))} title={`Preview ${a.fileName}`}
                 className="tp-focus-ring flex h-28 items-center justify-center overflow-hidden bg-muted/50 transition-colors hover:bg-muted">
                 <Thumb a={a} url={urls[a.id]} />
@@ -188,6 +258,7 @@ export default function TicketAttachmentsTab({
         <ul className="mt-2 divide-y divide-border">
           {shown.map(({ a, kind, who, at, entryId }) => (
             <li key={a.id} className="flex items-center gap-3 py-2">
+              {selectBox(a)}
               {isImage(a) ? <ImageIcon className="h-4 w-4 flex-none text-muted-foreground/75" aria-hidden="true" /> : <Paperclip className="h-4 w-4 flex-none text-muted-foreground/75" aria-hidden="true" />}
               <button type="button" onClick={() => onPreview?.(a, shown.map((r) => r.a))} className="tp-focus-ring min-w-0 flex-1 truncate text-left text-sm font-medium text-foreground hover:text-primary" title={`Preview ${a.fileName}`}>{a.fileName}</button>
               <span className="hidden flex-none text-xs text-muted-foreground sm:inline">{KIND_WORD[kind]}{who ? ` · ${who}` : ''}</span>

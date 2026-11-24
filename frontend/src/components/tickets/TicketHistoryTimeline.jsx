@@ -117,7 +117,8 @@ function styleFor(item) {
   if (item.event === 'status' && key(item.to) === 'resolved') return EVENT_STYLE.resolve;
   if (item.event === 'note' && /edited|updated/i.test(item.verb || '')) return EVENT_STYLE.noteEdit;
   if (item.event === 'priority') {
-    const a = PRIORITY_RANK[key(item.from)]; const b = PRIORITY_RANK[key(item.to)];
+    // A priority_changed sentence carries its levels on priorityFrom / priorityTo (QA 11-23 #2).
+    const a = PRIORITY_RANK[key(item.priorityFrom ?? item.from)]; const b = PRIORITY_RANK[key(item.priorityTo ?? item.to)];
     if (a && b && a !== b) return b > a ? EVENT_STYLE.priorityUp : EVENT_STYLE.priorityDown;
   }
   return EVENT_STYLE[item.event] || EVENT_STYLE.system;
@@ -135,7 +136,7 @@ function verbFor(item) {
     if (item.verb && !/^(assigned|unassigned)$/.test(item.verb) && !has(item.to) && !has(item.from)) return item.verb;
     return has(item.to) ? 'assigned' : 'unassigned';
   }
-  if (item.event === 'priority') return 'priority';
+  if (item.event === 'priority') return item.sentence ? item.verb : 'priority';
   if (item.event === 'group') return has(item.to) ? 'group' : 'cleared the group';
   if (item.event === 'category') return 'category';
   if (item.event === 'created') return 'created the ticket';

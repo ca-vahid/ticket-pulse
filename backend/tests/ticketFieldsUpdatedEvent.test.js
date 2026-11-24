@@ -135,9 +135,27 @@ describe('updateTicketFields → ONE ticket.fields_updated per PATCH', () => {
     expect(extra.changesTableHtml).toContain('<td><strong>Priority</strong></td><td>Medium (2)</td><td>High (3)</td>');
     expect(extra.changesText).toContain('Priority: Medium (2) → High (3)');
     expect(extra.changesList).toEqual(expect.arrayContaining([expect.objectContaining({ field: 'dueBy', label: 'Due by' })]));
-    // The audit rows still land (fields_updated + due_changed + custom_fields_changed) — one EVENT.
+    // The audit rows still land — one EVENT. QA 11-23: the priority part is its
+    // own priority_changed row, so a priority-only field edit writes no fields_updated row.
     const auditTypes = ticketActivityRepositoryMock.create.mock.calls.map(([a]) => a.activityType);
-    expect(auditTypes).toEqual(expect.arrayContaining(['fields_updated', 'due_changed', 'custom_fields_changed']));
+    expect(auditTypes).toEqual(expect.arrayContaining(['priority_changed', 'due_changed', 'custom_fields_changed']));
+    expect(auditTypes).not.toContain('fields_updated');
+    const priorityRow = ticketActivityRepositoryMock.create.mock.calls.map(([a]) => a).find((a) => a.activityType === 'priority_changed');
+    expect(priorityRow.performedBy).toBe('Cora Coordinator');
+    expect(priorityRow.details).toEqual(expect.objectContaining({
+      from: 'Medium', to: 'High', source: 'agent', actorKind: 'human', actorName: 'Cora Coordinator', actorEmail: 'cora@example.com',
+    }));
+  });
+
+  test('QA 11-23: priority + subject → fields_updated keeps the subject only; an API key reads as source api', async () => {
+    await ticketService.updateTicketFields(501, 1, { priority: 4, subject: 'Laptop will not boot at all' }, apiActor);
+    const rows = ticketActivityRepositoryMock.create.mock.calls.map(([a]) => a);
+    const fieldsRow = rows.find((a) => a.activityType === 'fields_updated');
+    expect(Object.keys(fieldsRow.details.changes)).toEqual(['subject']);
+    const priorityRow = rows.find((a) => a.activityType === 'priority_changed');
+    expect(priorityRow.details).toEqual(expect.objectContaining({ from: 'Medium', to: 'Urgent', source: 'api', actorKind: 'api' }));
+    // The workflow event still carries the priority change.
+    expect(fieldsEvents()[0][2].extra.changedFields.sort()).toEqual(['priority', 'subject']);
   });
 
   test('custom-fields-only PATCH → one event (setValues does not double-fire)', async () => {
@@ -238,6 +256,14 @@ describe('updateFsTicket → fields_updated for FIELD keys only', () => {
     expect(events[0][1]).toBe(601);
     expect(events[0][2].extra.changedFields).toEqual(['priority']);
     expect(events[0][2].extra.changes.priority).toEqual(expect.objectContaining({ from: 3, to: 2 }));
+    // QA 11-23: one priority_changed history row; fs_write_back keeps changes.priority
+    // (the sync echo guard reads it) and says the history row carries it.
+    const rows = ticketActivityRepositoryMock.create.mock.calls.map(([a]) => a);
+    const writeBack = rows.find((a) => a.activityType === 'fs_write_back');
+    expect(writeBack.details.changes.priority).toEqual({ from: 3, to: 2 });
+    expect(writeBack.details.priorityLogged).toBe(true);
+    expect(rows.filter((a) => a.activityType === 'priority_changed')).toHaveLength(1);
+    expect(rows.find((a) => a.activityType === 'priority_changed').details).toEqual(expect.objectContaining({ from: 'High', to: 'Medium', source: 'agent' }));
   });
 
   test('status-only write-back → NO fields_updated (status_changed owns it)', async () => {

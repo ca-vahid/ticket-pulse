@@ -12,6 +12,8 @@ export const PRIORITY_ID_TO_LABEL = Object.freeze(
 );
 
 export const PRIORITY_OUTPUT_MARKER = 'PRIORITY_OUTPUT_V1';
+// QA 11-23 item 3: one person who cannot work at all is High (marker for the prompt auto-upgrade).
+export const PRIORITY_CANNOT_WORK_MARKER = 'PRIORITY_CANNOT_WORK_V1';
 
 const PRIORITY_ALIASES = Object.freeze({
   low: 'Low',

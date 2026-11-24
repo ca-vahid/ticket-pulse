@@ -17,6 +17,8 @@ import { RecommendationCards } from './LivePipelineView';
 import HandoffHistoryStrip from './HandoffHistoryStrip';
 import { getRecommendationList, withNormalizedRecommendations } from '../../utils/assignmentRecommendations';
 import NonActionableBadge from './NonActionableBadge';
+import { priorityOverrideFor, priorityOverrideTitle } from './priorityOverride';
+import { assignmentRuleLines } from './assignmentRuleLines';
 
 const ticketDescriptionMdComponents = {
   ...transcriptMdComponents,
@@ -1251,7 +1253,11 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
   const assessedPriorityLabel = ticket?.assessedPriority || (assessedPriorityId ? PRIORITY_LABELS[assessedPriorityId] : null);
   const freshservicePriorityLabel = PRIORITY_LABELS[ticket?.priority] || (ticket?.priority ? `P${ticket.priority}` : '—');
   const prioritySignalId = assessedPriorityId || Number(ticket?.priority) || null;
-  const prioritySignalTitle = [
+  // QA 11-23 #2: a person (the requester's status link, an agent) chose the priority.
+  const priorityOverride = priorityOverrideFor(ticket, run);
+  const ruleLines = assignmentRuleLines(run);
+  const priorityOverrideTooltip = priorityOverrideTitle(priorityOverride);
+  const prioritySignalTitle = priorityOverrideTooltip || [
     assessedPriorityLabel ? `Ticket Pulse priority: ${assessedPriorityLabel}` : `FreshService priority: ${freshservicePriorityLabel}`,
     ticket?.priorityRationale,
     assessedPriorityId && Number(ticket?.priority) && assessedPriorityId !== Number(ticket.priority)
@@ -1444,7 +1450,7 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
               {assessedPriorityLabel && (
                 <span
                   className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${PRIORITY_PILL[assessedPriorityId] || 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200'}`}
-                  title={ticket?.priorityRationale || undefined}
+                  title={priorityOverrideTooltip || ticket?.priorityRationale || undefined}
                 >
                   TP {assessedPriorityLabel}
                 </span>
@@ -1646,7 +1652,32 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
         </div>
       )}
 
-      {assessedPriorityLabel && (
+      {assessedPriorityLabel && priorityOverride && (
+        // QA 11-23 #2: a person chose this priority. Their note first; the AI's
+        // own signals below it, labelled as its earlier view, in muted text.
+        <div className="bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 rounded-lg p-3 flex items-start gap-2.5" data-testid="priority-override-box">
+          <AlertTriangle className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-blue-800 dark:text-blue-200">{priorityOverride.headline}</p>
+            {priorityOverride.note && (
+              <p className="mt-1 text-xs leading-relaxed text-blue-700 dark:text-blue-200">{priorityOverride.note}</p>
+            )}
+            {(priorityOverride.aiLevel || priorityOverride.aiRationale || priorityOverride.signals.length > 0) && (
+              <div className="mt-2 border-t border-blue-200/70 dark:border-blue-500/20 pt-2 text-xs text-muted-foreground" data-testid="priority-ai-earlier">
+                <p className="font-medium">{priorityOverride.earlierLabel}</p>
+                {priorityOverride.aiLevel && <p className="mt-0.5">Rated {priorityOverride.aiLevel}.</p>}
+                {priorityOverride.aiRationale && <p className="mt-0.5 leading-relaxed">{priorityOverride.aiRationale}</p>}
+                {priorityOverride.signals.length > 0 && <p className="mt-0.5">Signals: {priorityOverride.signals.join(', ')}</p>}
+              </div>
+            )}
+            {assessedPriorityId && Number(ticket?.priority) && assessedPriorityId !== Number(ticket.priority) && (
+              <p className="mt-1 text-xs text-blue-600 dark:text-blue-300">FreshService currently shows {freshservicePriorityLabel}.</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {assessedPriorityLabel && !priorityOverride && (
         <div className="bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 rounded-lg p-3 flex items-start gap-2.5">
           <AlertTriangle className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
@@ -1670,6 +1701,25 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
       )}
 
       <PriorityAlertAuditCard run={run} workspaceTimezone={workspaceTimezone} />
+
+      {/* QA 11-23 #6: Level match and same-day follow-up routing, in their own words. */}
+      {ruleLines.length > 0 && (
+        <section className="space-y-2 border-l-2 border-border pl-3" aria-label="Assignment rules" data-testid="run-rule-lines">
+          {ruleLines.map((l) => (
+            <div key={l.key} className="text-sm" data-testid={`run-rule-${l.key}`}>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{l.label}</p>
+              <p className="text-foreground">
+                {l.sentence}
+                {l.relatedTicketId && l.relatedRef && (
+                  <> <Link to={`/tickets/${l.relatedTicketId}`} className="tp-focus-ring rounded text-xs font-semibold text-primary hover:underline">Open {l.relatedRef}</Link></>
+                )}
+              </p>
+              {l.note && <p className="text-xs text-muted-foreground">{l.note}</p>}
+              {l.extra.map((x) => <p key={x} className="text-xs text-muted-foreground">{x}</p>)}
+            </div>
+          ))}
+        </section>
+      )}
 
       {run.llmFallbackUsed && (
         <div className="bg-yellow-50 dark:bg-yellow-500/15 border border-yellow-200 dark:border-yellow-500/30 rounded-lg p-3 flex items-start gap-2.5">

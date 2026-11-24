@@ -7,8 +7,13 @@ import { PRIORITY_ID_TO_LABEL, PRIORITY_LABEL_TO_ID, priorityMeetsThreshold } fr
 import { getNotificationProviderStatus } from './notificationProviders.js';
 import notificationDeliveryService from './notificationDeliveryService.js';
 import { sendVerificationSms } from './twilioNotificationService.js';
-import config from '../config/index.js';
 import logger from '../utils/logger.js';
+import {
+  notificationTicketLink,
+  notificationTicketRef,
+  spokenTicketRef,
+  ticketSubjectWords,
+} from '../utils/ticketNotificationLink.js';
 
 export const NOTIFICATION_THRESHOLDS = Object.freeze(['disabled', 'high_urgent', 'urgent_only']);
 export const NOTIFICATION_CHANNELS = Object.freeze(['email', 'sms', 'whatsapp', 'phone_call']);
@@ -77,68 +82,97 @@ export function notificationPreferenceAllows(preference = {}, priority, channel)
   return true;
 }
 
+// QA 11-23 item 1: every alert names the ticket by its own reference (TP-n for
+// a Ticket Pulse ticket, #n for a FreshService one) and links to it in Ticket
+// Pulse — the short /<workspace>/TP-n link the after-hours escalation already
+// sends. The FreshService link is only the fallback for a ticket without an id.
+// An agent used to get "Ticket #250001 is now Urgent priority. You are assigned
+// in FreshService." for a Ticket Pulse ticket mirrored to FreshService.
 export function buildNotificationMessage({ ticket, priority }) {
-  const fsId = ticket?.freshserviceTicketId ? Number(ticket.freshserviceTicketId) : null;
-  const domain = config.freshservice?.domain || null;
-  const host = domain
-    ? (domain.includes('.freshservice.com') ? domain : `${domain}.freshservice.com`)
-    : null;
-  const link = fsId && host ? `https://${host}/a/tickets/${fsId}` : null;
+  const link = notificationTicketLink(ticket);
   return [
-    fsId ? `Ticket #${fsId}` : 'A ticket',
-    `${priority} priority`,
-    'has been assigned to you.',
+    ticketSubjectWords(ticket),
+    `is ${priority} priority and has been assigned to you.`,
     link ? `Open: ${link}` : null,
   ].filter(Boolean).join(' ');
 }
 
 export function buildPriorityChangeNotificationMessage({ ticket, priority }) {
-  const fsId = ticket?.freshserviceTicketId ? Number(ticket.freshserviceTicketId) : null;
-  const domain = config.freshservice?.domain || null;
-  const host = domain
-    ? (domain.includes('.freshservice.com') ? domain : `${domain}.freshservice.com`)
-    : null;
-  const link = fsId && host ? `https://${host}/a/tickets/${fsId}` : null;
+  const link = notificationTicketLink(ticket);
   return [
-    fsId ? `Ticket #${fsId}` : 'A ticket',
-    `is now ${priority} priority.`,
-    'You are assigned in FreshService.',
+    ticketSubjectWords(ticket),
+    `is now ${priority} priority and assigned to you.`,
     link ? `Open: ${link}` : null,
   ].filter(Boolean).join(' ');
 }
 
+// WhatsApp template variables: `ticketId` keeps its meaning (the bare
+// FreshService number) so approved templates read as before; `ticketRef`
+// (QA 11-23) is the ticket's own reference, TP-1042 / #250001.
 function buildWhatsAppVariables({ ticket, priority, message }) {
-  const fsId = ticket?.freshserviceTicketId ? Number(ticket.freshserviceTicketId) : null;
-  const domain = config.freshservice?.domain || null;
-  const host = domain
-    ? (domain.includes('.freshservice.com') ? domain : `${domain}.freshservice.com`)
-    : null;
-  const link = fsId && host ? `https://${host}/a/tickets/${fsId}` : '';
+  const fsId = fsTicketIdOrNull(ticket);
   return {
     message,
     priority: priority || '',
     ticketId: fsId ? String(fsId) : '',
-    link,
+    ticketRef: notificationTicketRef(ticket) || '',
+    link: notificationTicketLink(ticket) || '',
   };
 }
 
 export function buildVoiceNotificationMessage({ ticket, priority }) {
-  const fsId = ticket?.freshserviceTicketId ? Number(ticket.freshserviceTicketId) : null;
+  const spoken = spokenTicketRef(ticket);
   return [
     'Ticket Pulse alert.',
-    fsId ? `Ticket number ${fsId}` : 'A ticket',
+    spoken ? `Ticket ${spoken}` : 'A ticket',
     `is ${priority} priority and has been assigned to you.`,
   ].filter(Boolean).join(' ');
 }
 
 export function buildPriorityChangeVoiceNotificationMessage({ ticket, priority }) {
-  const fsId = ticket?.freshserviceTicketId ? Number(ticket.freshserviceTicketId) : null;
+  const spoken = spokenTicketRef(ticket);
   return [
     'Ticket Pulse priority alert.',
-    fsId ? `Ticket number ${fsId}` : 'A ticket',
-    `is now ${priority} priority.`,
-    'You are assigned in FreshService.',
+    spoken ? `Ticket ${spoken}` : 'A ticket',
+    `is now ${priority} priority and assigned to you.`,
   ].filter(Boolean).join(' ');
+}
+
+/** The fields an alert needs to name and link the ticket (QA 11-23 item 1). */
+const TICKET_LINK_SELECT = Object.freeze({
+  id: true,
+  workspaceId: true,
+  origin: true,
+  nativeNumber: true,
+  freshserviceTicketId: true,
+});
+
+function hasLinkFields(ticket) {
+  return Boolean(ticket?.id && ticket.workspaceId && ticket.origin !== undefined && ticket.nativeNumber !== undefined);
+}
+
+/** Adds origin/nativeNumber/workspaceId when the caller's ticket lacks them; never throws. */
+async function withLinkFields(ticket) {
+  if (!ticket?.id || hasLinkFields(ticket)) return ticket;
+  try {
+    const row = await prisma.ticket.findUnique({ where: { id: ticket.id }, select: TICKET_LINK_SELECT });
+    if (!row) return ticket;
+    return {
+      ...ticket,
+      workspaceId: ticket.workspaceId ?? row.workspaceId,
+      origin: ticket.origin ?? row.origin,
+      nativeNumber: ticket.nativeNumber ?? row.nativeNumber,
+      freshserviceTicketId: ticket.freshserviceTicketId ?? row.freshserviceTicketId,
+    };
+  } catch (error) {
+    logger.warn('Notification ticket link lookup failed; using the ticket as given', { ticketId: ticket.id, error: error.message });
+    return ticket;
+  }
+}
+
+function fsTicketIdOrNull(ticket) {
+  const id = Number(ticket?.freshserviceTicketId);
+  return Number.isFinite(id) && id > 0 ? id : null;
 }
 
 async function getGraphPhones(email) {
@@ -395,23 +429,23 @@ class NotificationPreferenceService {
 
   async _hydrateNotificationTicket(ticketLike, ticketId) {
     const ticket = ticketLike || null;
-    if (
-      ticket?.id
-      && ticket?.workspaceId
-      && ticket?.freshserviceTicketId
-      && (ticket.assessedPriority || ticket.priority)
-    ) {
-      return ticket;
+    // A Ticket Pulse ticket may have no FreshService copy; the alert still
+    // needs origin + nativeNumber to name and link it (QA 11-23 item 1).
+    if (ticket?.id && ticket?.workspaceId && (ticket.assessedPriority || ticket.priority)) {
+      // The caller's priority is the freshest; only the link fields are filled in.
+      return withLinkFields(ticket);
     }
 
     const id = ticket?.id || ticketId;
     if (!id) return ticket;
 
-    return prisma.ticket.findUnique({
+    const row = await prisma.ticket.findUnique({
       where: { id },
       select: {
         id: true,
         workspaceId: true,
+        origin: true,
+        nativeNumber: true,
         freshserviceTicketId: true,
         assessedPriority: true,
         assessedPriorityId: true,
@@ -422,6 +456,7 @@ class NotificationPreferenceService {
         assignedTech: { select: { email: true } },
       },
     });
+    return row ? { ...(ticket || {}), ...row } : ticket;
   }
 
   async _queueAssignedTicketNotifications({
@@ -477,7 +512,9 @@ class NotificationPreferenceService {
           whatsappVariables,
           providerConfigured: provider.configured,
           providerMissing: provider.missing,
-          freshserviceTicketId: Number(ticket.freshserviceTicketId),
+          freshserviceTicketId: fsTicketIdOrNull(ticket),
+          ticketRef: notificationTicketRef(ticket),
+          ticketLink: notificationTicketLink(ticket),
           notificationType,
           assignment: assignmentContext,
         },
@@ -515,6 +552,8 @@ class NotificationPreferenceService {
           select: {
             id: true,
             workspaceId: true,
+            origin: true,
+            nativeNumber: true,
             freshserviceTicketId: true,
             subject: true,
             assignedTechId: true,
@@ -524,7 +563,7 @@ class NotificationPreferenceService {
       },
     });
 
-    const ticket = hydratedEvent?.ticket;
+    const ticket = await withLinkFields(hydratedEvent?.ticket);
     const priority = hydratedEvent?.toPriorityLabel;
     const technicianId = ticket?.assignedTechId;
     if (!hydratedEvent?.id || !ticket?.id || !priority) {
@@ -573,7 +612,9 @@ class NotificationPreferenceService {
           whatsappVariables,
           providerConfigured: provider.configured,
           providerMissing: provider.missing,
-          freshserviceTicketId: Number(ticket.freshserviceTicketId),
+          freshserviceTicketId: fsTicketIdOrNull(ticket),
+          ticketRef: notificationTicketRef(ticket),
+          ticketLink: notificationTicketLink(ticket),
           notificationType: 'freshservice_priority_change',
           priorityChange: {
             fromPriorityId: hydratedEvent.fromPriorityId,

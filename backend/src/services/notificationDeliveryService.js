@@ -10,8 +10,11 @@ function payloadValue(payload, key) {
 
 function buildEmailSubject(delivery) {
   if (delivery.subject) return delivery.subject;
-  const ticketId = payloadValue(delivery.payload, 'freshserviceTicketId');
   const priorityLabel = delivery.assessedPriority || 'updated';
+  // QA 11-23 item 1: the ticket's own reference (TP-n / #n) when the alert carries it.
+  const ticketRef = payloadValue(delivery.payload, 'ticketRef');
+  if (ticketRef) return `Ticket Pulse: ${priorityLabel} priority ticket ${ticketRef}`;
+  const ticketId = payloadValue(delivery.payload, 'freshserviceTicketId');
   return ticketId
     ? `Ticket Pulse: ${priorityLabel} priority ticket #${ticketId}`
     : `Ticket Pulse: ${priorityLabel} priority ticket`;

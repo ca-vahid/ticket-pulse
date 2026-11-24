@@ -1,6 +1,6 @@
 import { Bell, LayoutDashboard, LogOut } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { useWorkspaceOptional } from '../contexts/WorkspaceContext';
+import { useWorkspaceOptional, useCurrentWorkspaceRole } from '../contexts/WorkspaceContext';
 import NotificationSettingsPanel from '../components/agent/NotificationSettingsPanel';
 import AgentAlertsPanel from '../components/agent/AgentAlertsPanel';
 import TeamsNotificationsPanel from '../components/agent/TeamsNotificationsPanel';
@@ -21,7 +21,10 @@ export default function Notifications() {
   const currentWorkspaceId = currentWorkspace?.id || null;
   // QA 11-12 #1: the held e-mail digest goes to the workspace's admins and the super admins;
   // only they get the switch that turns it off for themselves.
-  const receivesHeldDigest = user?.role === 'admin' || String(currentWorkspace?.role || '').toLowerCase() === 'admin';
+  // QA 11-23 #3: currentWorkspace usually carries no role — read it from the
+  // workspace list, or a workspace admin never saw the switch.
+  const workspaceRole = useCurrentWorkspaceRole();
+  const receivesHeldDigest = user?.role === 'admin' || workspaceRole === 'admin';
   const canAccessDashboard = user?.role && user.role !== 'agent';
   const homeHref = canAccessDashboard ? '/dashboard' : '/my-competencies';
 

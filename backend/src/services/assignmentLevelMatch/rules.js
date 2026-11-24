@@ -11,7 +11,9 @@
  *   1. Everyone the AI recommended who holds the ticket's skill at that level
  *      or above qualifies. Exact-subcategory skill beats parent-category skill.
  *   2. Among those, extra skill gives no edge: fewest tickets received today
- *      wins, then fewest open tickets, then the AI's own order.
+ *      wins, then fewest open tickets, then the AI's own order — but never
+ *      someone with 5+ more open tickets than a qualified AI pick unless
+ *      their day is lighter by 2+ (QA 11-23 item 1).
  *   3. People on leave, off shift (while someone qualified is on shift), who
  *      already rejected this ticket, or who carry a routing note are never
  *      promoted. The AI's own pick is always allowed to stay.
@@ -151,9 +153,14 @@ export function skillFor(skills, { categoryId = null, subcategoryId = null } = {
  *   { techId, techName, rank, score, skill: {level,num,priority}|null, today, open,
  *     onLeave, onShift, rejectedThisTicket, routingNote, assignableOnly }
  * @param {number} [input.scoreMargin]       see SCORE_MARGIN
- * @returns {{ outcome, techId, techName, from, requiredLevel, considered, sentence }}
+ * @param {number} [input.openGap]           see OPEN_LOAD_GAP
+ * @param {number} [input.todayOverride]     see TODAY_GAP_OVERRIDE
+ * @returns {{ outcome, techId, techName, from, requiredLevel, considered, sentence,
+ *   moveReason?, skipped?, skipReason? }}
  */
-export function decide({ requiredLevel, aiPickId, candidates = [], scoreMargin = SCORE_MARGIN }) {
+export function decide({
+  requiredLevel, aiPickId, candidates = [], scoreMargin = SCORE_MARGIN, openGap = OPEN_LOAD_GAP, todayOverride = TODAY_GAP_OVERRIDE,
+}) {
   const need = normalizeLevel(requiredLevel);
   const pick = candidates.find((c) => c.techId === aiPickId) || null;
   const base = {
@@ -181,25 +188,111 @@ export function decide({ requiredLevel, aiPickId, candidates = [], scoreMargin =
   if (pool.some((c) => c.onShift)) pool = pool.filter((c) => c.onShift || c.techId === aiPickId);
 
   const ordered = [...pool].sort((a, b) => (a.today - b.today) || (a.open - b.open) || (a.rank - b.rank));
-  let chosen = ordered[0];
-  // A tie with the AI's own pick keeps the AI's pick.
   const pickInPool = pool.find((c) => c.techId === aiPickId);
+
+  // Open load counts too (QA 11-23 item 1, TP-1042): one ticket fewer today
+  // never outweighs a much heavier queue. Someone carrying OPEN_LOAD_GAP or
+  // more open tickets than a qualified AI pick is passed over unless their
+  // day is lighter by TODAY_GAP_OVERRIDE or more. Only against a pick who
+  // meets the level — a pick who does not is moved for skill, not for load.
+  const skipped = [];
+  let chosen = null;
+  for (const c of ordered) {
+    const skip = pickInPool && c.techId !== aiPickId ? loadSkip(c, pickInPool, { openGap, todayOverride }) : null;
+    if (!skip) { chosen = c; break; }
+    skipped.push(skip);
+  }
+  chosen = chosen || pickInPool || ordered[0];
+  // A tie with the AI's own pick keeps the AI's pick.
   if (pickInPool && pickInPool.today === chosen.today && pickInPool.open === chosen.open) chosen = pickInPool;
 
   const considered = ordered.map((c) => ({ techId: c.techId, techName: c.techName, level: c.skill.level, today: c.today, open: c.open }));
+  const skipFields = skipped.length ? { skipped, skipReason: skipped[0].reason } : { skipped: [], skipReason: null };
   if (chosen.techId === aiPickId) {
+    const who = chosen.techName || 'the AI’s pick';
     return {
-      ...base, outcome: OUTCOMES.KEPT, considered,
-      sentence: `Needs ${need}; ${chosen.techName || 'the AI’s pick'} qualifies and has the lightest load today (${chosen.today} today, ${chosen.open} open).`,
+      ...base, outcome: OUTCOMES.KEPT, considered, moveReason: null, ...skipFields,
+      sentence: skipped.length
+        ? `Needs ${need}; kept with ${who}: ${skipped[0].sentenceTail}.`
+        : `Needs ${need}; ${who} qualifies and has the lightest load today (${chosen.today} today, ${chosen.open} open).`,
     };
   }
-  const was = pick ? `${pick.techName} (${pick.skill?.level || 'no skill'}, ${pick.today} today, ${pick.open} open)` : 'the AI’s pick';
+  const { moveReason, sentence } = moveSentence({ need, chosen, pick: pickInPool ? pick : null, pickAny: pick });
   return {
     ...base,
     outcome: OUTCOMES.MOVED,
     techId: chosen.techId,
     techName: chosen.techName,
     considered,
-    sentence: `Needs ${need}: ${chosen.techName} (${chosen.skill.level}, ${chosen.today} today, ${chosen.open} open) instead of ${was} — extra skill is not needed for this request.`,
+    moveReason,
+    ...skipFields,
+    sentence,
+  };
+}
+
+/** Open-load gap that blocks a move (QA 11-23 item 1). */
+export const OPEN_LOAD_GAP = 5;
+/** …unless the other person's day is lighter by at least this many tickets. */
+export const TODAY_GAP_OVERRIDE = 2;
+
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+/** Why `c` may not take the ticket from the qualified pick, or null. */
+function loadSkip(c, pick, { openGap = OPEN_LOAD_GAP, todayOverride = TODAY_GAP_OVERRIDE } = {}) {
+  const openMore = c.open - pick.open;
+  const todayFewer = pick.today - c.today;
+  if (openMore < openGap || todayFewer >= todayOverride) return null;
+  const fewer = todayFewer > 0 ? `only ${todayFewer} fewer today` : 'no fewer today';
+  const sentenceTail = `${c.techName || 'the other person'} has ${plural(openMore, 'more open ticket', 'more open tickets')} and ${fewer}`;
+  return {
+    techId: c.techId, techName: c.techName, open: c.open, today: c.today, openMore, todayFewer,
+    reason: `kept: ${sentenceTail}`,
+    sentenceTail,
+  };
+}
+
+/** "Both advanced in Teams" / "Priya Nair is expert, Eli Park advanced in Teams". */
+function levelsPhrase(chosen, pick) {
+  const a = chosen.skill || {};
+  const b = pick.skill || {};
+  const sameName = Boolean(a.name && a.name === b.name);
+  const where = (s) => (s.name ? ` in ${s.name}` : '');
+  if (a.level === b.level && (sameName || (!a.name && !b.name))) return `Both ${a.level}${sameName ? ` in ${a.name}` : ''}`;
+  if (sameName) return `${chosen.techName} is ${a.level}, ${pick.techName} ${b.level} in ${a.name}`;
+  return `${chosen.techName} is ${a.level}${where(a)}, ${pick.techName} ${b.level || 'unrated'}${where(b)}`;
+}
+
+/**
+ * The move sentence gives the REAL reason (QA 11-23 item 2). "Extra skill is
+ * not needed" only when the new person's level really is lower than the pick's.
+ * @returns {{ moveReason: 'pick_below_level'|'less_skill_needed'|'lighter_day'|'fewer_open', sentence }}
+ */
+function moveSentence({ need, chosen, pick, pickAny }) {
+  const to = chosen.techName;
+  if (!pick) {
+    const was = pickAny
+      ? `${pickAny.techName} (${pickAny.skill?.level || 'no skill'}, ${pickAny.today} today, ${pickAny.open} open)`
+      : 'the AI’s pick';
+    return {
+      moveReason: 'pick_below_level',
+      sentence: `Needs ${need}: ${to} (${chosen.skill.level}, ${chosen.today} today, ${chosen.open} open) instead of ${was}, who does not hold this skill at that level.`,
+    };
+  }
+  if (chosen.skill.num < (pick.skill?.num || 0)) {
+    return {
+      moveReason: 'less_skill_needed',
+      sentence: `Needs ${need}: ${to} (${chosen.skill.level}, ${chosen.today} today, ${chosen.open} open) instead of ${pick.techName} (${pick.skill.level}, ${pick.today} today, ${pick.open} open) — extra skill is not needed for this request.`,
+    };
+  }
+  const levels = levelsPhrase(chosen, pick);
+  if (chosen.today < pick.today) {
+    return {
+      moveReason: 'lighter_day',
+      sentence: `Lighter day: ${to} (${chosen.today} today) instead of ${pick.techName} (${pick.today} today). ${levels}; ${to} has ${chosen.open} open, ${pick.techName} ${pick.open}.`,
+    };
+  }
+  return {
+    moveReason: 'fewer_open',
+    sentence: `Fewer open tickets: ${to} (${chosen.open} open) instead of ${pick.techName} (${pick.open} open). ${levels}; both have ${chosen.today} today.`,
   };
 }

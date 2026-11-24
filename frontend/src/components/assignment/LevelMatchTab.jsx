@@ -163,7 +163,7 @@ export default function LevelMatchTab({ workspaceTimezone = 'America/Vancouver' 
                 </thead>
                 <tbody>
                   {shown.map((r) => (
-                    <tr key={r.runId} className="border-b border-border/60 align-top" title={r.sentence || undefined}>
+                    <tr key={r.runId} className="border-b border-border/60 align-top">
                       <td className="whitespace-nowrap py-1 pr-3 tabular-nums text-muted-foreground">{formatDateTimeInTimezone(r.at, workspaceTimezone)}</td>
                       <td className="max-w-[20rem] truncate py-1 pr-3">
                         <Link to={`/tickets/${r.ticketId}`} className="tp-focus-ring rounded text-primary hover:underline">{r.ref}</Link>
@@ -174,9 +174,16 @@ export default function LevelMatchTab({ workspaceTimezone = 'America/Vancouver' 
                         {r.requiredLevelReason ? <span className="block truncate text-muted-foreground" title={r.requiredLevelReason}>{r.requiredLevelReason}</span> : null}
                       </td>
                       <td className="whitespace-nowrap py-1 pr-3 text-foreground/85">{r.from?.techName || '—'}</td>
-                      <td className="whitespace-nowrap py-1 text-foreground/85">
-                        {r.outcome === 'moved' ? (r.to?.techName || '—') : <span className="text-muted-foreground">{OUTCOME_WORDS[r.outcome] || r.outcome}</span>}
-                        {r.outcome === 'moved' && !r.applied ? <ShadowMark /> : null}
+                      <td className="max-w-[26rem] py-1 text-foreground/85">
+                        <span className="whitespace-nowrap">
+                          {r.outcome === 'moved' ? (r.to?.techName || '—') : <span className="text-muted-foreground">{OUTCOME_WORDS[r.outcome] || r.outcome}</span>}
+                          {r.outcome === 'moved' && !r.applied ? <ShadowMark /> : null}
+                        </span>
+                        {/* QA 11-23: the rule's own sentence, readable in the row (it was only a tooltip). */}
+                        {r.sentence ? <span className="mt-0.5 block whitespace-normal break-words text-muted-foreground" data-testid="level-match-sentence">{r.sentence}</span> : null}
+                        {r.outcome === 'kept' && r.skipReason && !String(r.sentence || '').includes(String(r.skipReason).replace(/^kept:\s*/i, ''))
+                          ? <span className="mt-0.5 block whitespace-normal break-words text-muted-foreground" data-testid="level-match-skip-reason">{r.skipReason.replace(/^kept:\s*/i, 'Kept: ')}</span>
+                          : null}
                       </td>
                     </tr>
                   ))}

@@ -28,6 +28,7 @@ import assignmentRepository from './assignmentRepository.js';
 import assignmentPipelineService from './assignmentPipelineService.js';
 import freshServiceActionService from './freshServiceActionService.js';
 import ticketPriorityEventService from './ticketPriorityEventService.js';
+import { recordPriorityChange } from './priorityHistoryService.js';
 import notificationPreferenceService from './notificationPreferenceService.js';
 import ticketLifecycleNotificationService from './ticketLifecycleNotificationService.js';
 import {
@@ -4588,6 +4589,16 @@ class SyncService {
         if (Object.keys(patch).length === 0) return { changed: false };
 
         const updated = await prisma.ticket.update({ where: { id: ticket.id }, data: patch });
+        if (priorityChanged) {
+          // QA 11-23 item 2: every priority change leaves a history row.
+          await recordPriorityChange({
+            ticketId: ticket.id,
+            from: current.priority,
+            to: fsPriority,
+            source: 'sync',
+            note: 'Priority reconciled from FreshService on open.',
+          });
+        }
         if (statusChanged) {
           // Name the human when the cached FS feed knows them; otherwise this
           // is a reconcile row ("FreshService", kind=reconcile).

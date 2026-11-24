@@ -185,6 +185,38 @@ describe('the same write as Ticket Pulse (When a requester replies, 14 Oct 2026)
     }));
   });
 
+  // QA 11-23 item 2: a priority the workflow sets is its own priority_changed row.
+  test('TP-born priority set by a workflow → one priority_changed row, the workflow row keeps the rest', async () => {
+    const tp = { ...FS_TICKET, id: 502, workspaceId: 1, origin: 'ticketpulse', freshserviceTicketId: null, status: 'Closed', priority: 2 };
+    prismaMock.ticket.findUnique.mockResolvedValue(tp);
+    await executeUpdateTicketNode({ id: 'bump', type: 'update_ticket', data: { setStatus: 'Open', setPriority: 3, note: 'Raised for VIP senders.' } }, ctx(tp), { workflowId: 9765 });
+    const rows = activityCreateMock.mock.calls.map(([a]) => a);
+    const priorityRow = rows.find((a) => a.activityType === 'priority_changed');
+    expect(priorityRow).toEqual(expect.objectContaining({ ticketId: 502, performedBy: 'Notification workflow' }));
+    expect(priorityRow.details).toEqual(expect.objectContaining({
+      from: 'Medium', to: 'High', source: 'workflow', actorKind: 'workflow', note: 'Raised for VIP senders.', workflowId: 9765,
+    }));
+    const workflowRow = rows.find((a) => a.activityType === 'workflow_updated_ticket');
+    expect(Object.keys(workflowRow.details.changes)).toEqual(['status']);
+  });
+
+  test('a priority set by Ticket Pulse itself (system actor) is still source workflow, never a person', async () => {
+    const tp = { ...FS_TICKET, id: 504, workspaceId: 1, origin: 'ticketpulse', freshserviceTicketId: null, status: 'Open', priority: 2 };
+    prismaMock.ticket.findUnique.mockResolvedValue(tp);
+    await executeUpdateTicketNode({ id: 'bump', type: 'update_ticket', data: { setPriority: 3 } }, ctx(tp), { actor: ACTOR });
+    const priorityRow = activityCreateMock.mock.calls.map(([a]) => a).find((a) => a.activityType === 'priority_changed');
+    expect(priorityRow.performedBy).toBe('Ticket Pulse');
+    expect(priorityRow.details).toEqual(expect.objectContaining({ source: 'workflow', actorKind: 'system', from: 'Medium', to: 'High' }));
+  });
+
+  test('TP-born priority-only workflow write → no workflow_updated_ticket row at all', async () => {
+    const tp = { ...FS_TICKET, id: 503, workspaceId: 1, origin: 'ticketpulse', freshserviceTicketId: null, status: 'Open', priority: 2 };
+    prismaMock.ticket.findUnique.mockResolvedValue(tp);
+    await executeUpdateTicketNode({ id: 'bump', type: 'update_ticket', data: { setPriority: 4 } }, ctx(tp), { workflowId: 9766 });
+    const types = activityCreateMock.mock.calls.map(([a]) => a.activityType);
+    expect(types).toEqual(['priority_changed']);
+  });
+
   test('without an actor nothing changes: still the workflow\'s row and source', async () => {
     const tp = { ...FS_TICKET, id: 501, workspaceId: 1, origin: 'ticketpulse', freshserviceTicketId: null, status: 'Closed' };
     prismaMock.ticket.findUnique.mockResolvedValue(tp);

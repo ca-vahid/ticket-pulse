@@ -50,6 +50,8 @@ function renderTemplateValue(value, variables) {
     .replaceAll('{{message}}', variables.message || '')
     .replaceAll('{{priority}}', variables.priority || '')
     .replaceAll('{{ticketId}}', variables.ticketId || '')
+    // QA 11-23: the ticket's own reference (TP-1042 / #250001); {{link}} is the Ticket Pulse link.
+    .replaceAll('{{ticketRef}}', variables.ticketRef || '')
     .replaceAll('{{link}}', variables.link || '');
 }
 
@@ -202,6 +204,8 @@ export async function placeVoiceCall({ to, message }) {
     to: recipient,
   };
 }
+
+export const __testing = { buildContentVariables, renderTemplateValue };
 
 export default {
   sendSms,

@@ -12,6 +12,7 @@ import {
 import { isFsTaxonomySyncWorkspace } from '../utils/workspaceFeatureFlags.js';
 import logger from '../utils/logger.js';
 import { PRIORITY_ID_TO_LABEL } from './priorityAssessment.js';
+import { recordPriorityChange } from './priorityHistoryService.js';
 import { normalizeTicketType } from './ticketTypeAssessment.js';
 import ticketTypeService from './ticketTypeService.js';
 import statusService from './statusService.js';
@@ -43,6 +44,19 @@ export function unescapeIfEscaped(value) {
     .replace(/&amp;/g, '&');   // last: never resurrect a double-escape
 }
 
+
+/**
+ * The run's same-day repeat raise (QA 11-23 item 5, assignmentFollowUp) when
+ * the level being written IS that raise — raised this run, or held at an
+ * earlier raise — else null. Then the history row says 'repeat_report'.
+ */
+export function repeatReportFor(recommendation, priorityLabel) {
+  const rr = recommendation && typeof recommendation === 'object' ? recommendation.repeatReport : null;
+  if (!rr || typeof rr !== 'object' || !priorityLabel) return null;
+  const level = rr.raised === true ? rr.raisedTo : rr.keptAt;
+  if (!level || String(level).toLowerCase() !== String(priorityLabel).toLowerCase()) return null;
+  return { ...rr, historyNote: rr.historyNote || (rr.relatedRef ? `Same problem reported again today (${rr.relatedRef})` : 'Same problem reported again today') };
+}
 
 const TP_SKILL_OBJECT_TITLE = 'Ticket Pulse Skills';
 const TP_SUBSKILL_OBJECT_TITLE = 'Ticket Pulse Subskills';
@@ -508,6 +522,7 @@ class FreshServiceActionService {
           select: {
             id: true,
             freshserviceTicketId: true,
+            priority: true,
             assessedPriority: true,
             assessedPriorityId: true,
             priorityRationale: true,
@@ -580,20 +595,37 @@ class FreshServiceActionService {
 
       const action = actions[0];
       await client.updateTicketPriority(action.ticketId, action.priorityId);
-      await prisma.ticket.update({
+      const localUpdated = await prisma.ticket.update({
         where: { id: run.ticketId },
         data: {
           priority: action.priorityId,
           updatedAt: new Date(),
         },
-      }).catch((updateError) => {
+      }).then(() => true).catch((updateError) => {
         logger.warn('FreshService priority sync: priority updated but local mirror update failed', {
           ticketId: run.ticketId,
           freshserviceTicketId: action.ticketId,
           runId,
           error: updateError.message,
         });
+        return false;
       });
+      // QA 11-23 item 2: the AI setting the ticket's priority is history too.
+      // A same-day repeat raise (item 5, recommendation.repeatReport) is named
+      // as such: one 'repeat_report' row, from the ticket's real prior level.
+      if (localUpdated) {
+        const repeat = repeatReportFor(run.recommendation, action.priorityLabel);
+        await recordPriorityChange({
+          ticketId: run.ticketId,
+          from: run.ticket?.priority ?? null,
+          to: action.priorityId,
+          source: repeat ? 'repeat_report' : 'ai_assessment',
+          note: repeat ? repeat.historyNote : (run.ticket?.priorityRationale || null),
+          details: repeat
+            ? { pipelineRunId: runId, relatedTicketId: repeat.relatedTicketId ?? null, relatedRef: repeat.relatedRef ?? null }
+            : { pipelineRunId: runId },
+        });
+      }
 
       await prisma.assignmentPipelineRun.update({
         where: { id: runId },

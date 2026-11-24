@@ -14,6 +14,7 @@ import ticketTypeService from './ticketTypeService.js';
 import statusService from './statusService.js';
 import { countsForAgentMetrics, withAgentMetricTickets } from '../utils/autoHelpMetrics.js';
 import { requesterTitle } from '../utils/requesterTitle.js';
+import { countAssignedToday } from './assignmentTodayCount.js';
 
 // Workload scans historically match legacy row variants too (lowercase labels
 // and raw FS status ints from very old syncs). Phase 8b: the canonical pair is
@@ -1521,7 +1522,7 @@ async function getAssignmentRiskSignals(workspaceId, input = {}) {
     };
   }
 
-  const [episodes, openTickets, todayTickets, leaves] = await Promise.all([
+  const [episodes, openTickets, todayMap, leaves] = await Promise.all([
     prisma.ticketAssignmentEpisode.findMany({
       where: {
         workspaceId,
@@ -1550,11 +1551,9 @@ async function getAssignmentRiskSignals(workspaceId, input = {}) {
       where: { workspaceId, assignedTechId: { in: candidateIds }, status: { in: await openWorkloadStatuses(workspaceId) } },
       _count: true,
     }),
-    prisma.ticket.groupBy({
-      by: ['assignedTechId'],
-      where: { workspaceId, assignedTechId: { in: candidateIds }, createdAt: { gte: todayStart, lte: todayEnd } },
-      _count: true,
-    }),
+    // One "today" for every assignment rule (QA 11-23 item 3) — the same
+    // count Level match uses: tickets given to them today, once per ticket.
+    countAssignedToday({ workspaceId, technicianIds: candidateIds, timezone, excludeTicketId: target.ticketId }),
     prisma.technicianLeave.findMany({
       where: {
         workspaceId,
@@ -1599,7 +1598,6 @@ async function getAssignmentRiskSignals(workspaceId, input = {}) {
   }
 
   const openMap = Object.fromEntries(openTickets.map((row) => [row.assignedTechId, groupCount(row)]));
-  const todayMap = Object.fromEntries(todayTickets.map((row) => [row.assignedTechId, groupCount(row)]));
   const leaveMap = new Map();
   for (const leave of leaves) {
     if (!leaveMap.has(leave.technicianId)) leaveMap.set(leave.technicianId, []);
@@ -1648,7 +1646,7 @@ async function getAssignmentRiskSignals(workspaceId, input = {}) {
     const fullDayWfh = techLeaves.some((leave) => leave.isFullDay !== false && leave.category === 'WFH');
     const shift = getAgentShiftStatus(tech, timezone);
     const openTickets = openMap[tech.id] || 0;
-    const todayAssigned = todayMap[tech.id] || 0;
+    const todayAssigned = todayMap.get(tech.id) || 0;
 
     let riskPenalty = 0;
     if (sameTicketRejected) riskPenalty = Math.max(riskPenalty, 0.95);
@@ -1818,7 +1816,6 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
   });
   const timezone = workspace?.defaultTimezone || 'America/Vancouver';
   const { start: dateStart, end: dateEnd } = getLocalDateBounds(timezone);
-  const { start: todayStart, end: todayEnd } = getTodayRange(timezone);
 
   const proficiencyOrder = { basic: 1, intermediate: 2, advanced: 3, expert: 4 };
   const minLevel = proficiencyOrder[min_proficiency] || 0;
@@ -1850,7 +1847,7 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
     }
   }
 
-  const [techs, competencies, leaves, openTickets, todayTickets, assignmentConfig] = await Promise.all([
+  const [techs, competencies, leaves, openTickets, assignmentConfig] = await Promise.all([
     prisma.technician.findMany({
       where: {
         workspaceId,
@@ -1869,11 +1866,6 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
     prisma.ticket.groupBy({
       by: ['assignedTechId'],
       where: { workspaceId, status: { in: await openWorkloadStatuses(workspaceId) } },
-      _count: true,
-    }),
-    prisma.ticket.groupBy({
-      by: ['assignedTechId'],
-      where: { workspaceId, createdAt: { gte: todayStart, lte: todayEnd } },
       _count: true,
     }),
     prisma.assignmentConfig.findUnique({
@@ -1900,7 +1892,10 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
   }
 
   const openMap = Object.fromEntries(openTickets.map((r) => [r.assignedTechId, groupCount(r)]));
-  const todayMap = Object.fromEntries(todayTickets.map((r) => [r.assignedTechId, groupCount(r)]));
+  // One "today" for every assignment rule (QA 11-23 item 3): see assignmentTodayCount.js.
+  const todayMap = await countAssignedToday({
+    workspaceId, technicianIds: techs.map((t) => t.id), timezone, excludeTicketId: ticketId,
+  });
 
   const results = [];
   const excluded = [];
@@ -1931,7 +1926,7 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
     }
 
     const open = openMap[t.id] || 0;
-    const today = todayMap[t.id] || 0;
+    const today = todayMap.get(t.id) || 0;
     const locationMatch = preferred_location
       ? (t.location || '').toLowerCase().includes(preferred_location.toLowerCase())
       : null;
@@ -2433,6 +2428,12 @@ async function getTicketDetails(ticketId) {
 
   if (!ticket) return { error: 'Ticket not found' };
   const timezone = await getWorkspaceTimezone(ticket.workspaceId);
+  // A same-day repeat raise (QA 11-23 item 5) is Ticket Pulse's, not the AI's:
+  // show the AI its own level and say why the ticket sits higher, so the next
+  // run judges the request instead of anchoring on — and re-raising — it.
+  const repeatRaise = await import('./assignmentFollowUp/sameDayRepeatService.js')
+    .then(({ default: svc }) => svc.priorityContextForAi(ticket.id))
+    .catch(() => null);
 
   return {
     id: ticket.id,
@@ -2443,12 +2444,15 @@ async function getTicketDetails(ticketId) {
     status: ticket.status,
     priority: ticket.priority,
     priorityLabel: { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' }[ticket.priority] || `P${ticket.priority}`,
-    assessedPriority: ticket.assessedPriority,
-    assessedPriorityId: ticket.assessedPriorityId,
+    assessedPriority: repeatRaise?.aiLevelBeforeRaise || ticket.assessedPriority,
+    assessedPriorityId: repeatRaise?.aiLevelBeforeRaise
+      ? ({ Low: 1, Medium: 2, High: 3, Urgent: 4 }[repeatRaise.aiLevelBeforeRaise] || ticket.assessedPriorityId)
+      : ticket.assessedPriorityId,
     priorityRationale: ticket.priorityRationale,
     priorityConfidence: ticket.priorityConfidence,
     priorityEvidence: ticket.priorityEvidence,
     priorityAssessedAt: ticket.priorityAssessedAt?.toISOString?.() || null,
+    ...(repeatRaise ? { priorityRaisedForRepeatReport: repeatRaise } : {}),
     freshserviceTicketType: ticket.ticketType,
     assessedTicketType: ticket.assessedTicketType,
     ticketTypeRationale: ticket.ticketTypeRationale,
@@ -2543,17 +2547,14 @@ async function getWorkloadStats(workspaceId) {
   });
   const techIds = techs.map((t) => t.id);
 
-  const [openTickets, todayTickets, selfPicked] = await Promise.all([
+  const [openTickets, todayMap, selfPicked] = await Promise.all([
     prisma.ticket.groupBy({
       by: ['assignedTechId'],
       where: { workspaceId, assignedTechId: { in: techIds }, status: { in: await openWorkloadStatuses(workspaceId) } },
       _count: true,
     }),
-    prisma.ticket.groupBy({
-      by: ['assignedTechId'],
-      where: { workspaceId, assignedTechId: { in: techIds }, createdAt: { gte: start, lte: end } },
-      _count: true,
-    }),
+    // One "today" for every assignment rule (QA 11-23 item 3): see assignmentTodayCount.js.
+    countAssignedToday({ workspaceId, technicianIds: techIds, timezone }),
     prisma.ticket.groupBy({
       by: ['assignedTechId'],
       where: { workspaceId, assignedTechId: { in: techIds }, createdAt: { gte: start, lte: end }, isSelfPicked: true },
@@ -2562,14 +2563,13 @@ async function getWorkloadStats(workspaceId) {
   ]);
 
   const openMap = Object.fromEntries(openTickets.map((r) => [r.assignedTechId, r._count]));
-  const todayMap = Object.fromEntries(todayTickets.map((r) => [r.assignedTechId, r._count]));
   const selfMap = Object.fromEntries(selfPicked.map((r) => [r.assignedTechId, r._count]));
 
   const stats = techs.map((t) => ({
     techId: t.id,
     techName: t.name,
     openTickets: openMap[t.id] || 0,
-    todayAssigned: todayMap[t.id] || 0,
+    todayAssigned: todayMap.get(t.id) || 0,
     todaySelfPicked: selfMap[t.id] || 0,
     // Low counts here can be BY DESIGN — a guidance note explains it and
     // outranks the load numbers (QA 07-14).

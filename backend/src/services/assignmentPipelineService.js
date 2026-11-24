@@ -1703,6 +1703,28 @@ class AssignmentPipelineService {
         }
       }
 
+      // QA 11-23 items 4–5 (services/assignmentFollowUp): the same requester
+      // reported the same problem earlier today and that ticket is still open.
+      // The AI's priority goes up one level (Urgent at most) on every run —
+      // before the urgent rule reads it; follow-up routing (below, after the
+      // share rule) may send the ticket to that ticket's owner. Never blocks.
+      let sameDayRepeat = null;
+      let sameDayRepeatService = null;
+      if (recommendation && !isNoise && !groupObserved) {
+        try {
+          ({ default: sameDayRepeatService } = await import('./assignmentFollowUp/sameDayRepeatService.js'));
+          sameDayRepeat = await sameDayRepeatService.evaluate({
+            workspaceId, ticketId, runId, recommendation, priorityAssessmentEnabled,
+          });
+          if (sameDayRepeat?.bump) {
+            emit({ type: 'repeat_report', message: sameDayRepeat.record?.sentence || null });
+          }
+        } catch (repeatError) {
+          sameDayRepeat = null;
+          logger.warn('Pipeline: same-day repeat check failed - nothing changed', { runId, ticketId, error: repeatError.message });
+        }
+      }
+
       // Urgent response, layer 1 (plans/URGENT_RESPONSE_PLAN.md): an Urgent
       // (or High) ticket is never auto-assigned to someone who is not at work.
       // The guard is deterministic and never blocks: any error keeps the AI's
@@ -1818,6 +1840,40 @@ class AssignmentPipelineService {
       }
       const shareRuleAssigned = Boolean(shareRule?.applied && decision === 'auto_assigned' && shareRule.techId && assignTechId === shareRule.techId);
 
+      // Follow-up routing (QA 11-23 item 4, `followup_routing_ws<N>`): keep a
+      // same-day repeat with whoever holds the first ticket. Shadow records
+      // "Would send to …" (recommendation.followUpRouting); Live assigns when
+      // the owner is at work and not away. Never after the urgent, escalation
+      // or share rule chose; once it moves the ticket, later rules keep it.
+      let followUp = null;
+      const followUpPickId = assignTechId || topRec?.techId || null;
+      if (sameDayRepeat?.related && sameDayRepeatService && !urgentGuardHeld && followUpPickId
+        && ['auto_assigned', 'pending_review'].includes(decision)) {
+        try {
+          followUp = await sameDayRepeatService.route({
+            workspaceId, ticketId, runId, decision, related: sameDayRepeat.related,
+            pickId: followUpPickId,
+            pickName: followUpPickId === topRec?.techId ? (topRec?.techName || null) : (shareRule?.techName || urgentGuard?.techName || null),
+            locked: urgentGuardRedirected || shareRuleAssigned || escalationLocked,
+            dryRun: assignmentConfig?.dryRunMode ?? true,
+            ticketOrigin: sameDayRepeat.origin || null,
+          });
+          if (followUp?.record) recommendation.followUpRouting = followUp.record;
+          if (followUp?.applied && followUp.techId && decision === 'auto_assigned') assignTechId = followUp.techId;
+          if (followUp?.step) {
+            stepCounter++;
+            await assignmentRepository.createPipelineStep({ ...followUp.step, pipelineRunId: runId, stepNumber: stepCounter }).catch((stepError) => {
+              logger.warn('Pipeline: failed to record followup_routing step', { runId, error: stepError.message });
+            });
+            emit({ type: 'followup_routing', applied: followUp.applied === true, message: followUp.record?.sentence || null });
+          }
+        } catch (followUpError) {
+          followUp = null;
+          logger.warn('Pipeline: follow-up routing failed - assignment unchanged', { runId, ticketId, error: followUpError.message });
+        }
+      }
+      const followUpAssigned = Boolean(followUp?.applied && decision === 'auto_assigned' && followUp.techId && assignTechId === followUp.techId);
+
       // Level match (26 Oct 2026, services/assignmentLevelMatch): among the
       // people the AI listed who meet the level THIS request needs, extra
       // skill gives no edge — the lightest load today wins. Shadow records
@@ -1830,7 +1886,7 @@ class AssignmentPipelineService {
           const { default: levelMatchService } = await import('./assignmentLevelMatch/levelMatchService.js');
           levelMatch = await levelMatchService.guard({
             workspaceId, ticketId, runId, techId: levelPickId, decision, recommendation,
-            locked: urgentGuardRedirected || shareRuleAssigned || escalationLocked,
+            locked: urgentGuardRedirected || shareRuleAssigned || escalationLocked || followUpAssigned,
             dryRun: assignmentConfig?.dryRunMode ?? true,
           });
           if (levelMatch?.record) recommendation.levelMatch = levelMatch.record;
@@ -1862,7 +1918,7 @@ class AssignmentPipelineService {
           timezoneFit = await timezoneFitService.guard({
             workspaceId, ticketId, runId, techId: timezonePickId, decision, recommendation,
             siteBound: siteBoundRouting,
-            locked: urgentGuardRedirected || shareRuleAssigned || escalationLocked || levelMatch?.applied === true,
+            locked: urgentGuardRedirected || shareRuleAssigned || escalationLocked || followUpAssigned || levelMatch?.applied === true,
             dryRun: assignmentConfig?.dryRunMode ?? true,
           });
           if (timezoneFit?.record) recommendation.timezoneFit = timezoneFit.record;
@@ -1892,11 +1948,13 @@ class AssignmentPipelineService {
           spreadGuard = await assignmentSpreadService.guardAutoAssignment({
             workspaceId, ticketId, runId, techId: assignTechId, recommendation, reboundFrom,
             techName: shareRuleAssigned ? (shareRule.techName || null)
-              : timezoneFit?.applied ? (timezoneFit.record?.to?.techName || null)
-                : levelMatch?.applied ? (levelMatch.record?.to?.techName || null)
-                  : assignTechId === topRec.techId ? (topRec.techName || null) : (urgentGuard?.techName || null),
+              : followUpAssigned ? (followUp.record?.to?.techName || null)
+                : timezoneFit?.applied ? (timezoneFit.record?.to?.techName || null)
+                  : levelMatch?.applied ? (levelMatch.record?.to?.techName || null)
+                    : assignTechId === topRec.techId ? (topRec.techName || null) : (urgentGuard?.techName || null),
             // Either/or: a ticket the share rule gave out is counted by Spread, never moved by its cap.
-            locked: urgentGuardRedirected || shareRuleAssigned || escalationLocked,
+            // Same for a same-day follow-up kept with the first ticket's owner (QA 11-23).
+            locked: urgentGuardRedirected || shareRuleAssigned || escalationLocked || followUpAssigned,
             dryRun: assignmentConfig?.dryRunMode ?? true,
           });
           if (spreadGuard?.techId && spreadGuard.moved) assignTechId = spreadGuard.techId;
@@ -1914,6 +1972,7 @@ class AssignmentPipelineService {
         escalationGuard && ['swapped', 'kept', 'best_available'].includes(escalationGuard.outcome) ? escalationGuard.sentence : null,
         urgentGuardRedirected ? urgentGuard.sentence : null,
         shareRuleAssigned ? shareRule.sentence : null,
+        followUpAssigned ? followUp.sentence : null,
         levelMatch?.applied ? levelMatch.sentence : null,
         timezoneFit?.applied ? timezoneFit.sentence : null,
         spreadGuard?.sentence || null,
@@ -1984,6 +2043,9 @@ class AssignmentPipelineService {
       } else if (recommendation) {
         await this._persistInternalClassification(ticketId, workspaceId, recommendation);
         if (priorityAssessmentEnabled) {
+          // A same-day repeat raise rides in recommendation.repeatReport; its
+          // history row is written by executePriorityWriteback, where the real
+          // priority changes (QA 11-23 item 5).
           await this._persistPriorityAssessment(ticketId, runId, recommendation);
         } else {
           logger.info('Pipeline priority assessment persistence skipped by workspace setting', {
@@ -2037,6 +2099,12 @@ class AssignmentPipelineService {
         ...(pipelineDidDecide ? { decidedAt: new Date() } : {}),
         ...(willTriggerSync ? { syncStatus: 'pending' } : {}),
       });
+
+      // QA 11-23 item 4: Live follow-up routing leaves a private note
+      // suggesting a merge into the earlier ticket. Fire and forget.
+      if (followUpAssigned && sameDayRepeatService && finalStatus === 'completed') {
+        sameDayRepeatService.addMergeNote({ ticketId, workspaceId, related: sameDayRepeat.related }).catch(() => {});
+      }
 
       // MEGA 11-14 Part B: the ticket may have got an owner (or closed) while
       // the AI was thinking — then there is nothing left to review. The

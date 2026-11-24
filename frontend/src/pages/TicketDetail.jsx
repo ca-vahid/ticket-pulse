@@ -64,6 +64,7 @@ import AutofillRunCard from '../components/tickets/AutofillRunCard';
 import TicketTasksTab from '../components/tickets/TicketTasksTab';
 import TicketFamilyCard from '../components/tickets/TicketFamilyCard';
 import TicketAttachmentsTab from '../components/tickets/TicketAttachmentsTab';
+import PriorityReasonLine from '../components/tickets/PriorityReasonLine';
 import GroupedBanner, { isGroupedCopy as isGroupedCopyOf } from '../components/tickets/GroupedBanner';
 import MentionNotice from '../components/tickets/MentionNotice';
 import {
@@ -4627,6 +4628,10 @@ export default function TicketDetail() {
                     canUpload={canWrite}
                     onUpload={uploadAttachments}
                     uploading={savingField === 'attachments'}
+                    onMerged={({ fileName, pageCount }) => {
+                      fetchTicket({ silent: true });
+                      showToast('emerald', `${fileName} attached (${pageCount} page${pageCount === 1 ? '' : 's'})`);
+                    }}
                     nameForEmail={nameForEmail}
                     ticketRef={ticket.displayRef || `TP-${ticket.nativeNumber || ticket.id}`}
                     subject={ticket.subject}
@@ -4742,6 +4747,8 @@ export default function TicketDetail() {
                       aria-label="Ticket priority"
                       options={[1, 2, 3, 4].map((p) => ({ value: p, label: PRIORITY_LABELS[p], dot: PRIORITY_STRIP_COLORS[p] }))}
                     />
+                    {/* QA 11-23 #2: who set this priority, when, and why. */}
+                    <PriorityReasonLine reason={ticket.priorityReason} priority={ticket.priority} className="mt-1.5" />
                   </SidebarField>
 
                   {/* SLA clocks. TP-born (canWrite): pencil-editable — presets

@@ -182,6 +182,31 @@ describe('assignmentTools risk and routing helpers', () => {
     expect(result.summary.suppressedCount).toBe(1);
   });
 
+  // QA 11-23 item 3: todayAssigned is the shared count (assignmentTodayCount.js),
+  // the same one Level match shows — not "tickets created today they still hold".
+  test('get_assignment_risk_signals todayAssigned = tickets given to them today, once each, this ticket excluded', async () => {
+    prismaMock.ticket.findMany = jest.fn().mockResolvedValue([]);
+    prismaMock.ticketAssignmentEpisode.findMany.mockImplementation(async ({ where }) => {
+      if (where?.startedAt) {
+        return [
+          { technicianId: 1, ticketId: 700, startedAt: new Date('2026-05-22T16:00:00.000Z') }, // older ticket given today
+          { technicianId: 1, ticketId: 700, startedAt: new Date('2026-05-22T17:00:00.000Z') }, // came back: same ticket
+          { technicianId: 1, ticketId: 701, startedAt: new Date('2026-05-22T17:30:00.000Z') },
+          { technicianId: 1, ticketId: 900, startedAt: new Date('2026-05-22T18:00:00.000Z') }, // this ticket
+          { technicianId: 2, ticketId: 702, startedAt: new Date('2026-05-22T15:30:00.000Z') },
+        ];
+      }
+      return [];
+    });
+    const result = await executeTool('get_assignment_risk_signals', {
+      ticket_id: 900, categoryId: 10, subcategoryId: 11, candidate_tech_ids: [1, 2],
+    }, { workspaceId: 1, ticketId: 900 });
+    const byId = new Map(result.candidates.map((c) => [c.techId, c]));
+    expect(byId.get(1).workload.todayAssigned).toBe(2);
+    expect(byId.get(2).workload.todayAssigned).toBe(1);
+    delete prismaMock.ticket.findMany;
+  });
+
   test('find_matching_agents down-ranks active rejection suppressions', async () => {
     const result = await executeTool('find_matching_agents', {
       categoryId: 10,

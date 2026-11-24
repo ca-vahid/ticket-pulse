@@ -1,12 +1,15 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { DatabaseError, NotFoundError } from '../utils/errors.js';
-import { PRIORITY_OUTPUT_MARKER } from './priorityAssessment.js';
+import { PRIORITY_CANNOT_WORK_MARKER, PRIORITY_OUTPUT_MARKER } from './priorityAssessment.js';
 
 const AFTER_HOURS_WORKFLOW_MARKER = 'AFTER_HOURS_PRIORITY_QUEUE_V2';
 const AFTER_HOURS_WORKFLOW_NOTE = `Note (${AFTER_HOURS_WORKFLOW_MARKER}): Full assignment finalization only runs during business hours. When after-hours priority assessment is enabled, Ticket Pulse may run a priority-assessment-only pass immediately, classify the ticket, write the assessed priority back to FreshService when workspace writeback is enabled, and then queue the full assignment run for business hours. If that priority-only pass determines the ticket is non-actionable noise/FYI, submit an empty recommendations array so the workspace noise-dismissal policy can close it instead of queueing assignment. Urgent after-hours escalation is workspace policy controlled by Ticket Pulse settings; do not decide whether to notify recipients from the prompt. The queued business-hours run reassesses the ticket before any assignment is finalized. You do not need to decide whether to defer based on business hours.`;
 
-const PRIORITY_DEFINITIONS_SECTION = `
+// The priority section as it shipped before QA 11-23. Kept verbatim: an
+// unedited copy of it in a workspace prompt is swapped whole for the current
+// one, and its lines stay "known default" for the customization check.
+const LEGACY_PRIORITY_DEFINITIONS_SECTION = `
 ## Priority Definitions (${PRIORITY_OUTPUT_MARKER})
 Ticket Pulse is the source of truth for priority assessment. Assess priority from the ticket's business impact, time sensitivity, affected scope, requester context, and evidence quality. FreshService's imported priority is historical input only; do not copy it blindly.
 
@@ -17,6 +20,28 @@ Use exactly one normalized value:
 - \`Urgent\`: active outage, broad business disruption, safety/security incident, executive-critical interruption, or immediate deadline where delay materially increases risk.
 
 Always populate \`assessedPriority\`, \`priorityRationale\`, and \`priorityConfidence\` when calling \`submit_recommendation\`. Add concise \`prioritySignals\` when useful. If evidence is thin, choose the best supported value and set confidence to \`low\` or \`medium\`; do not inflate priority just because the requester used vague urgency language.`;
+
+// QA 11-23 item 3 (Live, no Shadow): e.g. run 1001 noted that the requester
+// could not sign in at all, then chose Medium because nothing else looked
+// urgent. One person who cannot work at all is High.
+export const PRIORITY_CANNOT_WORK_RULE = `Rule (${PRIORITY_CANNOT_WORK_MARKER}): One person who can't work at all (can't sign in to Teams, Outlook or their PC, or is locked out) is High, even with no outage. Medium is for work that's slowed but still possible. Use the Urgent tests only to decide Urgent; their absence never rules out High.`;
+
+const LEGACY_INFLATE_SENTENCE = 'do not inflate priority just because the requester used vague urgency language.';
+const SOFTENED_INFLATE_SENTENCE = 'do not inflate priority just because the requester used vague urgency language ("ASAP", "urgent" with nothing behind it). That caution is about vague words only: a requester who says they cannot work at all is stating impact, so judge it by the cannot-work rule, not as vague urgency.';
+
+const PRIORITY_DEFINITIONS_SECTION = `
+## Priority Definitions (${PRIORITY_OUTPUT_MARKER})
+Ticket Pulse is the source of truth for priority assessment. Assess priority from the ticket's business impact, time sensitivity, affected scope, requester context, and evidence quality. FreshService's imported priority is historical input only; do not copy it blindly.
+
+Use exactly one normalized value:
+- \`Low\`: routine request, no meaningful time pressure, single-user inconvenience, or informational work that is still actionable.
+- \`Medium\`: normal operational support, limited user impact, work that is slowed but still possible, standard access/software/help request, or unclear urgency with no outage or deadline signals.
+- \`High\`: significant user/team impact, blocked work (including one person who cannot work at all), time-sensitive operational deadline, escalated requester context, or credible security/production-risk language that needs priority handling.
+- \`Urgent\`: active outage, broad business disruption, safety/security incident, executive-critical interruption, or immediate deadline where delay materially increases risk.
+
+${PRIORITY_CANNOT_WORK_RULE}
+
+Always populate \`assessedPriority\`, \`priorityRationale\`, and \`priorityConfidence\` when calling \`submit_recommendation\`. Add concise \`prioritySignals\` when useful. If evidence is thin, choose the best supported value and set confidence to \`low\` or \`medium\`; ${SOFTENED_INFLATE_SENTENCE}`;
 
 // ── Decision-notes step scaffolding (NT-6) ────────────────────────────────
 // v2: search_decision_notes now returns two labeled buckets — adminDecisions
@@ -213,7 +238,55 @@ function replaceDecisionNotesStep(prompt) {
   return `${before}\n\n${DECISION_NOTES_STEP.trim()}\n${tail}`;
 }
 
+/**
+ * QA 11-23 item 3: does this prompt still lack the cannot-work rule? Only
+ * prompts that carry the priority scaffolding (PRIORITY_OUTPUT_V1) are asked;
+ * a prompt without it gets the whole current section from the older upgrade.
+ */
+function needsPriorityRulesUpgrade(systemPrompt = '') {
+  return Boolean(systemPrompt)
+    && systemPrompt.includes(PRIORITY_OUTPUT_MARKER)
+    && !systemPrompt.includes(PRIORITY_CANNOT_WORK_MARKER);
+}
+
+/** The "## Priority Definitions (PRIORITY_OUTPUT_V1)" section, up to the next "## " header. */
+function extractPrioritySection(prompt = '') {
+  const startMatch = prompt.match(new RegExp(`## Priority Definitions \\(${PRIORITY_OUTPUT_MARKER}\\)[^\\n]*`));
+  if (!startMatch) return null;
+  const startIdx = startMatch.index;
+  const after = prompt.slice(startIdx + startMatch[0].length);
+  const nextSection = after.match(/\n## /);
+  const endIdx = nextSection ? startIdx + startMatch[0].length + nextSection.index : prompt.length;
+  return { startIdx, endIdx, text: prompt.slice(startIdx, endIdx) };
+}
+
+/**
+ * Add the cannot-work rule to a prompt, losing nothing an admin wrote:
+ *  - an unedited copy of the old priority section is swapped whole for the current one;
+ *  - an edited section keeps its text, gets the rule appended, and the old
+ *    "do not inflate" sentence (when still verbatim) is softened;
+ *  - a prompt that mentions the marker without the section gets the rule at the end.
+ */
+function patchPriorityRules(prompt) {
+  if (!needsPriorityRulesUpgrade(prompt)) return prompt;
+  const section = extractPrioritySection(prompt);
+  if (!section) return `${prompt.trimEnd()}\n\n${PRIORITY_CANNOT_WORK_RULE}`;
+  const before = prompt.slice(0, section.startIdx);
+  const tail = prompt.slice(section.endIdx);
+  if (normalizePromptWhitespace(section.text) === normalizePromptWhitespace(LEGACY_PRIORITY_DEFINITIONS_SECTION)) {
+    return `${before}${PRIORITY_DEFINITIONS_SECTION.trim()}\n${tail}`;
+  }
+  const softened = section.text.includes(LEGACY_INFLATE_SENTENCE)
+    ? section.text.replace(LEGACY_INFLATE_SENTENCE, SOFTENED_INFLATE_SENTENCE)
+    : section.text;
+  return `${before}${softened.trimEnd()}\n\n${PRIORITY_CANNOT_WORK_RULE}\n${tail}`;
+}
+
 function needsPromptUpgrade(systemPrompt = '') {
+  return needsScaffoldUpgrade(systemPrompt) || needsPriorityRulesUpgrade(systemPrompt);
+}
+
+function needsScaffoldUpgrade(systemPrompt = '') {
   if (/check_business_hours|deferUntil|get_leaves_today|## Step 1: Check Business Hours|## Your Process|When a new ticket comes in, analyze it thoroughly and recommend the best technician to handle it\./i.test(systemPrompt)) {
     return true;
   }
@@ -432,6 +505,7 @@ function getKnownDefaultLineSet() {
     knownDefaultLineSet = new Set(
       [
         ...DEFAULT_SYSTEM_PROMPT.split('\n'),
+        ...LEGACY_PRIORITY_DEFINITIONS_SECTION.split('\n'),
         ...LEGACY_DECISION_NOTES_STEP.split('\n'),
         ...AGENT_BRIEFING_STEP.split('\n'),
         ...LEGACY_DEFAULT_LINE_FRAGMENTS,
@@ -461,6 +535,7 @@ function finishPromptUpgrade(prompt) {
   if (prompt && !prompt.includes(PRIORITY_OUTPUT_MARKER)) {
     prompt = injectPriorityDefinitions(prompt);
   }
+  prompt = patchPriorityRules(prompt);
   if (prompt.includes('IT helpdesk ticket assignment assistant') && (
     !prompt.includes('taxonomyReviewNeeded')
     || !prompt.includes('pendingReviewSuggestions')
@@ -488,8 +563,9 @@ function finishPromptUpgrade(prompt) {
 }
 
 function upgradeLegacyPrompt(systemPrompt = '') {
-  if (!needsPromptUpgrade(systemPrompt)) {
-    return systemPrompt;
+  if (!needsScaffoldUpgrade(systemPrompt)) {
+    // Only the cannot-work rule is missing (or nothing is): the targeted patch.
+    return patchPriorityRules(systemPrompt);
   }
 
   // NT-6: the prompt still carries the verbatim legacy decision-notes scaffold
@@ -554,7 +630,8 @@ function upgradeLegacyPrompt(systemPrompt = '') {
     // prompt unchanged makes the upgrade a no-op; getPublished() detects that
     // and skips publishing a new version (no churn, no data loss).
     logger.warn('Prompt auto-upgrade: no safe targeted patch for customized prompt; leaving prompt unchanged');
-    return systemPrompt;
+    // The cannot-work rule is additive and keeps every admin line (QA 11-23).
+    return patchPriorityRules(systemPrompt);
   }
 
   let upgraded = systemPrompt;
@@ -575,6 +652,20 @@ function upgradeLegacyPrompt(systemPrompt = '') {
     .replace(/deferUntil/gi, '');
 
   return finishPromptUpgrade(upgraded.trim());
+}
+
+export const CANNOT_WORK_UPGRADE_NOTE = "Added the rule: one person who can't work at all is High.";
+
+/** The version note says what the auto-upgrade changed (second-look review, QA 11-23). */
+function autoUpgradeNote(previousPrompt, upgradedPrompt, fromVersion) {
+  const scaffold = needsScaffoldUpgrade(previousPrompt);
+  const addedRule = !String(previousPrompt || '').includes(PRIORITY_CANNOT_WORK_MARKER)
+    && String(upgradedPrompt || '').includes(PRIORITY_CANNOT_WORK_MARKER);
+  const what = [
+    scaffold ? 'Refreshed the prompt step scaffolding.' : null,
+    addedRule ? CANNOT_WORK_UPGRADE_NOTE : null,
+  ].filter(Boolean).join(' ') || 'Refreshed the prompt step scaffolding.';
+  return `auto-upgrade: ${what} (from v${fromVersion}, system-applied, previous version preserved)`;
 }
 
 // getPublished() runs on every pipeline run — warn once per workspace+version
@@ -650,7 +741,7 @@ class PromptRepository {
           const upgraded = await this.createVersion(workspaceId, {
             systemPrompt: upgradedPrompt,
             toolConfig: published.toolConfig,
-            notes: `auto-upgrade: refreshed prompt step scaffolding from v${fromVersion} (system-applied, previous version preserved)`,
+            notes: autoUpgradeNote(published.systemPrompt, upgradedPrompt, fromVersion),
             createdBy: 'system',
           });
           published = await this.publish(upgraded.id, 'system');
@@ -754,5 +845,5 @@ class PromptRepository {
 }
 
 export { DEFAULT_SYSTEM_PROMPT };
-export { needsPromptUpgrade, upgradeLegacyPrompt, isCustomizedPrompt };
+export { needsPromptUpgrade, upgradeLegacyPrompt, isCustomizedPrompt, patchPriorityRules, needsPriorityRulesUpgrade };
 export default new PromptRepository();

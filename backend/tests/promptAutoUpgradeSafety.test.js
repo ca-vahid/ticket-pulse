@@ -162,7 +162,8 @@ describe('NT-9: getPublished auto-upgrade path', () => {
   });
 
   test('customized prompt with no safe patch survives getPublished untouched (no new version)', async () => {
-    const customPrompt = `You are an IT helpdesk ticket assignment assistant. AFTER_HOURS_PRIORITY_QUEUE_V2 PRIORITY_OUTPUT_V1
+    // Carries PRIORITY_CANNOT_WORK_V1 (QA 11-23) so the only gap is one with no safe patch.
+    const customPrompt = `You are an IT helpdesk ticket assignment assistant. AFTER_HOURS_PRIORITY_QUEUE_V2 PRIORITY_OUTPUT_V1 PRIORITY_CANNOT_WORK_V1
 
 ## Step 1: Read the Ticket
 Our workspace triages hardware tickets to the Vancouver bench first.

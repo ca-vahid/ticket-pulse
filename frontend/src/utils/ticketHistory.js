@@ -35,6 +35,7 @@
  */
 import { activityActorKind, fsActorName, isMachineActivity } from '../components/tickets/activityKind.jsx';
 import { fsSystemEntryKind, fsSystemEntryLabel } from './fsSystemEntry.js';
+import { priorityChangeLine, priorityName } from './priorityReason.js';
 
 const NEAR_MS = 3 * 60 * 1000;
 
@@ -189,7 +190,7 @@ function baseItem(partial) {
  */
 export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pipelineRuns = [], workflowRuns = [], thread = [], techNameById = new Map() } = {}) {
   const items = [];
-  const attributed = { status: [], assignment: [] };
+  const attributed = { status: [], assignment: [], priority: [] };
 
   for (const a of activities) {
     const d = a.details && typeof a.details === 'object' ? a.details : {};
@@ -204,6 +205,7 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
     const at = new Date(a.performedAt).getTime();
     const t = a.activityType;
     let item;
+    let priorityRow = null;
     if (t === 'status_changed') {
       const to = d.newStatus || null;
       const reopen = d.oldStatus && to && TERMINAL.has(norm(d.oldStatus)) && !TERMINAL.has(norm(to));
@@ -304,7 +306,11 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
       // (2 Oct 2026): this row carries the real actor and the before → after,
       // so it IS the story — "Gaby reassigned Gaby → Marcus" — not a raw
       // "fs write back". FreshService's echo of it is dropped below.
-      const c = d.changes && typeof d.changes === 'object' ? d.changes : {};
+      const all = d.changes && typeof d.changes === 'object' ? d.changes : {};
+      // QA 11-23 #2: `priorityLogged` = a priority_changed row already tells
+      // the priority part; drop it here so the change is not shown twice.
+      const c = d.priorityLogged === true ? Object.fromEntries(Object.entries(all).filter(([k]) => k !== 'priority')) : all;
+      if (d.priorityLogged === true && Object.keys(c).length === 0) continue;
       if (c.assignee) {
         item = baseItem({ event: 'assignment', verb: c.assignee.to ? 'reassigned' : 'unassigned the ticket', from: c.assignee.from || null, to: c.assignee.to || null, machine: false });
         if (c.assignee.to) attributed.assignment.push({ at, to: norm(c.assignee.to) });
@@ -364,6 +370,15 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
         importance: 2,
         machine: false,
       });
+    } else if (t === 'priority_changed') {
+      // QA 11-23 #2: B1's priority audit row, one plain sentence per source
+      // ("raised the priority to Urgent from their status link"). The levels
+      // ride on priorityFrom / priorityTo for the up / down icon only, so the
+      // sentence is not followed by a second "Medium → High".
+      const line = priorityChangeLine(d, a.performedBy);
+      item = baseItem({ event: 'priority', verb: line.verb, sentence: true, priorityFrom: line.from, priorityTo: line.to, detail: line.detail, workflowName: line.workflowName, importance: 2, machine: line.machine });
+      priorityRow = { ...line, at };
+      attributed.priority.push({ at, to: norm(line.to) });
     } else if (t === 'mirror_conflict') {
       item = baseItem({ event: 'system', verb: 'mirror conflict', detail: d.note || (Array.isArray(d.drift) ? d.drift.join(', ') : null) });
     } else if (t === 'created') {
@@ -406,10 +421,15 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
     } else {
       item = baseItem({ event: 'system', verb: humanize(t), detail: d.note || null });
     }
-    const shownActor = t === 'urgent_response'
-      ? 'Ticket Pulse'
-      : ((t === 'merged_from' || t === 'merged_into') && d.actorName) ? d.actorName : actor;
-    items.push({ ...item, key: `a-${a.id}`, at, kind, atype: t, actorType: actorTypeFor(shownActor, fsName ? 'human' : kind), machine: item.machine ?? machine, actor: shownActor, source, sig: `a|${t}|${shownActor}|${item.from || ''}|${item.to || ''}|${item.detail || (t === 'urgent_response' ? item.verb : '')}` });
+    const shownActor = priorityRow ? priorityRow.actor
+      : t === 'urgent_response'
+        ? 'Ticket Pulse'
+        : ((t === 'merged_from' || t === 'merged_into') && d.actorName) ? d.actorName : actor;
+    const rowKind = priorityRow ? priorityRow.actorKind : kind;
+    const rowSource = priorityRow ? priorityRow.source : source;
+    // A requester raising the priority is a person, whatever the row's actorKind says.
+    const typeHint = priorityRow ? (priorityRow.source === 'freshservice' && priorityRow.machine === false ? 'human' : rowKind) : (fsName ? 'human' : kind);
+    items.push({ ...item, key: `a-${a.id}`, at, kind: rowKind, atype: t, actorType: actorTypeFor(shownActor, typeHint), machine: item.machine ?? machine, actor: shownActor, source: rowSource, sig: `a|${t}|${shownActor}|${item.from || ''}|${item.to || ''}|${item.detail || (t === 'urgent_response' || priorityRow ? item.verb : '')}` });
   }
 
   // QA 11-05 #9: an episode is the ASSIGNER's action. "Ticket Pulse AI ·
@@ -519,6 +539,8 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
     } else if (parsed.event === 'group') {
       items.push({ ...baseItem({ event: 'group', verb: 'set the group', to: parsed.to }), key: `fs-${e.id}`, at, kind: 'freshservice_sync', machine: isEcho, actor, source: 'freshservice', sig: `fs|group|${actor}|${parsed.to || ''}` });
     } else if (parsed.event === 'priority') {
+      // The priority_changed row already tells this change in words.
+      if (attributed.priority.some((s) => Math.abs(s.at - at) <= NEAR_MS && s.to === norm(parsed.to))) continue;
       items.push({ ...baseItem({ event: 'priority', verb: 'set priority', to: parsed.to }), key: `fs-${e.id}`, at, kind: 'freshservice_sync', machine: isEcho, actor, source: 'freshservice', sig: `fs|priority|${actor}|${parsed.to}` });
     } else if (parsed.event === 'note') {
       items.push({ ...baseItem({ event: 'note', verb: parsed.updated ? 'edited a note' : parsed.priv ? 'added a private note' : 'added a note' }), key: `fs-${e.id}`, at, kind: 'freshservice_sync', machine: isEcho, actor, source: 'freshservice', sig: `fs|note|${actor}|${parsed.updated ? 'u' : 'a'}` });
@@ -594,6 +616,13 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
       const move = `${h.verb}${h.from ? ` ${h.from} →` : ''}${h.to ? ` ${h.to}` : ''}`;
       run.extra.push([move, h.detail].filter(Boolean).join(' · '));
     }
+  }
+
+  // QA 11-23 #2: a priority_changed sentence is the one line for its change;
+  // the write-back row of the same move only repeats it.
+  const sentences = items.filter((i) => i.event === 'priority' && i.sentence);
+  for (const i of items) {
+    if (i.event === 'priority' && !i.sentence && sentences.some((s) => near(s, i) && norm(s.priorityTo) === norm(priorityName(i.to)))) drop.add(i);
   }
 
   const deduped = items.filter((i) => !drop.has(i));

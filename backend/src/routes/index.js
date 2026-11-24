@@ -42,6 +42,7 @@ import ticketGroupingRoutes from './ticketGrouping.routes.js';
 import assignmentSpreadRoutes from './assignmentSpread.routes.js';
 import assignmentLevelMatchRoutes from './assignmentLevelMatch.routes.js';
 import assignmentSharesRoutes from './assignmentShares.routes.js';
+import assignmentPriorityRaisesRoutes from './assignmentPriorityRaises.routes.js'; // QA 11-23
 import { requireWorkspace } from '../middleware/workspace.js';
 import usageRoutes from './usage.routes.js';
 import siteStatsRoutes from './siteStats.routes.js';
@@ -184,6 +185,9 @@ router.use('/calendar-leave', calendarLeaveRoutes);
 router.use('/notifications', notificationsRoutes);
 router.use('/notification-workflows', notificationWorkflowRoutes);
 router.use('/ai-providers', aiProviderRoutes);
+// QA 11-23: GET /assignment/priority-raises (also answered at /assignments/… — the QA contract's spelling).
+router.use('/assignment', assignmentPriorityRaisesRoutes);
+router.use('/assignments', assignmentPriorityRaisesRoutes);
 router.use('/assignment', assignmentRoutes);
 router.use('/analytics', requireAdminOrObserver, analyticsRoutes);
 router.use('/summit', requireAdmin, summitRoutes);
