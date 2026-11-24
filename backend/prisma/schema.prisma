@@ -273,6 +273,13 @@ model TicketAttachment {
   source        String   @default("upload") @db.VarChar(20) // upload | email
   uploadedBy    String?  @map("uploaded_by") @db.VarChar(255)
   createdAt     DateTime @default(now()) @map("created_at")
+  // Display name (4.4.08): the name shown and used for downloads. file_name
+  // stays the original (storage + FreshService mirror keep it).
+  displayName   String?   @map("display_name") @db.VarChar(255)
+  nameSource    String?   @map("name_source") @db.VarChar(16) // auto | manual | reverted
+  nameDetails   Json?     @map("name_details") // { vendor, invoiceNumber, documentDate, method, confidence, model? }
+  namedAt       DateTime? @map("named_at")
+  namedBy       String?   @map("named_by") @db.VarChar(255)
 
   @@index([ticketId])
   @@index([workspaceId])

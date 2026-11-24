@@ -1308,6 +1308,12 @@ export const ticketsAPI = {
     setTimeout(() => URL.revokeObjectURL(url), 10000);
   },
 
+  // QA 11-23 attachment names (4.4.08): put the original name back, or type
+  // one. `{ action: 'revert' }` | `{ action: 'edit', name }` → { success, data: attachment }.
+  renameAttachment: async (id, attachmentId, body) => {
+    return await api.post(`/tickets/${id}/attachments/${attachmentId}/name`, body);
+  },
+
   // Approvals
   requestApproval: async (id, payload) => {
     return await api.post(`/tickets/${id}/approvals`, payload);

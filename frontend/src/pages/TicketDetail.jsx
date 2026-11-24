@@ -64,6 +64,7 @@ import AutofillRunCard from '../components/tickets/AutofillRunCard';
 import TicketTasksTab from '../components/tickets/TicketTasksTab';
 import TicketFamilyCard from '../components/tickets/TicketFamilyCard';
 import TicketAttachmentsTab from '../components/tickets/TicketAttachmentsTab';
+import { attachmentName, originalNameIfRenamed } from '../components/tickets/attachmentNames';
 import PriorityReasonLine from '../components/tickets/PriorityReasonLine';
 import GroupedBanner, { isGroupedCopy as isGroupedCopyOf } from '../components/tickets/GroupedBanner';
 import MentionNotice from '../components/tickets/MentionNotice';
@@ -341,16 +342,19 @@ function DescriptionImageStrip({ ticketId, images, onPreview, className = 'mt-3 
 
 function AttachmentChip({ attachment, onPreview }) {
   const isImage = isImageAttachment(attachment);
+  // 4.4.08: the name people see; the original rides in the hover text.
+  const name = attachmentName(attachment);
+  const was = originalNameIfRenamed(attachment);
   return (
     <button
       onClick={onPreview}
       className="tp-focus-ring inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-border bg-card text-sm font-medium text-foreground/85 hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200 hover:bg-blue-50/40 dark:hover:bg-blue-500/10"
-      title={`Preview ${attachment.fileName} (${formatBytes(attachment.sizeBytes)})`}
+      title={`Preview ${name} (${formatBytes(attachment.sizeBytes)})${was ? `, was ${was}` : ''}`}
     >
       {isImage
         ? <ImageIcon className="w-4 h-4 flex-none text-muted-foreground/75" aria-hidden="true" />
         : <Paperclip className="w-4 h-4 flex-none text-muted-foreground/75" aria-hidden="true" />}
-      <span className="truncate max-w-[260px]">{attachment.fileName}</span>
+      <span className="truncate max-w-[260px]">{name}</span>
       <span className="text-xs text-muted-foreground/75">{formatBytes(attachment.sizeBytes)}</span>
     </button>
   );
@@ -2000,9 +2004,21 @@ export default function TicketDetail() {
   }, [ticketId, fetchTicket, showToast]);
 
   const downloadAttachment = useCallback((a) => {
-    ticketsAPI.downloadAttachment(ticketId, a.id, a.fileName)
+    // 4.4.08: saved under the name people see (the vendor name when it has one).
+    ticketsAPI.downloadAttachment(ticketId, a.id, attachmentName(a))
       .catch((err) => showToast('red', err.response?.data?.message || 'Download failed'));
   }, [ticketId, showToast]);
+
+  // 4.4.08: a rename or revert on the Attachments tab shows everywhere at once
+  // (chips, sidebar, preview); the server's activity row arrives on the next load.
+  const attachmentRenamed = useCallback((attachmentId, fields) => {
+    lastLocalMutationRef.current = Date.now();
+    setTicket((prev) => (prev ? {
+      ...prev,
+      attachments: (prev.attachments || []).map((x) => (x.id === attachmentId ? { ...x, ...fields } : x)),
+    } : prev));
+    fetchTicket({ silent: true });
+  }, [fetchTicket]);
 
   const isAdmin = meta?.actor?.kind === 'admin' || meta?.actor?.workspaceRole === 'admin';
 
@@ -3651,11 +3667,11 @@ export default function TicketDetail() {
                               <button
                                 key={a.id}
                                 onClick={() => previewImage(a)}
-                                title={`Preview ${a.fileName}`}
+                                title={`Preview ${attachmentName(a)}${originalNameIfRenamed(a) ? `, was ${originalNameIfRenamed(a)}` : ''}`}
                                 className="tp-focus-ring inline-flex max-w-full items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm font-medium text-foreground/85 hover:border-blue-300 dark:hover:border-blue-500/40 hover:bg-blue-50 dark:hover:bg-blue-500/15 hover:text-blue-700 dark:hover:text-blue-200"
                               >
                                 <Paperclip className="w-4 h-4 flex-none text-muted-foreground/75" aria-hidden="true" />
-                                <span className="truncate">{a.fileName}</span>
+                                <span className="truncate">{attachmentName(a)}</span>
                                 <span className="flex-none text-xs text-muted-foreground/75">{formatBytes(a.sizeBytes)}</span>
                               </button>
                             ))}
@@ -4635,6 +4651,9 @@ export default function TicketDetail() {
                     nameForEmail={nameForEmail}
                     ticketRef={ticket.displayRef || `TP-${ticket.nativeNumber || ticket.id}`}
                     subject={ticket.subject}
+                    // 4.4.08: edit / revert a file's name (agents who can work the ticket).
+                    canRename={canConverse && !actorReadOnly}
+                    onRenamed={attachmentRenamed}
                   />
                 )}
 
@@ -5110,10 +5129,11 @@ export default function TicketDetail() {
                             : <Paperclip className="w-[18px] h-[18px] text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />}
                           <button
                             onClick={() => previewImage(a)}
-                            title={`Preview ${a.fileName}`}
+                            title={`Preview ${attachmentName(a)}${originalNameIfRenamed(a) ? `, was ${originalNameIfRenamed(a)}` : ''}`}
                             className="tp-focus-ring min-w-0 flex-1 text-left rounded"
                           >
-                            <p className="text-sm font-medium text-foreground/85 truncate hover:text-blue-700 dark:hover:text-blue-200">{a.fileName}</p>
+                            <p className="text-sm font-medium text-foreground/85 truncate hover:text-blue-700 dark:hover:text-blue-200">{attachmentName(a)}</p>
+                            {originalNameIfRenamed(a) && <p className="text-[11px] text-muted-foreground truncate">was {originalNameIfRenamed(a)}</p>}
                             <p className="text-[11px] text-muted-foreground/75 truncate">
                               {formatBytes(a.sizeBytes)}
                               {a.source === 'email' ? ' · from email' : a.source === 'freshservice' ? ' · from FreshService' : a.uploadedBy ? ` · ${(nameForEmail(a.uploadedBy) && !String(nameForEmail(a.uploadedBy)).includes('@')) ? nameForEmail(a.uploadedBy) : a.uploadedBy.split('@')[0]}` : ''}
@@ -5121,14 +5141,14 @@ export default function TicketDetail() {
                           </button>
                           <button
                             onClick={() => previewImage(a)}
-                            aria-label={`Preview ${a.fileName}`}
+                            aria-label={`Preview ${attachmentName(a)}`}
                             className="tp-focus-ring p-1 text-muted-foreground/75 hover:text-blue-700 dark:hover:text-blue-200 hover:bg-blue-50 dark:hover:bg-blue-500/15 rounded"
                           >
                             <Eye className="w-4 h-4" aria-hidden="true" />
                           </button>
                           <button
                             onClick={() => downloadAttachment(a)}
-                            aria-label={`Download ${a.fileName}`}
+                            aria-label={`Download ${attachmentName(a)}`}
                             className="tp-focus-ring p-1 text-muted-foreground/75 hover:text-blue-700 dark:hover:text-blue-200 hover:bg-blue-50 dark:hover:bg-blue-500/15 rounded"
                           >
                             <Download className="w-4 h-4" aria-hidden="true" />
@@ -5137,7 +5157,7 @@ export default function TicketDetail() {
                             <button
                               onClick={() => applyChange(`attach-del-${a.id}`, () => ticketsAPI.removeAttachment(ticketId, a.id))}
                               disabled={savingField === `attach-del-${a.id}`}
-                              aria-label={`Remove ${a.fileName}`}
+                              aria-label={`Remove ${attachmentName(a)}`}
                               className="tp-focus-ring p-1 text-muted-foreground/75 hover:text-red-600 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/15 rounded"
                             >
                               <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />

@@ -5,6 +5,7 @@ import logger from '../utils/logger.js';
 import { ValidationError, NotFoundError } from '../utils/errors.js';
 import { fsConversationEntryIdCandidates, parseFsConversationId } from '../utils/fsEntryId.js';
 import { markRecurring } from './recurringImageService.js';
+import { NAME_SELECT, withNameFields } from './attachmentNamingRules.js';
 
 async function streamToBuffer(stream) {
   const chunks = [];
@@ -392,10 +393,12 @@ class AttachmentService {
       select: {
         id: true, fileName: true, contentType: true, sizeBytes: true,
         threadEntryId: true, source: true, uploadedBy: true, createdAt: true,
+        ...NAME_SELECT,
       },
     });
     // Signature logos seen on many tickets carry `recurring: true` (19 Oct 2026).
-    return markRecurring(workspaceId, rows);
+    // 4.4.08: displayName / originalName / nameSource / nameDetails on every row.
+    return (await markRecurring(workspaceId, rows)).map(withNameFields);
   }
 
   /** One stored file's bytes (blob, or FreshService on first use). Null when gone. */

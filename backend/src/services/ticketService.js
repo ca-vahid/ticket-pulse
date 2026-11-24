@@ -52,6 +52,7 @@ import { sseManager } from '../routes/sse.routes.js';
 import { actorKindOf, deriveActorKind } from '../utils/actorKind.js';
 import { buildFieldsUpdatedExtra } from './ticketChangeRenderer.js';
 import { markRecurring } from './recurringImageService.js';
+import { NAME_SELECT as ATTACHMENT_NAME_SELECT, withNameFields as withAttachmentNameFields } from './attachmentNamingRules.js';
 import { recordPriorityChange, prioritySourceForActor, priorityReasonFrom } from './priorityHistoryService.js';
 import ticketHandBackService, {
   normalizeHandBack, isRealReason as isRealHandBackReason, handBackLabel, reasonForRebound as reasonForHandBackRebound,
@@ -3026,8 +3027,11 @@ class TicketService {
         select: {
           id: true, fileName: true, contentType: true, sizeBytes: true,
           threadEntryId: true, source: true, uploadedBy: true, createdAt: true,
+          ...ATTACHMENT_NAME_SELECT,
         },
-      }).then((rows) => markRecurring(ticket.workspaceId, rows)),
+      }).then((rows) => markRecurring(ticket.workspaceId, rows))
+        // 4.4.08: displayName / originalName / nameSource / nameDetails.
+        .then((rows) => (Array.isArray(rows) ? rows.map(withAttachmentNameFields) : rows)),
       // Active pinned workflow cards (field cards) — dismissed ones stay in the
       // table for re-run bookkeeping but never ship to the client.
       prisma.ticketPinnedCard.findMany({

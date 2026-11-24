@@ -3,7 +3,9 @@
  * one PDF, built in the browser with pdf-lib and attached as a new file. The
  * originals stay. PDFs go in page by page; JPG and PNG pictures become a page
  * each, fitted to Letter or A4. pdf-lib is loaded only when someone merges.
+ * 4.4.08: files are named as people see them (displayName, else fileName).
  */
+import { attachmentName, shownFileName } from './attachmentNames';
 
 export const MERGE_LIMIT_BYTES = 40 * 1024 * 1024;
 
@@ -43,7 +45,7 @@ export function sniffKind(bytes) {
 }
 
 const quoted = (name) => `“${name}”`;
-const listNames = (items) => items.map((a) => a.fileName || 'unnamed file').join(', ');
+const listNames = (items) => items.map((a) => shownFileName(a) || 'unnamed file').join(', ');
 const mb = (bytes) => `${Math.max(1, Math.round(bytes / (1024 * 1024)))} MB`;
 
 /**
@@ -97,7 +99,7 @@ export class MergeError extends Error {
 function fetchFailure(a, err) {
   const status = err?.response?.status;
   const why = status ? ` (server error ${status})` : '';
-  return new MergeError(`${quoted(a.fileName)} could not be downloaded${why}, so nothing was merged. Try again, or take it out.`, a.fileName);
+  return new MergeError(`${quoted(attachmentName(a))} could not be downloaded${why}, so nothing was merged. Try again, or take it out.`, shownFileName(a) || null);
 }
 
 /** A picture's size on the page: shrunk to fit inside the margins, never blown up. */
@@ -153,22 +155,22 @@ export async function buildMergedPdf(items, { fetchBytes, onProgress, signal, pa
     const declared = mergeKind(a);
     const actual = sniffKind(bytes);
     if (declared === 'pdf' || actual === 'pdf') {
-      if (actual !== 'pdf') throw new MergeError(`${quoted(a.fileName)} looks damaged: it is not a readable PDF, so nothing was merged.`, a.fileName);
+      if (actual !== 'pdf') throw new MergeError(`${quoted(attachmentName(a))} looks damaged: it is not a readable PDF, so nothing was merged.`, shownFileName(a) || null);
       let src;
       try {
         src = await PDFDocument.load(bytes, { updateMetadata: false });
       } catch (err) {
         if (isEncryptedError(err, lib)) {
-          throw new MergeError(`${quoted(a.fileName)} is password-protected, so it can't be merged. Save a copy without the password, attach that, and merge again.`, a.fileName);
+          throw new MergeError(`${quoted(attachmentName(a))} is password-protected, so it can't be merged. Save a copy without the password, attach that, and merge again.`, shownFileName(a) || null);
         }
-        throw new MergeError(`${quoted(a.fileName)} looks damaged and could not be read, so nothing was merged.`, a.fileName);
+        throw new MergeError(`${quoted(attachmentName(a))} looks damaged and could not be read, so nothing was merged.`, shownFileName(a) || null);
       }
       try {
         const pages = await out.copyPages(src, src.getPageIndices());
         if (!pages.length) throw new Error('no pages');
         pages.forEach((p) => out.addPage(p));
       } catch {
-        throw new MergeError(`${quoted(a.fileName)} looks damaged and its pages could not be copied, so nothing was merged.`, a.fileName);
+        throw new MergeError(`${quoted(attachmentName(a))} looks damaged and its pages could not be copied, so nothing was merged.`, shownFileName(a) || null);
       }
     } else {
       const kind = actual || declared;
@@ -176,7 +178,7 @@ export async function buildMergedPdf(items, { fetchBytes, onProgress, signal, pa
       try {
         img = kind === 'png' ? await out.embedPng(bytes) : await out.embedJpg(bytes);
       } catch {
-        throw new MergeError(`${quoted(a.fileName)} looks damaged: the picture could not be read, so nothing was merged.`, a.fileName);
+        throw new MergeError(`${quoted(attachmentName(a))} looks damaged: the picture could not be read, so nothing was merged.`, shownFileName(a) || null);
       }
       const fit = fitImage(img.width, img.height, size);
       const page = out.addPage([fit.pageW, fit.pageH]);

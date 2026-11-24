@@ -5,6 +5,7 @@ import { formatBytes } from './ticketUi';
 import {
   MERGE_LIMIT_BYTES, MergeError, PAGE_SIZES, buildMergedPdf, defaultPageSize, mergeBlocker, mergeKind, mergedFileName, normalisePdfName,
 } from './attachmentMerge';
+import { attachmentName } from './attachmentNames';
 
 const KIND_LABEL = { pdf: 'PDF', jpg: 'Picture', png: 'Picture' };
 
@@ -15,7 +16,8 @@ const KIND_LABEL = { pdf: 'PDF', jpg: 'Picture', png: 'Picture' };
  */
 export default function MergePdfDialog({ ticketId, items: initialItems, onClose, onDone, loadPdfLib }) {
   const [items, setItems] = useState(initialItems);
-  const [name, setName] = useState(() => mergedFileName(initialItems[0]?.fileName));
+  // 4.4.08: the default name follows the first file's shown name (its vendor name when it has one).
+  const [name, setName] = useState(() => mergedFileName(initialItems[0] ? attachmentName(initialItems[0]) : null));
   const [nameTouched, setNameTouched] = useState(false);
   const [pageSize, setPageSize] = useState(() => defaultPageSize());
   const [phase, setPhase] = useState('ready'); // ready | reading | building | attaching
@@ -37,7 +39,7 @@ export default function MergePdfDialog({ ticketId, items: initialItems, onClose,
 
   // The default name follows the first file until the agent edits it.
   useEffect(() => {
-    if (!nameTouched) setName(mergedFileName(items[0]?.fileName));
+    if (!nameTouched) setName(mergedFileName(items[0] ? attachmentName(items[0]) : null));
   }, [items, nameTouched]);
 
   const close = () => {
@@ -66,7 +68,7 @@ export default function MergePdfDialog({ ticketId, items: initialItems, onClose,
     next.splice(to, 0, it);
     setItems(next);
     setError(null);
-    setAnnounce(`${it.fileName} moved to position ${to + 1} of ${next.length}.`);
+    setAnnounce(`${attachmentName(it)} moved to position ${to + 1} of ${next.length}.`);
   };
 
   const remove = (index) => {
@@ -74,7 +76,7 @@ export default function MergePdfDialog({ ticketId, items: initialItems, onClose,
     const it = items[index];
     setItems(items.filter((_, i) => i !== index));
     setError(null);
-    setAnnounce(`${it.fileName} taken out. ${items.length - 1} files left.`);
+    setAnnounce(`${attachmentName(it)} taken out. ${items.length - 1} files left.`);
   };
 
   const merge = async () => {
@@ -140,18 +142,18 @@ export default function MergePdfDialog({ ticketId, items: initialItems, onClose,
             <li key={a.id} className="flex items-center gap-2 py-2">
               <span className="w-5 flex-none text-right text-xs tabular-nums text-muted-foreground">{i + 1}</span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium text-foreground" title={a.fileName}>{a.fileName}</span>
+                <span className="block truncate text-sm font-medium text-foreground" title={attachmentName(a)}>{attachmentName(a)}</span>
                 <span className="block text-[11px] text-muted-foreground">{KIND_LABEL[mergeKind(a)] || 'Not a PDF or picture'} · {formatBytes(a.sizeBytes)}</span>
               </span>
-              <button type="button" onClick={() => move(i, -1)} aria-disabled={i === 0 || running} aria-label={`Move ${a.fileName} up`} title="Move up"
+              <button type="button" onClick={() => move(i, -1)} aria-disabled={i === 0 || running} aria-label={`Move ${attachmentName(a)} up`} title="Move up"
                 className={`tp-focus-ring flex-none rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground ${i === 0 ? 'opacity-40' : ''}`}>
                 <ArrowUp className="h-3.5 w-3.5" aria-hidden="true" />
               </button>
-              <button type="button" onClick={() => move(i, 1)} aria-disabled={i === items.length - 1 || running} aria-label={`Move ${a.fileName} down`} title="Move down"
+              <button type="button" onClick={() => move(i, 1)} aria-disabled={i === items.length - 1 || running} aria-label={`Move ${attachmentName(a)} down`} title="Move down"
                 className={`tp-focus-ring flex-none rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground ${i === items.length - 1 ? 'opacity-40' : ''}`}>
                 <ArrowDown className="h-3.5 w-3.5" aria-hidden="true" />
               </button>
-              <button type="button" onClick={() => remove(i)} aria-disabled={items.length <= 2 || running} aria-label={`Take ${a.fileName} out of the merge`} title={items.length <= 2 ? 'A merge needs at least two files' : 'Take out'}
+              <button type="button" onClick={() => remove(i)} aria-disabled={items.length <= 2 || running} aria-label={`Take ${attachmentName(a)} out of the merge`} title={items.length <= 2 ? 'A merge needs at least two files' : 'Take out'}
                 className={`tp-focus-ring flex-none rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground ${items.length <= 2 ? 'opacity-40' : ''}`}>
                 <X className="h-3.5 w-3.5" aria-hidden="true" />
               </button>

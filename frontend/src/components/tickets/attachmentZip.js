@@ -1,4 +1,5 @@
 import { strToU8, zip } from 'fflate';
+import { shownFileName } from './attachmentNames';
 
 /**
  * "Download all" for the Attachments tab (QA 11-06 #5): fetch each listed file
@@ -126,7 +127,8 @@ function zipAsync(files, signal) {
  */
 export async function buildAttachmentsZip(attachments, { fetchBytes, onProgress, signal, concurrency = ZIP_CONCURRENCY } = {}) {
   const list = [...attachments];
-  const names = uniqueZipNames(list.map((a) => a.fileName));
+  // 4.4.08: each file goes in under the name people see (its vendor name when it has one).
+  const names = uniqueZipNames(list.map(shownFileName));
   const results = new Array(list.length);
   let next = 0;
   let done = 0;
@@ -160,7 +162,7 @@ export async function buildAttachmentsZip(attachments, { fetchBytes, onProgress,
       files[names[i]] = [r.bytes, { level: compressionLevel(a.fileName, a.contentType), mtime: zipMtime(a.createdAt) }];
       included.push(names[i]);
     } else {
-      missing.push({ fileName: a.fileName || names[i], reason: r?.reason || 'could not be downloaded' });
+      missing.push({ fileName: shownFileName(a) || names[i], reason: r?.reason || 'could not be downloaded' });
     }
   });
   if (!included.length) return { blob: null, included, missing };

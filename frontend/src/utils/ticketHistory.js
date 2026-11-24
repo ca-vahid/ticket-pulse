@@ -379,6 +379,21 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
       item = baseItem({ event: 'priority', verb: line.verb, sentence: true, priorityFrom: line.from, priorityTo: line.to, detail: line.detail, workflowName: line.workflowName, importance: 2, machine: line.machine });
       priorityRow = { ...line, at };
       attributed.priority.push({ at, to: norm(line.to) });
+    } else if (t === 'attachment_renamed') {
+      // 4.4.08: an e-mailed document named after its vendor, or a person's
+      // edit / revert of that name. "Ticket Pulse named a file INV-100234.pdf
+      // → Acme Supplies_INV-100234_2026_11_23.pdf".
+      const verb = { auto: 'named a file automatically', edit: 'renamed a file', revert: 'put back a file\'s original name' }[d.action] || 'renamed a file';
+      const how = { rules: 'Found from the e-mail', ai: 'Found by reading the document', 'rules+ai': 'Found from the e-mail and the document' }[d.method] || null;
+      item = baseItem({
+        event: 'field',
+        verb,
+        from: d.from || null,
+        to: d.to || null,
+        detail: d.action === 'auto' ? how : null,
+        importance: 1,
+        machine: false,
+      });
     } else if (t === 'mirror_conflict') {
       item = baseItem({ event: 'system', verb: 'mirror conflict', detail: d.note || (Array.isArray(d.drift) ? d.drift.join(', ') : null) });
     } else if (t === 'created') {

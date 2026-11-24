@@ -1304,7 +1304,15 @@ class MailboxIngestService {
           buffer: file.buffer,
           uploadedBy: email.from,
           source: 'email',
-        }).then((row) => { if (row?.id && Array.isArray(stored)) stored.push(row.id); }).catch((err) => {
+        }).then((row) => {
+          if (row?.id && Array.isArray(stored)) stored.push(row.id);
+          // 4.4.08: vendor display names, in the background (the workspace switch is read there).
+          if (row?.id) {
+            import('./attachmentNamingService.js')
+              .then(({ queueEmailAttachment }) => queueEmailAttachment(row, { email, isInline: file.isInline === true || Boolean(file.inlineName) }))
+              .catch(() => {});
+          }
+        }).catch((err) => {
           skipped.push({ name: file.name, reason: err.message });
         });
       }
