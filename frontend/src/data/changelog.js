@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.4.10-preview';
+export const APP_VERSION = '4.4.11-preview';
 
 export const changelog = [
+  {
+    version: '4.4.11-preview',
+    date: 'November 24, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Attachment names read better</strong> &mdash; the grey line under a renamed file now starts with &ldquo;Named automatically&rdquo; and wraps instead of cutting off; PDFs whose file name or type got mangled in transit (like &ldquo;report.pdf_&rdquo;) are now recognised and named.' },
+      { type: 'improved', html: '<strong>Small fixes</strong> &mdash; a long &ldquo;Why this priority&rdquo; note shows two lines with More; the Raised by requester tab and its heading use one name; on a phone, a personal key&rsquo;s &ldquo;from&rdquo; address stays together; red text and red buttons are easier to read in dark mode.' }
+    ],
+  },
   {
     version: '4.4.10-preview',
     date: 'November 24, 2026',
