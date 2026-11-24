@@ -32,6 +32,11 @@ const prismaMock = {
   ticketTypeDefinition: {
     findMany: jest.fn(),
   },
+  // QA 11-23: the AI's priority write leaves a priority_changed history row.
+  ticketActivity: {
+    create: jest.fn(),
+    findFirst: jest.fn(),
+  },
 };
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({
@@ -400,6 +405,38 @@ describe('freshServiceActionService priority writeback', () => {
         priorityWrittenAt: expect.any(Date),
       }),
     });
+  });
+
+  test('QA 11-23: the AI setting the priority writes one priority_changed row with its rationale', async () => {
+    const client = { updateTicketPriority: jest.fn().mockResolvedValue({ id: 222999, priority: 4 }) };
+    freshserviceModule.createFreshServiceClient.mockReturnValue(client);
+    prismaMock.ticketActivity.findFirst.mockResolvedValue(null);
+    prismaMock.ticketActivity.create.mockResolvedValue({ id: 1 });
+    prismaMock.assignmentPipelineRun.findUnique.mockResolvedValue(priorityRun({
+      ticket: { ...priorityRun().ticket, priority: 2 },
+    }));
+
+    await freshServiceActionService.executePriorityWriteback(3101, 1, false);
+
+    expect(prismaMock.ticketActivity.create).toHaveBeenCalledTimes(1);
+    const { data } = prismaMock.ticketActivity.create.mock.calls[0][0];
+    expect(data).toEqual(expect.objectContaining({ ticketId: 501, activityType: 'priority_changed', performedBy: 'Ticket Pulse AI' }));
+    expect(data.details).toEqual(expect.objectContaining({
+      from: 'Medium', to: 'Urgent', source: 'ai_assessment', actorKind: 'ai',
+      note: 'Active outage affecting a project team.', pipelineRunId: 3101,
+    }));
+  });
+
+  test('QA 11-23: no history row when the AI keeps the priority the ticket already had', async () => {
+    const client = { updateTicketPriority: jest.fn().mockResolvedValue({ id: 222999, priority: 4 }) };
+    freshserviceModule.createFreshServiceClient.mockReturnValue(client);
+    prismaMock.assignmentPipelineRun.findUnique.mockResolvedValue(priorityRun({
+      ticket: { ...priorityRun().ticket, priority: 4 },
+    }));
+
+    await freshServiceActionService.executePriorityWriteback(3101, 1, false);
+
+    expect(prismaMock.ticketActivity.create).not.toHaveBeenCalled();
   });
 
   test('records priority writeback failure without throwing into assignment sync flow', async () => {

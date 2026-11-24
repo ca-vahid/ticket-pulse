@@ -52,6 +52,7 @@ import { sseManager } from '../routes/sse.routes.js';
 import { actorKindOf, deriveActorKind } from '../utils/actorKind.js';
 import { buildFieldsUpdatedExtra } from './ticketChangeRenderer.js';
 import { markRecurring } from './recurringImageService.js';
+import { recordPriorityChange, prioritySourceForActor, priorityReasonFrom } from './priorityHistoryService.js';
 import ticketHandBackService, {
   normalizeHandBack, isRealReason as isRealHandBackReason, handBackLabel, reasonForRebound as reasonForHandBackRebound,
   HAND_BACK_KINDS, overrideCodeFor,
@@ -3071,6 +3072,9 @@ class TicketService {
       // read-time heuristic for legacy rows) so the History tab can chip +
       // filter without re-deriving.
       activities: (activities || []).map((a) => ({ ...a, actorKind: deriveActorKind(a) })),
+      // QA 11-23 item 2: "Why this priority" — the latest priority_changed row
+      // that still describes the current priority, else the assessment rationale.
+      priorityReason: priorityReasonFrom(ticket, activities || []),
       approvals: (approvals || []).map((a) => { const e = earlierConditionsFor(a, approvals); return e ? { ...a, earlierConditions: e } : a; }),
       attachments,
       pinnedCards,
@@ -4287,7 +4291,9 @@ class TicketService {
 
   // `emitEvent:false` (TU-5): an aggregating caller (API resubmission) fires
   // ONE ticket.fields_updated for the whole change set itself.
-  async updateTicketFields(ticketId, workspaceId, input, actor, { emitEvent = true, eventSource = null } = {}) {
+  // prioritySource / priorityNote (QA 11-23): a caller that changes priority for
+  // a reason of its own (e.g. 'repeat_report') names it for the history row.
+  async updateTicketFields(ticketId, workspaceId, input, actor, { emitEvent = true, eventSource = null, prioritySource = null, priorityNote = null } = {}) {
     const ticket = await this._requireNativeTicket(ticketId, workspaceId);
     const parsed = updateTicketSchema.safeParse(input);
     if (!parsed.success) throw new ValidationError(zodMessage(parsed.error));
@@ -4479,6 +4485,11 @@ class TicketService {
     const otherChanges = Object.fromEntries(Object.entries(changes).filter(([k]) => !(k in dueChanges) && k !== 'ccEmails'));
     const dueOnly = Object.keys(otherChanges).length === 0 && !ccChanged && Object.keys(dueChanges).length > 0;
     if (!dueOnly) patch.mirrorState = 'pending';
+    // QA 11-23 item 2: a priority edit is its own priority_changed row (below),
+    // not part of the fields_updated row — one line in the history, not two.
+    // _audit would have stamped the activity time; a priority-only edit does it here.
+    if (changes.priority) patch.lastRealActivityAt = new Date();
+    const auditedFieldChanges = Object.fromEntries(Object.entries(otherChanges).filter(([k]) => k !== 'priority'));
 
     const updated = await prisma.ticket.update({
       where: { id: ticket.id },
@@ -4490,8 +4501,19 @@ class TicketService {
     // reads distinctly in the activity timeline; other field edits keep the
     // generic fields_updated entry.
     let auditRow = null; // first audit row of this write anchors the event stamp
-    if (Object.keys(otherChanges).length) {
-      const row = await this._audit(ticket.id, 'fields_updated', actor, { changes: otherChanges });
+    if (changes.priority) {
+      const row = await recordPriorityChange({
+        ticketId: ticket.id,
+        from: changes.priority.from,
+        to: changes.priority.to,
+        source: prioritySource || prioritySourceForActor(actor),
+        actor,
+        note: priorityNote,
+      });
+      auditRow = auditRow || row;
+    }
+    if (Object.keys(auditedFieldChanges).length) {
+      const row = await this._audit(ticket.id, 'fields_updated', actor, { changes: auditedFieldChanges });
       auditRow = auditRow || row;
     }
     if (Object.keys(dueChanges).length) {
@@ -4969,6 +4991,7 @@ class TicketService {
         toTechName: fsHandBackKind === HAND_BACK_KINDS.REASSIGN ? (updated.assignedTech?.name || null) : null,
       })
       : null;
+    const priorityMoved = Boolean(changes.priority) && Number(changes.priority.from) !== Number(changes.priority.to);
     const writeBackAudit = await this._audit(ticket.id, 'fs_write_back', actor, {
       changes,
       fsTicketId: Number(ticket.freshserviceTicketId),
@@ -4979,7 +5002,19 @@ class TicketService {
       ...(fsHandBackEvent ? { handBack: fsHandBackEvent } : {}),
       // QA 10-20 #2: a system close says why (grouping: "Combined into TP-10294").
       ...(auditDetails && typeof auditDetails === 'object' && !Array.isArray(auditDetails) ? auditDetails : {}),
+      // QA 11-23 item 2: the priority part has its own priority_changed row;
+      // History shows that one (this row keeps changes.priority for the echo guard).
+      ...(priorityMoved ? { priorityLogged: true } : {}),
     });
+    if (priorityMoved) {
+      await recordPriorityChange({
+        ticketId: ticket.id,
+        from: changes.priority.from,
+        to: changes.priority.to,
+        source: prioritySourceForActor(actor),
+        actor,
+      });
+    }
     // ticket.fields_updated (TU-5) for the FIELD part of a write-back —
     // status and assignee have their own triggers (status_changed /
     // assigned / reassigned fire from _notifyLifecycle below).

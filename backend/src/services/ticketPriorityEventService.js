@@ -2,6 +2,7 @@ import prisma from './prisma.js';
 import assignmentPipelineService from './assignmentPipelineService.js';
 import notificationPreferenceService from './notificationPreferenceService.js';
 import { PRIORITY_ID_TO_LABEL, PRIORITY_LABEL_TO_ID } from './priorityAssessment.js';
+import { recordPriorityChange } from './priorityHistoryService.js';
 import logger from '../utils/logger.js';
 
 const NOTIFY_PRIORITY_FLOOR = PRIORITY_LABEL_TO_ID.High;
@@ -96,6 +97,16 @@ class TicketPriorityEventService {
       fromPriorityId,
       toPriorityId,
       direction: event.direction,
+    });
+
+    // QA 11-23 item 2: a change seen in FreshService is ticket history too.
+    await recordPriorityChange({
+      ticketId: upsertedTicket.id,
+      from: fromPriorityId,
+      to: toPriorityId,
+      source: 'sync',
+      at: sourceUpdatedAt || null,
+      details: { priorityEventId: event.id, ingestSource: source },
     });
 
     if (processAsync) {
@@ -199,6 +210,9 @@ class TicketPriorityEventService {
           select: {
             id: true,
             workspaceId: true,
+            // QA 11-23 item 1: the alert names and links the ticket in Ticket Pulse.
+            origin: true,
+            nativeNumber: true,
             freshserviceTicketId: true,
             subject: true,
             status: true,

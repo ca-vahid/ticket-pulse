@@ -2358,6 +2358,13 @@ export const assignmentLevelMatchAPI = {
   saveSettings: (patch) => api.put('/assignment-level-match/settings', patch),
 };
 
+// QA 11-23 priority
+// Assignment Review → Raised by requester: tickets the AI rated Medium or Low
+// that the requester raised from their status link. Coordinator or higher.
+export const priorityRaisesAPI = {
+  list: (days = 7) => api.get('/assignment/priority-raises', { params: { days } }),
+};
+
 // QA 11-17 item 1 — Time-zone fit: the switch beside Level match.
 export const assignmentTimezoneFitAPI = {
   get: (days = 14) => api.get('/assignment-level-match/timezone-fit', { params: { days } }),

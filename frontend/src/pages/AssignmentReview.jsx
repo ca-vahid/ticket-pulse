@@ -15,6 +15,7 @@ import HandBacksTab from '../components/assignment/HandBacksTab';
 import SpreadTab from '../components/assignment/SpreadTab';
 import SharesTab from '../components/assignment/SharesTab';
 import LevelMatchTab from '../components/assignment/LevelMatchTab';
+import PriorityRaisesTab from '../components/assignment/PriorityRaisesTab';
 import RunEscalationLine from '../components/assignment/RunEscalationLine';
 import SettledBacklogButton from '../components/assignment/SettledBacklogButton';
 import { formatDateTimeInTimezone } from '../utils/dateHelpers';
@@ -43,6 +44,8 @@ const ALL_TABS = [
   { id: 'shares', label: 'Shares', icon: PieChart, minRole: 'reviewer' },
   // 26 Oct 2026: the AI judges the level a request needs; lightest day among the qualified wins.
   { id: 'level-match', label: 'Level match', icon: Gauge, minRole: 'reviewer' },
+  // QA 11-23 #2: tickets the AI rated Medium or Low that the requester raised.
+  { id: 'priority-raises', label: 'Raised by requester', icon: ArrowUp, minRole: 'reviewer' },
   { id: 'daily-review', label: 'Improvements', icon: Sparkles, minRole: 'admin' },
   { id: 'competencies', label: 'Competencies', icon: Award, minRole: 'admin' },
   { id: 'competency-requests', label: 'Requests', icon: MessageSquare, minRole: 'admin' },
@@ -5156,6 +5159,7 @@ export default function AssignmentReview() {
             {activeTab === 'spread' && <SpreadTab workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'shares' && <SharesTab workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'level-match' && <LevelMatchTab workspaceTimezone={workspaceTimezone} />}
+            {activeTab === 'priority-raises' && <PriorityRaisesTab />}
             {activeTab === 'daily-review' && <DailyReviewManager workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'competencies' && <CompetencyManager deepRunId={competencyRunId} deepAnalyzeTechId={analyzeTechId} workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'competency-requests' && <CompetencyRequestsTab onPendingCountChange={setCompetencyRequestCount} />}

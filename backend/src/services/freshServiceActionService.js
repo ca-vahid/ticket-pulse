@@ -12,6 +12,7 @@ import {
 import { isFsTaxonomySyncWorkspace } from '../utils/workspaceFeatureFlags.js';
 import logger from '../utils/logger.js';
 import { PRIORITY_ID_TO_LABEL } from './priorityAssessment.js';
+import { recordPriorityChange } from './priorityHistoryService.js';
 import { normalizeTicketType } from './ticketTypeAssessment.js';
 import ticketTypeService from './ticketTypeService.js';
 import statusService from './statusService.js';
@@ -508,6 +509,7 @@ class FreshServiceActionService {
           select: {
             id: true,
             freshserviceTicketId: true,
+            priority: true,
             assessedPriority: true,
             assessedPriorityId: true,
             priorityRationale: true,
@@ -580,20 +582,32 @@ class FreshServiceActionService {
 
       const action = actions[0];
       await client.updateTicketPriority(action.ticketId, action.priorityId);
-      await prisma.ticket.update({
+      const localUpdated = await prisma.ticket.update({
         where: { id: run.ticketId },
         data: {
           priority: action.priorityId,
           updatedAt: new Date(),
         },
-      }).catch((updateError) => {
+      }).then(() => true).catch((updateError) => {
         logger.warn('FreshService priority sync: priority updated but local mirror update failed', {
           ticketId: run.ticketId,
           freshserviceTicketId: action.ticketId,
           runId,
           error: updateError.message,
         });
+        return false;
       });
+      // QA 11-23 item 2: the AI setting the ticket's priority is history too.
+      if (localUpdated) {
+        await recordPriorityChange({
+          ticketId: run.ticketId,
+          from: run.ticket?.priority ?? null,
+          to: action.priorityId,
+          source: 'ai_assessment',
+          note: run.ticket?.priorityRationale || null,
+          details: { pipelineRunId: runId },
+        });
+      }
 
       await prisma.assignmentPipelineRun.update({
         where: { id: runId },

@@ -19,13 +19,12 @@ import {
 import notificationPreferenceService from './notificationPreferenceService.js';
 import { resolveAfterHoursActiveContact } from './urgentEscalationContactService.js';
 import { PRIORITY_ID_TO_LABEL } from './priorityAssessment.js';
-import config from '../config/index.js';
 import { AuthorizationError, NotFoundError, ValidationError } from '../utils/errors.js';
 import logger from '../utils/logger.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
-import { ticketLinkUrl } from '../utils/ticketLink.js';
-import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
+import { freshserviceTicketLink, notificationTicketRef, ticketAppLink } from '../utils/ticketNotificationLink.js';
 import { repairCp437Mojibake } from '../utils/mojibake.js';
+import { recordPriorityChange, priorityLabelOf } from './priorityHistoryService.js';
 
 const ESCALATION_CHANNELS = Object.freeze(['email', 'sms', 'whatsapp', 'phone_call']);
 const PHONE_CHANNELS = new Set(['sms', 'whatsapp', 'phone_call']);
@@ -221,31 +220,50 @@ function hashText(value) {
   return crypto.createHash('sha256').update(String(value)).digest('hex');
 }
 
-function freshserviceLink(ticket) {
-  const fsId = ticket?.freshserviceTicketId ? Number(ticket.freshserviceTicketId) : null;
-  const domain = config.freshservice?.domain || null;
-  const host = domain
-    ? (domain.includes('.freshservice.com') ? domain : `${domain}.freshservice.com`)
-    : null;
-  return fsId && host ? `https://${host}/a/tickets/${fsId}` : null;
-}
-
 /**
  * 16 Nov 2026 (IT cutover): the person on call is paged to the ticket in Ticket Pulse, where IT
  * now works it, not the FreshService copy. The ticket's own reference (TP-n for a Ticket Pulse
  * ticket) and the app's short link (/it/TP-n); the FreshService link only if no app link can
- * be built (a ticket object without an id).
+ * be built (a ticket object without an id). QA 11-23: the builders now live in
+ * utils/ticketNotificationLink.js so the assignment and priority-change alerts use them too.
  */
-function ticketAppLink(ticket) {
-  if (!ticket?.id) return null;
-  return ticketLinkUrl(resolvePublicBaseUrl({ warn: (m) => logger.warn(m) }), ticket);
+const freshserviceLink = freshserviceTicketLink;
+const escalationTicketRef = notificationTicketRef;
+
+/**
+ * QA 11-23 item 2: what the ticket was before the requester raised it, kept on
+ * the escalation event — the ticket's own priority and the AI's assessment
+ * (the weekly "the requester raised it" list compares against the latter).
+ */
+function priorityBeforeRaise(ticket) {
+  const fromPriorityId = Number(ticket?.priority) || null;
+  const fromAssessedPriorityId = Number(ticket?.assessedPriorityId) || null;
+  return {
+    fromPriorityId,
+    fromPriorityLabel: priorityLabelOf(fromPriorityId),
+    fromAssessedPriorityId,
+    fromAssessedPriority: priorityLabelOf(ticket?.assessedPriority) || priorityLabelOf(fromAssessedPriorityId),
+    toPriorityLabel: URGENT_PRIORITY_LABEL,
+  };
 }
 
-function escalationTicketRef(ticket) {
-  if (!ticket) return null;
-  const hasNumbers = ticket.nativeNumber !== null && ticket.nativeNumber !== undefined
-    || ticket.freshserviceTicketId !== null && ticket.freshserviceTicketId !== undefined;
-  return hasNumbers ? ticketDisplayRef(ticket) : null;
+/** The requester's raise in the ticket history (it used to leave no row). Never throws. */
+async function recordRequesterRaise({ ticket, event, note }) {
+  await recordPriorityChange({
+    ticketId: ticket?.id,
+    from: ticket?.priority,
+    to: URGENT_PRIORITY_ID,
+    source: 'requester_link',
+    actorKind: 'human',
+    actorName: ticket?.requester?.name || ticket?.requester?.email || 'Requester',
+    actorEmail: ticket?.requester?.email || null,
+    note,
+    details: {
+      urgentEscalationEventId: event?.id ?? null,
+      escalationSource: event?.source || null,
+      fromAssessedPriority: priorityLabelOf(ticket?.assessedPriority) || priorityLabelOf(ticket?.assessedPriorityId),
+    },
+  });
 }
 
 function preferredPhone(preference = {}) {
@@ -1009,6 +1027,7 @@ class AfterHoursUrgentEscalationService {
             providerConfigured: readiness.configured,
             providerMissing: readiness.providerMissing,
             freshserviceTicketId: ticket.freshserviceTicketId ? Number(ticket.freshserviceTicketId) : null,
+            ticketRef: escalationTicketRef(ticket), // QA 11-23: the e-mail subject names TP-n
             escalationType: source,
             urgentEscalationEventId: event.id,
           },
@@ -1129,6 +1148,7 @@ class AfterHoursUrgentEscalationService {
             providerConfigured: provider.configured,
             providerMissing: provider.missing,
             freshserviceTicketId: ticket.freshserviceTicketId ? Number(ticket.freshserviceTicketId) : null,
+            ticketRef: escalationTicketRef(ticket),
             escalationType: source,
             legacyRecipient: true,
             urgentEscalationEventId: event.id,
@@ -1380,6 +1400,7 @@ class AfterHoursUrgentEscalationService {
         payload: safeJson({
           publicStatusTokenPrefix: state.link.tokenPrefix || state.token.slice(0, 10),
           afterHours: state.policyContext.availability,
+          ...priorityBeforeRaise(state.ticket),
         }),
       },
     });
@@ -1395,6 +1416,11 @@ class AfterHoursUrgentEscalationService {
         priorityAssessedAt: new Date(),
         updatedAt: new Date(),
       },
+    });
+    await recordRequesterRaise({
+      ticket: state.ticket,
+      event,
+      note: 'Asked for urgent after-hours help from their status link.',
     });
 
     const writeback = await freshServiceActionService.executeDirectPriorityWriteback({
@@ -1731,6 +1757,7 @@ class AfterHoursUrgentEscalationService {
           businessHours: state.policyContext.availability,
           assignedAgentPriorityAlerts: 'system_priority_preferences',
           notifySupervisors: state.policy.businessUrgencyNotifySupervisors,
+          ...priorityBeforeRaise(state.ticket),
         }),
       },
     });
@@ -1749,6 +1776,9 @@ class AfterHoursUrgentEscalationService {
       select: {
         id: true,
         workspaceId: true,
+        // QA 11-23 item 1: the alert names and links the ticket in Ticket Pulse.
+        origin: true,
+        nativeNumber: true,
         freshserviceTicketId: true,
         subject: true,
         status: true,
@@ -1758,6 +1788,11 @@ class AfterHoursUrgentEscalationService {
         assignedTechId: true,
         assignedTech: { select: { id: true, name: true, email: true } },
       },
+    });
+    await recordRequesterRaise({
+      ticket: state.ticket,
+      event,
+      note: 'Raised the priority to Urgent from their status link.',
     });
 
     const writeback = await freshServiceActionService.executeDirectPriorityWriteback({

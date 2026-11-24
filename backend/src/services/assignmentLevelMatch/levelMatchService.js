@@ -1,7 +1,8 @@
 import prisma from '../prisma.js';
 import settingsRepository from '../settingsRepository.js';
 import logger from '../../utils/logger.js';
-import { getTodayRange, getLocalDateBounds } from '../../utils/timezone.js';
+import { getLocalDateBounds } from '../../utils/timezone.js';
+import { countAssignedToday } from '../assignmentTodayCount.js';
 import {
   MODES, OUTCOMES, applyPatch, decide, normalizeLevel, normalizeSettings, onShiftAt, skillFor, toStored,
 } from './rules.js';
@@ -14,8 +15,9 @@ import {
  * - Shadow records who the rule would have picked on the run
  *   (`recommendation.levelMatch`) and changes nothing. Live gives the ticket
  *   to that person on an automatic assignment.
- * - "Today" = assignment episodes started since local midnight (picked by
- *   hand or given by automation — both are load), this ticket excluded.
+ * - "Today" = tickets given to the person since local midnight, by anyone,
+ *   once per ticket, this ticket excluded (assignmentTodayCount.js — the
+ *   same count get_assignment_risk_signals shows the AI).
  *
  * Nothing here may fail an assignment: every public method catches and
  * answers "leave it as it was".
@@ -91,13 +93,12 @@ class LevelMatchService {
     }
     const workspace = await prisma.workspace.findUnique({ where: { id: ws }, select: { defaultTimezone: true } }).catch(() => null);
     const timezone = workspace?.defaultTimezone || 'America/Vancouver';
-    const { start: todayStart } = getTodayRange(timezone, now);
     const { start: dayStart, end: dayEnd } = getLocalDateBounds(timezone, now);
     const { openWorkloadStatuses } = await import('../assignmentTools.js');
     const openStatuses = await openWorkloadStatuses(ws);
     const thisTicket = toId(ticketId);
 
-    const [techs, skills, todayRows, openRows, leaves, rejections] = await Promise.all([
+    const [techs, skills, today, openRows, leaves, rejections, skillNames] = await Promise.all([
       prisma.technician.findMany({
         where: { id: { in: ids }, workspaceId: ws },
         select: { id: true, name: true, isActive: true, timezone: true, workStartTime: true, workEndTime: true, routingGuidance: true, assignableOnly: true },
@@ -108,11 +109,8 @@ class LevelMatchService {
           select: { technicianId: true, competencyCategoryId: true, proficiencyLevel: true },
         })
         : [],
-      prisma.ticketAssignmentEpisode.groupBy({
-        by: ['technicianId'],
-        where: { workspaceId: ws, technicianId: { in: ids }, startedAt: { gte: todayStart, lte: now }, ...(thisTicket ? { NOT: { ticketId: thisTicket } } : {}) },
-        _count: { _all: true },
-      }),
+      // One "today" for every assignment rule (QA 11-23 item 3): see assignmentTodayCount.js.
+      countAssignedToday({ workspaceId: ws, technicianIds: ids, timezone, now, excludeTicketId: thisTicket }),
       prisma.ticket.groupBy({
         by: ['assignedTechId'],
         where: { workspaceId: ws, assignedTechId: { in: ids }, status: { in: openStatuses }, ...(thisTicket ? { NOT: { id: thisTicket } } : {}) },
@@ -125,6 +123,12 @@ class LevelMatchService {
       thisTicket
         ? prisma.ticketAssignmentEpisode.findMany({ where: { ticketId: thisTicket, endMethod: 'rejected' }, select: { technicianId: true } })
         : [],
+      // The skill's name, for the sentence ("Both advanced in Teams"). Optional.
+      categoryId || subcategoryId
+        ? Promise.resolve().then(() => prisma.competencyCategory.findMany({
+          where: { id: { in: [categoryId, subcategoryId].filter(Boolean) } }, select: { id: true, name: true },
+        })).catch(() => [])
+        : [],
     ]);
 
     const byId = new Map(techs.map((t) => [t.id, t]));
@@ -134,8 +138,13 @@ class LevelMatchService {
       skillsBy.get(s.technicianId).push({ categoryId: s.competencyCategoryId, level: s.proficiencyLevel });
     }
     const count = (rows, key) => new Map(rows.map((r) => [r[key], r._count?._all ?? 0]));
-    const today = count(todayRows, 'technicianId');
     const open = count(openRows, 'assignedTechId');
+    const nameOf = new Map((Array.isArray(skillNames) ? skillNames : []).map((c) => [c.id, c.name]));
+    const named = (skill) => {
+      if (!skill) return null;
+      const name = nameOf.get(skill.priority === 2 ? subcategoryId : categoryId) || null;
+      return name ? { ...skill, name } : skill;
+    };
     const away = new Set(leaves.filter((l) => !NOT_AWAY.includes(l.category)).map((l) => l.technicianId));
     const rejected = new Set(rejections.map((r) => r.technicianId));
 
@@ -148,7 +157,7 @@ class LevelMatchService {
           techName: t.name || r.techName,
           rank: r.rank,
           score: r.score,
-          skill: skillFor(skillsBy.get(r.techId) || [], { categoryId, subcategoryId }),
+          skill: named(skillFor(skillsBy.get(r.techId) || [], { categoryId, subcategoryId })),
           today: today.get(r.techId) || 0,
           open: open.get(r.techId) || 0,
           onLeave: away.has(r.techId),
@@ -196,6 +205,10 @@ class LevelMatchService {
         to: result.outcome === OUTCOMES.MOVED ? { techId: result.techId, techName: result.techName } : null,
         considered: result.considered,
         sentence: result.sentence,
+        // QA 11-23: why the move happened, and who was passed over for a much heavier queue.
+        moveReason: result.moveReason || null,
+        skipped: result.skipped || [],
+        skipReason: result.skipReason || null,
         at: now.toISOString(),
       };
       const wouldMove = result.outcome === OUTCOMES.MOVED;
@@ -245,9 +258,10 @@ class LevelMatchService {
       decision: r.decision,
       ...(r.level_match || {}),
     }));
-    const tally = { total: runs.length, kept: 0, moved: 0, noLevel: 0, noSkill: 0, byLevel: {} };
+    const tally = { total: runs.length, kept: 0, moved: 0, noLevel: 0, noSkill: 0, keptForOpenLoad: 0, byLevel: {} };
     for (const r of runs) {
       if (r.outcome === OUTCOMES.KEPT) tally.kept += 1;
+      if (r.outcome === OUTCOMES.KEPT && r.skipReason) tally.keptForOpenLoad += 1;
       else if (r.outcome === OUTCOMES.MOVED) tally.moved += 1;
       else if (r.outcome === OUTCOMES.NO_LEVEL) tally.noLevel += 1;
       else if (r.outcome === OUTCOMES.NO_SKILL) tally.noSkill += 1;

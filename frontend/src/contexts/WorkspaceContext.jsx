@@ -368,3 +368,25 @@ export function useWorkspace() {
 export function useWorkspaceOptional() {
   return useContext(WorkspaceContext);
 }
+
+/**
+ * The person's role in the workspace on screen, lower-cased ('admin',
+ * 'coordinator', 'viewer', …) or null (QA 11-23 #3).
+ *
+ * `currentWorkspace` is usually stored as `{ id, name, slug }` with no role
+ * (selection, switch, the localStorage copy); only the `availableWorkspaces`
+ * entries carry it. Read the role from there, falling back to a role the
+ * current object happens to carry. Tolerant outside a provider.
+ */
+export function workspaceRoleFor(currentWorkspace, availableWorkspaces) {
+  if (!currentWorkspace) return null;
+  const listed = (availableWorkspaces || []).find((w) => String(w?.id) === String(currentWorkspace.id));
+  const raw = listed?.role || currentWorkspace.role || '';
+  const role = String(raw).trim().toLowerCase();
+  return role || null;
+}
+
+export function useCurrentWorkspaceRole() {
+  const ctx = useContext(WorkspaceContext);
+  return workspaceRoleFor(ctx?.currentWorkspace || null, ctx?.availableWorkspaces || []);
+}

@@ -618,12 +618,43 @@ describe('afterHoursUrgentEscalationService', () => {
       assignedTech: { id: 17, name: 'Alex Agent', email: 'alex@example.com' },
     });
     queuePriorityChangeMock.mockResolvedValue({ queued: 1, channels: ['email'] });
+    prismaMock.ticketActivity.findFirst.mockResolvedValue(null);
+    prismaMock.ticketActivity.create.mockResolvedValue({ id: 5001 });
 
     const result = await afterHoursUrgentEscalationService.submitPublicBusinessUrgency('token-2', {
       ip: '127.0.0.1',
       userAgent: 'jest',
     });
 
+    // QA 11-23 item 2: the from-level is kept on the event, and the raise is ticket history.
+    expect(prismaMock.urgentEscalationEvent.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        source: 'business_urgency',
+        payload: expect.objectContaining({
+          fromPriorityId: 3,
+          fromPriorityLabel: 'High',
+          fromAssessedPriority: 'High',
+          toPriorityLabel: 'Urgent',
+        }),
+      }),
+    }));
+    expect(prismaMock.ticketActivity.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        ticketId: 502,
+        activityType: 'priority_changed',
+        performedBy: 'Requester',
+        details: expect.objectContaining({
+          from: 'High',
+          to: 'Urgent',
+          source: 'requester_link',
+          actorKind: 'human',
+          actorName: 'Requester',
+          actorEmail: 'requester@example.com',
+          note: 'Raised the priority to Urgent from their status link.',
+          urgentEscalationEventId: 46,
+        }),
+      }),
+    });
     expect(result.status).toBe('submitted');
     // The public response carries counts only (QA 11-16 review: it used to name skipped staff);
     // the full summary is kept on the escalation event for the team.

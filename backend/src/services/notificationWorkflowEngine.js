@@ -4756,12 +4756,31 @@ export async function executeUpdateTicketNode(node, eventContext, { dryRun = fal
       .catch(() => {});
   }
 
+  // QA 11-23 item 2: a priority the workflow set is its own priority_changed
+  // row; the workflow row below carries the other changes (none → no row).
+  const loggedChanges = Object.fromEntries(Object.entries(changes).filter(([key]) => key !== 'priority'));
+  if (changes.priority) {
+    try {
+      const { recordPriorityChange } = await import('./priorityHistoryService.js');
+      await recordPriorityChange({
+        ticketId: ticket.id,
+        from: changes.priority.from,
+        to: changes.priority.to,
+        source: who.kind === 'workflow' ? 'workflow' : 'agent',
+        actorKind: who.kind,
+        actorName: who.name,
+        note: node.data?.note || null,
+        details: { workflowId: workflowId || null, eventType: eventContext.event?.type || null },
+      });
+    } catch { /* non-fatal */ }
+  }
   try {
+    if (!Object.keys(loggedChanges).length) throw new Error('nothing else to log');
     const { default: ticketActivityRepository } = await import('./ticketActivityRepository.js');
     // Ticket Pulse's own status-only write reads as a status change in the
     // history ("reopened"), the way a person's would; a workflow's stays a
     // workflow row.
-    const ownStatusWrite = who.kind !== 'workflow' && Object.keys(changes).length === 1 && changes.status;
+    const ownStatusWrite = who.kind !== 'workflow' && Object.keys(loggedChanges).length === 1 && loggedChanges.status;
     await ticketActivityRepository.create(ownStatusWrite
       ? {
         ticketId: ticket.id,
@@ -4778,7 +4797,7 @@ export async function executeUpdateTicketNode(node, eventContext, { dryRun = fal
         activityType: 'workflow_updated_ticket',
         performedBy: 'Notification workflow',
         performedAt: now,
-        details: { changes, note: node.data?.note || null, eventType: eventContext.event?.type || null, actorKind: 'workflow' },
+        details: { changes: loggedChanges, note: node.data?.note || null, eventType: eventContext.event?.type || null, actorKind: 'workflow' },
       });
   } catch { /* non-fatal */ }
   try {

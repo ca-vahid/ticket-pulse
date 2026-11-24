@@ -16,6 +16,7 @@ import ticketReclassificationService from '../services/ticketReclassificationSer
 import syncService from '../services/syncService.js';
 import promptRepository from '../services/promptRepository.js';
 import priorityBackfillService from '../services/priorityBackfillService.js';
+import { priorityReasonForTicket } from '../services/priorityHistoryService.js';
 import workspaceWebhookService from '../services/workspaceWebhookService.js';
 import providerGateway from '../services/aiProviders/providerGateway.js';
 import graphMailClient from '../integrations/graphMailClient.js';
@@ -1080,7 +1081,9 @@ router.get('/runs/:id', requireAdmin, asyncHandler(async (req, res) => {
       }
     }
   } catch { /* prompt metadata unavailable — run detail still renders */ }
-  res.json({ success: true, data: { ...run, promptVersionNumber, currentPublishedPromptVersion } });
+  // QA 11-23: "Why this priority" on the run's ticket (e.g. raised by the requester from their status link).
+  const ticket = run.ticket ? { ...run.ticket, priorityReason: await priorityReasonForTicket(run.ticket) } : run.ticket;
+  res.json({ success: true, data: { ...run, ticket, promptVersionNumber, currentPublishedPromptVersion } });
 }));
 
 router.post('/runs/:id/decide', requireReviewer, asyncHandler(async (req, res) => {

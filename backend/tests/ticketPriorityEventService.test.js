@@ -12,6 +12,11 @@ const prismaMock = {
   assignmentPipelineRun: {
     findFirst: jest.fn().mockResolvedValue(null),
   },
+  // QA 11-23: a change seen in FreshService leaves a priority_changed row.
+  ticketActivity: {
+    create: jest.fn(),
+    findFirst: jest.fn(),
+  },
 };
 
 const runPipelineMock = jest.fn();
@@ -92,6 +97,25 @@ describe('ticketPriorityEventService', () => {
         dedupeKey: 'fs-priority:501:2:3:2026-05-27T15:05:00.000Z',
       }),
     });
+    expect(prismaMock.ticketActivity.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        ticketId: 501,
+        activityType: 'priority_changed',
+        performedBy: 'FreshService',
+        performedAt: new Date('2026-05-27T15:05:00.000Z'),
+        details: expect.objectContaining({ from: 'Medium', to: 'High', source: 'sync', actorKind: 'freshservice_sync', priorityEventId: 41 }),
+      }),
+    });
+  });
+
+  test('QA 11-23: an already-recorded FreshService change writes no second history row', async () => {
+    prismaMock.ticketPriorityEvent.findUnique.mockResolvedValue({ id: 40 });
+    await ticketPriorityEventService.recordFreshServicePriorityChange({
+      processAsync: false,
+      existingTicket: { id: 501, workspaceId: 1, priority: 2 },
+      upsertedTicket: { id: 501, workspaceId: 1, priority: 3, freshserviceUpdatedAt: new Date('2026-05-27T15:05:00.000Z') },
+    });
+    expect(prismaMock.ticketActivity.create).not.toHaveBeenCalled();
   });
 
   test('processes raised High and Urgent events through agent preferences and reassessment', async () => {
