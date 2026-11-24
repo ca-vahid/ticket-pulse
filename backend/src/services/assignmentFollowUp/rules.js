@@ -124,19 +124,42 @@ const id = (v) => { const n = Number(v); return Number.isInteger(n) && n > 0 ? n
 const round2 = (n) => Math.round(n * 100) / 100;
 
 /**
+ * The blocked-work symptoms (coordinator, 23 Nov): two tickets in the same
+ * subcategory that both say the person cannot get in are the same problem,
+ * whatever else the words are. Read on the normalized subject ("sign-in" →
+ * "sign in"); `access` counts here although it is generic elsewhere.
+ */
+const SYMPTOM = /\b(sign ?in(to)?|signin|log ?in(to)?|login|logon|locked out|passwords?|access)\b/;
+export const SAME_SYMPTOM_WORDS = Object.freeze(['sign in', 'sign-in', 'signin', 'log in', 'login', 'logon', 'locked out', 'password', 'access']);
+
+/** Does the subject carry a sign-in / access symptom? */
+export function hasAccessSymptom(subject) {
+  return SYMPTOM.test(normalizeSubject(subject));
+}
+
+/** Content words of category / subcategory names ("Teams" → ['team']). */
+export function categoryNameWords(...names) {
+  return [...new Set(names.filter(Boolean).flatMap((n) => subjectTokens(n)))];
+}
+
+/**
  * Is `other` the same problem as `ticket`? A shared subcategory or category
  * alone is never enough (second-look review, 23 Nov): one person can have a
  * Teams licence request and a Teams sign-in problem the same day.
- *   - Same subcategory: at least one shared meaningful content word (generic
- *     ticket words like "can't", "access", "lost" do not count), or close
- *     words / text as below (coordinator, 23 Nov).
+ *   - Same subcategory: at least one shared meaningful word that is not a
+ *     generic ticket word AND not a word of either ticket's category or
+ *     subcategory name (in a product-named subcategory the product is always
+ *     shared); or both subjects carry a sign-in / access symptom; or close
+ *     embedded text (coordinator, 23 Nov).
  *   - Category-only or no category: subject words at SUBJECT_SIMILARITY_MIN,
  *     or (both tickets already embedded) text at TEXT_SIMILARITY_MIN.
+ * `categoryWords`: the name words to leave out (categoryNameWords). `null`
+ * means the names could not be read — then shared words do not count at all.
  * `matchedOn` says what agreed: the subcategory, the category (when one side
  * has no subcategory), or nothing but the words ('subject' / 'text').
- * @returns {null | { matchedOn, similarity, textSimilarity, sharedWords }}
+ * @returns {null | { matchedOn, similarity, textSimilarity, sharedWords, symptom }}
  */
-export function sameProblem(ticket, other, { textSimilarity = null } = {}) {
+export function sameProblem(ticket, other, { textSimilarity = null, categoryWords = [] } = {}) {
   const subject = subjectSimilarity(ticket?.subject, other?.subject);
   const text = Number.isFinite(textSimilarity) ? textSimilarity : null;
   const wordsClose = subject >= SUBJECT_SIMILARITY_MIN;
@@ -145,14 +168,17 @@ export function sameProblem(ticket, other, { textSimilarity = null } = {}) {
   const sb = id(other?.internalSubcategoryId);
   const ca = id(ticket?.internalCategoryId);
   const cb = id(other?.internalCategoryId);
-  const sharedWords = sharedContentWords(ticket?.subject, other?.subject);
+  const nameWords = categoryWords === null ? null : new Set(categoryWords || []);
+  const sharedWords = nameWords === null ? [] : sharedContentWords(ticket?.subject, other?.subject).filter((w) => !nameWords.has(w));
+  const symptom = hasAccessSymptom(ticket?.subject) && hasAccessSymptom(other?.subject);
   const base = {
     similarity: round2(wordsClose || !textClose ? subject : text),
     textSimilarity: text === null ? null : round2(text),
     sharedWords,
+    symptom,
   };
   if (sa && sb && sa === sb) {
-    return sharedWords.length || wordsClose || textClose ? { matchedOn: 'subcategory', ...base } : null;
+    return sharedWords.length || symptom || textClose ? { matchedOn: 'subcategory', ...base } : null;
   }
   if (!wordsClose && !textClose) return null;
   // Same category counts only when one side has no subcategory: two different

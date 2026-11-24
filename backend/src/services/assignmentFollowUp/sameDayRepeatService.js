@@ -4,7 +4,7 @@ import logger from '../../utils/logger.js';
 import { getLocalDateBounds, getTodayRange } from '../../utils/timezone.js';
 import { onShiftAt } from '../assignmentLevelMatch/rules.js';
 import {
-  MAX_REQUESTER_TICKETS_PER_DAY, MODES, OUTCOMES, applyPatch, machineCreatedReason, mergeNote, normalizeSettings, priorityId,
+  MAX_REQUESTER_TICKETS_PER_DAY, MODES, OUTCOMES, applyPatch, categoryNameWords, machineCreatedReason, mergeNote, normalizeSettings, priorityId,
   raisedPriority, routingSentence, sameProblem, ticketRef, toStored,
 } from './rules.js';
 
@@ -39,6 +39,11 @@ const LADDER = ['Low', 'Medium', 'High', 'Urgent'];
 const rank = (label) => LADDER.findIndex((p) => p.toLowerCase() === String(label || '').trim().toLowerCase());
 const labelOf = (label) => LADDER[rank(label)] || null;
 const higher = (a, b) => (rank(a) >= rank(b) ? labelOf(a) : labelOf(b));
+/** Sources of a priority_changed row a PERSON made (priorityHistoryService sources / actor kinds). */
+const PERSON_SOURCES = new Set(['agent', 'requester_link', 'personal_key']);
+const PERSON_KINDS = new Set(['human', 'personal_key']);
+const isPersonChange = (d) => Boolean(d && typeof d === 'object' && d.source !== PRIORITY_SOURCE
+  && (PERSON_SOURCES.has(d.source) || (!d.source && PERSON_KINDS.has(d.actorKind))));
 /** What the matcher reads from both tickets. */
 const TICKET_FIELDS = Object.freeze({
   id: true, workspaceId: true, requesterId: true, createdAt: true, subject: true, internalCategoryId: true, internalSubcategoryId: true,
@@ -171,9 +176,19 @@ class SameDayRepeatService {
       if (!people.length) return null;
 
       const textSimilarity = await this._textSimilarity(ticketId, people.map((r) => r.id));
+      // Category / subcategory names: their words never count as shared
+      // (in the Teams subcategory every ticket says "Teams"). Unreadable → null.
+      const catIds = [...new Set([t, ...people].flatMap((x) => [toId(x.internalCategoryId), toId(x.internalSubcategoryId)]).filter(Boolean))];
+      const names = catIds.length
+        ? await soft(() => prisma.competencyCategory.findMany({ where: { id: { in: catIds } }, select: { id: true, name: true } }))
+        : [];
+      const nameOf = Array.isArray(names) ? new Map(names.map((c) => [c.id, c.name])) : null;
+      const wordsFor = (r) => (nameOf === null ? null : categoryNameWords(
+        ...[t.internalCategoryId, t.internalSubcategoryId, r.internalCategoryId, r.internalSubcategoryId].map((cid) => nameOf.get(toId(cid))),
+      ));
       let best = null;
       for (const r of people) {
-        const match = sameProblem(t, r, { textSimilarity: textSimilarity.get(r.id) });
+        const match = sameProblem(t, r, { textSimilarity: textSimilarity.get(r.id), categoryWords: wordsFor(r) });
         if (!match) continue;
         // Strongest match first; between equals, the most recent (rows are newest first).
         if (!best || MATCH_STRENGTH[match.matchedOn] > MATCH_STRENGTH[best.match.matchedOn]) best = { row: r, match };
@@ -188,6 +203,8 @@ class SameDayRepeatService {
         status: row.status,
         matchedOn: match.matchedOn,
         similarity: match.similarity ?? null,
+        sharedWords: match.sharedWords || [],
+        symptom: match.symptom === true,
         owner: toId(row.assignedTechId) ? { techId: row.assignedTechId, techName: row.assignedTech?.name || null } : null,
       };
     } catch (err) {
@@ -260,7 +277,11 @@ class SameDayRepeatService {
       if (!priorityAssessmentEnabled) notRaisedReason = 'priority_assessment_off';
       else if (triageMode === 'trusted') notRaisedReason = 'trusted_intake';
       else if (!to) notRaisedReason = 'no_ai_priority';
-      else if (prior) {
+      else if (prior?.overridden) {
+        // A person changed the priority after the raise: their choice stands.
+        notRaisedReason = 'person_changed';
+        sentence = `Not raised again: ${prior.overriddenBy || 'a person'} set the priority${prior.overriddenTo ? ` to ${prior.overriddenTo}` : ''} after the repeat raise.`;
+      } else if (prior) {
         notRaisedReason = 'already_raised';
         // Keep the earlier raise; never higher. The AI's own higher answer stands.
         if (rank(prior.raisedTo) > rank(from)) keptAt = prior.raisedTo;
@@ -328,27 +349,45 @@ class SameDayRepeatService {
           ...(toId(excludeRunId) ? { id: { not: toId(excludeRunId) } } : {}),
           recommendation: { path: ['repeatReport', 'raised'], equals: true },
         },
-        select: { recommendation: true },
+        select: { recommendation: true, createdAt: true },
         orderBy: { createdAt: 'desc' },
         take: 10,
       }), []),
       soft(() => prisma.ticketActivity.findMany({
         where: { ticketId: id, activityType: 'priority_changed' },
-        select: { details: true },
+        select: { details: true, performedAt: true },
         orderBy: { performedAt: 'desc' },
         take: 30,
       }), []),
     ]);
-    const fromRuns = (Array.isArray(runs) ? runs : []).map((r) => r?.recommendation?.repeatReport)
-      .filter((r) => r?.raised === true && labelOf(r.raisedTo));
-    const fromRows = (Array.isArray(rows) ? rows : []).map((r) => r?.details)
-      .filter((d) => d?.source === PRIORITY_SOURCE && labelOf(d.to));
-    if (!fromRuns.length && !fromRows.length) return null;
-    const raisedTo = [...fromRuns.map((r) => r.raisedTo), ...fromRows.map((d) => d.to)].reduce((a, b) => higher(a, b));
+    const runRaises = (Array.isArray(runs) ? runs : [])
+      .map((r) => ({ rr: r?.recommendation?.repeatReport, at: r?.createdAt ? new Date(r.createdAt) : null }))
+      .filter(({ rr }) => rr?.raised === true && labelOf(rr.raisedTo));
+    const priorityRows = Array.isArray(rows) ? rows : [];
+    const rowRaises = priorityRows
+      .map((r) => ({ d: r?.details, at: r?.performedAt ? new Date(r.performedAt) : null }))
+      .filter(({ d }) => d?.source === PRIORITY_SOURCE && labelOf(d.to));
+    if (!runRaises.length && !rowRaises.length) return null;
+
+    // A person's change after the raise wins (coordinator, 23 Nov): an agent
+    // or the requester's status link set the priority since — nothing is
+    // held or re-applied; their choice stands.
+    const raisedAt = Math.max(...[...runRaises, ...rowRaises].map(({ at }) => (at ? at.getTime() : 0)));
+    const personAfter = priorityRows.find((r) => isPersonChange(r?.details)
+      && r?.performedAt && new Date(r.performedAt).getTime() > raisedAt);
+    if (personAfter) {
+      return {
+        raisedTo: null, overridden: true,
+        overriddenTo: labelOf(personAfter.details?.to), overriddenBy: personAfter.details?.actorName || null,
+        aiPriority: null, relatedRef: runRaises[0]?.rr?.relatedRef || rowRaises[0]?.d?.relatedRef || null,
+      };
+    }
+    const raisedTo = [...runRaises.map(({ rr }) => rr.raisedTo), ...rowRaises.map(({ d }) => d.to)].reduce((a, b) => higher(a, b));
     return {
       raisedTo,
-      aiPriority: labelOf(fromRuns[0]?.aiPriority) || labelOf(fromRows[0]?.from) || null,
-      relatedRef: fromRuns[0]?.relatedRef || fromRows[0]?.relatedRef || null,
+      overridden: false,
+      aiPriority: labelOf(runRaises[0]?.rr?.aiPriority) || labelOf(rowRaises[0]?.d?.from) || null,
+      relatedRef: runRaises[0]?.rr?.relatedRef || rowRaises[0]?.d?.relatedRef || null,
     };
   }
 
@@ -359,7 +398,7 @@ class SameDayRepeatService {
   async priorityContextForAi(ticketId) {
     try {
       const prior = await this.priorRaise(ticketId);
-      if (!prior) return null;
+      if (!prior || prior.overridden) return null; // a person's level is the ticket's own
       return {
         aiLevelBeforeRaise: prior.aiPriority,
         raisedTo: prior.raisedTo,

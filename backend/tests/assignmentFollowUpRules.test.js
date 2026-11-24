@@ -1,6 +1,6 @@
 import { describe, expect, test } from '@jest/globals';
 import {
-  GENERIC_TICKET_WORDS, OUTCOMES, isServiceMailbox, machineCreatedReason, mergeNote, normalizeSettings, sharedContentWords, subjectTokens, priorityId, raisedPriority, routingSentence, sameProblem, subjectSimilarity, ticketRef,
+  GENERIC_TICKET_WORDS, OUTCOMES, SAME_SYMPTOM_WORDS, categoryNameWords, hasAccessSymptom, isServiceMailbox, machineCreatedReason, mergeNote, normalizeSettings, sharedContentWords, subjectTokens, priorityId, raisedPriority, routingSentence, sameProblem, subjectSimilarity, ticketRef,
 } from '../src/services/assignmentFollowUp/rules.js';
 
 describe('settings (followup_routing_ws<N>)', () => {
@@ -16,18 +16,45 @@ describe('settings (followup_routing_ws<N>)', () => {
 
 describe('same problem', () => {
   const teams = { internalCategoryId: 10, internalSubcategoryId: 101 };
-  test('same subcategory: one shared meaningful word is enough — the production shape matches', () => {
-    expect(sameProblem({ ...teams, subject: 'Lost access to Teams again' }, { ...teams, subject: "Can't sign into Teams" }))
-      .toMatchObject({ matchedOn: 'subcategory', sharedWords: ['team'] });
-    expect(sameProblem({ ...teams, subject: "Still can't sign in to Teams" }, { ...teams, subject: "Can't sign in to Teams" }))
-      .toEqual({ matchedOn: 'subcategory', similarity: 1, textSimilarity: null, sharedWords: ['sign', 'team'] });
+  // The Teams subcategory, under Collaboration: "Teams" is the product, not the problem.
+  const TEAMS_WORDS = categoryNameWords('Collaboration', 'Teams');
+
+  test('category / subcategory name words never count as shared', () => {
+    expect(TEAMS_WORDS).toEqual(['collaboration', 'team']);
+    // The licence pair shares only "Teams": not a repeat.
+    expect(sameProblem({ ...teams, subject: 'Teams licence for a starter' }, { ...teams, subject: "Can't sign in to Teams" }, { categoryWords: TEAMS_WORDS }))
+      .toBeNull();
+    // Names unreadable (null): shared words do not count at all.
+    expect(sameProblem({ ...teams, subject: 'Teams licence renewal' }, { ...teams, subject: 'Teams licence for a starter' }, { categoryWords: null }))
+      .toBeNull();
+    // A shared word that is not the product still counts.
+    expect(sameProblem({ ...teams, subject: 'Teams licence renewal' }, { ...teams, subject: 'Teams licence for a starter' }, { categoryWords: TEAMS_WORDS }))
+      .toMatchObject({ matchedOn: 'subcategory', sharedWords: ['licence'], symptom: false });
+  });
+
+  test('the production shape matches on the sign-in / access symptom', () => {
+    expect(sameProblem({ ...teams, subject: 'Lost access to Teams again' }, { ...teams, subject: "Can't sign into Teams" }, { categoryWords: TEAMS_WORDS }))
+      .toMatchObject({ matchedOn: 'subcategory', sharedWords: [], symptom: true });
+    expect(sameProblem({ ...teams, subject: "Still can't sign in to Teams" }, { ...teams, subject: "Can't sign in to Teams" }, { categoryWords: TEAMS_WORDS }))
+      .toEqual({ matchedOn: 'subcategory', similarity: 1, textSimilarity: null, sharedWords: ['sign'], symptom: true });
+  });
+
+  test('the same-symptom set', () => {
+    for (const s of ['Sign in fails', 'sign-in loop', 'Signin broken', "Can't log in", 'Log into Teams', 'login page', 'logon error', 'Locked out', 'Password expired', 'No access to the share']) {
+      expect(hasAccessSymptom(s)).toBe(true);
+    }
+    for (const s of ['Printer jam on floor 3', 'Need a new monitor', 'Teams licence for a starter', 'Signature block wrong', 'Accessory order']) {
+      expect(hasAccessSymptom(s)).toBe(false);
+    }
+    expect(SAME_SYMPTOM_WORDS).toEqual(['sign in', 'sign-in', 'signin', 'log in', 'login', 'logon', 'locked out', 'password', 'access']);
   });
 
   test('same subcategory, two different problems with no shared content word: not a repeat', () => {
     const hw = { internalCategoryId: 20, internalSubcategoryId: 201 };
-    expect(sameProblem({ ...hw, subject: 'Printer jam on floor 3' }, { ...hw, subject: 'Need a new monitor' })).toBeNull();
+    expect(sameProblem({ ...hw, subject: 'Printer jam on floor 3' }, { ...hw, subject: 'Need a new monitor' }, { categoryWords: categoryNameWords('Hardware', 'Peripherals') }))
+      .toBeNull();
     // Generic words alone never make two tickets the same problem.
-    expect(sameProblem({ ...hw, subject: "Can't access, error again" }, { ...hw, subject: 'Lost access: error, need help' })).toBeNull();
+    expect(sameProblem({ ...hw, subject: 'Not working, error again' }, { ...hw, subject: 'Broken, need help' })).toBeNull();
     // Close embedded text still can.
     expect(sameProblem({ ...hw, subject: 'Printer jam on floor 3' }, { ...hw, subject: 'Need a new monitor' }, { textSimilarity: 0.9 }))
       .toMatchObject({ matchedOn: 'subcategory', similarity: 0.9 });
@@ -64,7 +91,7 @@ describe('same problem', () => {
   });
 
   test('embedding similarity is the last resort', () => {
-    expect(sameProblem({ subject: 'a' }, { subject: 'b' }, { textSimilarity: 0.9 })).toEqual({ matchedOn: 'text', similarity: 0.9, textSimilarity: 0.9, sharedWords: [] });
+    expect(sameProblem({ subject: 'a' }, { subject: 'b' }, { textSimilarity: 0.9 })).toEqual({ matchedOn: 'text', similarity: 0.9, textSimilarity: 0.9, sharedWords: [], symptom: false });
     expect(sameProblem({ subject: 'a' }, { subject: 'b' }, { textSimilarity: 0.5 })).toBeNull();
   });
 

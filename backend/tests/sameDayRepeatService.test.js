@@ -18,6 +18,7 @@ const prismaMock = {
   ticketEmbedding: { findMany: jest.fn() },
   ticketActivity: { findMany: jest.fn(), create: jest.fn() },
   ticketLink: { findMany: jest.fn() },
+  competencyCategory: { findMany: jest.fn() },
   assignmentPipelineRun: { findMany: jest.fn() },
   technician: { findFirst: jest.fn() },
   technicianLeave: { findMany: jest.fn() },
@@ -73,6 +74,7 @@ beforeEach(() => {
   prismaMock.ticketActivity.findMany.mockImplementation(async ({ where }) => (where?.activityType === 'created' ? createdRows : priorityRows));
   prismaMock.ticketActivity.create.mockResolvedValue({ id: 1 });
   prismaMock.ticketLink.findMany.mockResolvedValue([]);
+  prismaMock.competencyCategory.findMany.mockResolvedValue([{ id: 10, name: 'Collaboration' }, { id: 101, name: 'Teams' }]);
   prismaMock.assignmentPipelineRun.findMany.mockResolvedValue([]);
   prismaMock.technician.findFirst.mockResolvedValue({
     id: ELI, name: 'Eli Park', isActive: true, timezone: 'America/Vancouver', workStartTime: '08:00', workEndTime: '17:00', freshserviceId: BigInt(55),
@@ -99,6 +101,20 @@ describe('findSameDayRelatedOpenTicket', () => {
   test('the production shape: same subcategory and one shared word ("Teams") is a repeat', async () => {
     prismaMock.ticket.findMany.mockResolvedValue([{ ...FIRST, subject: "Can't sign into Teams" }]);
     expect(await find({ subject: 'Lost access to Teams again' })).toMatchObject({ ticketId: 2000, matchedOn: 'subcategory' });
+  });
+
+  test('the licence pair in the Teams subcategory shares only the product name: not a repeat', async () => {
+    prismaMock.ticket.findMany.mockResolvedValue([{ ...FIRST, subject: "Can't sign in to Teams" }]);
+    expect(await find({ subject: 'Teams licence for a starter' })).toBeNull();
+    expect(prismaMock.competencyCategory.findMany).toHaveBeenCalledWith({ where: { id: { in: [10, 101] } }, select: { id: true, name: true } });
+    // A shared word that is not the product counts.
+    prismaMock.ticket.findMany.mockResolvedValue([{ ...FIRST, subject: 'Teams licence renewal' }]);
+    expect(await find({ subject: 'Teams licence for a starter' })).toMatchObject({ ticketId: 2000, sharedWords: ['licence'] });
+    // Names unreadable: shared words do not count, the symptom still does.
+    prismaMock.competencyCategory.findMany.mockRejectedValue(new Error('db down'));
+    expect(await find({ subject: 'Teams licence for a starter' })).toBeNull();
+    prismaMock.ticket.findMany.mockResolvedValue([FIRST]);
+    expect(await find()).toMatchObject({ ticketId: 2000, symptom: true });
   });
 
   test('the same subcategory alone is not a repeat: some shared content word is needed', async () => {
@@ -288,10 +304,40 @@ describe('once per ticket: the raise never stacks across re-runs (review MUST 1)
     expect(urgent.repeatReport.notRaisedReason).toBe('already_raised');
   });
 
+  test('a person\'s change after the raise wins: raised to High, agent set Medium, the re-run leaves Medium', async () => {
+    prismaMock.assignmentPipelineRun.findMany.mockResolvedValue([{ ...raisedRun, createdAt: pst('09:50') }]);
+    priorityRows = [
+      { performedAt: pst('10:05'), details: { source: 'agent', actorKind: 'human', actorName: 'Eli Park', from: 'High', to: 'Medium' } },
+      { performedAt: pst('09:51'), details: { source: 'repeat_report', from: 'Medium', to: 'High', relatedRef: 'TP-1042' } },
+    ];
+    const rec = REC(); // the AI answers Medium
+    const out = await service.evaluate({ workspaceId: WS, ticketId: 2001, runId: 12, recommendation: rec, now: NOW });
+    expect(out).toMatchObject({ bump: null, keptAt: null });
+    expect(rec).toMatchObject({ assessedPriority: 'Medium', assessedPriorityId: 2 });
+    expect(rec.repeatReport).toMatchObject({
+      raised: false, keptAt: null, notRaisedReason: 'person_changed',
+      sentence: 'Not raised again: Eli Park set the priority to Medium after the repeat raise.',
+    });
+    expect(await service.priorRaise(2001)).toMatchObject({ overridden: true, overriddenTo: 'Medium', raisedTo: null });
+    // The AI is not told about a raise a person has already replaced.
+    expect(await service.priorityContextForAi(2001)).toBeNull();
+  });
+
+  test('the requester\'s status link counts as a person; a change BEFORE the raise does not', async () => {
+    prismaMock.assignmentPipelineRun.findMany.mockResolvedValue([{ ...raisedRun, createdAt: pst('09:50') }]);
+    priorityRows = [{ performedAt: pst('10:00'), details: { source: 'requester_link', actorKind: 'human', to: 'Urgent' } }];
+    expect(await service.priorRaise(2001)).toMatchObject({ overridden: true, overriddenTo: 'Urgent' });
+    priorityRows = [{ performedAt: pst('09:30'), details: { source: 'agent', actorKind: 'human', to: 'Low' } }];
+    expect(await service.priorRaise(2001)).toMatchObject({ overridden: false, raisedTo: 'High' });
+    // A workflow or the AI changing it later is not a person: the raise is held.
+    priorityRows = [{ performedAt: pst('10:00'), details: { source: 'ai_assessment', actorKind: 'ai', to: 'Medium' } }];
+    expect(await service.priorRaise(2001)).toMatchObject({ overridden: false, raisedTo: 'High' });
+  });
+
   test('priorRaise: the highest earlier raise, with the AI\'s level before it', async () => {
     prismaMock.assignmentPipelineRun.findMany.mockResolvedValue([raisedRun]);
     priorityRows = [{ details: { source: 'ai_assessment', from: 'Low', to: 'Urgent' } }, { details: { source: 'repeat_report', from: 'Medium', to: 'High' } }];
-    expect(await service.priorRaise(2001)).toEqual({ raisedTo: 'High', aiPriority: 'Medium', relatedRef: 'TP-1042' });
+    expect(await service.priorRaise(2001)).toEqual({ raisedTo: 'High', overridden: false, aiPriority: 'Medium', relatedRef: 'TP-1042' });
     prismaMock.assignmentPipelineRun.findMany.mockResolvedValue([]);
     priorityRows = [];
     expect(await service.priorRaise(2001)).toBeNull();
