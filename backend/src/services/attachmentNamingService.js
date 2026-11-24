@@ -9,7 +9,7 @@ import {
   aliasEntryFor, emailDomain, extensionFor, extractFromRules, formatAttachmentName, isFreeMailDomain,
   isInternalDomain, isNameableDocument, isPaymentPlatformDomain, isPdf, mightBePdf, normaliseEditedName,
   pacificDate, plausibleVendor, sameVendor, shownName, startsLikePdf, uniqueName, validIsoDate, vendorFromEditedName,
-  withNameFields,
+  withNameFields, dayMonthCorrected,
 } from './attachmentNamingRules.js';
 
 export { withNameFields };
@@ -298,7 +298,7 @@ export function decideName({ rules, ai = null, aiModel = null, fileName, content
   let invoiceNumber = null;
   if (ai?.invoiceNumber && (aiUsable || !rules?.invoice)) { invoiceNumber = ai.invoiceNumber; usedAi = true; } else if (rules?.invoice) invoiceNumber = rules.invoice.value;
 
-  const docDate = ai ? validIsoDate(ai.documentDate, now) : null;
+  const docDate = ai ? dayMonthCorrected(validIsoDate(ai.documentDate, now), pacificDate(receivedAt || now)) : null;
   if (docDate) usedAi = true;
   const date = docDate || pacificDate(receivedAt || now);
   const usedRules = Boolean(rules?.vendor || rules?.invoice);
