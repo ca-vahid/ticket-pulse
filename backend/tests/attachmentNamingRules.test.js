@@ -105,6 +105,10 @@ describe('vendor tidying (24 Nov 2026)', () => {
     expect(tidyVendor('Acme Ltée / Acme Ltd')).toBe('Acme Ltée');
     expect(tidyVendor('Acme Ltd / Northwind Ltd')).toBe('Acme Ltd / Northwind Ltd');
   });
+  test('spaces printed inside an invoice number are dropped', () => {
+    expect(formatAttachmentName({ vendor: 'Acme Coffee Inc', invoiceNumber: '328 9392', date: '2026-11-24', ext: 'pdf' })).toBe('Acme Coffee Inc_3289392_2026_11_24.pdf');
+  });
+
   test('the formatted name uses the tidy vendor', () => {
     expect(formatAttachmentName({ vendor: 'BEER WORKS INC', invoiceNumber: 'P100', date: '2026-11-24', ext: 'pdf' })).toBe('Beer Works Inc_P100_2026_11_24.pdf');
   });
@@ -127,7 +131,7 @@ describe('name format', () => {
 
   test('illegal characters are stripped and whitespace collapsed', () => {
     expect(formatAttachmentName({ vendor: 'Acme:  "Supplies"* <Ltd>|', invoiceNumber: 'A/B\\12?', date: '2026-01-05', ext: 'pdf' }))
-      .toBe('Acme Supplies Ltd_A B 12_2026_01_05.pdf');
+      .toBe('Acme Supplies Ltd_AB12_2026_01_05.pdf');
   });
 
   test('capped at 120 characters before the extension, keeping the number and date', () => {

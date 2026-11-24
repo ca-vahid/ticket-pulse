@@ -314,6 +314,11 @@ describe('Shadow: the record beside the mail, nothing else', () => {
     expect(buildRecord({ mode: 'shadow', matches, actual: 'reply_to TP-2040', actualTicketId: 880 })).toMatchObject({ wouldHave: 'attach_to #251107', agrees: true });
   });
 
+  test('a threaded reply with no invoice match neither agrees nor disagrees', () => {
+    expect(agreement({ actual: 'reply_to TP-9', actualTicketId: 9, matches: [] })).toBeNull();
+    expect(agreement({ actual: 'new_ticket', matches: [] })).toBe(true);
+  });
+
   test('off (the default) does nothing at all; skipped mail is never recorded', async () => {
     settings.set('invoice_match_ws2', 'off');
     expect(await recordAfterIntake(connection, email(), 'created', { now: NOW })).toBeNull();

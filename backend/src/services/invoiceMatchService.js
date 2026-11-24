@@ -493,7 +493,9 @@ export function agreement(record) {
   if (!record || record.actual === 'held' || record.error) return null;
   const matches = Array.isArray(record.matches) ? record.matches : [];
   if (record.actual === 'new_ticket') return matches.length === 0;
-  if (!matches.length) return false;
+  // A reply already threaded onto its ticket with no invoice match: matching had
+  // nothing to say, so it neither agrees nor disagrees (24 Nov 2026).
+  if (!matches.length) return String(record.actual || '').startsWith('reply_to') ? null : false;
   const actualId = Number(record.actualTicketId);
   if (actualId) return matches.some((m) => Number(m.ticketId) === actualId);
   return matches.some((m) => record.actual === `reply_to ${m.displayRef}`);
