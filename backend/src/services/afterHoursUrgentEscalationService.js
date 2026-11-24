@@ -243,6 +243,8 @@ function priorityBeforeRaise(ticket) {
     fromPriorityLabel: priorityLabelOf(fromPriorityId),
     fromAssessedPriorityId,
     fromAssessedPriority: priorityLabelOf(ticket?.assessedPriority) || priorityLabelOf(fromAssessedPriorityId),
+    // An earlier requester raise overwrites assessedPriority; then it is not the AI's level.
+    fromAssessedBy: String(ticket?.priorityConfidence || '').toLowerCase() === 'requester' ? 'requester' : 'ai',
     toPriorityLabel: URGENT_PRIORITY_LABEL,
   };
 }

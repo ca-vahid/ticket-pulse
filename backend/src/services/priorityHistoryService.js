@@ -271,7 +271,9 @@ async function aiLevelsBefore(events, workspaceId) {
   const levels = new Map(); // eventId -> label | null
   const missing = [];
   for (const event of events) {
-    const label = priorityLabelOf(payloadOf(event).fromAssessedPriority);
+    const payload = payloadOf(event);
+    // A level an earlier requester raise wrote is not the AI's.
+    const label = payload.fromAssessedBy === 'requester' ? null : priorityLabelOf(payload.fromAssessedPriority);
     if (label) levels.set(event.id, label);
     else missing.push(event);
   }
@@ -300,7 +302,8 @@ async function aiLevelsBefore(events, workspaceId) {
 /**
  * Weekly "the requester raised it" list: tickets the AI had at Medium or Low
  * that the requester raised from their status link (urgency raise or after-hours
- * escalation). One row per ticket (its latest raise), newest first. Read-only.
+ * escalation). One row per ticket (its earliest raise in the window against an
+ * AI level of Low or Medium), newest first. Read-only.
  *
  * @returns {Promise<Array<{ ticketId, displayRef, subject, aiPriority, raisedTo, raisedAt, requesterName }>>}
  */
@@ -334,17 +337,18 @@ export async function listRequesterPriorityRaises({ workspaceId, days = 7, now =
     },
   });
 
-  const latestPerTicket = [];
-  const seen = new Set();
-  for (const event of events || []) {
-    if (!event?.ticket || seen.has(event.ticketId)) continue;
-    seen.add(event.ticketId);
-    latestPerTicket.push(event);
+  // A second raise of the same ticket sees the Urgent the first raise wrote, not
+  // the AI's level. So per ticket the row is its EARLIEST raise in the window
+  // whose earlier AI level was Low or Medium (second-look review, QA 11-23).
+  const withTicket = (events || []).filter((event) => event?.ticket);
+  const aiLevels = await aiLevelsBefore(withTicket, ws);
+  const chosen = new Map(); // ticketId -> event
+  for (const event of [...withTicket].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())) {
+    if (chosen.has(event.ticketId) || !LOW_AI_LEVELS.has(aiLevels.get(event.id))) continue;
+    chosen.set(event.ticketId, event);
   }
-
-  const aiLevels = await aiLevelsBefore(latestPerTicket, ws);
-  return latestPerTicket
-    .filter((event) => LOW_AI_LEVELS.has(aiLevels.get(event.id)))
+  return [...chosen.values()]
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     .map((event) => {
       const payload = payloadOf(event);
       const ticket = event.ticket;

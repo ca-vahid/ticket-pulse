@@ -2428,6 +2428,12 @@ async function getTicketDetails(ticketId) {
 
   if (!ticket) return { error: 'Ticket not found' };
   const timezone = await getWorkspaceTimezone(ticket.workspaceId);
+  // A same-day repeat raise (QA 11-23 item 5) is Ticket Pulse's, not the AI's:
+  // show the AI its own level and say why the ticket sits higher, so the next
+  // run judges the request instead of anchoring on — and re-raising — it.
+  const repeatRaise = await import('./assignmentFollowUp/sameDayRepeatService.js')
+    .then(({ default: svc }) => svc.priorityContextForAi(ticket.id))
+    .catch(() => null);
 
   return {
     id: ticket.id,
@@ -2438,12 +2444,15 @@ async function getTicketDetails(ticketId) {
     status: ticket.status,
     priority: ticket.priority,
     priorityLabel: { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' }[ticket.priority] || `P${ticket.priority}`,
-    assessedPriority: ticket.assessedPriority,
-    assessedPriorityId: ticket.assessedPriorityId,
+    assessedPriority: repeatRaise?.aiLevelBeforeRaise || ticket.assessedPriority,
+    assessedPriorityId: repeatRaise?.aiLevelBeforeRaise
+      ? ({ Low: 1, Medium: 2, High: 3, Urgent: 4 }[repeatRaise.aiLevelBeforeRaise] || ticket.assessedPriorityId)
+      : ticket.assessedPriorityId,
     priorityRationale: ticket.priorityRationale,
     priorityConfidence: ticket.priorityConfidence,
     priorityEvidence: ticket.priorityEvidence,
     priorityAssessedAt: ticket.priorityAssessedAt?.toISOString?.() || null,
+    ...(repeatRaise ? { priorityRaisedForRepeatReport: repeatRaise } : {}),
     freshserviceTicketType: ticket.ticketType,
     assessedTicketType: ticket.assessedTicketType,
     ticketTypeRationale: ticket.ticketTypeRationale,

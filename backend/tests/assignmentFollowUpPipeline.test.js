@@ -46,7 +46,7 @@ const levelIsActive = jest.fn();
 const tzGuard = jest.fn();
 const executeTool = jest.fn();
 const repeatMock = {
-  evaluate: jest.fn(), route: jest.fn(), recordPriorityBump: jest.fn(), addMergeNote: jest.fn(),
+  evaluate: jest.fn(), route: jest.fn(), addMergeNote: jest.fn(),
 };
 const loggerMock = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() };
 
@@ -165,7 +165,7 @@ beforeEach(() => {
   executeTool.mockResolvedValue({ candidates: [] });
   repeatMock.evaluate.mockImplementation(raising);
   repeatMock.route.mockResolvedValue(null);
-  repeatMock.recordPriorityBump.mockResolvedValue(true);
+
   repeatMock.addMergeNote.mockResolvedValue(true);
   submit({ ...REAL });
   spies = [
@@ -178,31 +178,28 @@ beforeEach(() => {
 afterEach(() => spies.forEach((s) => s.mockRestore()));
 
 describe('the repeat raises priority (item 5)', () => {
-  test('raised before the urgent rule reads it; saved, then the history row', async () => {
-    const order = [];
-    pipeline._persistPriorityAssessment.mockImplementation(async (_t, _r, rec) => { order.push(`persist:${rec.assessedPriority}`); });
-    repeatMock.recordPriorityBump.mockImplementation(async () => { order.push('history'); return true; });
+  test('raised before the urgent rule reads it, saved as the assessment, and handed to the write-back on the run', async () => {
+    const persisted = [];
+    pipeline._persistPriorityAssessment.mockImplementation(async (_t, _r, rec) => { persisted.push(rec.assessedPriority); });
     await run();
     expect(guardAutoAssignment).toHaveBeenCalledWith(expect.objectContaining({ assessedPriorityId: 3 }));
-    expect(order).toEqual(['persist:High', 'history']);
-    expect(repeatMock.recordPriorityBump).toHaveBeenCalledWith(expect.objectContaining({
-      ticketId: TICKET_ID, workspaceId: WS_ID, runId: RUN_ID, bump: { from: 'Medium', to: 'High' }, related: RELATED,
-    }));
+    expect(persisted).toEqual(['High']);
+    // No history row from the pipeline itself: the write-back records it where the real priority moves.
+    expect(freshServiceActionServiceMock.executePriorityWriteback).toHaveBeenCalledWith(RUN_ID, WS_ID, false);
     expect(finalRunUpdate().recommendation.repeatReport).toMatchObject({ raised: true, raisedTo: 'High' });
   });
 
   test('runs whatever the routing mode: route says nothing, the raise still happens', async () => {
     repeatMock.route.mockResolvedValue(null); // follow-up routing off
     await run();
-    expect(repeatMock.recordPriorityBump).toHaveBeenCalled();
+    expect(finalRunUpdate().recommendation).toMatchObject({ assessedPriority: 'High', repeatReport: { raised: true } });
     expect(finalRunUpdate()).toMatchObject({ decision: 'auto_assigned', assignedTechId: DANA });
   });
 
-  test('priority assessment off in the workspace: no history row', async () => {
+  test('priority assessment off in the workspace: the service is told so', async () => {
     config({ priorityAssessmentEnabled: false });
     await run();
     expect(repeatMock.evaluate).toHaveBeenCalledWith(expect.objectContaining({ priorityAssessmentEnabled: false }));
-    expect(repeatMock.recordPriorityBump).not.toHaveBeenCalled();
   });
 
   test('a noise verdict is never looked at', async () => {
@@ -254,7 +251,7 @@ describe('follow-up routing (item 4)', () => {
     repeatMock.evaluate.mockResolvedValue(null);
     await run();
     expect(repeatMock.route).not.toHaveBeenCalled();
-    expect(repeatMock.recordPriorityBump).not.toHaveBeenCalled();
+    expect(finalRunUpdate().recommendation.assessedPriority).toBe('Medium');
   });
 
   test('the same-day code throws: the AI\'s pick and priority stand', async () => {

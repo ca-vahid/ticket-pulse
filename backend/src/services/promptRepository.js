@@ -21,9 +21,9 @@ Use exactly one normalized value:
 
 Always populate \`assessedPriority\`, \`priorityRationale\`, and \`priorityConfidence\` when calling \`submit_recommendation\`. Add concise \`prioritySignals\` when useful. If evidence is thin, choose the best supported value and set confidence to \`low\` or \`medium\`; do not inflate priority just because the requester used vague urgency language.`;
 
-// QA 11-23 item 3 (Live, no Shadow): run 36226 listed "work blocked (cannot
-// sign into Teams)" and still chose Medium because there was "no outage,
-// deadline or multi-user impact". One person who cannot work at all is High.
+// QA 11-23 item 3 (Live, no Shadow): e.g. run 1001 noted that the requester
+// could not sign in at all, then chose Medium because nothing else looked
+// urgent. One person who cannot work at all is High.
 export const PRIORITY_CANNOT_WORK_RULE = `Rule (${PRIORITY_CANNOT_WORK_MARKER}): One person who can't work at all (can't sign in to Teams, Outlook or their PC, or is locked out) is High, even with no outage. Medium is for work that's slowed but still possible. Use the Urgent tests only to decide Urgent; their absence never rules out High.`;
 
 const LEGACY_INFLATE_SENTENCE = 'do not inflate priority just because the requester used vague urgency language.';
@@ -654,6 +654,20 @@ function upgradeLegacyPrompt(systemPrompt = '') {
   return finishPromptUpgrade(upgraded.trim());
 }
 
+export const CANNOT_WORK_UPGRADE_NOTE = "Added the rule: one person who can't work at all is High.";
+
+/** The version note says what the auto-upgrade changed (second-look review, QA 11-23). */
+function autoUpgradeNote(previousPrompt, upgradedPrompt, fromVersion) {
+  const scaffold = needsScaffoldUpgrade(previousPrompt);
+  const addedRule = !String(previousPrompt || '').includes(PRIORITY_CANNOT_WORK_MARKER)
+    && String(upgradedPrompt || '').includes(PRIORITY_CANNOT_WORK_MARKER);
+  const what = [
+    scaffold ? 'Refreshed the prompt step scaffolding.' : null,
+    addedRule ? CANNOT_WORK_UPGRADE_NOTE : null,
+  ].filter(Boolean).join(' ') || 'Refreshed the prompt step scaffolding.';
+  return `auto-upgrade: ${what} (from v${fromVersion}, system-applied, previous version preserved)`;
+}
+
 // getPublished() runs on every pipeline run — warn once per workspace+version
 // when an upgrade is skipped, not on every fetch.
 const upgradeSkipWarnedFor = new Set();
@@ -727,7 +741,7 @@ class PromptRepository {
           const upgraded = await this.createVersion(workspaceId, {
             systemPrompt: upgradedPrompt,
             toolConfig: published.toolConfig,
-            notes: `auto-upgrade: refreshed prompt step scaffolding from v${fromVersion} (system-applied, previous version preserved)`,
+            notes: autoUpgradeNote(published.systemPrompt, upgradedPrompt, fromVersion),
             createdBy: 'system',
           });
           published = await this.publish(upgraded.id, 'system');

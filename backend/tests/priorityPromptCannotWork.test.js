@@ -1,18 +1,28 @@
 import { jest } from '@jest/globals';
 
 /**
- * QA 11-23 item 3 (Live): one person who cannot work at all is High. Run 36226
- * listed "work blocked (cannot sign into Teams)" and still chose Medium because
- * there was "no outage, deadline or multi-user impact". These tests pin the
+ * QA 11-23 item 3 (Live): one person who cannot work at all is High. E.g. run
+ * 1001 noted the requester could not sign in at all and still chose Medium
+ * because nothing else looked urgent. These tests pin the
  * prompt text and the auto-upgrade that carries it to every workspace prompt.
  */
 
-jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: { assignmentPromptVersion: {} } }));
+const promptVersionMock = {
+  findFirst: jest.fn(),
+  findUnique: jest.fn(),
+  create: jest.fn(),
+  update: jest.fn(),
+  updateMany: jest.fn(),
+};
+jest.unstable_mockModule('../src/services/prisma.js', () => ({
+  default: { assignmentPromptVersion: promptVersionMock, $transaction: jest.fn(async (ops) => Promise.all(ops)) },
+}));
 jest.unstable_mockModule('../src/utils/logger.js', () => ({
   default: { debug: jest.fn(), error: jest.fn(), info: jest.fn(), warn: jest.fn() },
 }));
 
 const {
+  default: promptRepository,
   DEFAULT_SYSTEM_PROMPT,
   PRIORITY_CANNOT_WORK_RULE,
   needsPromptUpgrade,
@@ -109,6 +119,24 @@ describe('auto-upgrade brings the rule to existing prompts (Live)', () => {
     const once = patchPriorityRules(staleDefault());
     expect(patchPriorityRules(once)).toBe(once);
     expect(upgradeLegacyPrompt(once)).toBe(once);
+  });
+
+  test('the new version note says what changed', async () => {
+    const stale = staleDefault();
+    promptVersionMock.findFirst
+      .mockResolvedValueOnce({ id: 30, workspaceId: 4, version: 12, status: 'published', systemPrompt: stale, toolConfig: null })
+      .mockResolvedValueOnce({ version: 12 });
+    promptVersionMock.create.mockImplementation(({ data }) => Promise.resolve({ id: 31, workspaceId: 4, version: 13, ...data }));
+    promptVersionMock.update.mockResolvedValue({});
+    promptVersionMock.updateMany.mockResolvedValue({ count: 1 });
+    promptVersionMock.findUnique.mockImplementation(() => Promise.resolve({ id: 31, workspaceId: 4, version: 13, status: 'published', systemPrompt: DEFAULT_SYSTEM_PROMPT }));
+
+    await promptRepository.getPublished(4);
+
+    const { data } = promptVersionMock.create.mock.calls[0][0];
+    expect(data.systemPrompt).toBe(DEFAULT_SYSTEM_PROMPT);
+    expect(data.notes).toBe("auto-upgrade: Added the rule: one person who can't work at all is High. (from v12, system-applied, previous version preserved)");
+    expect(data.createdBy).toBe('system');
   });
 
   test('a prompt with no priority scaffolding gets the whole current section', () => {

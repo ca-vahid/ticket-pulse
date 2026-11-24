@@ -2043,14 +2043,10 @@ class AssignmentPipelineService {
       } else if (recommendation) {
         await this._persistInternalClassification(ticketId, workspaceId, recommendation);
         if (priorityAssessmentEnabled) {
+          // A same-day repeat raise rides in recommendation.repeatReport; its
+          // history row is written by executePriorityWriteback, where the real
+          // priority changes (QA 11-23 item 5).
           await this._persistPriorityAssessment(ticketId, runId, recommendation);
-          // QA 11-23 item 5: the "Raised to High: same problem reported again
-          // today" history row, once per ticket and level. Never throws.
-          if (sameDayRepeat?.bump && sameDayRepeatService) {
-            await sameDayRepeatService.recordPriorityBump({
-              ticketId, workspaceId, runId, bump: sameDayRepeat.bump, related: sameDayRepeat.related,
-            });
-          }
         } else {
           logger.info('Pipeline priority assessment persistence skipped by workspace setting', {
             runId,

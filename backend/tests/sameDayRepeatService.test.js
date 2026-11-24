@@ -2,10 +2,10 @@ import { jest } from '@jest/globals';
 
 /**
  * QA 11-23 items 4–5, the TP-1042 shape: at 9:47 AM Pacific the requester
- * opened TP-1042 ("can't sign into Teams"), which went to Eli Park. At
- * 10:15 AM the same person opened TP-1043 ("Lost access to Teams again") and
- * the AI picked Dana Fox. TP-1043 should go to Eli (Live), or say so (Shadow),
- * and its priority goes one level above what the AI chose.
+ * opened TP-1042 ("Can't sign in to Teams"), which went to Eli Park. At
+ * 10:15 AM the same person opened TP-1043 ("Still can't sign in to Teams")
+ * and the AI picked Dana Fox. TP-1043 should go to Eli (Live), or say so
+ * (Shadow), and its priority goes one level above what the AI chose — once.
  */
 const settingsStore = new Map();
 const settingsRepositoryMock = {
@@ -14,9 +14,11 @@ const settingsRepositoryMock = {
 };
 const prismaMock = {
   workspace: { findUnique: jest.fn() },
-  ticket: { findUnique: jest.fn(), findMany: jest.fn() },
+  ticket: { findUnique: jest.fn(), findMany: jest.fn(), count: jest.fn() },
   ticketEmbedding: { findMany: jest.fn() },
   ticketActivity: { findMany: jest.fn(), create: jest.fn() },
+  ticketLink: { findMany: jest.fn() },
+  assignmentPipelineRun: { findMany: jest.fn() },
   technician: { findFirst: jest.fn() },
   technicianLeave: { findMany: jest.fn() },
   ticketAssignmentEpisode: { findFirst: jest.fn() },
@@ -41,28 +43,37 @@ const pst = (hhmm) => new Date(`2026-11-23T${hhmm}:00.000-08:00`);
 const NOW = pst('10:16');
 
 const NEW_TICKET = {
-  id: 2001, workspaceId: WS, requesterId: 77, createdAt: pst('10:15'), subject: 'Lost access to Teams again', triageMode: null, origin: 'ticketpulse',
-  internalCategoryId: null, internalSubcategoryId: null,
+  id: 2001, workspaceId: WS, requesterId: 77, createdAt: pst('10:15'), subject: "Still can't sign in to Teams", triageMode: null, origin: 'ticketpulse',
+  occurrenceCount: 0, requester: { email: 'dana.fox@example.com' }, internalCategoryId: null, internalSubcategoryId: null,
 };
 const FIRST = {
-  id: 2000, subject: "can't sign into Teams", createdAt: pst('09:47'), status: 'Open', origin: 'ticketpulse', nativeNumber: 1042, freshserviceTicketId: null,
+  id: 2000, subject: "Can't sign in to Teams", createdAt: pst('09:47'), status: 'Open', origin: 'ticketpulse', nativeNumber: 1042, freshserviceTicketId: null,
+  triageMode: null, occurrenceCount: 0, requester: { email: 'dana.fox@example.com' },
   internalCategoryId: 10, internalSubcategoryId: 101, assignedTechId: ELI, assignedTech: { id: ELI, name: 'Eli Park' },
 };
 const REC = () => ({
   internalCategoryId: 10, internalSubcategoryId: 101, assessedPriority: 'Medium', assessedPriorityId: 2, priorityRationale: 'One person blocked.',
   recommendations: [{ techId: DANA, techName: 'Dana Fox' }],
 });
+/** `created` rows by ticket id, and `priority_changed` rows — one findMany, two questions. */
+let createdRows = [];
+let priorityRows = [];
 
 beforeEach(() => {
   jest.clearAllMocks();
   settingsStore.clear();
   service._reset();
+  createdRows = [];
+  priorityRows = [];
   prismaMock.workspace.findUnique.mockResolvedValue({ defaultTimezone: 'America/Vancouver' });
   prismaMock.ticket.findUnique.mockResolvedValue({ ...NEW_TICKET });
   prismaMock.ticket.findMany.mockResolvedValue([FIRST]);
+  prismaMock.ticket.count.mockResolvedValue(2);
   prismaMock.ticketEmbedding.findMany.mockResolvedValue([]);
-  prismaMock.ticketActivity.findMany.mockResolvedValue([]);
+  prismaMock.ticketActivity.findMany.mockImplementation(async ({ where }) => (where?.activityType === 'created' ? createdRows : priorityRows));
   prismaMock.ticketActivity.create.mockResolvedValue({ id: 1 });
+  prismaMock.ticketLink.findMany.mockResolvedValue([]);
+  prismaMock.assignmentPipelineRun.findMany.mockResolvedValue([]);
   prismaMock.technician.findFirst.mockResolvedValue({
     id: ELI, name: 'Eli Park', isActive: true, timezone: 'America/Vancouver', workStartTime: '08:00', workEndTime: '17:00', freshserviceId: BigInt(55),
   });
@@ -73,25 +84,86 @@ beforeEach(() => {
   isBusinessHours.mockResolvedValue({ isBusinessHours: true });
 });
 
+const find = (over = {}) => service.findSameDayRelatedOpenTicket({ ...NEW_TICKET, internalCategoryId: 10, internalSubcategoryId: 101, ...over }, { now: NOW });
+
 describe('findSameDayRelatedOpenTicket', () => {
   test('finds the requester\'s open ticket from earlier today about the same problem', async () => {
-    const found = await service.findSameDayRelatedOpenTicket({ ...NEW_TICKET, internalCategoryId: 10, internalSubcategoryId: 101 }, { now: NOW });
-    expect(found).toMatchObject({ ticketId: 2000, ref: 'TP-1042', matchedOn: 'subcategory', owner: { techId: ELI, techName: 'Eli Park' } });
+    const found = await find();
+    expect(found).toMatchObject({ ticketId: 2000, ref: 'TP-1042', matchedOn: 'subcategory', similarity: 1, owner: { techId: ELI, techName: 'Eli Park' } });
     const where = prismaMock.ticket.findMany.mock.calls[0][0].where;
     expect(where).toMatchObject({ workspaceId: WS, requesterId: 77, id: { not: 2001 }, isNoise: false, status: { in: ['Open', 'Pending'] } });
     expect(where.createdAt.gte.toISOString()).toBe('2026-11-23T08:00:00.000Z'); // Pacific midnight
     expect(where.createdAt.lt).toEqual(pst('10:15')); // earlier than this ticket only
   });
 
-  test('a different problem from the same requester is not related', async () => {
-    prismaMock.ticket.findMany.mockResolvedValue([{ ...FIRST, internalSubcategoryId: 102, subject: 'Need a second monitor' }]);
-    expect(await service.findSameDayRelatedOpenTicket({ ...NEW_TICKET, internalCategoryId: 10, internalSubcategoryId: 101 })).toBeNull();
+  test('the production shape: same subcategory and one shared word ("Teams") is a repeat', async () => {
+    prismaMock.ticket.findMany.mockResolvedValue([{ ...FIRST, subject: "Can't sign into Teams" }]);
+    expect(await find({ subject: 'Lost access to Teams again' })).toMatchObject({ ticketId: 2000, matchedOn: 'subcategory' });
+  });
+
+  test('the same subcategory alone is not a repeat: some shared content word is needed', async () => {
+    prismaMock.ticket.findMany.mockResolvedValue([{ ...FIRST, subject: 'Printer jam on floor 3' }]);
+    expect(await find({ subject: 'Need a new monitor' })).toBeNull();
+    // A category-only match keeps the 0.6 bar: one shared word is not enough.
+    prismaMock.ticket.findMany.mockResolvedValue([{ ...FIRST, internalSubcategoryId: null, subject: 'Teams licence for a starter' }]);
+    expect(await find()).toBeNull();
+  });
+
+  test('different words still match when both tickets are embedded and the text is close', async () => {
+    prismaMock.ticket.findMany.mockResolvedValue([{ ...FIRST, subject: 'Teams keeps logging me out' }]);
+    prismaMock.ticketEmbedding.findMany.mockResolvedValue([
+      { ticketId: 2001, embedding: [1, 0, 0] }, { ticketId: 2000, embedding: [0.95, 0.31, 0] },
+    ]);
+    expect(await find()).toMatchObject({ ticketId: 2000, matchedOn: 'subcategory', similarity: 0.95 });
   });
 
   test('a close subject is enough when the categories are missing', async () => {
     prismaMock.ticket.findMany.mockResolvedValue([{ ...FIRST, internalCategoryId: null, internalSubcategoryId: null, subject: 'Teams sign in failing' }]);
-    const found = await service.findSameDayRelatedOpenTicket({ ...NEW_TICKET, subject: 'RE: Teams sign in failing' });
+    const found = await find({ internalCategoryId: null, internalSubcategoryId: null, subject: 'RE: Teams sign in failing' });
     expect(found).toMatchObject({ ticketId: 2000, matchedOn: 'subject' });
+  });
+
+  test('a requester with more than 3 tickets that day is automation: never a repeat', async () => {
+    prismaMock.ticket.count.mockResolvedValue(4);
+    expect(await find()).toBeNull();
+    prismaMock.ticket.count.mockResolvedValue(3);
+    expect(await find()).toMatchObject({ ticketId: 2000 });
+    prismaMock.ticket.count.mockRejectedValue(new Error('db down'));
+    expect(await find()).toBeNull();
+  });
+
+  test('tickets a machine made never count, on either side', async () => {
+    // A workflow's child ticket copies the parent's requester.
+    createdRows = [{ ticketId: 2000, performedBy: 'Notification workflow', details: { actorKind: 'workflow' } }];
+    expect(await find()).toBeNull();
+    // Created through the API / an integration.
+    createdRows = [{ ticketId: 2001, performedBy: 'apikey:ab12', details: { actorKind: 'api', createdVia: 'api' } }];
+    expect(await find()).toBeNull();
+    // Alert bundling / correlation and other Ticket Pulse automation.
+    createdRows = [{ ticketId: 2000, performedBy: 'Ticket Pulse alert bundling', details: { actorKind: 'system', actorEmail: 'bundles@ticketpulse.internal' } }];
+    expect(await find()).toBeNull();
+    createdRows = [];
+    prismaMock.ticket.findMany.mockResolvedValue([{ ...FIRST, triageMode: 'trusted' }]);
+    expect(await find()).toBeNull();
+    prismaMock.ticket.findMany.mockResolvedValue([{ ...FIRST, occurrenceCount: 3 }]);
+    expect(await find()).toBeNull();
+    prismaMock.ticket.findMany.mockResolvedValue([FIRST]);
+    expect(await find({ requester: { email: 'no-reply@example.com' } })).toBeNull();
+  });
+
+  test('mail intake is a person writing in: it still counts', async () => {
+    createdRows = [
+      { ticketId: 2000, performedBy: 'Ticket Pulse Mail', details: { actorKind: 'system', actorEmail: 'mailbox@ticketpulse.internal', createdVia: 'email' } },
+      { ticketId: 2001, performedBy: 'Ticket Pulse Mail', details: { actorKind: 'system', actorEmail: 'mailbox@ticketpulse.internal', createdVia: 'email' } },
+    ];
+    expect(await find()).toMatchObject({ ticketId: 2000 });
+  });
+
+  test('tickets already linked to each other (parent/child, related) are left out', async () => {
+    prismaMock.ticketLink.findMany.mockResolvedValue([{ ticketId: 2000, relatedTicketId: 2001 }]);
+    expect(await find()).toBeNull();
+    const where = prismaMock.ticketLink.findMany.mock.calls[0][0].where;
+    expect(where.OR).toEqual([{ ticketId: 2001, relatedTicketId: { in: [2000] } }, { ticketId: { in: [2000] }, relatedTicketId: 2001 }]);
   });
 
   test('loads the ticket when only the id is given; no requester means nothing', async () => {
@@ -103,27 +175,21 @@ describe('findSameDayRelatedOpenTicket', () => {
 
   test('a database error answers null', async () => {
     prismaMock.ticket.findMany.mockRejectedValue(new Error('db down'));
-    expect(await service.findSameDayRelatedOpenTicket({ ...NEW_TICKET, internalSubcategoryId: 101 })).toBeNull();
+    expect(await find()).toBeNull();
   });
 });
 
 describe('evaluate: the repeat raises priority one level (item 5)', () => {
-  test('Medium from the AI becomes High, with the reason on the run', async () => {
+  test('Medium from the AI becomes High, with the reason on the run; the rationale is left as the AI wrote it', async () => {
     const rec = REC();
     const out = await service.evaluate({ workspaceId: WS, ticketId: 2001, runId: 9, recommendation: rec, now: NOW });
     expect(out.bump).toEqual({ from: 'Medium', to: 'High' });
-    expect(rec).toMatchObject({ assessedPriority: 'High', assessedPriorityId: 3 });
-    expect(rec.priorityRationale).toMatch(/^One person blocked\. Raised from Medium to High/);
+    expect(rec).toMatchObject({ assessedPriority: 'High', assessedPriorityId: 3, priorityRationale: 'One person blocked.' });
     expect(rec.repeatReport).toMatchObject({
-      relatedTicketId: 2000, relatedRef: 'TP-1042', matchedOn: 'subcategory', aiPriority: 'Medium', raisedTo: 'High', raised: true,
+      relatedTicketId: 2000, relatedRef: 'TP-1042', matchedOn: 'subcategory', aiPriority: 'Medium', raisedTo: 'High', raised: true, keptAt: null,
       owner: { techId: ELI, techName: 'Eli Park' }, sentence: 'Raised to High: same problem reported again today (TP-1042).',
+      historyNote: 'Same problem reported again today (TP-1042)',
     });
-  });
-
-  test('the AI\'s category for this run is the one compared', async () => {
-    await service.evaluate({ workspaceId: WS, ticketId: 2001, recommendation: REC(), now: NOW });
-    // NEW_TICKET has no category yet; the match came from the recommendation's subcategory 101.
-    expect(prismaMock.ticket.findMany).toHaveBeenCalled();
   });
 
   test('Urgent stays Urgent; no AI priority, priority assessment off or trusted intake raise nothing', async () => {
@@ -139,9 +205,10 @@ describe('evaluate: the repeat raises priority one level (item 5)', () => {
     expect((await service.evaluate({ workspaceId: WS, ticketId: 2001, recommendation: off, priorityAssessmentEnabled: false })).bump).toBeNull();
     expect(off.assessedPriority).toBe('Medium');
 
+    // A trusted-intake ticket is never a repeat at all now.
     prismaMock.ticket.findUnique.mockResolvedValue({ ...NEW_TICKET, triageMode: 'trusted' });
     const trusted = REC();
-    expect((await service.evaluate({ workspaceId: WS, ticketId: 2001, recommendation: trusted })).record.notRaisedReason).toBe('trusted_intake');
+    expect(await service.evaluate({ workspaceId: WS, ticketId: 2001, recommendation: trusted })).toBeNull();
     expect(trusted.assessedPriority).toBe('Medium');
   });
 
@@ -185,45 +252,58 @@ describe('evaluate: the repeat raises priority one level (item 5)', () => {
   });
 });
 
-describe('recordPriorityBump: the history row through the shared helper', () => {
-  test('one priority_changed row, source repeat_report, by the RULES.md contract', async () => {
-    const spy = jest.spyOn(service, '_recordPriorityChange').mockResolvedValue({ id: 5 });
-    const ok = await service.recordPriorityBump({
-      ticketId: 2001, workspaceId: WS, runId: 9, bump: { from: 'Medium', to: 'High' }, related: { ticketId: 2000, ref: 'TP-1042' }, now: NOW,
+describe('once per ticket: the raise never stacks across re-runs (review MUST 1)', () => {
+  const raisedRun = { recommendation: { repeatReport: { raised: true, aiPriority: 'Medium', raisedTo: 'High', relatedRef: 'TP-1042' } } };
+
+  test('after hours raised Medium to High; the business-hours run reads High back: it stays High', async () => {
+    prismaMock.assignmentPipelineRun.findMany.mockResolvedValue([raisedRun]);
+    const rec = { ...REC(), assessedPriority: 'High', assessedPriorityId: 3 }; // the AI anchored on the saved High
+    const out = await service.evaluate({ workspaceId: WS, ticketId: 2001, runId: 10, recommendation: rec, now: NOW });
+    expect(out.bump).toBeNull();
+    expect(rec).toMatchObject({ assessedPriority: 'High', assessedPriorityId: 3 });
+    expect(rec.repeatReport).toMatchObject({
+      raised: false, notRaisedReason: 'already_raised', keptAt: null,
+      sentence: 'Kept at High: already raised once for this repeat report (TP-1042).',
     });
-    expect(ok).toBe(true);
-    expect(spy).toHaveBeenCalledWith(expect.objectContaining({
-      ticketId: 2001, from: 'Medium', to: 'High', source: 'repeat_report', actorKind: 'system', actorName: 'Ticket Pulse', actorEmail: null,
-      via: { kind: 'assignment_pipeline', runId: 9 }, note: 'Same problem reported again today (TP-1042)',
-      details: expect.objectContaining({ runId: 9, relatedTicketId: 2000, relatedRef: 'TP-1042' }),
-    }));
-    spy.mockRestore();
+    expect(isBusinessHours).not.toHaveBeenCalled();
+    const where = prismaMock.assignmentPipelineRun.findMany.mock.calls[0][0].where;
+    expect(where).toMatchObject({ ticketId: 2001, id: { not: 10 }, recommendation: { path: ['repeatReport', 'raised'], equals: true } });
   });
 
-  test('the row lands through priorityHistoryService.recordPriorityChange', async () => {
-    prismaMock.ticketActivity.findFirst = jest.fn().mockResolvedValue(null); // the helper's own duplicate check
-    await service.recordPriorityBump({
-      ticketId: 2001, workspaceId: WS, runId: 9, bump: { from: 'Medium', to: 'High' }, related: { ticketId: 2000, ref: 'TP-1042' }, now: NOW,
-    });
-    expect(prismaMock.ticketActivity.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        ticketId: 2001,
-        activityType: 'priority_changed',
-        performedBy: 'Ticket Pulse',
-        details: expect.objectContaining({ from: 'Medium', to: 'High', source: 'repeat_report', actorKind: 'system', note: 'Same problem reported again today (TP-1042)' }),
-      }),
-    });
+  test('a hand-back re-run where the AI now says Medium keeps the earlier raise (High), never lower, never higher', async () => {
+    prismaMock.assignmentPipelineRun.findMany.mockResolvedValue([raisedRun]);
+    const rec = REC();
+    const out = await service.evaluate({ workspaceId: WS, ticketId: 2001, runId: 11, recommendation: rec, now: NOW });
+    expect(out).toMatchObject({ bump: null, keptAt: 'High' });
+    expect(rec).toMatchObject({ assessedPriority: 'High', assessedPriorityId: 3 });
+    expect(rec.repeatReport).toMatchObject({ notRaisedReason: 'already_raised', keptAt: 'High', aiPriority: 'Medium' });
   });
 
-  test('a re-run raising to the same level writes nothing more; a failure never throws', async () => {
-    const spy = jest.spyOn(service, '_recordPriorityChange').mockResolvedValue({ id: 5 });
-    prismaMock.ticketActivity.findMany.mockResolvedValue([{ details: { source: 'repeat_report', to: 'High' } }]);
-    expect(await service.recordPriorityBump({ ticketId: 2001, workspaceId: WS, bump: { from: 'Medium', to: 'High' }, related: { ref: 'TP-1042' } })).toBe(false);
-    expect(spy).not.toHaveBeenCalled();
-    prismaMock.ticketActivity.findMany.mockResolvedValue([]);
-    spy.mockRejectedValue(new Error('db down'));
-    expect(await service.recordPriorityBump({ ticketId: 2001, workspaceId: WS, bump: { from: 'Medium', to: 'High' }, related: { ref: 'TP-1042' } })).toBe(false);
-    spy.mockRestore();
+  test('a repeat_report history row counts as the earlier raise too; the AI\'s own higher answer stands', async () => {
+    priorityRows = [{ details: { source: 'repeat_report', from: 'Medium', to: 'High', relatedRef: 'TP-1042' } }];
+    const urgent = { ...REC(), assessedPriority: 'Urgent', assessedPriorityId: 4 };
+    const out = await service.evaluate({ workspaceId: WS, ticketId: 2001, recommendation: urgent, now: NOW });
+    expect(out.keptAt).toBeNull();
+    expect(urgent.assessedPriority).toBe('Urgent');
+    expect(urgent.repeatReport.notRaisedReason).toBe('already_raised');
+  });
+
+  test('priorRaise: the highest earlier raise, with the AI\'s level before it', async () => {
+    prismaMock.assignmentPipelineRun.findMany.mockResolvedValue([raisedRun]);
+    priorityRows = [{ details: { source: 'ai_assessment', from: 'Low', to: 'Urgent' } }, { details: { source: 'repeat_report', from: 'Medium', to: 'High' } }];
+    expect(await service.priorRaise(2001)).toEqual({ raisedTo: 'High', aiPriority: 'Medium', relatedRef: 'TP-1042' });
+    prismaMock.assignmentPipelineRun.findMany.mockResolvedValue([]);
+    priorityRows = [];
+    expect(await service.priorRaise(2001)).toBeNull();
+  });
+
+  test('priorityContextForAi: the AI is told its own level and why the ticket sits higher', async () => {
+    prismaMock.assignmentPipelineRun.findMany.mockResolvedValue([raisedRun]);
+    const ctx = await service.priorityContextForAi(2001);
+    expect(ctx).toMatchObject({ aiLevelBeforeRaise: 'Medium', raisedTo: 'High', relatedRef: 'TP-1042' });
+    expect(ctx.note).toMatch(/raised this ticket's priority from Medium to High.*Judge the priority of this request on its own/);
+    prismaMock.assignmentPipelineRun.findMany.mockResolvedValue([]);
+    expect(await service.priorityContextForAi(2001)).toBeNull();
   });
 });
 

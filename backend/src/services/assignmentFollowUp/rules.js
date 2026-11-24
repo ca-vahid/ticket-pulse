@@ -8,8 +8,11 @@
  *
  *   - Related ticket: same requester, still open, created the same local
  *     (Pacific) day BEFORE this one, not this ticket, and the same problem —
- *     the same subcategory, the same category when either has no
- *     subcategory, or a close subject.
+ *     the same subcategory and one shared meaningful word, or close words
+ *     (subject, or embedded text) otherwise. Never a ticket a machine made
+ *     (workflow, API, trusted intake, alert, service mailbox), never one
+ *     linked to the other, never for a requester with more than 3 tickets
+ *     that day.
  *   - Follow-up routing (setting `followup_routing_ws<N>`: off | shadow | live,
  *     off by default): Shadow records "Would send to <owner>"; Live gives the
  *     ticket to the related ticket's owner when they are at work and not away,
@@ -73,10 +76,21 @@ export function normalizeSettings(raw) {
 export const applyPatch = levelApplyPatch;
 export const toStored = levelToStored;
 
+/**
+ * Generic ticket words: they say something is wrong, not WHAT (coordinator,
+ * 23 Nov). Never counted as a shared content word. Matched after the light
+ * plural stem, so "errors" → "error" is covered.
+ */
+export const GENERIC_TICKET_WORDS = Object.freeze([
+  'cant', 'can', 'cannot', 'unable', 'help', 'issue', 'problem', 'request', 'again', 'please', 'urgent', 'asap', 'not',
+  'working', 'work', 'access', 'lost', 'error', 'need', 'needed', 'new', 'broken', 'fail', 'failed', 'failing', 'still',
+  'question', 'support', 'ticket', 'fix', 'trouble',
+]);
+
 const STOP = new Set([
-  'the', 'and', 'for', 'with', 'from', 'that', 'this', 'have', 'has', 'not', 'cant', 'can', 'cannot', 'unable', 'again',
-  'still', 'please', 'help', 'issue', 'issues', 'problem', 'request', 'urgent', 'asap', 'into', 'onto', 'my', 'our', 'your',
-  'ticket', 'fw', 'fwd', 're', 'its', 'it', 'is', 'are', 'was', 'any', 'all', 'some', 'get', 'got', 'now', 'today',
+  'the', 'and', 'for', 'with', 'from', 'that', 'this', 'have', 'has', 'into', 'onto', 'my', 'our', 'your', 'off', 'out',
+  'fw', 'fwd', 're', 'its', 'it', 'is', 'are', 'was', 'any', 'all', 'some', 'get', 'got', 'now', 'today', 'when', 'what',
+  ...GENERIC_TICKET_WORDS,
 ]);
 
 /** Plural → singular, lightly ("passwords" → "password", "access" stays). */
@@ -86,7 +100,14 @@ const stem = (w) => (w.length > 4 && w.endsWith('s') && !w.endsWith('ss') ? w.sl
 export function subjectTokens(subject) {
   return [...new Set(normalizeSubject(subject).split(' ')
     .filter((w) => w.length >= 3 && !STOP.has(w))
-    .map(stem))];
+    .map(stem)
+    .filter((w) => !STOP.has(w)))];
+}
+
+/** Meaningful content words two subjects share (stop words and generic ticket words left out). */
+export function sharedContentWords(a, b) {
+  const y = new Set(subjectTokens(b));
+  return subjectTokens(a).filter((w) => y.has(w));
 }
 
 /** Dice overlap of two subjects' content words, 0…1. */
@@ -100,24 +121,77 @@ export function subjectSimilarity(a, b) {
 
 const id = (v) => { const n = Number(v); return Number.isInteger(n) && n > 0 ? n : null; };
 
+const round2 = (n) => Math.round(n * 100) / 100;
+
 /**
- * Is `other` the same problem as `ticket`?
- * @returns {null | { matchedOn: 'subcategory'|'category'|'subject'|'text', similarity?: number }}
+ * Is `other` the same problem as `ticket`? A shared subcategory or category
+ * alone is never enough (second-look review, 23 Nov): one person can have a
+ * Teams licence request and a Teams sign-in problem the same day.
+ *   - Same subcategory: at least one shared meaningful content word (generic
+ *     ticket words like "can't", "access", "lost" do not count), or close
+ *     words / text as below (coordinator, 23 Nov).
+ *   - Category-only or no category: subject words at SUBJECT_SIMILARITY_MIN,
+ *     or (both tickets already embedded) text at TEXT_SIMILARITY_MIN.
+ * `matchedOn` says what agreed: the subcategory, the category (when one side
+ * has no subcategory), or nothing but the words ('subject' / 'text').
+ * @returns {null | { matchedOn, similarity, textSimilarity, sharedWords }}
  */
 export function sameProblem(ticket, other, { textSimilarity = null } = {}) {
+  const subject = subjectSimilarity(ticket?.subject, other?.subject);
+  const text = Number.isFinite(textSimilarity) ? textSimilarity : null;
+  const wordsClose = subject >= SUBJECT_SIMILARITY_MIN;
+  const textClose = text !== null && text >= TEXT_SIMILARITY_MIN;
   const sa = id(ticket?.internalSubcategoryId);
   const sb = id(other?.internalSubcategoryId);
   const ca = id(ticket?.internalCategoryId);
   const cb = id(other?.internalCategoryId);
-  if (sa && sb && sa === sb) return { matchedOn: 'subcategory' };
+  const sharedWords = sharedContentWords(ticket?.subject, other?.subject);
+  const base = {
+    similarity: round2(wordsClose || !textClose ? subject : text),
+    textSimilarity: text === null ? null : round2(text),
+    sharedWords,
+  };
+  if (sa && sb && sa === sb) {
+    return sharedWords.length || wordsClose || textClose ? { matchedOn: 'subcategory', ...base } : null;
+  }
+  if (!wordsClose && !textClose) return null;
   // Same category counts only when one side has no subcategory: two different
   // subcategories under one parent are two different problems.
-  if (ca && cb && ca === cb && !(sa && sb)) return { matchedOn: 'category' };
-  const similarity = subjectSimilarity(ticket?.subject, other?.subject);
-  if (similarity >= SUBJECT_SIMILARITY_MIN) return { matchedOn: 'subject', similarity: Math.round(similarity * 100) / 100 };
-  if (Number.isFinite(textSimilarity) && textSimilarity >= TEXT_SIMILARITY_MIN) {
-    return { matchedOn: 'text', similarity: Math.round(textSimilarity * 100) / 100 };
-  }
+  if (ca && cb && ca === cb && !(sa && sb)) return { matchedOn: 'category', ...base };
+  return { matchedOn: wordsClose ? 'subject' : 'text', ...base };
+}
+
+/** Requesters with more tickets than this in one day are automation, not a person reporting again. */
+export const MAX_REQUESTER_TICKETS_PER_DAY = 3;
+
+const SERVICE_MAILBOX = /^(no-?reply|do-?not-?reply|alerts?|alerting|monitor(ing)?|notifications?|notify|system|daemon|mailer-daemon|postmaster|automation|bot|svc|service)([._+-]|\d|@|$)/i;
+
+/** A mailbox that is a machine, not a person (no-reply@, alerts@, svc-backup@…). */
+export function isServiceMailbox(email) {
+  const local = String(email || '').trim().toLowerCase();
+  return Boolean(local) && SERVICE_MAILBOX.test(local);
+}
+
+const MACHINE_KINDS = new Set(['workflow', 'api']);
+
+/**
+ * Was this ticket made by a machine rather than reported by a person? Reads
+ * the ticket row and its `created` activity row (null for FS-born tickets).
+ * Mail intake ("Ticket Pulse Mail") is a person writing in, so it is not.
+ * @returns {string|null} the reason, or null for a person's ticket
+ */
+export function machineCreatedReason(ticket, createdRow = null) {
+  if (!ticket) return 'missing';
+  if (ticket.triageMode === 'trusted') return 'trusted_intake';
+  if (Number(ticket.occurrenceCount) > 0) return 'alert';
+  if (isServiceMailbox(ticket.requester?.email)) return 'service_mailbox';
+  const d = createdRow?.details && typeof createdRow.details === 'object' ? createdRow.details : {};
+  if (MACHINE_KINDS.has(d.actorKind)) return d.actorKind;
+  if (d.createdVia === 'api') return 'api';
+  const email = String(d.actorEmail || '').toLowerCase();
+  if (email.endsWith('@ticketpulse.internal') && email !== 'mailbox@ticketpulse.internal') return 'automation';
+  if (/^ticket pulse \(/i.test(String(createdRow?.performedBy || ''))) return 'automation';
+  if (/^notification workflow$|^ticket workflow$/i.test(String(createdRow?.performedBy || ''))) return 'workflow';
   return null;
 }
 

@@ -4766,7 +4766,9 @@ export async function executeUpdateTicketNode(node, eventContext, { dryRun = fal
         ticketId: ticket.id,
         from: changes.priority.from,
         to: changes.priority.to,
-        source: who.kind === 'workflow' ? 'workflow' : 'agent',
+        // Every write through this node is automation (a workflow, or Ticket
+        // Pulse's own "When a requester replies"): never a person's change.
+        source: 'workflow',
         actorKind: who.kind,
         actorName: who.name,
         note: node.data?.note || null,

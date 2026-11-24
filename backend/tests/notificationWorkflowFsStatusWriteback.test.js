@@ -200,6 +200,15 @@ describe('the same write as Ticket Pulse (When a requester replies, 14 Oct 2026)
     expect(Object.keys(workflowRow.details.changes)).toEqual(['status']);
   });
 
+  test('a priority set by Ticket Pulse itself (system actor) is still source workflow, never a person', async () => {
+    const tp = { ...FS_TICKET, id: 504, workspaceId: 1, origin: 'ticketpulse', freshserviceTicketId: null, status: 'Open', priority: 2 };
+    prismaMock.ticket.findUnique.mockResolvedValue(tp);
+    await executeUpdateTicketNode({ id: 'bump', type: 'update_ticket', data: { setPriority: 3 } }, ctx(tp), { actor: ACTOR });
+    const priorityRow = activityCreateMock.mock.calls.map(([a]) => a).find((a) => a.activityType === 'priority_changed');
+    expect(priorityRow.performedBy).toBe('Ticket Pulse');
+    expect(priorityRow.details).toEqual(expect.objectContaining({ source: 'workflow', actorKind: 'system', from: 'Medium', to: 'High' }));
+  });
+
   test('TP-born priority-only workflow write → no workflow_updated_ticket row at all', async () => {
     const tp = { ...FS_TICKET, id: 503, workspaceId: 1, origin: 'ticketpulse', freshserviceTicketId: null, status: 'Open', priority: 2 };
     prismaMock.ticket.findUnique.mockResolvedValue(tp);

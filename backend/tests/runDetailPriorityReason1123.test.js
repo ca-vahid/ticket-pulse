@@ -72,7 +72,7 @@ function buildApp() {
 }
 
 const RAISED_AT = new Date('2026-11-23T18:17:00.000Z');
-const run = (ticket) => ({ id: 36226, workspaceId: 2, promptVersionId: 7, steps: [], ticket });
+const run = (ticket) => ({ id: 1001, workspaceId: 2, promptVersionId: 7, steps: [], ticket });
 
 beforeEach(() => jest.clearAllMocks());
 
@@ -85,7 +85,7 @@ test('a requester raise: priorityReason names them, the link and the note', asyn
     details: { from: 'Medium', to: 'Urgent', source: 'requester_link', actorName: 'Dana Fox', note: 'Raised the priority to Urgent from their status link.' },
   });
 
-  const res = await request(buildApp()).get('/assignment/runs/36226');
+  const res = await request(buildApp()).get('/assignment/runs/1001');
 
   expect(res.status).toBe(200);
   expect(res.body.data.ticket.priorityReason).toEqual({
@@ -104,7 +104,7 @@ test('no history row: falls back to the AI rationale; a failed read never breaks
   }));
   prismaMock.ticketActivity.findFirst.mockRejectedValue(new Error('db blip'));
 
-  const res = await request(buildApp()).get('/assignment/runs/36226');
+  const res = await request(buildApp()).get('/assignment/runs/1001');
 
   expect(res.status).toBe(200);
   expect(res.body.data.ticket.priorityReason).toEqual(expect.objectContaining({

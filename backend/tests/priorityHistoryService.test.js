@@ -181,12 +181,12 @@ describe('listRequesterPriorityRaises', () => {
     subject: `Subject ${id}`, requester: { name: 'Dana Fox', email: 'dana.fox@example.com' }, ...extra,
   });
 
-  test('workspace-scoped, AI Medium/Low only, one row per ticket, newest first', async () => {
+  test('workspace-scoped, AI Medium/Low only, one row per ticket (earliest qualifying raise), newest first', async () => {
     prismaMock.urgentEscalationEvent.findMany.mockResolvedValue([
       { id: 3, ticketId: 11, source: 'business_urgency', createdAt: new Date('2026-11-23T18:17:00Z'), payload: { fromAssessedPriority: 'Medium', toPriorityLabel: 'Urgent' }, ticket: ticket(11, 1042) },
       { id: 2, ticketId: 11, source: 'business_urgency', createdAt: new Date('2026-11-22T18:00:00Z'), payload: { fromAssessedPriority: 'Low' }, ticket: ticket(11, 1042) },
       { id: 1, ticketId: 12, source: 'self_service', createdAt: new Date('2026-11-21T03:00:00Z'), payload: { fromAssessedPriority: 'High' }, ticket: ticket(12, 1043) },
-      { id: 0, ticketId: 13, source: 'business_urgency', createdAt: new Date('2026-11-20T16:00:00Z'), payload: {}, ticket: ticket(13, null, { origin: 'freshservice', freshserviceTicketId: 253330, requester: { name: null, email: 'eli.park@example.com' } }) },
+      { id: 0, ticketId: 13, source: 'business_urgency', createdAt: new Date('2026-11-20T16:00:00Z'), payload: {}, ticket: ticket(13, null, { origin: 'freshservice', freshserviceTicketId: 250003, requester: { name: null, email: 'eli.park@example.com' } }) },
     ]);
     // Older event without the stored level: the last completed AI run before the raise decides.
     prismaMock.assignmentPipelineRun.findMany.mockResolvedValue([
@@ -202,8 +202,28 @@ describe('listRequesterPriorityRaises', () => {
     expect(where.createdAt.gte.toISOString()).toBe('2026-11-16T20:00:00.000Z');
     expect(prismaMock.assignmentPipelineRun.findMany.mock.calls[0][0].where).toEqual(expect.objectContaining({ workspaceId: 1, ticketId: { in: [13] } }));
     expect(rows).toEqual([
-      { ticketId: 11, displayRef: 'TP-1042', subject: 'Subject 11', aiPriority: 'Medium', raisedTo: 'Urgent', raisedAt: '2026-11-23T18:17:00.000Z', requesterName: 'Dana Fox' },
-      { ticketId: 13, displayRef: '#253330', subject: 'Subject 13', aiPriority: 'Low', raisedTo: 'Urgent', raisedAt: '2026-11-20T16:00:00.000Z', requesterName: 'eli.park@example.com' },
+      // Ticket 11 was raised twice: its earliest raise against the AI level counts.
+      { ticketId: 11, displayRef: 'TP-1042', subject: 'Subject 11', aiPriority: 'Low', raisedTo: 'Urgent', raisedAt: '2026-11-22T18:00:00.000Z', requesterName: 'Dana Fox' },
+      { ticketId: 13, displayRef: '#250003', subject: 'Subject 13', aiPriority: 'Low', raisedTo: 'Urgent', raisedAt: '2026-11-20T16:00:00.000Z', requesterName: 'eli.park@example.com' },
+    ]);
+  });
+
+  test('a second raise of the same ticket does not drop it: the earliest raise against the AI level counts', async () => {
+    prismaMock.urgentEscalationEvent.findMany.mockResolvedValue([
+      // Second raise (newest): assessedPriority was already Urgent, written by the first raise.
+      { id: 21, ticketId: 14, source: 'business_urgency', createdAt: new Date('2026-11-23T19:00:00Z'), payload: { fromAssessedPriority: 'Urgent', fromAssessedBy: 'requester' }, ticket: ticket(14, 1044) },
+      // Older payload without fromAssessedBy, already Urgent: not the AI's level either.
+      { id: 20, ticketId: 14, source: 'business_urgency', createdAt: new Date('2026-11-22T19:00:00Z'), payload: { fromAssessedPriority: 'Urgent' }, ticket: ticket(14, 1044) },
+      { id: 19, ticketId: 14, source: 'business_urgency', createdAt: new Date('2026-11-21T19:00:00Z'), payload: { fromAssessedPriority: 'Medium', fromAssessedBy: 'ai' }, ticket: ticket(14, 1044) },
+    ]);
+    prismaMock.assignmentPipelineRun.findMany.mockResolvedValue([
+      { ticketId: 14, createdAt: new Date('2026-11-21T10:00:00Z'), recommendation: { assessedPriority: 'Medium' } },
+    ]);
+
+    const rows = await listRequesterPriorityRaises({ workspaceId: 1, days: 7, now: NOW });
+
+    expect(rows).toEqual([
+      expect.objectContaining({ ticketId: 14, displayRef: 'TP-1044', aiPriority: 'Medium', raisedAt: '2026-11-21T19:00:00.000Z' }),
     ]);
   });
 

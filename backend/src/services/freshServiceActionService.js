@@ -45,6 +45,19 @@ export function unescapeIfEscaped(value) {
 }
 
 
+/**
+ * The run's same-day repeat raise (QA 11-23 item 5, assignmentFollowUp) when
+ * the level being written IS that raise — raised this run, or held at an
+ * earlier raise — else null. Then the history row says 'repeat_report'.
+ */
+export function repeatReportFor(recommendation, priorityLabel) {
+  const rr = recommendation && typeof recommendation === 'object' ? recommendation.repeatReport : null;
+  if (!rr || typeof rr !== 'object' || !priorityLabel) return null;
+  const level = rr.raised === true ? rr.raisedTo : rr.keptAt;
+  if (!level || String(level).toLowerCase() !== String(priorityLabel).toLowerCase()) return null;
+  return { ...rr, historyNote: rr.historyNote || (rr.relatedRef ? `Same problem reported again today (${rr.relatedRef})` : 'Same problem reported again today') };
+}
+
 const TP_SKILL_OBJECT_TITLE = 'Ticket Pulse Skills';
 const TP_SUBSKILL_OBJECT_TITLE = 'Ticket Pulse Subskills';
 const TP_SUBSKILL_PARENT_FIELD = 'parent_skill';
@@ -598,14 +611,19 @@ class FreshServiceActionService {
         return false;
       });
       // QA 11-23 item 2: the AI setting the ticket's priority is history too.
+      // A same-day repeat raise (item 5, recommendation.repeatReport) is named
+      // as such: one 'repeat_report' row, from the ticket's real prior level.
       if (localUpdated) {
+        const repeat = repeatReportFor(run.recommendation, action.priorityLabel);
         await recordPriorityChange({
           ticketId: run.ticketId,
           from: run.ticket?.priority ?? null,
           to: action.priorityId,
-          source: 'ai_assessment',
-          note: run.ticket?.priorityRationale || null,
-          details: { pipelineRunId: runId },
+          source: repeat ? 'repeat_report' : 'ai_assessment',
+          note: repeat ? repeat.historyNote : (run.ticket?.priorityRationale || null),
+          details: repeat
+            ? { pipelineRunId: runId, relatedTicketId: repeat.relatedTicketId ?? null, relatedRef: repeat.relatedRef ?? null }
+            : { pipelineRunId: runId },
         });
       }
 

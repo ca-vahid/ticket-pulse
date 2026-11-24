@@ -412,7 +412,9 @@ describe('notificationPreferenceService', () => {
             ticketLink: 'https://tp.example.com/it/222999',
             whatsappVariables: expect.objectContaining({
               priority: 'High',
-              ticketId: '#222999',
+              // {{ticketId}} keeps its meaning (bare FreshService number); {{ticketRef}} is new.
+              ticketId: '222999',
+              ticketRef: '#222999',
               link: 'https://tp.example.com/it/222999',
             }),
           }),
@@ -679,7 +681,7 @@ describe('notificationPreferenceService', () => {
 
   describe('QA 11-23 item 1: alerts name and link the ticket in Ticket Pulse', () => {
     const tpBorn = { id: 9001, workspaceId: 1, origin: 'ticketpulse', nativeNumber: 1042, freshserviceTicketId: 250001 };
-    const fsBorn = { id: 9002, workspaceId: 1, origin: 'freshservice', nativeNumber: null, freshserviceTicketId: 253329 };
+    const fsBorn = { id: 9002, workspaceId: 1, origin: 'freshservice', nativeNumber: null, freshserviceTicketId: 250002 };
 
     test('priority change: a Ticket Pulse ticket mirrored to FreshService uses TP-n and the app link', () => {
       const message = buildPriorityChangeNotificationMessage({ ticket: tpBorn, priority: 'Urgent' });
@@ -689,14 +691,14 @@ describe('notificationPreferenceService', () => {
 
     test('priority change: a FreshService ticket keeps its number but opens in Ticket Pulse', () => {
       expect(buildPriorityChangeNotificationMessage({ ticket: fsBorn, priority: 'High' }))
-        .toBe('Ticket #253329 is now High priority and assigned to you. Open: https://tp.example.com/it/253329');
+        .toBe('Ticket #250002 is now High priority and assigned to you. Open: https://tp.example.com/it/250002');
     });
 
     test('assignment: same reference and link', () => {
       expect(buildNotificationMessage({ ticket: tpBorn, priority: 'High' }))
         .toBe('TP-1042 is High priority and has been assigned to you. Open: https://tp.example.com/it/TP-1042');
       expect(buildNotificationMessage({ ticket: fsBorn, priority: 'Urgent' }))
-        .toBe('Ticket #253329 is Urgent priority and has been assigned to you. Open: https://tp.example.com/it/253329');
+        .toBe('Ticket #250002 is Urgent priority and has been assigned to you. Open: https://tp.example.com/it/250002');
     });
 
     test('without the workspace link name the long /tickets/<id> form is used, never FreshService', () => {
@@ -718,7 +720,7 @@ describe('notificationPreferenceService', () => {
       expect(buildVoiceNotificationMessage({ ticket: tpBorn, priority: 'High' }))
         .toBe('Ticket Pulse alert. Ticket T P 1042 is High priority and has been assigned to you.');
       expect(buildVoiceNotificationMessage({ ticket: fsBorn, priority: 'High' }))
-        .toBe('Ticket Pulse alert. Ticket number 253329 is High priority and has been assigned to you.');
+        .toBe('Ticket Pulse alert. Ticket number 250002 is High priority and has been assigned to you.');
       for (const text of [
         buildPriorityChangeVoiceNotificationMessage({ ticket: tpBorn, priority: 'Urgent' }),
         buildVoiceNotificationMessage({ ticket: fsBorn, priority: 'High' }),
@@ -746,7 +748,26 @@ describe('notificationPreferenceService', () => {
       const [delivery] = prismaMock.notificationDelivery.createMany.mock.calls.at(-1)[0].data;
       expect(delivery.payload.message).toBe('TP-1042 is now Urgent priority and assigned to you. Open: https://tp.example.com/it/TP-1042');
       expect(delivery.payload.ticketRef).toBe('TP-1042');
-      expect(delivery.payload.whatsappVariables).toEqual(expect.objectContaining({ ticketId: 'TP-1042', link: 'https://tp.example.com/it/TP-1042' }));
+      expect(delivery.payload.whatsappVariables).toEqual(expect.objectContaining({ ticketId: '250001', ticketRef: 'TP-1042', link: 'https://tp.example.com/it/TP-1042' }));
+    });
+
+    test('WhatsApp {{ticketId}} stays the bare FreshService number; empty for a ticket without one', async () => {
+      prismaMock.technicianNotificationPreference.findUnique.mockResolvedValue({
+        id: 1, workspaceId: 1, technicianId: 17, threshold: 'high_urgent',
+        emailEnabled: true, smsEnabled: false, whatsappEnabled: false, phoneCallEnabled: false,
+        phoneVerifiedAt: null, technician: { email: 'dana.fox@example.com' },
+      });
+      settingsRepositoryMock.getSendGridConfig.mockResolvedValue({ apiKey: 'SG.test', fromEmail: 'ticketpulse@example.com' });
+      prismaMock.notificationDelivery.createMany.mockResolvedValue({ count: 1 });
+
+      await notificationPreferenceService.queueNotificationsForPriorityChange({
+        id: 46, workspaceId: 1, toPriorityId: 3, toPriorityLabel: 'High',
+        ticket: { id: 9003, workspaceId: 1, origin: 'ticketpulse', nativeNumber: 1043, freshserviceTicketId: null, assignedTechId: 17 },
+      });
+
+      const [delivery] = prismaMock.notificationDelivery.createMany.mock.calls.at(-1)[0].data;
+      expect(delivery.payload.whatsappVariables).toEqual(expect.objectContaining({ ticketId: '', ticketRef: 'TP-1043' }));
+      expect(delivery.payload.freshserviceTicketId).toBeNull();
     });
   });
 });

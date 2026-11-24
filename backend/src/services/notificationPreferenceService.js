@@ -106,11 +106,16 @@ export function buildPriorityChangeNotificationMessage({ ticket, priority }) {
   ].filter(Boolean).join(' ');
 }
 
+// WhatsApp template variables: `ticketId` keeps its meaning (the bare
+// FreshService number) so approved templates read as before; `ticketRef`
+// (QA 11-23) is the ticket's own reference, TP-1042 / #250001.
 function buildWhatsAppVariables({ ticket, priority, message }) {
+  const fsId = fsTicketIdOrNull(ticket);
   return {
     message,
     priority: priority || '',
-    ticketId: notificationTicketRef(ticket) || '',
+    ticketId: fsId ? String(fsId) : '',
+    ticketRef: notificationTicketRef(ticket) || '',
     link: notificationTicketLink(ticket) || '',
   };
 }
