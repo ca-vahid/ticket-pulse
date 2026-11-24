@@ -5,6 +5,7 @@ import logger from '../utils/logger.js';
 import { ValidationError, NotFoundError } from '../utils/errors.js';
 import { fsConversationEntryIdCandidates, parseFsConversationId } from '../utils/fsEntryId.js';
 import { markRecurring } from './recurringImageService.js';
+import { NAME_SELECT, withNameFields } from './attachmentNamingRules.js';
 
 async function streamToBuffer(stream) {
   const chunks = [];
@@ -86,7 +87,7 @@ class AttachmentService {
    * Store a buffer and record the attachment row.
    * Blob path: ws-<workspaceId>/ticket-<ticketId>/<random>-<safe-name>
    */
-  async upload({ workspaceId, ticketId, threadEntryId = null, fileName, contentType, buffer, uploadedBy = null, source = 'upload' }) {
+  async upload({ workspaceId, ticketId, threadEntryId = null, fileName, contentType, buffer, uploadedBy = null, source = 'upload', names = null }) {
     const safeName = sanitizeFileName(fileName);
     this.validateUpload({ fileName: safeName, sizeBytes: buffer?.length || 0 });
 
@@ -115,6 +116,14 @@ class AttachmentService {
         blobName,
         source,
         uploadedBy,
+        // A merge/split copy keeps the file's display name (4.4.08 review).
+        ...(names?.nameSource ? {
+          displayName: names.displayName ?? null,
+          nameSource: names.nameSource,
+          nameDetails: names.nameDetails ?? undefined,
+          namedAt: names.namedAt ?? null,
+          namedBy: names.namedBy ?? null,
+        } : {}),
       },
     });
     logger.info(`Attachment stored: ${safeName} (${buffer.length} bytes) → ${this.containerName()}/${blobName}`);
@@ -149,6 +158,15 @@ class AttachmentService {
       buffer,
       uploadedBy,
       source: 'copy',
+      // The copy shows the same name as the original (and a Revert there still
+      // gives back the vendor's original file name).
+      names: attachment.nameSource ? {
+        displayName: attachment.displayName,
+        nameSource: attachment.nameSource,
+        nameDetails: attachment.nameDetails,
+        namedAt: attachment.namedAt,
+        namedBy: attachment.namedBy,
+      } : null,
     });
   }
 
@@ -392,10 +410,12 @@ class AttachmentService {
       select: {
         id: true, fileName: true, contentType: true, sizeBytes: true,
         threadEntryId: true, source: true, uploadedBy: true, createdAt: true,
+        ...NAME_SELECT,
       },
     });
     // Signature logos seen on many tickets carry `recurring: true` (19 Oct 2026).
-    return markRecurring(workspaceId, rows);
+    // 4.4.08: displayName / originalName / nameSource / nameDetails on every row.
+    return (await markRecurring(workspaceId, rows)).map(withNameFields);
   }
 
   /** One stored file's bytes (blob, or FreshService on first use). Null when gone. */

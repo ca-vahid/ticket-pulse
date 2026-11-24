@@ -1294,6 +1294,13 @@ class MailboxIngestService {
       // content id. Outlook gives every attachment a content id, so a 278 KB invoice PDF
       // (isInline false) was read as an unused inline picture and dropped since 4.2.56.
       const files = prefetched ? (all || []).filter((f) => (f.isInline === true ? Boolean(f.inlineName) : true)) : all;
+      // 4.4.08: how many documents this mail carried (a subject's invoice number
+      // belongs to one of them). Only body pictures (`inlineName`) count as inline:
+      // Apple Mail flags attached PDFs inline too.
+      const naming = await import('./attachmentNamingRules.js').catch(() => null);
+      const documentCount = naming
+        ? files.filter((f) => naming.isNameableDocument({ fileName: f.inlineName || f.name, contentType: f.contentType, isInline: Boolean(f.inlineName) })).length
+        : null;
       for (const file of files) {
         await attachmentService.upload({
           workspaceId: ticket.workspaceId,
@@ -1304,7 +1311,15 @@ class MailboxIngestService {
           buffer: file.buffer,
           uploadedBy: email.from,
           source: 'email',
-        }).then((row) => { if (row?.id && Array.isArray(stored)) stored.push(row.id); }).catch((err) => {
+        }).then((row) => {
+          if (row?.id && Array.isArray(stored)) stored.push(row.id);
+          // 4.4.08: vendor display names, in the background (the workspace switch is read there).
+          if (row?.id) {
+            import('./attachmentNamingService.js')
+              .then(({ queueEmailAttachment }) => queueEmailAttachment(row, { email, isInline: Boolean(file.inlineName), documentCount }))
+              .catch(() => {});
+          }
+        }).catch((err) => {
           skipped.push({ name: file.name, reason: err.message });
         });
       }

@@ -6,6 +6,7 @@ import { formatBytes } from './ticketUi';
 import PdfViewer from './attachmentPreview/PdfViewer';
 import EmailView from './attachmentPreview/EmailView';
 import { parseEmailFile } from './attachmentPreview/parseEmail';
+import { attachmentName, originalNameIfRenamed } from './attachmentNames';
 
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 6;
@@ -244,7 +245,10 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose, 
   // The PDF viewer and the e-mail reader fill the card edge to edge (their own
   // toolbar / header is the chrome), like FreshService's document viewer.
   const fills = kind === 'pdf' || kind === 'email';
-  const download = () => ticketsAPI.downloadAttachment(ticketId, attachment.id, attachment.fileName);
+  // 4.4.08: shown and saved under its display name (the vendor name when it has one).
+  const shownName = attachmentName(attachment);
+  const wasName = originalNameIfRenamed(attachment);
+  const download = () => ticketsAPI.downloadAttachment(ticketId, attachment.id, shownName);
   const ready = kind === 'none' || Boolean(error) || (url && (kind === 'image' || kind === 'audio' || kind === 'video' || rich));
 
   const body = () => {
@@ -255,7 +259,7 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose, 
             <FileIcon className="w-8 h-8 text-muted-foreground/75" aria-hidden="true" />
           </span>
           <div>
-            <p className="text-sm font-semibold text-foreground">{attachment.fileName}</p>
+            <p className="text-sm font-semibold text-foreground">{shownName}</p>
             <p className="mt-0.5 text-xs text-muted-foreground">
               {error || noPreviewMessage(attachment)}
               {attachment.sizeBytes ? ` · ${formatBytes(attachment.sizeBytes)}` : ''}
@@ -273,11 +277,11 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose, 
     }
     if (!ready) return <Loader2 className="w-6 h-6 animate-spin text-muted-foreground/75" aria-hidden="true" />;
     if (kind === 'pdf') {
-      return <PdfViewer key={attachment.id} data={rich.data} fileName={attachment.fileName} railOpen={railOpen} onToggleRail={toggleRail} />;
+      return <PdfViewer key={attachment.id} data={rich.data} fileName={shownName} railOpen={railOpen} onToggleRail={toggleRail} />;
     }
     if (kind === 'email') return <EmailView email={rich.email} />;
-    if (kind === 'audio') return <audio controls src={url} className="w-[min(80vw,480px)]" aria-label={attachment.fileName} />;
-    if (kind === 'video') return <video controls src={url} className={`${full ? 'max-h-full' : 'max-h-[80vh]'} max-w-full rounded-lg shadow-subtle`} aria-label={attachment.fileName} />;
+    if (kind === 'audio') return <audio controls src={url} className="w-[min(80vw,480px)]" aria-label={shownName} />;
+    if (kind === 'video') return <video controls src={url} className={`${full ? 'max-h-full' : 'max-h-[80vh]'} max-w-full rounded-lg shadow-subtle`} aria-label={shownName} />;
     if (kind === 'text') {
       return (
         <pre data-preview-scroll className={`settings-scrollbar ${full ? 'h-full w-full' : 'h-[72vh] w-[min(92vw,880px)]'} overflow-auto overscroll-contain whitespace-pre-wrap break-words rounded-lg bg-card p-4 text-xs leading-relaxed text-foreground/85 shadow-subtle`}>
@@ -314,7 +318,7 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose, 
     return (
       <img
         src={url}
-        alt={attachment.fileName}
+        alt={shownName}
         draggable={false}
         onDoubleClick={() => (zoomed ? resetView() : zoomBy(ZOOM_STEP * 3))}
         onPointerDown={onPointerDown}
@@ -341,13 +345,14 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose, 
       : `${wide ? 'max-w-5xl' : 'max-w-[min(94vw,1280px)]'} max-h-[94vh]`;
 
   return (
-    <div ref={rootRef} className={`fixed inset-0 z-[60] flex items-center justify-center ${full ? 'p-2' : 'p-4'} overscroll-contain animate-fadeIn`} role="dialog" aria-modal="true" aria-label={`Preview ${attachment.fileName}`}>
+    <div ref={rootRef} className={`fixed inset-0 z-[60] flex items-center justify-center ${full ? 'p-2' : 'p-4'} overscroll-contain animate-fadeIn`} role="dialog" aria-modal="true" aria-label={`Preview ${shownName}`}>
       <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-[2px]" onClick={onClose} aria-hidden="true" />
       <div data-testid="attachment-preview-card" className={`relative tp-card rounded-2xl shadow-soft ${cardSize} flex flex-col animate-scaleIn`}>
         <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-border/60">
           <span className="min-w-0 text-sm font-semibold text-foreground truncate">
             <FileText className="mr-1.5 inline h-4 w-4 align-[-2px] text-muted-foreground/75" aria-hidden="true" />
-            {attachment.fileName}
+            {shownName}
+            {wasName && <span className="ml-2 hidden text-xs font-normal text-muted-foreground sm:inline" data-testid="attachment-preview-was">was {wasName}</span>}
             {attachment.sizeBytes ? <span className="ml-2 text-xs font-normal text-muted-foreground/75">{formatBytes(attachment.sizeBytes)}</span> : null}
             {list && index >= 0 && <span className="ml-2 text-xs font-normal tabular-nums text-muted-foreground/75">{index + 1} of {list.length}</span>}
           </span>
@@ -418,8 +423,8 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose, 
             <button
               type="button"
               onClick={() => onNavigate(prev)}
-              aria-label={`Previous: ${prev.fileName}`}
-              title={`Previous: ${prev.fileName} (←)`}
+              aria-label={`Previous: ${attachmentName(prev)}`}
+              title={`Previous: ${attachmentName(prev)} (←)`}
               className={`tp-focus-ring absolute ${kind === 'pdf' && fillsNow && railOpen ? 'left-2 sm:left-[9.5rem]' : 'left-2'} top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-full bg-card/90 text-foreground shadow-soft ring-1 ring-border hover:bg-card`}
             >
               <ChevronLeft className="h-5 w-5" aria-hidden="true" />
@@ -429,8 +434,8 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose, 
             <button
               type="button"
               onClick={() => onNavigate(next)}
-              aria-label={`Next: ${next.fileName}`}
-              title={`Next: ${next.fileName} (→)`}
+              aria-label={`Next: ${attachmentName(next)}`}
+              title={`Next: ${attachmentName(next)} (→)`}
               className={`tp-focus-ring absolute ${fillsNow ? 'right-5' : 'right-2'} top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-full bg-card/90 text-foreground shadow-soft ring-1 ring-border hover:bg-card`}
             >
               <ChevronRight className="h-5 w-5" aria-hidden="true" />

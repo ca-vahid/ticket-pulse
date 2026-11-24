@@ -10,6 +10,7 @@ import ticketService from '../services/ticketService.js';
 import scheduledTicketService from '../services/scheduledTicketService.js';
 import ticketParkService, { parkView } from '../services/ticketParkService.js';
 import attachmentService, { MAX_ATTACHMENT_BYTES } from '../services/attachmentService.js';
+import { contentDisposition, shownName, withNameFields } from '../services/attachmentNamingRules.js';
 import workspaceRepository from '../services/workspaceRepository.js';
 import { heartbeatPresence, leavePresence, presenceSnapshot } from '../services/presenceService.js';
 import prisma from '../services/prisma.js';
@@ -2588,7 +2589,7 @@ router.post(
         mirrorService.enqueueAttachment(req.workspaceId, ticketId, s.id).catch(() => {});
       }
     }
-    res.status(201).json({ success: true, data: stored });
+    res.status(201).json({ success: true, data: stored.map(withNameFields) });
   }),
 );
 
@@ -2598,9 +2599,28 @@ router.get('/:id/attachments/:attachmentId/download', asyncHandler(async (req, r
   );
   res.setHeader('Content-Type', attachment.contentType || 'application/octet-stream');
   res.setHeader('Content-Length', attachment.sizeBytes);
-  res.setHeader('Content-Disposition', `attachment; filename="${attachment.fileName.replace(/"/g, '')}"`);
+  // 4.4.08: downloads carry the display name (vendor name), RFC 5987 for non-ASCII.
+  res.setHeader('Content-Disposition', contentDisposition(shownName(attachment)));
   res.setHeader('X-Content-Type-Options', 'nosniff');
   stream.pipe(res);
+}));
+
+// 4.4.08: Revert or Edit an attachment's display name. Any member/agent of the
+// workspace (read-only roles are stopped by the global gate). Not behind native
+// ticketing: display names live in Ticket Pulse only and never reach FreshService.
+router.post('/:id/attachments/:attachmentId/name', asyncHandler(async (req, res) => {
+  const attachmentId = Number(req.params.attachmentId);
+  if (!Number.isInteger(attachmentId) || attachmentId <= 0) throw new NotFoundError('Attachment not found');
+  const { applyManualName } = await import('../services/attachmentNamingService.js');
+  const data = await applyManualName({
+    ticketId: parseTicketId(req),
+    attachmentId,
+    workspaceId: req.workspaceId,
+    action: req.body?.action,
+    name: req.body?.name,
+    actor: req.ticketActor,
+  });
+  res.json({ success: true, data });
 }));
 
 router.delete('/:id/attachments/:attachmentId', requireNativeTicketing, asyncHandler(async (req, res) => {

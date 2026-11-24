@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.4.07-preview';
+export const APP_VERSION = '4.4.08-preview';
 
 export const changelog = [
+  {
+    version: '4.4.08-preview',
+    date: 'November 24, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Accounting attachments name themselves</strong> &mdash; every document that arrives by e-mail in Accounting is renamed to the vendor, invoice number and date, e.g. &ldquo;Acme Supplies_INV-100234_2026_11_23.pdf&rdquo;, with the original name shown underneath. <strong>Revert</strong> puts the original back for good; <strong>Edit name</strong> fixes a name and teaches the vendor for that sender. Downloads, Download all, the preview and Merge into one PDF use the new name; the stored file and FreshService keep the original.' },
+    ],
+  },
   {
     version: '4.4.07-preview',
     date: 'November 23, 2026',

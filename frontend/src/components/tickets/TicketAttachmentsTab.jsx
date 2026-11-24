@@ -6,6 +6,8 @@ import { DownloadAllButton, DownloadAllPanel } from './AttachmentsDownloadAll';
 import { useDownloadAll } from './useDownloadAll';
 import MergePdfDialog from './MergePdfDialog';
 import { mergeBlocker } from './attachmentMerge';
+import AttachmentName from './AttachmentName';
+import { attachmentName } from './attachmentNames';
 
 /**
  * Attachments tab (30 Sep 2026): every file on the ticket in one place,
@@ -13,6 +15,8 @@ import { mergeBlocker } from './attachmentMerge';
  * original request), agent replies, internal notes, files uploaded straight
  * onto the ticket. Grid (image thumbnails) or list; click previews, the icon
  * downloads, "Show in conversation" jumps to the message it came with.
+ * 4.4.08: a file named automatically shows its new name with the original
+ * under it; editors can edit the name or revert it (AttachmentName).
  */
 const isImage = (a) => /^image\//i.test(a?.contentType || '') || /\.(png|jpe?g|gif|webp|bmp|svg|heic|avif)$/i.test(a?.fileName || '');
 const ext = (name) => (String(name || '').match(/\.([a-z0-9]{1,5})$/i)?.[1] || 'file').toUpperCase();
@@ -51,7 +55,7 @@ export function attachmentKind(a, entryById) {
 function Thumb({ a, url }) {
   if (isImage(a)) {
     return url
-      ? <img src={url} alt={a.fileName} loading="lazy" className="h-full w-full object-cover" />
+      ? <img src={url} alt={attachmentName(a)} loading="lazy" className="h-full w-full object-cover" />
       : <ImageIcon className="h-6 w-6 text-muted-foreground/50" aria-hidden="true" />;
   }
   return (
@@ -63,9 +67,22 @@ function Thumb({ a, url }) {
 }
 
 export default function TicketAttachmentsTab({
-  ticketId, attachments = [], signatureImages = [], entries = [], onPreview, onDownload, onJumpToEntry, canUpload = false, onUpload, uploading = false, nameForEmail = null, ticketRef = '', subject = '',
+  ticketId, attachments: attachmentsIn = [], signatureImages = [], entries = [], onPreview, onDownload, onJumpToEntry, canUpload = false, onUpload, uploading = false, nameForEmail = null, ticketRef = '', subject = '',
   onMerged = null, loadPdfLib,
+  // 4.4.08: agents who can edit the ticket may edit or revert a file's name.
+  canRename = false, onRenamed = null,
 }) {
+  // A rename shows straight away; the ticket's next load carries it for real.
+  const [nameOverrides, setNameOverrides] = useState({});
+  useEffect(() => { setNameOverrides((o) => (Object.keys(o).length ? {} : o)); }, [attachmentsIn]);
+  const attachments = useMemo(
+    () => attachmentsIn.map((a) => (nameOverrides[a.id] ? { ...a, ...nameOverrides[a.id] } : a)),
+    [attachmentsIn, nameOverrides],
+  );
+  const nameChanged = (id, fields, data) => {
+    setNameOverrides((o) => ({ ...o, [id]: fields }));
+    onRenamed?.(id, fields, data);
+  };
   const [filter, setFilter] = useState('all');
   const [view, setView] = useState(() => { try { return localStorage.getItem('tp_attach_view') || 'grid'; } catch { return 'grid'; } });
   const [urls, setUrls] = useState({});
@@ -136,7 +153,7 @@ export default function TicketAttachmentsTab({
       type="checkbox"
       checked={selectedSet.has(a.id)}
       onChange={() => toggleSelected(a.id)}
-      aria-label={`Select ${a.fileName}`}
+      aria-label={`Select ${attachmentName(a)}`}
       className={`tp-focus-ring h-4 w-4 flex-none cursor-pointer rounded border-input accent-blue-600 ${extra}`}
     />
   );
@@ -232,12 +249,12 @@ export default function TicketAttachmentsTab({
               {canMerge && (
                 <span className="absolute left-1.5 top-1.5 z-10 flex rounded bg-card/90 p-1 shadow-subtle">{selectBox(a)}</span>
               )}
-              <button type="button" onClick={() => onPreview?.(a, shown.map((r) => r.a))} title={`Preview ${a.fileName}`}
+              <button type="button" onClick={() => onPreview?.(a, shown.map((r) => r.a))} title={`Preview ${attachmentName(a)}`}
                 className="tp-focus-ring flex h-28 items-center justify-center overflow-hidden bg-muted/50 transition-colors hover:bg-muted">
                 <Thumb a={a} url={urls[a.id]} />
               </button>
               <div className="flex min-w-0 flex-1 flex-col gap-0.5 p-2.5">
-                <span className="truncate text-xs font-semibold text-foreground" title={a.fileName}>{a.fileName}</span>
+                <AttachmentName ticketId={ticketId} a={a} variant="grid" canRename={canRename} onChanged={nameChanged} />
                 <span className="truncate text-[11px] text-muted-foreground">{KIND_WORD[kind]}{who ? ` · ${who}` : ''}</span>
                 <span className="text-[11px] text-muted-foreground/75">{formatDayTime(at)} · {formatBytes(a.sizeBytes)}</span>
                 <span className="mt-1 flex items-center gap-2">
@@ -246,7 +263,7 @@ export default function TicketAttachmentsTab({
                       <MessageSquare className="h-3 w-3" aria-hidden="true" /> Go to message
                     </button>
                   )}
-                  <button type="button" onClick={() => onDownload?.(a)} aria-label={`Download ${a.fileName}`} title="Download" className="tp-focus-ring ml-auto rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground">
+                  <button type="button" onClick={() => onDownload?.(a)} aria-label={`Download ${attachmentName(a)}`} title="Download" className="tp-focus-ring ml-auto rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground">
                     <Download className="h-3.5 w-3.5" aria-hidden="true" />
                   </button>
                 </span>
@@ -260,14 +277,16 @@ export default function TicketAttachmentsTab({
             <li key={a.id} className="flex items-center gap-3 py-2">
               {selectBox(a)}
               {isImage(a) ? <ImageIcon className="h-4 w-4 flex-none text-muted-foreground/75" aria-hidden="true" /> : <Paperclip className="h-4 w-4 flex-none text-muted-foreground/75" aria-hidden="true" />}
-              <button type="button" onClick={() => onPreview?.(a, shown.map((r) => r.a))} className="tp-focus-ring min-w-0 flex-1 truncate text-left text-sm font-medium text-foreground hover:text-primary" title={`Preview ${a.fileName}`}>{a.fileName}</button>
+              <div className="min-w-0 flex-1">
+                <AttachmentName ticketId={ticketId} a={a} variant="list" canRename={canRename} onChanged={nameChanged} onPreview={(x) => onPreview?.(x, shown.map((r) => r.a))} />
+              </div>
               <span className="hidden flex-none text-xs text-muted-foreground sm:inline">{KIND_WORD[kind]}{who ? ` · ${who}` : ''}</span>
               <span className="hidden flex-none text-xs text-muted-foreground/75 md:inline">{formatDayTime(at)}</span>
               <span className="w-16 flex-none text-right text-xs text-muted-foreground/75">{formatBytes(a.sizeBytes)}</span>
               {entryId
                 ? <button type="button" onClick={() => onJumpToEntry?.(entryId)} title="Show in conversation" aria-label="Show in conversation" className="tp-focus-ring flex-none rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"><MessageSquare className="h-3.5 w-3.5" aria-hidden="true" /></button>
                 : <span className="w-[22px] flex-none" />}
-              <button type="button" onClick={() => onDownload?.(a)} aria-label={`Download ${a.fileName}`} title="Download" className="tp-focus-ring flex-none rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"><Download className="h-3.5 w-3.5" aria-hidden="true" /></button>
+              <button type="button" onClick={() => onDownload?.(a)} aria-label={`Download ${attachmentName(a)}`} title="Download" className="tp-focus-ring flex-none rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"><Download className="h-3.5 w-3.5" aria-hidden="true" /></button>
             </li>
           ))}
         </ul>
@@ -284,7 +303,7 @@ export default function TicketAttachmentsTab({
             {signatureImages.map((a) => (
               <li key={a.id} className="flex items-center gap-1.5">
                 <ImageIcon className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
-                <button type="button" onClick={() => onPreview?.(a, signatureImages)} className="tp-focus-ring max-w-[260px] truncate rounded hover:text-foreground hover:underline" title={`Preview ${a.fileName}`}>{a.fileName}</button>
+                <button type="button" onClick={() => onPreview?.(a, signatureImages)} className="tp-focus-ring max-w-[260px] truncate rounded hover:text-foreground hover:underline" title={`Preview ${attachmentName(a)}`}>{attachmentName(a)}</button>
                 <span className="text-muted-foreground/75">{formatBytes(a.sizeBytes)}</span>
               </li>
             ))}

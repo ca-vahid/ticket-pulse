@@ -69,6 +69,7 @@ class ScheduledSyncService {
       this.startNoiseCloseDigest();
       this.startUrgentResponseDigest();
       this.startPersonalKeyExpirySweep();
+      this.startAttachmentNamingCatchUp();
 
       logger.info(`Scheduled sync started for ${workspaces.length} workspace(s)`);
       return true;
@@ -635,6 +636,40 @@ class ScheduledSyncService {
     }
   }
 
+  /**
+   * Attachment names catch-up (4.4.08): 3 minutes after boot and daily at
+   * 03:40 Pacific, queue e-mail documents from the last 48 hours in live
+   * workspaces that a restart left unchecked (bounded at 500 per run). Quiet
+   * when no workspace is live. Kill switch: ATTACHMENT_NAMING_CATCHUP=false.
+   */
+  startAttachmentNamingCatchUp() {
+    this.stopAttachmentNamingCatchUp();
+    if (process.env.ATTACHMENT_NAMING_CATCHUP === 'false') return;
+    const run = async (why) => {
+      try {
+        const { catchUpRecentAttachments } = await import('./attachmentNamingService.js');
+        const result = await catchUpRecentAttachments();
+        if (result.found) logger.info(`Attachment naming catch-up (${why}): ${result.queued} of ${result.found} file(s) queued`);
+      } catch (error) {
+        logger.warn(`Attachment naming catch-up (${why}) failed (non-fatal): ${error.message}`);
+      }
+    };
+    this.attachmentNamingBootTimer = setTimeout(() => run('boot'), 3 * 60_000);
+    this.attachmentNamingBootTimer.unref?.();
+    this.attachmentNamingCatchUpJob = cron.schedule('40 3 * * *', () => run('daily'), { scheduled: true, timezone: 'America/Vancouver' });
+  }
+
+  stopAttachmentNamingCatchUp() {
+    if (this.attachmentNamingBootTimer) {
+      clearTimeout(this.attachmentNamingBootTimer);
+      this.attachmentNamingBootTimer = null;
+    }
+    if (this.attachmentNamingCatchUpJob) {
+      this.attachmentNamingCatchUpJob.stop();
+      this.attachmentNamingCatchUpJob = null;
+    }
+  }
+
   stopMailboxHoldDigest() {
     if (this.mailboxHoldDigestJob) {
       this.mailboxHoldDigestJob.stop();
@@ -650,6 +685,7 @@ class ScheduledSyncService {
     this.stopNoiseCloseDigest();
     this.stopUrgentResponseDigest();
     this.stopPersonalKeyExpirySweep();
+    this.stopAttachmentNamingCatchUp();
     if (this.cronJobs.size > 0) {
       logger.info(`Stopping all ${this.cronJobs.size} scheduled sync(s)`);
       for (const [wsId] of this.cronJobs) {
