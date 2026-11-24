@@ -1,6 +1,6 @@
 import {
   cleanNamePart, contentDisposition, extensionFor, extractFromRules, formatAttachmentName, holdsToken, isNameableDocument,
-  mightBePdf, normaliseEditedName, pacificDate, startsLikePdf, uniqueName, vendorFromEditedName, withNameFields, MAX_NAME_CHARS, MAX_STEM_CHARS,
+  mightBePdf, normaliseEditedName, pacificDate, startsLikePdf, tidyVendor, uniqueName, vendorFromEditedName, withNameFields, MAX_NAME_CHARS, MAX_STEM_CHARS,
 } from '../src/services/attachmentNamingRules.js';
 
 /**
@@ -86,6 +86,27 @@ describe('rules: vendor and invoice number from subject, sender and file name', 
     expect(rules({ subject: 'x', fromEmail: 'a@mail.acme.example', fileName: 'x.pdf', aliases }).vendor)
       .toEqual({ value: 'Acme Supplies', confidence: 'high', from: 'vendor_list' });
     expect(rules({ subject: 'x', fromEmail: 'a@getbalance.com', fileName: 'x.pdf', aliases }).vendor).toBeNull();
+  });
+});
+
+describe('vendor tidying (24 Nov 2026)', () => {
+  test('an all-capitals vendor of several words reads in normal capitals; short codes stay', () => {
+    expect(tidyVendor('BEER WORKS INC')).toBe('Beer Works Inc');
+    expect(tidyVendor('NORTHWIND ATV RENTALS LTD.')).toBe('Northwind ATV Rentals Ltd');
+    expect(tidyVendor('ACME HOLDINGS LLC')).toBe('Acme Holdings LLC');
+  });
+  test('one-word names and mixed case are left alone', () => {
+    expect(tidyVendor('BHP')).toBe('BHP');
+    expect(tidyVendor('Acme Supplies')).toBe('Acme Supplies');
+    expect(tidyVendor('McKinley & Sons')).toBe('McKinley & Sons');
+  });
+  test('a bilingual name written twice keeps its first version', () => {
+    expect(tidyVendor('ACME PARC CANADA INC. ACME PARK CANADA INC')).toBe('Acme Parc Canada Inc');
+    expect(tidyVendor('Acme Ltée / Acme Ltd')).toBe('Acme Ltée');
+    expect(tidyVendor('Acme Ltd / Northwind Ltd')).toBe('Acme Ltd / Northwind Ltd');
+  });
+  test('the formatted name uses the tidy vendor', () => {
+    expect(formatAttachmentName({ vendor: 'BEER WORKS INC', invoiceNumber: 'P100', date: '2026-11-24', ext: 'pdf' })).toBe('Beer Works Inc_P100_2026_11_24.pdf');
   });
 });
 
