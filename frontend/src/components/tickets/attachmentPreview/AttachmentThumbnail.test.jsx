@@ -196,8 +196,22 @@ describe('AttachmentThumbnail — fallbacks and limits', () => {
     await waitFor(() => expect(thumb()).toHaveAttribute('data-thumb', 'icon'));
   });
 
-  test('files over 10 MB are never fetched', async () => {
-    show(file(8, 'huge.pdf', { sizeBytes: 11 * 1024 * 1024 }));
+  test('when the device saves data, nothing is fetched and the icon stays', async () => {
+    const prev = Object.getOwnPropertyDescriptor(globalThis.navigator, 'connection');
+    Object.defineProperty(globalThis.navigator, 'connection', { value: { saveData: true }, configurable: true });
+    try {
+      show(file(20, 'small.pdf', { sizeBytes: 50 * 1024 }));
+      reveal();
+      await act(async () => { await Promise.resolve(); });
+      expect(ticketsAPI.attachmentBytes).not.toHaveBeenCalled();
+      expect(screen.getByText('type icon')).toBeInTheDocument();
+    } finally {
+      if (prev) Object.defineProperty(globalThis.navigator, 'connection', prev); else delete globalThis.navigator.connection;
+    }
+  });
+
+  test('files over 4 MB are never fetched', async () => {
+    show(file(8, 'huge.pdf', { sizeBytes: 5 * 1024 * 1024 }));
     reveal();
     await act(async () => { await Promise.resolve(); });
     expect(ticketsAPI.attachmentBytes).not.toHaveBeenCalled();

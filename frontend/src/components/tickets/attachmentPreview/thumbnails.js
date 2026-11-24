@@ -19,7 +19,8 @@
 import DOMPurify from 'dompurify';
 import { ticketsAPI } from '../../../services/api';
 
-export const THUMB_MAX_BYTES = 10 * 1024 * 1024;
+// 4 MB (UI Design, 24 Nov 2026): a thumbnail downloads the whole file, so big scans keep the icon.
+export const THUMB_MAX_BYTES = 4 * 1024 * 1024;
 export const THUMB_CONCURRENCY = 2;
 export const THUMB_CACHE_SIZE = 50;
 
@@ -56,8 +57,13 @@ export function thumbKind(a) {
 }
 
 /** True when a thumbnail may be fetched at all (known kind, not over the size cap). */
+/** The device asked to save data (mobile data saver): no thumbnails, icons only. */
+export function saveDataOn() {
+  try { return Boolean(globalThis.navigator?.connection?.saveData); } catch { return false; }
+}
+
 export function canThumb(a) {
-  return Boolean(thumbKind(a)) && !(Number(a?.sizeBytes) > THUMB_MAX_BYTES);
+  return Boolean(thumbKind(a)) && !(Number(a?.sizeBytes) > THUMB_MAX_BYTES) && !saveDataOn();
 }
 
 // ---- cache (LRU by insertion order of a Map) --------------------------------
