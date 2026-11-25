@@ -108,6 +108,7 @@ import TeamForwardDialog from '../components/tickets/TeamForwardDialog';
 import { baseStatusOf, fsBornStatusNames, isTerminalStatus, statusDefsFromMeta, statusDotClass, statusToneFromDefs } from '../components/tickets/statusDefs';
 import { looksLikeRealHtml } from '../utils/htmlContent';
 import { readTicketList } from '../utils/lastTicketList';
+import { cityOf, departmentOf, ticketRequesterPlace, useDepartmentMap } from '../utils/requesterDepartment';
 import { agoWords, formatPacificFull, formatPacificWhen, whenOnce } from '../utils/ticketDates';
 
 // Canonical 4 — FS-born tickets keep this vocabulary (FreshService owns their
@@ -863,6 +864,8 @@ export default function TicketDetail() {
   // address — the Back control goes there instead of the generic queue.
   const backTo = location.state?.from || null;
   const ticketId = Number(id);
+  // QA 11-24 #1: job class → department table (defaults + admin override).
+  const departmentMap = useDepartmentMap();
   // This ticket belongs to the workspace it was opened in. If the user switches
   // workspace while viewing it, the ticket won't exist in the new one — bounce
   // to that workspace's queue instead of showing a "not found" error.
@@ -3381,7 +3384,7 @@ export default function TicketDetail() {
                           {(() => {
                             const role = [...new Set([
                               ticket.requester.entraJobTitle || ticket.requester.jobTitle,
-                              ticket.requester.entraDepartment || ticket.requester.department,
+                              departmentOf(ticketRequesterPlace(ticket), departmentMap),
                             ].filter(Boolean))].join(' · ');
                             return role ? <p className="text-xs text-muted-foreground truncate" title={role}>{role}</p> : null;
                           })()}
@@ -5009,20 +5012,38 @@ export default function TicketDetail() {
                     </SidebarField>
                   )}
 
-                  {/* Requester's department — Entra ID is the source of truth
-                      (FS "departments" are office names here); read-only since
-                      we have no Entra write access (QA 07-13 #4). */}
-                  <SidebarField label="Department">
-                    <div
-                      className="px-3 py-2 text-sm text-muted-foreground bg-muted/50 border border-border/60 rounded-lg truncate"
-                      title="From Entra ID — read-only"
-                    >
-                      {[
-                        ticket.requester?.entraDepartment || ticket.requester?.department,
-                        ticket.requester?.entraOfficeLocation,
-                      ].filter(Boolean).join(' · ') || '—'}
-                    </div>
-                  </SidebarField>
+                  {/* Requester's department and city, apart (QA 11-24 #1).
+                      Department is Entra's job class without its level
+                      ("Contracts III" → Contracts); City is Entra's city, or
+                      the FreshService "department", which is the office here.
+                      Read-only: we have no Entra write access (QA 07-13 #4). */}
+                  {(() => {
+                    const place = ticketRequesterPlace(ticket);
+                    const dept = departmentOf(place, departmentMap);
+                    const city = cityOf(place, departmentMap);
+                    return (
+                      <>
+                        <SidebarField label="Department">
+                          <div
+                            className="px-3 py-2 text-sm text-muted-foreground bg-muted/50 border border-border/60 rounded-lg truncate"
+                            title={ticket.requester?.entraDepartment ? `From Entra ID (${ticket.requester.entraDepartment}) — read-only` : 'From Entra ID — read-only'}
+                            data-testid="requester-department"
+                          >
+                            {dept || '—'}
+                          </div>
+                        </SidebarField>
+                        <SidebarField label="City">
+                          <div
+                            className="px-3 py-2 text-sm text-muted-foreground bg-muted/50 border border-border/60 rounded-lg truncate"
+                            title="From Entra ID, or the FreshService office — read-only"
+                            data-testid="requester-city"
+                          >
+                            {city || '—'}
+                          </div>
+                        </SidebarField>
+                      </>
+                    );
+                  })()}
 
                   {/* Tags — TP-side layer, editable on BOTH origins */}
                   <TicketTagEditor

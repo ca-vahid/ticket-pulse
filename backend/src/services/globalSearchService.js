@@ -2,6 +2,8 @@ import prisma from './prisma.js';
 import ticketService from './ticketService.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { requesterTitle } from '../utils/requesterTitle.js';
+import { departmentOf, cityOf } from '../utils/requesterDepartment.js';
+import { getDepartmentMap } from './departmentMapService.js';
 
 /**
  * Multi-entity search behind GET /api/search (QA 08-04 #2, Phase 7).
@@ -282,7 +284,7 @@ class GlobalSearchService {
           { email: { contains: q, mode: 'insensitive' } },
         ],
       },
-      select: { id: true, name: true, email: true, department: true, entraDepartment: true, jobTitle: true, entraJobTitle: true },
+      select: { id: true, name: true, email: true, department: true, entraDepartment: true, entraCity: true, entraOfficeLocation: true, jobTitle: true, entraJobTitle: true },
       orderBy: { name: 'asc' },
       take: SECTION_TAKE * 3,
     });
@@ -291,7 +293,7 @@ class GlobalSearchService {
       const fuzzy = await this._fuzzyPeople('requesters', q, 'is_active = true');
       if (fuzzy.length) {
         fuzzyIds = new Map(fuzzy.map((f, i) => [Number(f.id), i]));
-        rows = await prisma.requester.findMany({ where: { id: { in: [...fuzzyIds.keys()] } }, select: { id: true, name: true, email: true, department: true, entraDepartment: true, jobTitle: true, entraJobTitle: true } });
+        rows = await prisma.requester.findMany({ where: { id: { in: [...fuzzyIds.keys()] } }, select: { id: true, name: true, email: true, department: true, entraDepartment: true, entraCity: true, entraOfficeLocation: true, jobTitle: true, entraJobTitle: true } });
       }
     }
     let counts = new Map();
@@ -314,12 +316,17 @@ class GlobalSearchService {
       if (name.split(/\s+/).some((w) => w.startsWith(lq))) return 1;
       return 2;
     };
+    // QA 11-24 #1: Department and City apart. requesters.department is the
+    // FreshService office (a city here), so it no longer stands in for the
+    // department; the job class from Entra does, without its level.
+    const departmentMap = await getDepartmentMap();
     return rows
       .map((r) => ({
         id: r.id,
         name: r.name,
         email: r.email,
-        department: r.department || r.entraDepartment || null,
+        department: departmentOf(r, departmentMap),
+        ...(cityOf(r, departmentMap) ? { city: cityOf(r, departmentMap) } : {}),
         jobTitle: requesterTitle(r),
         ticketCount: counts.get(r.id) || 0,
         ...(fuzzyIds ? { fuzzy: true } : {}),

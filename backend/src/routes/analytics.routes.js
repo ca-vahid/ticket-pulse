@@ -19,6 +19,13 @@ router.get('/demand-flow', asyncHandler(async (req, res) => {
   res.json({ success: true, data });
 }));
 
+// Demand → Tickets by department (QA 11-24 #2): created-in-range counts by the
+// requester's department, and by city. Deterministic; no AI.
+router.get('/tickets-by-department', asyncHandler(async (req, res) => {
+  const data = await analyticsService.getTicketsByDepartment(req.workspaceId, req.query);
+  res.json({ success: true, data });
+}));
+
 router.get('/category-intelligence', asyncHandler(async (req, res) => {
   const data = await analyticsService.getCategoryIntelligence(req.workspaceId, req.query);
   res.json({ success: true, data });

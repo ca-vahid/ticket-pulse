@@ -5,6 +5,7 @@ import settingsRepository from './settingsRepository.js';
 import syncService, { SYNC_LOCK_STALE_MS } from './syncService.js';
 import { sendTransactionalEmail } from './transactionalEmailService.js';
 import logger from '../utils/logger.js';
+import { isFreshServiceUnlinked } from '../utils/workspaceFsBinding.js';
 
 /**
  * Sync liveness self-monitoring (realtime plan Phase 3): compares each active
@@ -114,7 +115,9 @@ class SyncHealthService {
   }
 
   async _computeHealth(now = Date.now()) {
-    const workspaces = await workspaceRepository.getAllActive();
+    // QA 11-24 #4: a workspace with no FreshService link never syncs, so it
+    // has no freshness to report (it would read 'unknown' for ever).
+    const workspaces = (await workspaceRepository.getAllActive()).filter((ws) => !isFreshServiceUnlinked(ws));
     const workspaceIds = workspaces.map((ws) => ws.id);
     // Both helpers swallow their own DB errors into an empty Map — a failed
     // side-signal degrades to the old completions-only behavior, never a 500.

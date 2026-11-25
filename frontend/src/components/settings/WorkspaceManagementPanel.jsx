@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { Timer } from 'lucide-react';
 import { workspaceAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
+import NativeWorkspacesSection from './NativeWorkspacesSection';
 import {
   Search, CheckCircle, XCircle, Plus, Loader, Globe,
   Zap, Clock, RefreshCw, Power, PowerOff, Ticket,
@@ -19,7 +20,7 @@ const STATUS_LABEL = {
   new: 'Not onboarded',
 };
 
-export default function WorkspaceManagementPanel() {
+export default function WorkspaceManagementPanel({ canCreate = false }) {
   const { refreshWorkspaces } = useWorkspace();
   const [workspaces, setWorkspaces] = useState(null);
   const [isDiscovering, setIsDiscovering] = useState(false);
@@ -397,6 +398,11 @@ export default function WorkspaceManagementPanel() {
           <p className="text-muted-foreground/75 text-xs mt-1">New workspaces can be activated with one click. Use the Backfill tab to import historical data.</p>
         </div>
       )}
+
+      {/* QA 11-24 #4: workspaces with no FreshService link; super admins create them here. */}
+      <div className="border-t border-border pt-6">
+        <NativeWorkspacesSection canCreate={canCreate} />
+      </div>
     </div>
   );
 }

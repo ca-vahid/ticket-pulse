@@ -11,6 +11,7 @@ import { paragraphSpacing } from '../utils/emailHtmlHardening.js';
 import { validateResolution, requiresResolutionReason, resolvedByKindFromActor } from './resolutionReasonService.js';
 import { AuthorizationError, AppError, ValidationError, NotFoundError, ServiceBusyError, ConflictError } from '../utils/errors.js';
 import { TICKET_ORIGIN, TICKET_SOURCE, TICKET_SOURCE_LABELS, APP_NATIVE_TRIGGER_SOURCE, AGENT_SELECTABLE_SOURCES, ticketDisplayRef } from '../utils/ticketOrigin.js';
+import { isFreshServiceUnlinked } from '../utils/workspaceFsBinding.js';
 import { refPositionFor, replyMailSubject } from './mailSubjectService.js';
 import noiseRuleService from './noiseRuleService.js';
 import ticketTypeService from './ticketTypeService.js';
@@ -3878,7 +3879,7 @@ class TicketService {
         ],
       },
       select: {
-        id: true, name: true, email: true, department: true,
+        id: true, name: true, email: true, department: true, entraDepartment: true,
         entraOfficeLocation: true, entraCity: true, jobTitle: true, entraJobTitle: true,
       },
       orderBy: { name: 'asc' },
@@ -4104,7 +4105,9 @@ class TicketService {
         origin: TICKET_ORIGIN.TICKETPULSE,
         nativeNumber,
         freshserviceTicketId: null,
-        mirrorState: 'pending',
+        // QA 11-24 #4: a workspace with no FreshService link never gets a
+        // fallback copy ('none' — the ticket shows no mirror chip).
+        mirrorState: isFreshServiceUnlinked(workspace) ? 'none' : 'pending',
         subject: data.subject,
         ...normalizeDescriptionInput(data.description),
         // Resubmission key (Phase PA) — partial unique (workspace_id, external_ref).

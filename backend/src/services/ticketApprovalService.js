@@ -1,4 +1,6 @@
 import { requesterTitle } from '../utils/requesterTitle.js';
+import { departmentOf } from '../utils/requesterDepartment.js';
+import { currentDepartmentMap } from './departmentMapService.js';
 import crypto from 'node:crypto';
 import sanitizeHtml from 'sanitize-html';
 import prisma from './prisma.js';
@@ -766,7 +768,7 @@ class TicketApprovalService {
           name: requester.name || null,
           email: showEmail ? (requester.email || null) : null,
           title: requesterTitle(requester),
-          department: requester.department || requester.entraDepartment || null,
+          department: departmentOf(requester, currentDepartmentMap()),
           location: requester.entraOfficeLocation || requester.entraCity || null,
           photoUrl: requester.email ? photoUrl('requester') : null,
         } : null,
@@ -2287,7 +2289,7 @@ class TicketApprovalService {
     const requesterFacts = {
       name: requester.name || null,
       title: requesterTitle(requester),
-      department: requester.department || requester.entraDepartment || null,
+      department: departmentOf(requester, currentDepartmentMap()),
       location: requester.entraOfficeLocation || requester.entraCity || null,
     };
     const amountLabel = formatAmount(amountNumber(approval.amount), approval.amountCurrency || 'CAD');

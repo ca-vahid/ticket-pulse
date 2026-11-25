@@ -13,6 +13,7 @@ import { baseStatusOf, statusToneFromDefs } from './statusDefs';
 import { ParkedMark } from './ParkControls';
 import { ticketsAPI } from '../../services/api';
 import { useRequesterPhoto } from '../../hooks/useRequesterPhoto';
+import { cityOf, departmentOf, ticketRequesterPlace } from '../../utils/requesterDepartment';
 
 /**
  * Queue column registry (Mega 08-23 Phase QC) — the single source of truth for
@@ -518,16 +519,28 @@ function renderSource(ticket, ctx) {
   );
 }
 
-// Department: the ticket's own field first, then the requester's Entra/FS
-// profile as a fallback (the ticket column is sparse on FS-born rows). NOTE:
-// sort=department orders by the ticket column only — fallback-labeled rows
-// sort with the blanks (see ticketService).
+// Department and City apart (QA 11-24 #1). tickets.department is
+// FreshService's "department", which is the office CITY in this tenant, so it
+// feeds the City column (and sort=department, which orders by that column).
+// Department is the requester's Entra job class without its level
+// ("Contracts III" → Contracts) — derived per row, so it has no server sort.
 function renderDepartment(ticket, ctx) {
-  const dept = ticket.department || ticket.requester?.entraDepartment || ticket.requester?.department || null;
+  const dept = departmentOf(ticketRequesterPlace(ticket));
   return (
     <span className={`${ctx.cell('department')} ${ctx.cellPad}`} style={ctx.cellStyle('department')} title={dept || undefined}>
       {dept
         ? <span className="text-xs text-muted-foreground truncate">{dept}</span>
+        : <span className="text-xs text-muted-foreground/50">—</span>}
+    </span>
+  );
+}
+
+function renderCity(ticket, ctx) {
+  const city = cityOf(ticketRequesterPlace(ticket));
+  return (
+    <span className={`${ctx.cell('city')} ${ctx.cellPad}`} style={ctx.cellStyle('city')} title={city || undefined}>
+      {city
+        ? <span className="text-xs text-muted-foreground truncate">{city}</span>
         : <span className="text-xs text-muted-foreground/50">—</span>}
     </span>
   );
@@ -794,7 +807,8 @@ export const QUEUE_COLUMNS = [
   { key: 'lastActivity', label: 'Updated', defaultOn: true, sortField: 'updatedAt', track: '74px', minPx: 60, headerClass: 'justify-end', render: renderLastActivity },
   { key: 'createdAt', label: 'Created', defaultOn: false, sortField: 'createdAt', headerTitle: 'Sort by created date', track: '124px', minPx: 100, render: renderCreatedAt },
   { key: 'source', label: 'Source', defaultOn: false, sortField: 'source', track: '96px', minPx: 70, render: renderSource },
-  { key: 'department', label: 'Department', defaultOn: false, sortField: 'department', headerTitle: 'Sort by department (blanks last)', track: '130px', minPx: 100, render: renderDepartment },
+  { key: 'department', label: 'Department', defaultOn: false, sortField: null, headerTitle: "The requester's department, from Entra (job class without its level)", track: '130px', minPx: 100, render: renderDepartment },
+  { key: 'city', label: 'City', defaultOn: false, sortField: 'department', headerTitle: 'Sort by city — the FreshService office (blanks last)', track: '110px', minPx: 80, render: renderCity },
   { key: 'group', label: 'Group', defaultOn: false, sortField: null, track: '120px', minPx: 90, render: renderGroup },
 ];
 

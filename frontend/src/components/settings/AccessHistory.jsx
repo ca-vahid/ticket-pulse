@@ -25,6 +25,7 @@ export function describeAccessEvent(e) {
   case 'role_granted': return `${actor} gave ${target} the ${role(e.newValue)} role`;
   case 'role_changed': return `${actor} changed ${target} from ${role(e.oldValue)} to ${role(e.newValue)}`;
   case 'access_revoked': return `${actor} removed ${target}'s access (was ${role(e.oldValue)})`;
+  case 'workspace_created': return `${actor} created the workspace "${e.targetLabel || 'unnamed'}"`;
   case 'dashboard_view_changed': return `${actor} turned Dashboard view ${e.newValue === 'on' ? 'on' : 'off'} for ${target}`;
   case 'admin_list_changed': {
     const added = e.details?.added || [];

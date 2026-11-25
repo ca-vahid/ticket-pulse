@@ -337,6 +337,14 @@ router.get('/mentions/unseen-count', asyncHandler(async (req, res) => {
   res.json({ success: true, data: { count } });
 }));
 
+// QA 11-24 #1: the department table (job class → department) the ticket pages
+// use to show Department and City apart. Read-only; admins change it through
+// the app_settings key `department_map`.
+router.get('/department-map', asyncHandler(async (_req, res) => {
+  const { describeDepartmentMap } = await import('../services/departmentMapService.js');
+  res.json({ success: true, data: await describeDepartmentMap() });
+}));
+
 router.get('/meta', asyncHandler(async (req, res) => {
   const meta = await ticketService.getMeta(req.workspaceId);
   // QA 09-18 #4: the composer's greeting settings ride along so agents (who

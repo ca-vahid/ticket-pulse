@@ -42,6 +42,8 @@ export const ACTIONS = Object.freeze({
   PERSONAL_KEY_ENABLED_BY_ADMIN: 'personal_key_enabled_by_admin',
   PERSONAL_KEY_ACCESS_GRANTED: 'personal_key_access_granted',
   PERSONAL_KEY_ACCESS_REMOVED: 'personal_key_access_removed',
+  // QA 11-24 #4: a super admin created a Ticket Pulse workspace.
+  WORKSPACE_CREATED: 'workspace_created',
 });
 
 // The changes that hand out a working secret, or switch one back on: these alert.
