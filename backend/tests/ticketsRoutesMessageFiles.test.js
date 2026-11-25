@@ -92,6 +92,51 @@ describe('POST /api/tickets/:id/forward (QA 11-16)', () => {
     expect(input.noteHtml).toBe('<p>Quote attached</p>');
     expect(files.map((f) => f.originalname)).toEqual(['quote.pdf', 'pasted-image-1.png']);
   });
+
+  // QA 11-24 #5: the ticket's own files go along.
+  test('includeAttachmentIds reach the service, from JSON and from a form field', async () => {
+    await request(buildApp()).post('/api/tickets/501/forward')
+      .send({ to: ['eng@example.com'], includeAttachmentIds: [12, 14, 12] })
+      .expect(201);
+    expect(ticketServiceMock.forwardTicket.mock.calls[0][2].includeAttachmentIds).toEqual([12, 14]);
+    await request(buildApp()).post('/api/tickets/501/forward')
+      .field('to', 'eng@example.com')
+      .field('includeAttachmentIds', '12,14')
+      .attach('files', Buffer.from('%PDF-1.4'), 'quote.pdf')
+      .expect(201);
+    expect(ticketServiceMock.forwardTicket.mock.calls[1][2].includeAttachmentIds).toEqual([12, 14]);
+  });
+
+  test('an id that is not a number is a 400, nothing forwarded', async () => {
+    const res = await request(buildApp()).post('/api/tickets/501/forward')
+      .send({ to: ['eng@example.com'], includeAttachmentIds: ['12', 'abc'] })
+      .expect(400);
+    expect(res.body.message).toMatch(/list of attachment ids/);
+    expect(ticketServiceMock.forwardTicket).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/tickets/:id/replies to someone who is not the requester (QA 11-24 #7/#8)', () => {
+  test('replyToEntryId + replyToEmail ride as an option, never inside the body input', async () => {
+    await request(buildApp()).post('/api/tickets/501/replies')
+      .send({ bodyText: 'Thanks Tim', replyToEntryId: 88, replyToEmail: 'tim@example.com' })
+      .expect(201);
+    const [, , input, , files, options] = ticketServiceMock.addReply.mock.calls[0];
+    expect(input).toEqual({ bodyText: 'Thanks Tim' });
+    expect(files).toEqual([]);
+    expect(options).toEqual({ replyToParticipant: { entryId: 88, email: 'tim@example.com' } });
+  });
+
+  test('multipart replies carry it too; a plain reply passes no option', async () => {
+    await request(buildApp()).post('/api/tickets/501/replies')
+      .field('bodyText', 'See attached')
+      .field('replyToEntryId', '88')
+      .attach('files', Buffer.from('%PDF-1.4'), 'po.pdf')
+      .expect(201);
+    expect(ticketServiceMock.addReply.mock.calls[0][5]).toEqual({ replyToParticipant: { entryId: 88, email: null } });
+    await request(buildApp()).post('/api/tickets/501/replies').send({ bodyText: 'Hello' }).expect(201);
+    expect(ticketServiceMock.addReply.mock.calls[1]).toHaveLength(5);
+  });
 });
 
 describe('files per message (QA 11-16 #3)', () => {

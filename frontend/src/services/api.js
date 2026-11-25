@@ -778,6 +778,10 @@ export function buildThreadPayload(body = {}) {
     if (subjectField.subject) form.append('subject', subjectField.subject);
     // @mentions: named explicitly too, or a note with a picture would lose them.
     if (mentionIds.length) form.append('mentions', mentionIds.join(','));
+    // QA 11-24 #8: a reply to someone who is not the requester keeps its
+    // addressee when it carries files (this branch lists fields one by one).
+    if (rest.replyToEntryId !== undefined && rest.replyToEntryId !== null) form.append('replyToEntryId', String(rest.replyToEntryId));
+    if (rest.replyToEmail) form.append('replyToEmail', rest.replyToEmail);
     for (const file of files) form.append('files', file);
     return [form, { headers: { 'Content-Type': undefined, ...headers }, timeout: 120000 }];
   }
@@ -1148,16 +1152,22 @@ export const ticketsAPI = {
 
   // QA 11-16: the composer's HTML rides as `noteHtml` (links survive) and files
   // go multipart, `to` then as one comma-separated field like a reply's Cc.
-  forward: async (id, { to, note, noteHtml, files }) => {
+  // QA 11-24 #5: `includeAttachmentIds` = the ticket's own files to send along.
+  forward: async (id, { to, note, noteHtml, files, includeAttachmentIds }) => {
+    const ids = Array.isArray(includeAttachmentIds) ? includeAttachmentIds.filter((n) => Number.isInteger(n) && n > 0) : [];
     if (files && files.length > 0) {
       const form = new FormData();
       form.append('to', (to || []).join(','));
       if (note) form.append('note', note);
       if (noteHtml) form.append('noteHtml', noteHtml);
+      if (ids.length) form.append('includeAttachmentIds', ids.join(','));
       for (const file of files) form.append('files', file);
       return await api.post(`/tickets/${id}/forward`, form, { headers: { 'Content-Type': undefined }, timeout: 120000 });
     }
-    return await api.post(`/tickets/${id}/forward`, { to, note, ...(noteHtml ? { noteHtml } : {}) });
+    const body = { to, note, ...(noteHtml ? { noteHtml } : {}) };
+    // The ticket's files are read from storage server-side: give it time.
+    if (ids.length) return await api.post(`/tickets/${id}/forward`, { ...body, includeAttachmentIds: ids }, { timeout: 120000 });
+    return await api.post(`/tickets/${id}/forward`, body);
   },
 
   // Reply templates (canned reply snippets)

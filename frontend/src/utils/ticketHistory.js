@@ -236,6 +236,9 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
       item = baseItem({ event: 'noise', verb: t === 'noise_flagged' ? 'marked as noise' : 'cleared the noise flag', detail: d.note || d.reason || null });
     } else if (t === 'forwarded' || t === 'forwarded_intake' || t === 'forwarded_intake_unparsed' || t === 'agent_cc_intake') {
       item = baseItem({ event: 'forward', verb: humanize(t), detail: d.note || null });
+    } else if (t === 'replied_to_participant') {
+      // QA 11-24 #8: "Reply to <name>" — someone who is not the requester.
+      item = baseItem({ event: 'forward', verb: `replied to ${d.to || 'someone'} (not the requester)`, detail: d.note || null });
     } else if (t === 'ai_triage') {
       item = baseItem({ event: 'ai', verb: 'AI triage', detail: d.note || null, machine: true });
     } else if (t === 'workflow_updated_ticket') {

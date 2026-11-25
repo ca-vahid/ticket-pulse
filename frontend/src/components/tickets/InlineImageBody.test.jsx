@@ -39,15 +39,39 @@ describe('RichBody: pictures where they were', () => {
     expect(screen.getByText('IT Coordinator')).toBeInTheDocument();
   });
 
-  test('a click (or Enter) on the picture opens it by name', async () => {
+  test('a click (or Enter) on the picture opens it: its name and its own file', async () => {
     const onImageRef = vi.fn();
     render(<RichBody html={`<div><p><em>[Image: ${SCREENSHOT.fileName}]</em></p></div>`} ticketId={62969} inlineImages={[SCREENSHOT]} onImageRef={onImageRef} />);
     const img = await screen.findByAltText(SCREENSHOT.fileName);
     fireEvent.click(img);
-    expect(onImageRef).toHaveBeenCalledWith(SCREENSHOT.fileName);
+    expect(onImageRef).toHaveBeenCalledWith(SCREENSHOT.fileName, SCREENSHOT);
     const button = screen.getByRole('button', { name: `Open picture ${SCREENSHOT.fileName}` });
     fireEvent.keyDown(button, { key: 'Enter' });
     expect(onImageRef).toHaveBeenCalledTimes(2);
+    expect(onImageRef).toHaveBeenLastCalledWith(SCREENSHOT.fileName, SCREENSHOT);
+  });
+
+  // QA 11-24 #12: several pictures with one name opened the first one every time.
+  test('two pictures with the same name: each one shows and opens its own file', async () => {
+    const first = { id: 501, fileName: 'image001.png', contentType: 'image/png' };
+    const second = { id: 502, fileName: 'image001.png', contentType: 'image/png' };
+    const onImageRef = vi.fn();
+    render(<RichBody html="<p>[Image: image001.png]</p><p>and</p><p>[Image: image001.png]</p>" ticketId={7} inlineImages={[first, second]} onImageRef={onImageRef} />);
+    await waitFor(() => expect(screen.getAllByAltText('image001.png')).toHaveLength(2));
+    const [a, b] = screen.getAllByAltText('image001.png');
+    expect(a).toHaveAttribute('src', 'blob:ticket-7-file-501');
+    expect(b).toHaveAttribute('src', 'blob:ticket-7-file-502');
+    fireEvent.click(b);
+    expect(onImageRef).toHaveBeenLastCalledWith('image001.png', second);
+    fireEvent.click(a);
+    expect(onImageRef).toHaveBeenLastCalledWith('image001.png', first);
+  });
+
+  test('a ref with no picture of that name passes no file, so the page falls back to its name lookup', () => {
+    const onImageRef = vi.fn();
+    render(<RichBody html="<p>[Image: gone.png]</p>" ticketId={1} inlineImages={[LOGO]} onImageRef={onImageRef} />);
+    fireEvent.click(screen.getByText(/gone\.png/));
+    expect(onImageRef).toHaveBeenCalledWith('gone.png', null);
   });
 
   test('a picture pasted in the reply editor (non-breaking space in the marker) is matched too', async () => {

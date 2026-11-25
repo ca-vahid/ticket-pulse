@@ -48,6 +48,21 @@ describe('buildThreadPayload — ccRemoved', () => {
     expect(form.get('ccRemoved')).toBeNull();
   });
 
+  // QA 11-24 #8: a reply to someone other than the requester keeps its
+  // addressee whichever shape the request takes.
+  test('a reply to someone else carries replyToEntryId / replyToEmail in both shapes', () => {
+    const [json] = buildThreadPayload({ bodyText: 'hi', replyToEntryId: 88, replyToEmail: 'tim@example.com' });
+    expect(json).toMatchObject({ replyToEntryId: 88, replyToEmail: 'tim@example.com' });
+    const [form] = buildThreadPayload({
+      bodyText: 'hi', replyToEntryId: 88, replyToEmail: 'tim@example.com',
+      files: [new File(['x'], 'invoice.pdf', { type: 'application/pdf' })],
+    });
+    expect(form.get('replyToEntryId')).toBe('88');
+    expect(form.get('replyToEmail')).toBe('tim@example.com');
+    const [plain] = buildThreadPayload({ bodyText: 'hi', files: [new File(['x'], 'a.png', { type: 'image/png' })] });
+    expect(plain.get('replyToEntryId')).toBeNull();
+  });
+
   test('ccRemoved never leaks into the body fields', () => {
     const [payload] = buildThreadPayload({ bodyText: 'hi', ccRemoved: ['a@x.com'] });
     expect(payload.bodyText).toBe('hi');

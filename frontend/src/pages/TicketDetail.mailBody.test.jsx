@@ -59,7 +59,8 @@ describe('the opening e-mail entry', () => {
     const img = await screen.findByAltText('picture-1-9jDAAA-image.png');
     expect(img).toHaveAttribute('src', 'blob:t62969-a70934');
     fireEvent.click(img);
-    expect(onImageRef).toHaveBeenCalledWith('picture-1-9jDAAA-image.png');
+    // QA 11-24 #12: with the picture's own file, so the preview opens at it.
+    expect(onImageRef).toHaveBeenCalledWith('picture-1-9jDAAA-image.png', screenshot);
   });
 
   test('a picture shown inside a reply is not repeated in the strip under it; other pictures still are', async () => {
