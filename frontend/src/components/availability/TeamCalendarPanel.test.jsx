@@ -171,6 +171,16 @@ describe('collapsing duplicate entries', () => {
     expect(out.map((x) => x.id)).toEqual([1, 3, 4, 5]);
     expect(collapseDuplicateEntries(null)).toEqual([]);
   });
+
+  test('a morning booked here does not hide a full day from Vacation Tracker; the same morning does', () => {
+    const out = collapseDuplicateEntries([
+      e({ id: 1, source: 'app', dayPart: 'am' }),
+      e({ id: 2, source: 'vacation_tracker', dayPart: 'full' }),
+      e({ id: 3, source: 'vacation_tracker', dayPart: 'am' }),
+      e({ id: 4, source: 'vacation_tracker', dayPart: 'pm' }),
+    ]);
+    expect(out.map((x) => x.id)).toEqual([1, 2, 4]);
+  });
 });
 
 describe('Calendar (month)', () => {

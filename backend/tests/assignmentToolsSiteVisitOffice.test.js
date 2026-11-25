@@ -58,7 +58,7 @@ afterEach(() => jest.useRealTimers());
 
 describe('get_agent_availability: the visit names an office', () => {
   test('full day in Toronto: location, time zone and local time are Toronto, with the office note', async () => {
-    prismaMock.technicianLeave.findMany.mockResolvedValue([row(1, { vtLeaveId: 'av:574:w1', ...TORONTO })]);
+    prismaMock.technicianLeave.findMany.mockResolvedValue([row(1, { vtLeaveId: 'av:9001:w1', ...TORONTO })]);
     const out = await executeTool('get_agent_availability', {}, { workspaceId: 1 });
     const ari = out.inOffice.find((p) => p.techId === 1);
     expect(ari).toMatchObject({
@@ -79,7 +79,7 @@ describe('get_agent_availability: the visit names an office', () => {
 
   test('the Toronto local clock decides the shift: 08:00 in Vancouver is already on shift in Toronto', async () => {
     jest.setSystemTime(new Date('2026-05-22T15:00:00.000Z')); // 08:00 PT, 11:00 ET
-    prismaMock.technicianLeave.findMany.mockResolvedValue([row(1, { vtLeaveId: 'av:574:w1', ...TORONTO })]);
+    prismaMock.technicianLeave.findMany.mockResolvedValue([row(1, { vtLeaveId: 'av:9001:w1', ...TORONTO })]);
     const out = await executeTool('get_agent_availability', {}, { workspaceId: 1 });
     expect(out.inOffice.find((p) => p.techId === 1)).toMatchObject({ localTime: '11:00', onShift: true });
     expect(out.inOffice.find((p) => p.techId === 2)).toMatchObject({ localTime: '08:00', onShift: false });
@@ -87,7 +87,7 @@ describe('get_agent_availability: the visit names an office', () => {
 
   test('half day: the note names the window', async () => {
     prismaMock.technicianLeave.findMany.mockResolvedValue([
-      row(1, { vtLeaveId: 'av:575:w1', ...TORONTO, isFullDay: false, halfDayPart: 'PM', startMinute: 720, endMinute: 1440 }),
+      row(1, { vtLeaveId: 'av:9002:w1', ...TORONTO, isFullDay: false, halfDayPart: 'PM', startMinute: 720, endMinute: 1440 }),
     ]);
     const out = await executeTool('get_agent_availability', {}, { workspaceId: 1 });
     expect(out.inOffice.find((p) => p.techId === 1)).toMatchObject({
@@ -103,7 +103,7 @@ describe('get_agent_availability: the visit names an office', () => {
   test('no office: the 4.4.17 note, own location; an "Other site" text rides along', async () => {
     prismaMock.technicianLeave.findMany.mockResolvedValue([
       row(1, { vtLeaveId: 'leaveRequest-a1' }),
-      row(2, { vtLeaveId: 'av:576:w1', siteLocation: 'Client plant, Kamloops' }),
+      row(2, { vtLeaveId: 'av:9003:w1', siteLocation: 'Client plant, Kamloops' }),
     ]);
     const out = await executeTool('get_agent_availability', {}, { workspaceId: 1 });
     const ari = out.inOffice.find((p) => p.techId === 1);
@@ -117,7 +117,7 @@ describe('get_agent_availability: the visit names an office', () => {
   test('the same visit booked in Vacation Tracker and in Vacation Pulse counts once (the Vacation Pulse row wins)', async () => {
     prismaMock.technicianLeave.findMany.mockResolvedValue([
       row(1, { vtLeaveId: 'leaveRequest-b2', leaveTypeName: 'Site Visit', isFullDay: false, halfDayPart: 'PM', startMinute: 780, endMinute: 1020 }),
-      row(1, { vtLeaveId: 'av:577:w1', ...TORONTO, isFullDay: false, halfDayPart: 'PM', startMinute: 780, endMinute: 1020 }),
+      row(1, { vtLeaveId: 'av:9004:w1', ...TORONTO, isFullDay: false, halfDayPart: 'PM', startMinute: 780, endMinute: 1020 }),
     ]);
     const out = await executeTool('get_agent_availability', {}, { workspaceId: 1 });
     const ari = out.inOffice.filter((p) => p.techId === 1);
@@ -129,7 +129,7 @@ describe('get_agent_availability: the visit names an office', () => {
   test('two different leaves of one day are not collapsed (half-day off + half-day site visit)', async () => {
     prismaMock.technicianLeave.findMany.mockResolvedValue([
       row(1, { vtLeaveId: 'leaveRequest-c3', category: 'OFF', leaveTypeName: 'Vacation', isFullDay: false, halfDayPart: 'AM', startMinute: 0, endMinute: 720 }),
-      row(1, { vtLeaveId: 'av:578:w1', ...TORONTO, isFullDay: false, halfDayPart: 'PM', startMinute: 720, endMinute: 1440 }),
+      row(1, { vtLeaveId: 'av:9005:w1', ...TORONTO, isFullDay: false, halfDayPart: 'PM', startMinute: 720, endMinute: 1440 }),
     ]);
     const out = await executeTool('get_agent_availability', {}, { workspaceId: 1 });
     expect(out.halfDayOff.map((p) => p.techId)).toEqual([1]);
@@ -139,14 +139,14 @@ describe('get_agent_availability: the visit names an office', () => {
 
 describe('find_matching_agents: on-site work matches where the person is today', () => {
   test('a Vancouver person visiting Toronto matches a Toronto ticket and no longer matches Vancouver', async () => {
-    prismaMock.technicianLeave.findMany.mockResolvedValue([row(1, { vtLeaveId: 'av:574:w1', ...TORONTO })]);
-    const toronto = await executeTool('find_matching_agents', { preferred_location: 'Toronto', requires_physical_presence: true }, { workspaceId: 1, ticketId: 900 });
+    prismaMock.technicianLeave.findMany.mockResolvedValue([row(1, { vtLeaveId: 'av:9001:w1', ...TORONTO })]);
+    const toronto = await executeTool('find_matching_agents', { preferred_location: 'Toronto', requires_physical_presence: true }, { workspaceId: 1, ticketId: 9020 });
     const byName = Object.fromEntries(toronto.matches.map((m) => [m.techName, m]));
     expect(byName['Ari Stone']).toMatchObject({ locationMatch: true, location: 'Toronto', homeLocation: 'Vancouver', siteVisit: true, timezone: 'America/Toronto' });
     expect(byName['Cy Nolan']).toMatchObject({ locationMatch: true, location: 'Toronto' });
     expect(byName['Bo Reyes']).toMatchObject({ locationMatch: false, location: 'Vancouver' });
 
-    const vancouver = await executeTool('find_matching_agents', { preferred_location: 'Vancouver', requires_physical_presence: true }, { workspaceId: 1, ticketId: 900 });
+    const vancouver = await executeTool('find_matching_agents', { preferred_location: 'Vancouver', requires_physical_presence: true }, { workspaceId: 1, ticketId: 9020 });
     const v = Object.fromEntries(vancouver.matches.map((m) => [m.techName, m]));
     expect(v['Ari Stone'].locationMatch).toBe(false);
     expect(v['Bo Reyes'].locationMatch).toBe(true);
@@ -154,7 +154,7 @@ describe('find_matching_agents: on-site work matches where the person is today',
 
   test('a visit with no office leaves location matching on the home office', async () => {
     prismaMock.technicianLeave.findMany.mockResolvedValue([row(1, { vtLeaveId: 'leaveRequest-a1' })]);
-    const out = await executeTool('find_matching_agents', { preferred_location: 'Vancouver' }, { workspaceId: 1, ticketId: 900 });
+    const out = await executeTool('find_matching_agents', { preferred_location: 'Vancouver' }, { workspaceId: 1, ticketId: 9020 });
     const ari = out.matches.find((m) => m.techName === 'Ari Stone');
     expect(ari).toMatchObject({ locationMatch: true, location: 'Vancouver' });
     expect(ari.siteVisit).toBeUndefined();

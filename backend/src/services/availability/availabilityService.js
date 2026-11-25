@@ -1165,7 +1165,7 @@ class AvailabilityService {
       prisma.avBalanceAdjustment.findMany({ where: { email: person.email, leaveTypeId: leaveType.id, year }, select: { days: true, kind: true } }),
       prisma.avRequest.findMany({
         where: { email: person.email, leaveTypeId: leaveType.id, status: { in: ACTIVE }, startDate: { gte: start, lte: end }, ...(excludeRequestId ? { id: { not: excludeRequestId } } : {}) },
-        select: { days: true, status: true, startDate: true, endDate: true, source: true },
+        select: { days: true, status: true, startDate: true, endDate: true, dayPart: true, startMinute: true, endMinute: true, source: true },
       }),
     ]);
     const adjustments = adj.reduce((s, a) => s + num(a.days), 0);
@@ -1651,9 +1651,10 @@ class AvailabilityService {
    *   - changed dates / type / part -> request updated, projection rebuilt
    *   - no longer approved, or gone from VT within the window -> cancelled
    *   - cancelled by a person in Ticket Pulse -> stays cancelled (QA 11-09 #2)
-   *   - the same person already booked the same type on overlapping dates
-   *     in Vacation Pulse -> not imported, logged (25 Nov 2026: one visit,
-   *     one request; the leave sync skips its dashboard rows the same way)
+   *   - a Vacation Pulse booking of the same person and type already covers
+   *     its dates and part of the day -> not imported, logged; a partial
+   *     overlap is imported (25 Nov 2026: one leave, one request; the leave
+   *     sync skips its dashboard rows the same way)
    * Unknown VT leave types become new types so nothing is lost; people are
    * matched by e-mail.
    */
@@ -1725,12 +1726,13 @@ class AvailabilityService {
     const cancelledHere = await vtWriteBack.cancelledHereExternalIds({ since: toDay(start), strict: true });
     // 25 Nov 2026: a visit booked in Vacation Pulse and again in Vacation
     // Tracker counts once. The Vacation Pulse bookings (approved or waiting)
-    // in the window; a new Vacation Tracker leave of the same person, type and
-    // overlapping dates is not imported (the booking stays the one request,
-    // and the leave sync writes no second dashboard row for it either).
+    // in the window; a new Vacation Tracker leave of the same person and type
+    // that one of them covers (all its dates, and its part of the day) is not
+    // imported (the booking stays the one request, and the leave sync writes
+    // no second dashboard row for it either). A partial overlap is imported.
     const appBookings = (await prisma.avRequest.findMany({
       where: { source: { not: 'vacation_tracker' }, status: { in: ACTIVE }, startDate: { lte: toDay(end) }, endDate: { gte: toDay(start) } },
-      select: { id: true, email: true, leaveTypeId: true, startDate: true, endDate: true, dayPart: true, status: true, source: true, externalId: true },
+      select: { id: true, email: true, leaveTypeId: true, startDate: true, endDate: true, dayPart: true, startMinute: true, endMinute: true, status: true, source: true, externalId: true },
       take: 50000,
     })) || [];
 

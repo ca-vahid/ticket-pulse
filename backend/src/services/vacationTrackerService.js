@@ -2,7 +2,7 @@ import VacationTrackerClient from '../integrations/vacationTracker.js';
 import vtRepo from './vacationTrackerRepository.js';
 import technicianRepository from './technicianRepository.js';
 import logger from '../utils/logger.js';
-import { sameLeaveKind } from './availability/siteVisit.js';
+import { sameLeaveRow } from './availability/siteVisit.js';
 
 const syncState = {
   running: false,
@@ -202,7 +202,7 @@ class VacationTrackerService {
 
       // 25 Nov 2026: a visit booked in Vacation Pulse AND in Vacation Tracker
       // counts once. A Vacation Tracker leave-day that repeats a Vacation Pulse
-      // row (same person, day and kind of leave) is not written; the stale
+      // row (same person, day, kind and part of the day) is not written; the stale
       // clean-up below then removes any copy an earlier sync wrote.
       let appRows = [];
       let avTypes = [];
@@ -246,7 +246,12 @@ class VacationTrackerService {
           // treated as full on every day.
           const meta = deriveHalfDayMeta(leave, /*isBoundaryDay=*/!isMultiDay);
           const twins = appRowsByDay.get(`${mapping.technicianId}|${formatDateUTC(date)}`) || [];
-          if (twins.some((a) => sameLeaveKind({ leaveTypeName: ltInfo.vtLeaveTypeName, category: ltInfo.category }, a, avTypes))) {
+          // Same kind AND the same part of the day (both full-day, or the same
+          // half with the same minutes): a morning booked here never stands in
+          // for a full day in Vacation Tracker, and the cleanup below would
+          // delete that row.
+          const candidate = { leaveTypeName: ltInfo.vtLeaveTypeName, category: ltInfo.category, ...meta };
+          if (twins.some((a) => sameLeaveRow(candidate, a, avTypes))) {
             duplicateDays += 1;
             continue;
           }

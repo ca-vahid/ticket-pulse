@@ -98,14 +98,14 @@ describe('"Which office?" on a site visit', () => {
   };
   beforeEach(() => {
     api.preview.mockResolvedValue({ data: { outcome: 'approved', days: 1, dates: [] } });
-    api.createRequest.mockResolvedValue({ data: { id: 574, status: 'approved' } });
+    api.createRequest.mockResolvedValue({ data: { id: 9001, status: 'approved' } });
   });
 
   test('only a site visit asks; the active offices by name, then "Other site…"', () => {
     render(<BookTimeForm me={SITE_ME} />);
-    expect(screen.queryByLabelText('Which office?')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Which office\?/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('radio', { name: 'Site visit' }));
-    const select = screen.getByLabelText('Which office?');
+    const select = screen.getByLabelText(/^Which office\?/);
     expect([...select.options].map((o) => o.textContent)).toEqual(['Pick an office…', 'Toronto', 'Vancouver', 'Other site…']);
     expect(select).toBeRequired();
   });
@@ -115,10 +115,16 @@ describe('"Which office?" on a site visit', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Site visit' }));
     await flushPreview();
     fireEvent.click(screen.getByRole('button', { name: 'Book' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Pick which office the site visit is at');
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Pick which office the site visit is at');
     expect(api.createRequest).not.toHaveBeenCalled();
+    // The select is marked invalid and described by the error.
+    const select = screen.getByLabelText(/^Which office\?/);
+    expect(select).toHaveAttribute('aria-invalid', 'true');
+    expect(select.getAttribute('aria-describedby').split(' ')).toContain(alert.id);
+    expect(select).toHaveAccessibleDescription(/Pick which office the site visit is at/);
 
-    fireEvent.change(screen.getByLabelText('Which office?'), { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText(/^Which office\?/), { target: { value: '2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Book' }));
     await waitFor(() => expect(api.createRequest).toHaveBeenCalledWith(expect.objectContaining({ leaveTypeId: 4, siteOfficeId: 2 })));
     expect(api.createRequest.mock.calls[0][0]).not.toHaveProperty('siteLocation');
@@ -127,11 +133,17 @@ describe('"Which office?" on a site visit', () => {
   test('"Other site…" opens a short text box, and the text is what is sent', async () => {
     render(<BookTimeForm me={SITE_ME} />);
     fireEvent.click(screen.getByRole('radio', { name: 'Site visit' }));
-    fireEvent.change(screen.getByLabelText('Which office?'), { target: { value: 'other' } });
-    const box = screen.getByLabelText('Which site');
+    fireEvent.change(screen.getByLabelText(/^Which office\?/), { target: { value: 'other' } });
+    const box = screen.getByLabelText(/^Which site\?/);
     expect(box).toHaveAttribute('maxLength', '160');
     fireEvent.click(screen.getByRole('button', { name: /Book|Send for approval/ }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Say which site you are visiting');
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Say which site you are visiting');
+    // The "Which site?" box has a visible label, is marked invalid and described by the error.
+    expect(screen.getByText('Which site? (required)').tagName).toBe('LABEL');
+    expect(box).toHaveAttribute('aria-invalid', 'true');
+    expect(box).toHaveAttribute('aria-describedby', alert.id);
+    expect(screen.getByLabelText(/^Which office\?/)).not.toHaveAttribute('aria-invalid');
     fireEvent.change(box, { target: { value: '  Client plant, Kamloops ' } });
     fireEvent.click(screen.getByRole('button', { name: /Book|Send for approval/ }));
     await waitFor(() => expect(api.createRequest).toHaveBeenCalledWith(expect.objectContaining({ siteLocation: 'Client plant, Kamloops' })));
@@ -143,25 +155,25 @@ describe('"Which office?" on a site visit', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Site visit' }));
     await flushPreview();
     const calls = api.preview.mock.calls.length;
-    fireEvent.change(screen.getByLabelText('Which office?'), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText(/^Which office\?/), { target: { value: '1' } });
     await flushPreview();
     expect(api.preview.mock.calls.length).toBe(calls);
     expect(api.preview.mock.calls.at(-1)[0]).not.toHaveProperty('siteOfficeId');
   });
 
   test('changing an older site visit with no office: optional while type and dates stay, the header names the office when there is one', async () => {
-    const older = { ...THU_FRI, id: 220, leaveTypeId: 4, siteOfficeId: null, siteLocation: null };
+    const older = { ...THU_FRI, id: 9030, leaveTypeId: 4, siteOfficeId: null, siteLocation: null };
     const { unmount } = render(<BookTimeForm me={SITE_ME} editing={older} onStopEditing={vi.fn()} />);
-    expect(screen.getByLabelText('Which office?')).not.toBeRequired();
+    expect(screen.getByLabelText(/^Which office\?/)).not.toBeRequired();
     fireEvent.change(screen.getByLabelText('Note'), { target: { value: 'Bring the badge' } });
     await flushPreview();
     fireEvent.click(screen.getByRole('button', { name: /Save changes|Send changes for approval/ }));
-    await waitFor(() => expect(api.updateRequest).toHaveBeenCalledWith(220, expect.objectContaining({ note: 'Bring the badge' })));
+    await waitFor(() => expect(api.updateRequest).toHaveBeenCalledWith(9030, expect.objectContaining({ note: 'Bring the badge' })));
     unmount();
 
-    render(<BookTimeForm me={SITE_ME} editing={{ ...older, id: 221, siteOfficeId: 2 }} onStopEditing={vi.fn()} />);
+    render(<BookTimeForm me={SITE_ME} editing={{ ...older, id: 9031, siteOfficeId: 2 }} onStopEditing={vi.fn()} />);
     expect(screen.getByText(/Now: Site visit · Toronto/)).toBeInTheDocument();
-    expect(screen.getByLabelText('Which office?')).toHaveValue('2');
+    expect(screen.getByLabelText(/^Which office\?/)).toHaveValue('2');
   });
 });
 
@@ -169,8 +181,8 @@ describe('the "Which office?" field on its own (props in)', () => {
   test('renders for a harness and reports changes', () => {
     const onChange = vi.fn();
     render(<SiteOfficeField offices={[{ id: 2, name: 'Toronto' }]} value="other" location="Client plant" onChange={onChange} />);
-    expect(screen.getByLabelText('Which site')).toHaveValue('Client plant');
-    fireEvent.change(screen.getByLabelText('Which office?'), { target: { value: '2' } });
+    expect(screen.getByLabelText(/^Which site\?/)).toHaveValue('Client plant');
+    fireEvent.change(screen.getByLabelText(/^Which office\?/), { target: { value: '2' } });
     expect(onChange).toHaveBeenCalledWith({ siteOfficeId: '2', siteLocation: '' });
   });
 });
@@ -202,8 +214,8 @@ describe('my requests', () => {
   test('a site visit reads "Site visit · Toronto" (or its other site)', () => {
     const types = new Map([[4, { id: 4, name: 'Site visit', color: 'amber' }]]);
     const rows = [
-      { ...THU_FRI, id: 230, leaveTypeId: 4, status: 'approved', siteOfficeId: 2, sitePlace: null },
-      { ...THU_FRI, id: 231, leaveTypeId: 4, status: 'approved', siteLocation: 'Client plant, Kamloops', startDate: '2099-11-20', endDate: '2099-11-20' },
+      { ...THU_FRI, id: 9032, leaveTypeId: 4, status: 'approved', siteOfficeId: 2, sitePlace: null },
+      { ...THU_FRI, id: 9033, leaveTypeId: 4, status: 'approved', siteLocation: 'Client plant, Kamloops', startDate: '2099-11-20', endDate: '2099-11-20' },
     ];
     render(<MyRequestsList requests={rows} typeById={types} onCancel={vi.fn()} offices={[{ id: 2, name: 'Toronto' }]} />);
     expect(screen.getByText('Site visit · Toronto')).toBeInTheDocument();

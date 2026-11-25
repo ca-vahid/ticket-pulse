@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, Loader2, Pencil, XCircle } from 'lucide-react';
 import { availabilityAPI } from '../../services/api';
 import {
@@ -92,40 +92,58 @@ export function buildRequestBody(form, type) {
 
 /**
  * "Which office?" (25 Nov 2026) for a site visit: a plain select of the active
- * offices by name, then "Other site…", which opens a short text box. Props in,
- * so it renders on its own.
+ * offices by name, then "Other site…", which opens a short text box with its
+ * own visible label. `error` is shown under the control it is about (the text
+ * box when "Other site…" is picked, else the select), which is marked
+ * aria-invalid and described by it. Props in, so it renders on its own.
  */
-export function SiteOfficeField({ offices = [], value = '', location = '', onChange, required = true, keepOfficeId = null }) {
+export function SiteOfficeField({ offices = [], value = '', location = '', onChange, required = true, keepOfficeId = null, error = null }) {
+  const uid = useId().replace(/:/g, '');
+  const ids = { select: `av-site-office-${uid}`, hint: `av-site-office-${uid}-hint`, site: `av-site-text-${uid}`, error: `av-site-${uid}-error` };
   const choices = (offices || [])
     .filter((o) => o.isActive !== false || String(o.id) === String(keepOfficeId))
     .sort((a, b) => String(a.name).localeCompare(String(b.name)));
   const other = value === OTHER_SITE;
+  const officeInvalid = Boolean(error) && !other;
+  const siteInvalid = Boolean(error) && other;
+  const errorNote = error ? <p id={ids.error} role="alert" className="text-xs text-red-700 dark:text-red-300">{error}</p> : null;
   return (
     <div className="space-y-1.5" data-testid="site-office-field">
-      <Field label={required ? 'Which office? (required)' : 'Which office?'} hint="So the team and the assigner know where you are that day.">
+      <div className="grid min-w-0 gap-1 text-sm">
+        <label htmlFor={ids.select} className="text-xs font-medium text-muted-foreground">{required ? 'Which office? (required)' : 'Which office?'}</label>
         <select
+          id={ids.select}
           className={INPUT}
           value={value}
           onChange={(e) => onChange?.({ siteOfficeId: e.target.value, ...(e.target.value === OTHER_SITE ? {} : { siteLocation: '' }) })}
-          aria-label="Which office?"
           aria-required={required}
+          aria-invalid={officeInvalid || undefined}
+          aria-describedby={officeInvalid ? `${ids.hint} ${ids.error}` : ids.hint}
         >
           <option value="">Pick an office…</option>
           {choices.map((o) => <option key={o.id} value={String(o.id)}>{o.name}</option>)}
           <option value={OTHER_SITE}>Other site…</option>
         </select>
-      </Field>
+        <span id={ids.hint} className="text-xs text-muted-foreground">So the team and the assigner know where you are that day.</span>
+        {officeInvalid && errorNote}
+      </div>
       {other && (
-        <input
-          type="text"
-          className={INPUT}
-          value={location}
-          onChange={(e) => onChange?.({ siteOfficeId: OTHER_SITE, siteLocation: e.target.value })}
-          aria-label="Which site"
-          placeholder="Client site, city or address"
-          maxLength={SITE_LOCATION_MAX}
-          aria-required={required}
-        />
+        <div className="grid min-w-0 gap-1 text-sm">
+          <label htmlFor={ids.site} className="text-xs font-medium text-muted-foreground">{required ? 'Which site? (required)' : 'Which site?'}</label>
+          <input
+            id={ids.site}
+            type="text"
+            className={INPUT}
+            value={location}
+            onChange={(e) => onChange?.({ siteOfficeId: OTHER_SITE, siteLocation: e.target.value })}
+            placeholder="Client site, city or address"
+            maxLength={SITE_LOCATION_MAX}
+            aria-required={required}
+            aria-invalid={siteInvalid || undefined}
+            aria-describedby={siteInvalid ? ids.error : undefined}
+          />
+          {siteInvalid && errorNote}
+        </div>
       )}
     </div>
   );
@@ -230,12 +248,13 @@ export default function BookTimeForm({ me, onBooked, toast, editing = null, onSt
   const [previewing, setPreviewing] = useState(false);
   const [previewError, setPreviewError] = useState(null);
   const [submitError, setSubmitError] = useState(null);
+  const [siteError, setSiteError] = useState(null);
   const [saving, setSaving] = useState(false);
   const seq = useRef(0);
 
   const type = types.find((t) => String(t.id) === form.leaveTypeId) || null;
   const isHours = type?.unit === 'hour';
-  const set = (patch) => { setForm((f) => ({ ...f, ...patch })); setSubmitError(null); };
+  const set = (patch) => { setForm((f) => ({ ...f, ...patch })); setSubmitError(null); setSiteError(null); };
 
   const valid = Boolean(type && form.startDate && (isHours || (form.endDate && form.endDate >= form.startDate))
     && (!isHours || (form.startTime && form.endTime && form.endTime > form.startTime)));
@@ -278,7 +297,7 @@ export default function BookTimeForm({ me, onBooked, toast, editing = null, onSt
   const submit = async (e) => {
     e.preventDefault();
     if (!valid || saving || unchanged) return;
-    if (!siteOk) { setSubmitError(form.siteOfficeId === OTHER_SITE ? 'Say which site you are visiting' : 'Pick which office the site visit is at'); return; }
+    if (!siteOk) { setSiteError(form.siteOfficeId === OTHER_SITE ? 'Say which site you are visiting' : 'Pick which office the site visit is at'); return; }
     if (type?.requiresNote && !form.note.trim()) { setSubmitError(`${type.name} needs a note`); return; }
     setSaving(true);
     setSubmitError(null);
@@ -368,6 +387,7 @@ export default function BookTimeForm({ me, onBooked, toast, editing = null, onSt
           onChange={set}
           required={siteRequired}
           keepOfficeId={editing?.siteOfficeId ?? null}
+          error={siteError}
         />
       )}
 

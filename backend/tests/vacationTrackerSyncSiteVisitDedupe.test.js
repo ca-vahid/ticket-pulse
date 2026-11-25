@@ -46,8 +46,8 @@ beforeEach(() => {
   ]);
   // Ari booked the Toronto visit in Vacation Pulse for Tue 1 + Wed 2 Dec.
   vtRepo.getAvailabilityRows.mockResolvedValue([
-    { technicianId: 11, leaveDate: day('2099-12-01'), leaveTypeName: 'Site visit', category: 'OTHER', vtLeaveId: 'av:574:w1' },
-    { technicianId: 11, leaveDate: day('2099-12-02'), leaveTypeName: 'Site visit', category: 'OTHER', vtLeaveId: 'av:574:w1' },
+    { technicianId: 11, leaveDate: day('2099-12-01'), leaveTypeName: 'Site visit', category: 'OTHER', vtLeaveId: 'av:9001:w1' },
+    { technicianId: 11, leaveDate: day('2099-12-02'), leaveTypeName: 'Site visit', category: 'OTHER', vtLeaveId: 'av:9001:w1' },
   ]);
   vtRepo.bulkUpsertLeaves.mockResolvedValue([]);
   vtRepo.deleteStaleLeaves.mockResolvedValue({ count: 2 });
@@ -71,6 +71,23 @@ test('the twice-booked visit is skipped day by day; other people and other types
   expect(validKeys.has('leaveRequest-a1|2099-12-01')).toBe(false);
   expect(validKeys.has('leaveRequest-a1|2099-11-30')).toBe(true);
   expect(loggerMock.info).toHaveBeenCalledWith(expect.stringContaining('2 leave-day(s) skipped, already booked in Vacation Pulse'));
+});
+
+test('a morning booked here is not the full day in Vacation Tracker: the full day is written (and so never cleaned up)', async () => {
+  vtRepo.getAvailabilityRows.mockResolvedValue([
+    { technicianId: 11, leaveDate: day('2099-12-01'), leaveTypeName: 'Vacation', category: 'OFF', vtLeaveId: 'av:9006:w1', isFullDay: false, halfDayPart: 'AM', startMinute: 0, endMinute: 720 },
+    { technicianId: 12, leaveDate: day('2099-12-01'), leaveTypeName: 'Vacation', category: 'OFF', vtLeaveId: 'av:9007:w1', isFullDay: false, halfDayPart: 'AM', startMinute: 480, endMinute: 720 },
+  ]);
+  fetchLeaves.mockResolvedValue([
+    // Ari: full-day PTO in Vacation Tracker against a morning here — written.
+    { id: 'leaveRequest-a1', userId: 'u1', leaveTypeId: 'lt-vac', startDate: '2099-12-01', endDate: '2099-12-01', status: 'APPROVED' },
+    // Bo: the same morning, same minutes — skipped.
+    { id: 'leaveRequest-b1', userId: 'u2', leaveTypeId: 'lt-vac', startDate: '2099-12-01', endDate: '2099-12-01', status: 'APPROVED', isFullDayLeave: false, startHour: 8, startMinute: 0, endHour: 12, endMinute: 0 },
+  ]);
+  const out = await service.syncLeaves(1, '2099-11-25', '2099-12-31');
+  expect(vtRepo.bulkUpsertLeaves.mock.calls[0][0].map((r) => r.vtLeaveId)).toEqual(['leaveRequest-a1']);
+  expect(vtRepo.deleteStaleLeaves.mock.calls[0][3].has('leaveRequest-a1|2099-12-01')).toBe(true);
+  expect(out.duplicateDaysSkipped).toBe(1);
 });
 
 test('when Vacation Pulse rows cannot be read, the sync still runs (nothing skipped)', async () => {

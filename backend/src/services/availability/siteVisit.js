@@ -100,7 +100,7 @@ const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
  * Which office a note names: a case-insensitive whole-word match on the office
- * name ("Toronto", "toronto office visit", "Toronto site visit with Sam").
+ * name ("Toronto", "toronto office visit", "Toronto site visit with a colleague").
  * The longest name wins when one contains another ("North Vancouver" over
  * "Vancouver"); two unrelated offices in one note is ambiguous → null.
  */
@@ -122,34 +122,53 @@ export function officeFromNote(note, offices = []) {
 
 // ---------------------------------------------------------------- de-duplication
 
-const overlaps = (a, b) => toDay(a.startDate) <= toDay(b.endDate) && toDay(b.startDate) <= toDay(a.endDate);
 const covers = (outer, inner) => toDay(outer.startDate) <= toDay(inner.startDate) && toDay(outer.endDate) >= toDay(inner.endDate);
 const fromVt = (r) => r.source === 'vacation_tracker';
+const minute = (v) => (v === undefined || v === null || v === '' ? null : Number(v));
+
+/**
+ * Does the booking `app` take up the part of the day `other` does? A full-day
+ * booking covers any part; otherwise only the same part of the day (morning,
+ * afternoon, or the same hours). A morning booking never stands in for a
+ * full-day leave.
+ */
+export function coversPartOfDay(app, other) {
+  const part = app?.dayPart || 'full';
+  if (part === 'full') return true;
+  return part === (other?.dayPart || 'full')
+    && minute(app.startMinute) === minute(other.startMinute) && minute(app.endMinute) === minute(other.endMinute);
+}
+
+/** Is `app` (a Vacation Pulse booking) the same leave as `other` (one from Vacation Tracker)? It covers its dates and its part of the day. */
+const standsInFor = (app, other) => covers(app, other) && coversPartOfDay(app, other);
 
 /**
  * The import's skip rule: the Vacation Pulse booking (not from Vacation
- * Tracker, approved or waiting) of the same person and leave type whose dates
- * overlap this Vacation Tracker leave. Exact same dates first.
+ * Tracker, approved or waiting) of the same person and leave type that covers
+ * this Vacation Tracker leave — all of its dates and its part of the day.
+ * A partial overlap (a Mon–Fri leave against a Wednesday booked here) is not
+ * a twin: the other days are real leave and are imported. Exact dates first.
  */
 export function findAppTwin(fields, appRequests = []) {
   const same = appRequests.filter((r) => !fromVt(r) && ['approved', 'pending'].includes(r.status)
-    && lc(r.email) === lc(fields.email) && Number(r.leaveTypeId) === Number(fields.leaveTypeId) && overlaps(r, fields));
+    && lc(r.email) === lc(fields.email) && Number(r.leaveTypeId) === Number(fields.leaveTypeId) && standsInFor(r, fields));
   if (!same.length) return null;
   return same.find((r) => dayKey(r.startDate) === dayKey(fields.startDate) && dayKey(r.endDate) === dayKey(fields.endDate)) || same[0];
 }
 
 /**
- * Calendar entries (wallchart, overview, out today): an entry imported from
- * Vacation Tracker that a Vacation Pulse booking of the same person and type
- * already covers is the same visit — it is dropped. A partly overlapping one
- * stays (it covers days the booking does not).
+ * Calendar entries (wallchart, overview, out today) and balances: an entry
+ * imported from Vacation Tracker that a Vacation Pulse booking of the same
+ * person and type already covers (dates and part of the day) is the same
+ * leave — it is dropped. A partly overlapping one stays (it covers days, or
+ * hours, the booking does not).
  */
 export function collapseCalendarEntries(entries = []) {
   const own = entries.filter((e) => !fromVt(e));
   return entries.filter((e) => {
     if (!fromVt(e)) return true;
     return !own.some((o) => lc(o.email) === lc(e.email) && Number(o.leaveTypeId) === Number(e.leaveTypeId) && e.leaveTypeId !== null && e.leaveTypeId !== undefined
-      && (o.status === e.status || o.status === 'approved') && covers(o, e));
+      && (o.status === e.status || o.status === 'approved') && standsInFor(o, e));
   });
 }
 
@@ -183,8 +202,24 @@ export function sameLeaveKind(vtRow, appRow, avTypes = []) {
 const rowDay = (row) => (row.leaveDate ? dayKey(row.leaveDate) : '');
 
 /**
+ * The part of the day a dashboard row takes: 'full', or the half (AM / PM)
+ * with its exact minutes. Two rows are the same leave only when both are
+ * full-day, or both have the same part and the same minutes.
+ */
+export function rowPartOfDay(row) {
+  if (row?.isFullDay !== false) return 'full';
+  return `${row.halfDayPart || ''}|${minute(row.startMinute) ?? ''}|${minute(row.endMinute) ?? ''}`;
+}
+
+/** Same person-day leave? Same kind (by type mapping) and the same part of the day. */
+export function sameLeaveRow(vtRow, appRow, avTypes = []) {
+  return rowPartOfDay(vtRow) === rowPartOfDay(appRow) && sameLeaveKind(vtRow, appRow, avTypes);
+}
+
+/**
  * Pairs of dashboard rows where a Vacation Tracker row repeats a Vacation
- * Pulse row: same person, same day, same kind. [{ vtRow, appRow }].
+ * Pulse row: same person, day, kind and part of the day. [{ vtRow, appRow }].
+ * A morning booked here never pairs with a full day from Vacation Tracker.
  */
 export function duplicateLeavePairs(rows = [], avTypes = []) {
   const app = new Map();
@@ -197,34 +232,28 @@ export function duplicateLeavePairs(rows = [], avTypes = []) {
   const pairs = [];
   for (const r of rows) {
     if (!isVtRow(r)) continue;
-    const twin = (app.get(`${r.technicianId}|${rowDay(r)}`) || []).find((a) => sameLeaveKind(r, a, avTypes));
+    const twin = (app.get(`${r.technicianId}|${rowDay(r)}`) || []).find((a) => sameLeaveRow(r, a, avTypes));
     if (twin) pairs.push({ vtRow: r, appRow: twin });
   }
   return pairs;
 }
 
 /**
- * The rows one person has on one day, each visit once: rows of the same kind
- * (category, site visit, full / half day) collapse to one, the Vacation Pulse
- * row first (it carries the site office).
+ * The rows one person has on one day, each leave once: a row that is not
+ * Vacation Pulse's own ('av:') is dropped when a Vacation Pulse row has the
+ * same key (category, site visit, part of the day and its minutes). Vacation
+ * Pulse rows are never merged with each other (two hour bookings in one
+ * morning are two leaves), and the order is kept.
  */
 export function collapseLeaveRows(rows = []) {
-  const sorted = [...rows].sort((a, b) => Number(isAppRow(b)) - Number(isAppRow(a)));
-  const seen = new Set();
-  const out = [];
-  for (const r of sorted) {
-    const key = [
-      r.technicianId, rowDay(r), String(r.category || '').toUpperCase(), isSiteVisitLeave(r) ? 'site' : '',
-      r.isFullDay === false ? `half:${r.halfDayPart || ''}` : 'full',
-    ].join('|');
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(r);
-  }
-  return out;
+  const keyOf = (r) => [
+    r.technicianId, rowDay(r), String(r.category || '').toUpperCase(), isSiteVisitLeave(r) ? 'site' : '', rowPartOfDay(r),
+  ].join('|');
+  const appKeys = new Set(rows.filter(isAppRow).map(keyOf));
+  return rows.filter((r) => isAppRow(r) || !appKeys.has(keyOf(r)));
 }
 
 export default {
   isSiteVisitType, siteFieldsFor, editTouchesTypeOrDates, sitePlaceOf, siteLabel, projectionSiteFields, officeFromNote,
-  findAppTwin, collapseCalendarEntries, avTypeForVtName, sameLeaveKind, duplicateLeavePairs, collapseLeaveRows,
+  coversPartOfDay, findAppTwin, collapseCalendarEntries, avTypeForVtName, sameLeaveKind, rowPartOfDay, sameLeaveRow, duplicateLeavePairs, collapseLeaveRows,
 };

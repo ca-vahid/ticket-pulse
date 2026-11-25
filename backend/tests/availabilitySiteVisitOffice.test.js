@@ -117,7 +117,7 @@ describe('booking a site visit', () => {
     spy('project', async () => ({ written: 1 }));
     spy('_teamsSubmitted', async () => {});
     prismaMock.avRequest.findFirst.mockResolvedValue(null);
-    prismaMock.avRequest.create.mockImplementation(async ({ data }) => ({ id: 574, ...data }));
+    prismaMock.avRequest.create.mockImplementation(async ({ data }) => ({ id: 9001, ...data }));
   });
 
   test('without an office it is refused and nothing is written', async () => {
@@ -145,7 +145,7 @@ describe('booking a site visit', () => {
 
 describe('changing a waiting site visit', () => {
   const older = () => ({
-    id: 210, email: ME.email, leaveTypeId: 4, status: 'pending', source: 'app', startDate: toDay(D), endDate: toDay(D), dayPart: 'full',
+    id: 9010, email: ME.email, leaveTypeId: 4, status: 'pending', source: 'app', startDate: toDay(D), endDate: toDay(D), dayPart: 'full',
     startMinute: null, endMinute: null, days: 1, hours: 8, note: null, siteOfficeId: null, siteLocation: null, decision: { approvers: [] },
   });
   beforeEach(() => {
@@ -165,16 +165,16 @@ describe('changing a waiting site visit', () => {
 
   test('an older booking without an office can still have its note changed', async () => {
     spy('_shape', async () => ({ leaveType: SITE, startDate: toDay(D), endDate: toDay(D), dayPart: 'full', startMinute: null, endMinute: null, dates: [toDay(D)], days: 1, hours: 8, note: 'Bring the badge' }));
-    await svc.updateRequest(210, ME, { leaveTypeId: 4, startDate: D, note: 'Bring the badge' });
+    await svc.updateRequest(9010, ME, { leaveTypeId: 4, startDate: D, note: 'Bring the badge' });
     expect(prismaMock.avRequest.updateMany.mock.calls[0][0].data).toMatchObject({ note: 'Bring the badge', siteOfficeId: null, siteLocation: null });
   });
 
   test('moving its dates asks "Which office?" again', async () => {
     const moved = { leaveType: SITE, startDate: toDay('2099-12-03'), endDate: toDay('2099-12-03'), dayPart: 'full', startMinute: null, endMinute: null, dates: [toDay('2099-12-03')], days: 1, hours: 8, note: null };
     spy('_shape', async () => moved);
-    await expect(svc.updateRequest(210, ME, { leaveTypeId: 4, startDate: '2099-12-03' })).rejects.toThrow('Pick which office');
+    await expect(svc.updateRequest(9010, ME, { leaveTypeId: 4, startDate: '2099-12-03' })).rejects.toThrow('Pick which office');
     expect(prismaMock.avRequest.updateMany).not.toHaveBeenCalled();
-    await svc.updateRequest(210, ME, { leaveTypeId: 4, startDate: '2099-12-03', siteOfficeId: 2 });
+    await svc.updateRequest(9010, ME, { leaveTypeId: 4, startDate: '2099-12-03', siteOfficeId: 2 });
     const call = prismaMock.avRequest.updateMany.mock.calls[0][0];
     expect(call.data).toMatchObject({ siteOfficeId: 2 });
     const edited = prismaMock.avRequestEvent.createMany.mock.calls[0][0].data[0];
@@ -196,13 +196,13 @@ describe('the calendar (wallchart, overview, out today)', () => {
   test('a site visit names its place; the Vacation Tracker copy of the same visit is dropped', async () => {
     const base = { leaveTypeId: 4, startDate: toDay(D), endDate: toDay(D), dayPart: 'full', startMinute: null, endMinute: null, status: 'approved', days: 1 };
     prismaMock.avRequest.findMany.mockResolvedValue([
-      { ...base, id: 574, email: ME.email, source: 'app', siteOfficeId: 2, siteLocation: null, siteOffice: { name: 'Toronto' } },
-      { ...base, id: 575, email: ME.email, source: 'vacation_tracker', siteOfficeId: null, siteLocation: null, siteOffice: null },
-      { ...base, id: 576, email: 'bo.reyes@example.com', source: 'app', siteOfficeId: null, siteLocation: 'Client plant, Kamloops', siteOffice: null },
-      { ...base, id: 577, email: 'bo.reyes@example.com', leaveTypeId: 1, source: 'vacation_tracker', startDate: toDay('2099-12-04'), endDate: toDay('2099-12-04'), siteOffice: null },
+      { ...base, id: 9001, email: ME.email, source: 'app', siteOfficeId: 2, siteLocation: null, siteOffice: { name: 'Toronto' } },
+      { ...base, id: 9002, email: ME.email, source: 'vacation_tracker', siteOfficeId: null, siteLocation: null, siteOffice: null },
+      { ...base, id: 9003, email: 'bo.reyes@example.com', source: 'app', siteOfficeId: null, siteLocation: 'Client plant, Kamloops', siteOffice: null },
+      { ...base, id: 9004, email: 'bo.reyes@example.com', leaveTypeId: 1, source: 'vacation_tracker', startDate: toDay('2099-12-04'), endDate: toDay('2099-12-04'), siteOffice: null },
     ]);
     const out = await svc.calendar(ME, { from: '2099-12-01', to: '2099-12-31', workspaceId: 1 });
-    expect(out.entries.map((e) => e.id)).toEqual([574, 576, 577]);
+    expect(out.entries.map((e) => e.id)).toEqual([9001, 9003, 9004]);
     expect(out.entries[0]).toMatchObject({ label: 'Site visit', place: 'Toronto' });
     expect(out.entries[1]).toMatchObject({ label: 'Site visit', place: 'Client plant, Kamloops' });
     expect(out.entries[2]).toMatchObject({ label: 'Vacation', place: null });
@@ -217,13 +217,13 @@ describe('projection into the dashboard rows', () => {
     prismaMock.technicianLeave.deleteMany.mockResolvedValue({ count: 0 });
     prismaMock.technicianLeave.create.mockResolvedValue({});
   });
-  const req = (extra) => ({ id: 574, email: ME.email, leaveTypeId: 4, status: 'approved', startDate: toDay(D), endDate: toDay(D), dayPart: 'full', ...extra });
+  const req = (extra) => ({ id: 9001, email: ME.email, leaveTypeId: 4, status: 'approved', startDate: toDay(D), endDate: toDay(D), dayPart: 'full', ...extra });
 
   test('an office visit carries the office name and time zone', async () => {
     prismaMock.avLeaveType.findUnique.mockResolvedValue(SITE);
     await svc.project(req({ siteOfficeId: 2 }));
     expect(prismaMock.technicianLeave.create.mock.calls[0][0].data).toMatchObject({
-      vtLeaveId: 'av:574:w1', leaveTypeName: 'Site visit', category: 'OTHER', siteLocation: 'Toronto', siteTimezone: 'America/Toronto',
+      vtLeaveId: 'av:9001:w1', leaveTypeName: 'Site visit', category: 'OTHER', siteLocation: 'Toronto', siteTimezone: 'America/Toronto',
     });
   });
 
@@ -250,6 +250,22 @@ describe('balances count a twice-booked leave once', () => {
     const b = await svc._balanceFor(person, type, 2099, { yearStartMonth: 1 });
     expect(b.scheduled).toBe(3);
   });
+
+  test('a half day booked here does not hide a full day from Vacation Tracker (no half-day under-count)', async () => {
+    const person = { email: ME.email, startDate: null, entitlementOverrides: null };
+    prismaMock.avBalanceAdjustment.findMany.mockResolvedValue([]);
+    prismaMock.avRequest.findMany.mockResolvedValue([
+      // Morning booked here, full day in Vacation Tracker: both count (0.5 + 1).
+      { days: 0.5, status: 'approved', startDate: toDay(D), endDate: toDay(D), dayPart: 'am', startMinute: null, endMinute: null, source: 'app' },
+      { days: 1, status: 'approved', startDate: toDay(D), endDate: toDay(D), dayPart: 'full', startMinute: null, endMinute: null, source: 'vacation_tracker' },
+      // The same afternoon in both: counted once.
+      { days: 0.5, status: 'approved', startDate: toDay('2099-12-09'), endDate: toDay('2099-12-09'), dayPart: 'pm', source: 'app' },
+      { days: 0.5, status: 'approved', startDate: toDay('2099-12-09'), endDate: toDay('2099-12-09'), dayPart: 'pm', source: 'vacation_tracker' },
+    ]);
+    const type = { ...VACATION, tracksBalance: true, balancePolicy: { annualDays: 10 } };
+    const b = await svc._balanceFor(person, type, 2099, { yearStartMonth: 1 });
+    expect(b.scheduled).toBe(2);
+  });
 });
 
 // ---------------------------------------------------------------- the import's skip rule
@@ -263,7 +279,7 @@ describe('Vacation Tracker import: a visit already booked here is not imported a
     ]),
     fetchLeaves: jest.fn().mockResolvedValue(leaves),
   });
-  const appBooking = { id: 574, email: ME.email, leaveTypeId: 4, startDate: toDay(D), endDate: toDay(D), dayPart: 'full', status: 'approved', source: 'app', externalId: null };
+  const appBooking = { id: 9001, email: ME.email, leaveTypeId: 4, startDate: toDay(D), endDate: toDay(D), dayPart: 'full', status: 'approved', source: 'app', externalId: null };
 
   beforeEach(() => {
     spy('ensureSeed', async () => {});
@@ -274,7 +290,7 @@ describe('Vacation Tracker import: a visit already booked here is not imported a
     vtMock.cancelledHereExternalIds.mockResolvedValue(new Set());
     prismaMock.avLeaveType.findMany.mockResolvedValue([{ ...SITE, vtLeaveTypeNames: ['site visit', 'field'] }]);
     prismaMock.avPerson.findMany.mockResolvedValue([{ email: ME.email, workdays: null, dailyHours: 8 }, { email: 'bo.reyes@example.com', workdays: null, dailyHours: 8 }]);
-    prismaMock.avRequest.create.mockResolvedValue({ id: 900, status: 'approved' });
+    prismaMock.avRequest.create.mockResolvedValue({ id: 9020, status: 'approved' });
     // Imported copies: none yet. Bookings here (source not vacation_tracker): Ari's Toronto visit.
     prismaMock.avRequest.findMany.mockImplementation(async ({ where }) => {
       if (where.source === 'vacation_tracker') return [];
@@ -295,16 +311,28 @@ describe('Vacation Tracker import: a visit already booked here is not imported a
     expect(loggerMock.info).toHaveBeenCalledWith(expect.stringContaining('leaveRequest-a1 not imported'));
   });
 
-  test('overlapping dates count as the same visit; a different type does not', async () => {
+  test('a partial overlap is real leave and is imported (Mon–Fri against a Wednesday booked here); so is another type', async () => {
     prismaMock.avLeaveType.findMany.mockResolvedValue([{ ...SITE, vtLeaveTypeNames: ['site visit'] }, { ...VACATION, vtLeaveTypeNames: ['vacation'] }]);
     const c = client([
-      { id: 'leaveRequest-a3', userId: 'u1', leaveTypeId: 'lt-site', startDate: '2099-12-01', endDate: '2099-12-03', status: 'APPROVED', isFullDayLeave: true },
+      { id: 'leaveRequest-a3', userId: 'u1', leaveTypeId: 'lt-site', startDate: '2099-11-30', endDate: '2099-12-04', status: 'APPROVED', isFullDayLeave: true },
       { id: 'leaveRequest-a4', userId: 'u1', leaveTypeId: 'lt-vac', startDate: D, endDate: D, status: 'APPROVED', isFullDayLeave: true },
     ]);
     c.fetchLeaveTypes.mockResolvedValue([{ id: 'lt-site', name: 'Site Visit' }, { id: 'lt-vac', name: 'Vacation' }]);
     const out = await svc.syncFromVacationTracker(1, { from: '2099-11-01', to: '2099-12-31', client: c });
+    expect(out).toMatchObject({ created: 2, duplicates: 0 });
+    expect(prismaMock.avRequest.create.mock.calls.map((call) => call[0].data.externalId)).toEqual(['vt:leaveRequest-a3', 'vt:leaveRequest-a4']);
+  });
+
+  test('a morning booked here does not stand in for a full day in Vacation Tracker; the same morning does', async () => {
+    const morning = { ...appBooking, dayPart: 'am', startMinute: null, endMinute: null };
+    prismaMock.avRequest.findMany.mockImplementation(async ({ where }) => (where.source === 'vacation_tracker' || where.externalId ? [] : [morning]));
+    const c = client([
+      { id: 'leaveRequest-a6', userId: 'u1', leaveTypeId: 'lt-site', startDate: D, endDate: D, status: 'APPROVED', isFullDayLeave: true },
+      { id: 'leaveRequest-a7', userId: 'u1', leaveTypeId: 'lt-site', startDate: D, endDate: D, status: 'APPROVED', isFullDayLeave: false, startHour: 8, startMinute: 0, endHour: 12, endMinute: 0 },
+    ]);
+    const out = await svc.syncFromVacationTracker(1, { from: '2099-11-01', to: '2099-12-31', client: c });
     expect(out).toMatchObject({ created: 1, duplicates: 1 });
-    expect(prismaMock.avRequest.create.mock.calls[0][0].data).toMatchObject({ externalId: 'vt:leaveRequest-a4', leaveTypeId: 1 });
+    expect(prismaMock.avRequest.create.mock.calls[0][0].data).toMatchObject({ externalId: 'vt:leaveRequest-a6', dayPart: 'full' });
   });
 });
 
@@ -316,7 +344,7 @@ describe('de-duplication helpers', () => {
 
   test('a Vacation Tracker row repeating a Vacation Pulse row is a pair (by the type its name maps to)', () => {
     const rows = [
-      { id: 1, technicianId: 11, leaveDate: day, vtLeaveId: 'av:574:w1', leaveTypeName: 'Site visit', category: 'OTHER' },
+      { id: 1, technicianId: 11, leaveDate: day, vtLeaveId: 'av:9001:w1', leaveTypeName: 'Site visit', category: 'OTHER' },
       { id: 2, technicianId: 11, leaveDate: day, vtLeaveId: 'leaveRequest-a1', leaveTypeName: 'Business Trip', category: 'OTHER' },
       { id: 3, technicianId: 11, leaveDate: day, vtLeaveId: 'leaveRequest-a2', leaveTypeName: 'PTO', category: 'OFF' },
       { id: 4, technicianId: 12, leaveDate: day, vtLeaveId: 'leaveRequest-b1', leaveTypeName: 'Site Visit', category: 'OTHER' },
@@ -326,18 +354,37 @@ describe('de-duplication helpers', () => {
     expect(pairs.map((p) => [p.vtRow.id, p.appRow.id])).toEqual([[2, 1]]);
   });
 
-  test('rows of one person and day collapse by kind, the Vacation Pulse row first', () => {
+  test('a morning booked here never pairs with a full day from Vacation Tracker; the same morning and minutes does', () => {
+    const am = { isFullDay: false, halfDayPart: 'AM', startMinute: 0, endMinute: 720 };
     const rows = [
-      { technicianId: 11, leaveDate: day, vtLeaveId: 'leaveRequest-a1', leaveTypeName: 'Site Visit', category: 'OTHER', isFullDay: true },
-      { technicianId: 11, leaveDate: day, vtLeaveId: 'av:574:w1', leaveTypeName: 'Site visit', category: 'OTHER', isFullDay: true, siteLocation: 'Toronto' },
-      { technicianId: 11, leaveDate: day, vtLeaveId: 'leaveRequest-a5', leaveTypeName: 'Physio', category: 'OTHER', isFullDay: true },
+      { id: 1, technicianId: 11, leaveDate: day, vtLeaveId: 'av:9001:w1', leaveTypeName: 'Vacation', category: 'OFF', ...am },
+      { id: 2, technicianId: 11, leaveDate: day, vtLeaveId: 'leaveRequest-a1', leaveTypeName: 'PTO', category: 'OFF', isFullDay: true },
+      { id: 3, technicianId: 12, leaveDate: day, vtLeaveId: 'av:9002:w1', leaveTypeName: 'Vacation', category: 'OFF', ...am },
+      { id: 4, technicianId: 12, leaveDate: day, vtLeaveId: 'leaveRequest-b1', leaveTypeName: 'PTO', category: 'OFF', ...am },
+      { id: 5, technicianId: 12, leaveDate: day, vtLeaveId: 'leaveRequest-b2', leaveTypeName: 'PTO', category: 'OFF', isFullDay: false, halfDayPart: 'AM', startMinute: 480, endMinute: 720 },
     ];
-    const out = site.collapseLeaveRows(rows);
-    expect(out.map((r) => r.vtLeaveId)).toEqual(['av:574:w1', 'leaveRequest-a5']);
+    expect(site.duplicateLeavePairs(rows, avTypes).map((p) => [p.vtRow.id, p.appRow.id])).toEqual([[4, 3]]);
   });
 
-  test('the import twin: same person and type, overlapping dates; exact dates preferred', () => {
-    const fields = { email: 'ARI.STONE@example.com', leaveTypeId: 4, startDate: toDay(D), endDate: toDay(D) };
+  test('rows of one person and day: a non-Vacation Pulse row goes only when a Vacation Pulse row has the same key', () => {
+    const rows = [
+      { technicianId: 11, leaveDate: day, vtLeaveId: 'leaveRequest-a1', leaveTypeName: 'Site Visit', category: 'OTHER', isFullDay: true },
+      { technicianId: 11, leaveDate: day, vtLeaveId: 'av:9001:w1', leaveTypeName: 'Site visit', category: 'OTHER', isFullDay: true, siteLocation: 'Toronto' },
+      { technicianId: 11, leaveDate: day, vtLeaveId: 'leaveRequest-a5', leaveTypeName: 'Physio', category: 'OTHER', isFullDay: true },
+      { technicianId: 11, leaveDate: day, vtLeaveId: 'leaveRequest-a8', leaveTypeName: 'Physio', category: 'OTHER', isFullDay: true },
+    ];
+    // Two Vacation Tracker rows of the same kind stay: only a Vacation Pulse row can stand in.
+    expect(site.collapseLeaveRows(rows).map((r) => r.vtLeaveId)).toEqual(['av:9001:w1', 'leaveRequest-a5', 'leaveRequest-a8']);
+  });
+
+  test('two hour bookings in the same morning stay two leaves', () => {
+    const hours = (vtLeaveId, startMinute, endMinute) => ({ technicianId: 11, leaveDate: day, vtLeaveId, leaveTypeName: 'Appointment', category: 'OFF', isFullDay: false, halfDayPart: 'AM', startMinute, endMinute });
+    const rows = [hours('av:9006:w1', 540, 600), hours('av:9007:w1', 660, 720), hours('leaveRequest-c1', 540, 600)];
+    expect(site.collapseLeaveRows(rows).map((r) => r.vtLeaveId)).toEqual(['av:9006:w1', 'av:9007:w1']);
+  });
+
+  test('the import twin covers the dates and the part of the day; exact dates preferred', () => {
+    const fields = { email: 'ARI.STONE@example.com', leaveTypeId: 4, startDate: toDay(D), endDate: toDay(D), dayPart: 'full' };
     const twin = site.findAppTwin(fields, [
       { id: 1, email: ME.email, leaveTypeId: 4, startDate: toDay('2099-12-01'), endDate: toDay('2099-12-03'), status: 'approved', source: 'app' },
       { id: 2, email: ME.email, leaveTypeId: 4, startDate: toDay(D), endDate: toDay(D), status: 'pending', source: 'app' },
@@ -345,5 +392,11 @@ describe('de-duplication helpers', () => {
     ]);
     expect(twin.id).toBe(2);
     expect(site.findAppTwin({ ...fields, leaveTypeId: 1 }, [{ id: 1, email: ME.email, leaveTypeId: 4, startDate: toDay(D), endDate: toDay(D), status: 'approved', source: 'app' }])).toBeNull();
+    // Booked here for one day only: a three-day leave is not its twin.
+    expect(site.findAppTwin({ ...fields, startDate: toDay('2099-12-01'), endDate: toDay('2099-12-03') }, [{ id: 2, email: ME.email, leaveTypeId: 4, startDate: toDay(D), endDate: toDay(D), status: 'approved', source: 'app' }])).toBeNull();
+    // Hours must match exactly.
+    const hoursApp = { id: 4, email: ME.email, leaveTypeId: 4, startDate: toDay(D), endDate: toDay(D), dayPart: 'hours', startMinute: 540, endMinute: 600, status: 'approved', source: 'app' };
+    expect(site.findAppTwin({ ...fields, dayPart: 'hours', startMinute: 540, endMinute: 600 }, [hoursApp])?.id).toBe(4);
+    expect(site.findAppTwin({ ...fields, dayPart: 'hours', startMinute: 540, endMinute: 660 }, [hoursApp])).toBeNull();
   });
 });

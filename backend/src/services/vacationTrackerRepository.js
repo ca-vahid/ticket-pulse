@@ -177,7 +177,10 @@ class VacationTrackerRepository {
   async getAvailabilityRows(workspaceId, startDate, endDate) {
     return prisma.technicianLeave.findMany({
       where: { workspaceId, leaveDate: { gte: startDate, lte: endDate }, vtLeaveId: { startsWith: 'av:' } },
-      select: { technicianId: true, leaveDate: true, leaveTypeName: true, category: true, vtLeaveId: true },
+      select: {
+        technicianId: true, leaveDate: true, leaveTypeName: true, category: true, vtLeaveId: true,
+        isFullDay: true, halfDayPart: true, startMinute: true, endMinute: true,
+      },
     });
   }
 
