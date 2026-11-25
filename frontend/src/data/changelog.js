@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.4.18-preview';
+export const APP_VERSION = '4.4.19-preview';
 
 export const changelog = [
+  {
+    version: '4.4.19-preview',
+    date: 'November 25, 2026',
+    entries: [
+      { type: 'fix', html: '<strong>Site visits read right in Vacation Pulse</strong> &mdash; the overview now says &ldquo;1 at home &middot; 1 on a site visit&rdquo; instead of counting a visit to another office as working remotely, and a short bar on the team calendar shows where the person is (&ldquo;Toronto&rdquo;) instead of a cut-off &ldquo;Site visit &middot;&rdquo;.' },
+    ],
+  },
   {
     version: '4.4.18-preview',
     date: 'November 25, 2026',

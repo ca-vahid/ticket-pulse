@@ -157,7 +157,7 @@ export function Wallchart({
                         className={`absolute flex items-center overflow-hidden whitespace-nowrap rounded-md px-1.5 text-[11px] font-medium ${look.className} ${hours ? 'bottom-1.5 h-1.5 px-0' : 'top-1/2 h-6 -translate-y-1/2'}`}
                         style={{ ...look.style, left: `calc(${leftDays} * 100% / ${n} + 2px)`, width: `calc(${widthDays} * 100% / ${n} - 4px)` }}
                       >
-                        {!hours && seg.first && len >= 2 ? entryLabel(e) : ''}
+                        {!hours && seg.first && len >= 2 ? <BarLabel entry={e} /> : ''}
                       </span>
                     );
                   }))}
@@ -169,6 +169,21 @@ export function Wallchart({
       </div>
       {!peopleCount && emptyText && <p className="px-3 py-8 text-center text-sm text-muted-foreground">{emptyText}</p>}
     </div>
+  );
+}
+
+/**
+ * A bar's words. A wide bar reads "Site visit · Toronto". When the bar is too narrow for
+ * that, the place wraps onto a line of its own and `flex-wrap-reverse` + `content-end` keep that
+ * line on top, so a narrow bar reads "Toronto", never a clipped "Site visit ·" (25 Nov 2026).
+ */
+function BarLabel({ entry }) {
+  if (!entry?.place) return entryLabel(entry);
+  return (
+    <span className="flex h-6 min-w-0 flex-wrap-reverse content-end overflow-hidden leading-6">
+      <span className="whitespace-pre">{entry.label || 'Away'} · </span>
+      <span className="min-w-0 max-w-full truncate">{entry.place}</span>
+    </span>
   );
 }
 

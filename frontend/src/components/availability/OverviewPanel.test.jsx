@@ -133,6 +133,19 @@ describe('the page', () => {
     expect(summary).toHaveTextContent('1 away and 1 out for part of the day today');
   });
 
+  test('a site visit is counted as in, and named apart from working at home', async () => {
+    calendarData.entries = [
+      entry({ id: 1, email: 'c@x.ca', startDate: TODAY, endDate: TODAY, label: 'Working from home', availability: 'WFH' }),
+      entry({ id: 2, email: 'a@x.ca', startDate: TODAY, endDate: TODAY, label: 'Site visit', availability: 'ONSITE', place: 'Toronto' }),
+    ];
+    show();
+    const board = await screen.findByTestId('out-this-week');
+    await waitFor(() => expect(within(board).getByText('1 at home · 1 on a site visit')).toBeInTheDocument());
+    // Nobody is out: every day of the week, today included, reads 4 of 4 in.
+    expect(within(board).getAllByText('4 of 4 in')).toHaveLength(5);
+    expect(within(board).queryByText(/working remotely/)).not.toBeInTheDocument();
+  });
+
   test('a balance that has gone over says so in words, never as a negative number', async () => {
     show();
     const balances = await screen.findByTestId('my-balances');
