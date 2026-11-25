@@ -54,9 +54,25 @@ function PreflightList({ items }) {
           <li key={item.key} className="flex items-start gap-2 text-sm" data-state={item.state}>
             <Icon className={`mt-0.5 h-4 w-4 flex-shrink-0 ${st.text}`} aria-hidden="true" />
             <p className="min-w-0 text-foreground/85">
-              <span className={`mr-1.5 font-semibold ${st.text}`}>{st.word}</span>
+              <span className={`mr-1 font-semibold ${st.text}`}>{st.word}</span>{' '}
               {item.text}
-              {link && item.state !== 'ok' && (
+              {/* What to do: with a link, the sentence ends on the link ("Set up the same in Mail Workflows."). */}
+              {item.state !== 'ok' && item.todo && (
+                <>
+                  {' '}
+                  {item.todo}
+                  {link && (
+                    <>
+                      {' '}
+                      <Link to={link.href} className="tp-focus-ring rounded font-medium text-primary hover:underline" title="Opens Settings for the workspace you have selected">
+                        {link.label}
+                      </Link>
+                      .
+                    </>
+                  )}
+                </>
+              )}
+              {item.state !== 'ok' && !item.todo && link && (
                 <>
                   {' '}
                   <Link to={link.href} className="tp-focus-ring rounded font-medium text-primary hover:underline" title="Opens Settings for the workspace you have selected">
@@ -165,7 +181,7 @@ export default function FreshServiceSwitchView({ data, busy = false, error = nul
       <div className="space-y-0.5">
         <p className="flex flex-wrap items-center gap-x-2 text-sm">
           <FreshServiceModeText mode={mode} />
-          {since && <span className="text-xs text-muted-foreground">since {since}{record?.changedBy ? ` by ${who(record.changedBy)}` : ''}</span>}
+          {since && <span className="text-xs text-muted-foreground">since {since}{record?.changedBy ? ` by ${record.changedByName || who(record.changedBy)}` : ''}</span>}
         </p>
         {mode === 'off' && (
           <p className="text-xs text-muted-foreground" data-testid="fs-off-note">
@@ -322,7 +338,7 @@ export default function FreshServiceSwitchView({ data, busy = false, error = nul
             {[...record.history].reverse().map((h, i) => (
               <li key={`${h.at}-${i}`} className="flex flex-wrap gap-x-2">
                 <span className="text-foreground/85">{modeMeta(h.from).label} → {modeMeta(h.to).label}</span>
-                <span>by {who(h.by)}</span>
+                <span>by {h.byName || who(h.by)}</span>
                 <span className="tabular-nums">{pacificWhen(h.at, now)}</span>
               </li>
             ))}

@@ -172,6 +172,9 @@ export async function buildPreflight(ws) {
 
   const openFsBorn = Number(preview?.openFsBorn) || 0;
   const uncachedAttachments = Number(preview?.uncachedAttachments) || 0;
+  // Every item that is not OK says what happened (`text`) AND what to do
+  // (`todo`). With a `link`, `todo` ends just before the link's label, which
+  // the page renders as the link ("Set up the same in [Mail Workflows].").
   const items = [];
 
   // Mail intake: the one item that can block.
@@ -180,11 +183,15 @@ export async function buildPreflight(ws) {
   } else if (recentFsBornMail > 0) {
     items.push({
       key: 'mail_intake', state: 'block',
-      text: `No mailbox is connected to Ticket Pulse, and ${plural(recentFsBornMail, 'e-mail')} arrived through FreshService in the last ${RECENT_DAYS} days. Connect the team's mailbox in Ticket Mailboxes before turning FreshService off, or those e-mails stop becoming tickets.`,
-      link: 'ticket-mailboxes',
+      text: `No mailbox is connected to Ticket Pulse, and ${plural(recentFsBornMail, 'e-mail')} arrived through FreshService in the last ${RECENT_DAYS} days; after Off they would stop becoming tickets.`,
+      todo: 'Connect the team’s mailbox in', link: 'ticket-mailboxes',
     });
   } else {
-    items.push({ key: 'mail_intake', state: 'warn', text: `No mailbox is connected to Ticket Pulse. No e-mail came through FreshService in the last ${RECENT_DAYS} days, so nothing is lost, but new mail will need a mailbox.`, link: 'ticket-mailboxes' });
+    items.push({
+      key: 'mail_intake', state: 'warn',
+      text: `No mailbox is connected to Ticket Pulse. No e-mail came through FreshService in the last ${RECENT_DAYS} days, so nothing is lost yet.`,
+      todo: 'Connect one for new mail in', link: 'ticket-mailboxes',
+    });
   }
 
   // FreshService's own mail forwarding: if it keeps receiving the team's mail,
@@ -192,18 +199,28 @@ export async function buildPreflight(ws) {
   if (recentFsBornMail > 0) {
     items.push({
       key: 'fs_mail_forwarding', state: 'warn',
-      text: 'FreshService is still receiving mail for this team. Turn off its mail forwarding before switching off, or the same e-mails will become tickets in both places if you ever switch back.',
+      text: 'FreshService is still receiving mail for this team.',
+      todo: 'Turn off its mail forwarding before switching off, or the same e-mails will become tickets in both places if you ever switch back.',
     });
   }
 
   // Tickets still born in FreshService.
   items.push(recentFsBorn > 0
-    ? { key: 'recent_intake', state: 'warn', text: `${plural(recentFsBorn, 'ticket')} arrived through FreshService in the last ${RECENT_DAYS} days. After Off, anything still sent to FreshService won't reach Ticket Pulse.` }
+    ? {
+      key: 'recent_intake', state: 'warn',
+      text: `${plural(recentFsBorn, 'ticket')} arrived through FreshService in the last ${RECENT_DAYS} days.`,
+      todo: 'Point whoever still sends requests to FreshService at the team’s mailbox; after Off they won’t reach Ticket Pulse.',
+    }
     : { key: 'recent_intake', state: 'ok', text: `No tickets arrived through FreshService in the last ${RECENT_DAYS} days.` });
 
   // Adoption.
   if (preview?.error) {
-    items.push({ key: 'adopt', state: 'warn', text: `The open FreshService tickets could not be counted (${preview.error}).` });
+    logger.warn(`FreshService switch: preview for workspace ${ws} failed: ${preview.error}`);
+    items.push({
+      key: 'adopt', state: 'warn',
+      text: 'The open FreshService tickets could not be counted just now.',
+      todo: 'Reload this page in a minute; the switch still adopts every open one.',
+    });
   } else {
     items.push(openFsBorn > 0
       ? { key: 'adopt', state: 'ok', text: `${plural(openFsBorn, 'open FreshService ticket')} will be adopted: each becomes a Ticket Pulse ticket (TP-number), fully editable here.` }
@@ -212,24 +229,36 @@ export async function buildPreflight(ws) {
 
   // Attachments only FreshService holds.
   items.push(uncachedAttachments > 0
-    ? { key: 'attachments', state: 'warn', text: `${plural(uncachedAttachments, 'FreshService attachment')} on imported tickets ${uncachedAttachments === 1 ? 'is' : 'are'} not stored in Ticket Pulse yet. Adopted tickets keep theirs; the rest go when FreshService ends unless the final import runs first.` }
+    ? {
+      key: 'attachments', state: 'warn',
+      text: `${plural(uncachedAttachments, 'FreshService attachment')} on imported tickets ${uncachedAttachments === 1 ? 'is' : 'are'} not copied to Ticket Pulse yet (adopted tickets keep theirs).`,
+      todo: 'Run the final FreshService import before the account ends, or they go with it.',
+    }
     : { key: 'attachments', state: 'ok', text: 'Every FreshService attachment is already stored in Ticket Pulse.' });
 
   // What FreshService did for the requester, that Ticket Pulse now must.
   const wfItem = (key, wf, missingText, readyText) => {
-    if (!wf) return { key, state: 'warn', text: missingText, link: 'notification-workflows' };
-    if (wf.mockModeEnabled) return { key, state: 'warn', text: `${readyText} "${wf.name}" is still in Shadow, so it won't send yet.`, link: 'notification-workflows', workflowId: wf.id };
+    if (!wf) return { key, state: 'warn', text: missingText, todo: 'Set up the same in', link: 'notification-workflows' };
+    if (wf.mockModeEnabled) {
+      return {
+        key, state: 'warn', text: `${readyText} "${wf.name}" is still in Shadow, so it won't send yet.`,
+        todo: 'Take it out of Shadow in', link: 'notification-workflows', workflowId: wf.id,
+      };
+    }
     return { key, state: 'ok', text: `${readyText} "${wf.name}" is on.`, link: 'notification-workflows', workflowId: wf.id };
   };
   items.push(wfItem('ack_workflow', ackWorkflow,
-    'FreshService sent the "we got your ticket" e-mail for you. Ticket Pulse has no Ticket created workflow switched on to do it now.',
+    'FreshService sent the "we got your ticket" e-mail for you.',
     'Ticket Pulse acknowledges new tickets:'));
   items.push(wfItem('reminder_workflow', reminderWorkflow,
-    'FreshService reminded requesters who went quiet. Ticket Pulse has no Pending Response reminder (requester silent) workflow switched on.',
+    'FreshService reminded requesters who went quiet.',
     'Ticket Pulse reminds quiet requesters:'));
   items.push(autoClose?.enabled
     ? { key: 'auto_close', state: 'ok', text: 'Ticket Pulse closes resolved tickets automatically.', link: 'ticket-ops' }
-    : { key: 'auto_close', state: 'warn', text: 'FreshService closed resolved tickets for you. Auto-close of resolved tickets is off in Ticket Ops.', link: 'ticket-ops' });
+    : {
+      key: 'auto_close', state: 'warn', text: 'FreshService closed resolved tickets for you.',
+      todo: 'Turn on auto-close of resolved tickets in', link: 'ticket-ops',
+    });
 
   return {
     openFsBorn,
@@ -242,21 +271,59 @@ export async function buildPreflight(ws) {
     reminderWorkflow: reminderWorkflow ? { id: reminderWorkflow.id, name: reminderWorkflow.name, shadow: reminderWorkflow.mockModeEnabled === true } : null,
     autoCloseResolved: autoClose?.enabled === true,
     items,
-    blockers: items.filter((i) => i.state === 'block').map((i) => i.text),
-    warnings: items.filter((i) => i.state === 'warn').map((i) => i.text),
+    blockers: items.filter((i) => i.state === 'block').map(itemSentence),
+    warnings: items.filter((i) => i.state === 'warn').map(itemSentence),
   };
 }
 
-function publicRecord(record) {
+/** Where a preflight link points, in words (the page renders it as the link). */
+export const PREFLIGHT_LINK_LABELS = Object.freeze({
+  'ticket-mailboxes': 'Ticket Mailboxes',
+  'notification-workflows': 'Mail Workflows',
+  'ticket-ops': 'Ticket Ops',
+});
+
+/** One plain sentence for an item: what happened, then what to do (for API refusals and logs). */
+export function itemSentence(item) {
+  if (!item?.todo) return item?.text || '';
+  const label = item.link ? PREFLIGHT_LINK_LABELS[item.link] : null;
+  return `${item.text} ${item.todo}${label ? ` ${label}.` : ''}`;
+}
+
+/**
+ * People's names for the e-mails a record stores (changedBy, history[].by):
+ * a Ticket Pulse technician's display name; unknown e-mails stay unresolved
+ * and the page falls back to the e-mail's local part.
+ */
+async function namesFor(emails) {
+  const list = [...new Set(emails.filter(Boolean).map((e) => String(e).toLowerCase()))];
+  if (!list.length) return new Map();
+  const rows = await prisma.technician.findMany({
+    where: { OR: list.map((e) => ({ email: { equals: e, mode: 'insensitive' } })) },
+    select: { name: true, email: true },
+  }).catch(() => []);
+  const map = new Map();
+  for (const r of rows || []) {
+    const key = String(r.email || '').toLowerCase();
+    if (r.name && !map.has(key)) map.set(key, r.name);
+  }
+  return map;
+}
+
+async function publicRecord(record) {
   if (!record) return null;
+  const history = Array.isArray(record.history) ? record.history : [];
+  const names = await namesFor([record.changedBy, ...history.map((h) => h?.by)]);
+  const nameOf = (email) => (email ? names.get(String(email).toLowerCase()) || null : null);
   return {
     mode: record.mode,
     changedBy: record.changedBy || null,
+    changedByName: nameOf(record.changedBy),
     changedAt: record.changedAt || null,
     note: record.note || null,
     adoptedCount: record.adoptedCount ?? null,
     adoptedAt: record.adoptedAt || null,
-    history: Array.isArray(record.history) ? record.history : [],
+    history: history.map((h) => ({ ...h, byName: nameOf(h?.by) })),
   };
 }
 
@@ -416,7 +483,7 @@ router.get('/:id/freshservice', requireAuth, scopeToTarget, requireAdmin, asyncH
     mode === 'off' ? Promise.resolve(null) : buildPreflight(ws.id),
     readJob(ws.id),
   ]);
-  res.json({ success: true, data: { workspace: ws, mode, record: publicRecord(record), shadow, preflight, job, canWrite } });
+  res.json({ success: true, data: { workspace: ws, mode, record: await publicRecord(record), shadow, preflight, job, canWrite } });
 }));
 
 router.put('/:id/freshservice', requireAuth, scopeToTarget, requireGlobalAdmin, asyncHandler(async (req, res) => {
@@ -441,7 +508,7 @@ router.put('/:id/freshservice', requireAuth, scopeToTarget, requireGlobalAdmin, 
       targetLabel: ws.name, oldValue: before, newValue: next,
     });
   }
-  res.json({ success: true, data: { mode: next, record: publicRecord(record) } });
+  res.json({ success: true, data: { mode: next, record: await publicRecord(record) } });
 }));
 
 router.get('/:id/freshservice/off', requireAuth, scopeToTarget, requireAdmin, asyncHandler(async (req, res) => {

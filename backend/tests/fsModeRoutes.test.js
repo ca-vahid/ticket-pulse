@@ -15,6 +15,7 @@ const prismaMock = {
   workspace: { findUnique: jest.fn(), findMany: jest.fn() },
   mailboxConnection: { count: jest.fn() },
   ticket: { count: jest.fn(), findMany: jest.fn() },
+  technician: { findMany: jest.fn() },
   notificationWorkflow: { findFirst: jest.fn() },
 };
 const settings = new Map();
@@ -92,6 +93,7 @@ function wire({ mode = 'connected', mailboxes = 1, recentMail = 0, openFsBorn = 
   adoption.previewWorkspace.mockResolvedValue({ openFsBorn, uncachedAttachments: 3, sample: [{ id: 1, ref: '#900101', subject: 'Invoice', status: 'Open' }] });
   adoption.adoptWorkspace.mockResolvedValue({ adopted: openFsBorn, failed: [] });
   accessRole.mockImplementation(async (email, ws) => (email === 'lead@example.com' && Number(ws) === 5 ? 'admin' : email === 'someone@example.com' ? 'viewer' : null));
+  prismaMock.technician.findMany.mockResolvedValue([{ name: 'Morgan Reyes', email: 'Morgan.Reyes@example.com' }]);
 }
 
 beforeEach(() => {
@@ -105,6 +107,19 @@ describe('role gating', () => {
     expect(res.status).toBe(200);
     expect(res.body.data).toMatchObject({ mode: 'connected', canWrite: false, workspace: { id: 5, name: 'Project Accounting', freshserviceWorkspaceId: '9' } });
     expect(res.body.data.shadow.total).toBe(180);
+  });
+
+  test('who changed it reads as a name (record and history); an unknown e-mail stays unnamed', async () => {
+    fsMode.getModeRecord.mockResolvedValue({
+      mode: 'shadow', changedBy: 'morgan.reyes@example.com', changedAt: '2026-11-24T17:12:00.000Z',
+      history: [
+        { from: 'connected', to: 'shadow', by: 'morgan.reyes@example.com', at: '2026-11-24T17:12:00.000Z' },
+        { from: 'shadow', to: 'connected', by: 'stranger@example.com', at: '2026-11-23T17:12:00.000Z' },
+      ],
+    });
+    const res = await request(makeApp(superAdmin)).get('/api/workspaces/5/freshservice');
+    expect(res.body.data.record).toMatchObject({ changedBy: 'morgan.reyes@example.com', changedByName: 'Morgan Reyes' });
+    expect(res.body.data.record.history.map((h) => h.byName)).toEqual(['Morgan Reyes', null]);
   });
 
   test('a viewer cannot read it', async () => {
@@ -173,6 +188,27 @@ describe('preflight', () => {
     expect(p.warnings.length).toBeGreaterThan(0);
   });
 
+  test('every item that is not OK says what to do; linked ones end on the link', async () => {
+    wire({ mailboxes: 0, recentMail: 4 });
+    prismaMock.notificationWorkflow.findFirst.mockResolvedValue(null);
+    const res = await request(makeApp(superAdmin)).get('/api/workspaces/5/freshservice');
+    const notOk = res.body.data.preflight.items.filter((i) => i.state !== 'ok');
+    expect(notOk.map((i) => i.key).sort()).toEqual(['ack_workflow', 'attachments', 'fs_mail_forwarding', 'mail_intake', 'recent_intake', 'reminder_workflow'].sort());
+    for (const i of notOk) expect(i.todo).toEqual(expect.any(String));
+    const reminder = notOk.find((i) => i.key === 'reminder_workflow');
+    expect(reminder).toMatchObject({ text: 'FreshService reminded requesters who went quiet.', todo: 'Set up the same in', link: 'notification-workflows' });
+    expect(res.body.data.preflight.warnings).toContain('FreshService reminded requesters who went quiet. Set up the same in Mail Workflows.');
+    expect(res.body.data.preflight.blockers[0]).toMatch(/Connect the team’s mailbox in Ticket Mailboxes\.$/);
+  });
+
+  test('auto-close off says to turn it on in Ticket Ops', async () => {
+    const { default: autoClose } = await import('../src/services/autoCloseResolvedService.js');
+    autoClose.getSettings.mockResolvedValueOnce({ enabled: false });
+    const res = await request(makeApp(superAdmin)).get('/api/workspaces/5/freshservice');
+    expect(res.body.data.preflight.items.find((i) => i.key === 'auto_close'))
+      .toMatchObject({ state: 'warn', text: 'FreshService closed resolved tickets for you.', todo: 'Turn on auto-close of resolved tickets in', link: 'ticket-ops' });
+  });
+
   test('no mailbox while FreshService mail arrived this week blocks Off', async () => {
     wire({ mailboxes: 0, recentMail: 4 });
     const res = await request(makeApp(superAdmin)).get('/api/workspaces/5/freshservice');
@@ -189,7 +225,9 @@ describe('preflight', () => {
     let res = await request(makeApp(superAdmin)).get('/api/workspaces/5/freshservice');
     const item = res.body.data.preflight.items.find((i) => i.key === 'fs_mail_forwarding');
     expect(item).toMatchObject({ state: 'warn' });
-    expect(item.text).toMatch(/^FreshService is still receiving mail for this team\. Turn off its mail forwarding/);
+    expect(item.text).toBe('FreshService is still receiving mail for this team.');
+    expect(item.todo).toMatch(/^Turn off its mail forwarding before switching off/);
+    expect(res.body.data.preflight.warnings).toContain('FreshService is still receiving mail for this team. Turn off its mail forwarding before switching off, or the same e-mails will become tickets in both places if you ever switch back.');
     expect(res.body.data.preflight.blockers).toEqual([]);
     wire({ mailboxes: 1, recentMail: 0 });
     res = await request(makeApp(superAdmin)).get('/api/workspaces/5/freshservice');
