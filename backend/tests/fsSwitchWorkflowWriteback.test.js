@@ -176,3 +176,20 @@ describe('workflow assignment on imported history', () => {
     expect(await applyWorkflowAssignment(FS_TICKET, 9)).toEqual({ via: 'freshservice_writeback' });
   });
 });
+describe('workflow notes on imported history (Off)', () => {
+  test('add_note writes its own local system note: no ticketService call, no adoption, no FreshService — never a failed step', async () => {
+    const { executeAddNoteNode } = await import('../src/services/notificationWorkflowActionNodes.js');
+    prismaMock.ticket.findUnique.mockResolvedValue(FS_TICKET);
+    prismaMock.ticketThreadEntry.create.mockImplementation(async ({ data }) => ({ id: 7001, ...data }));
+    const out = await executeAddNoteNode({ id: 'n1', type: 'add_note', data: { mode: 'text' } }, ctx(FS_TICKET), {
+      renderedBody: '<p>Checked overnight</p>', workflowId: 9706,
+    });
+    expect(out.error).toBeUndefined();
+    expect(out.failed).toBeUndefined();
+    expect(prismaMock.ticketThreadEntry.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ ticketId: 39618, mirrorState: null }),
+    }));
+    expect(updateFsTicketMock).not.toHaveBeenCalled();
+    expect(getInteractiveClientMock).not.toHaveBeenCalled();
+  });
+});

@@ -58,7 +58,11 @@ describe('SyncHealthCard', () => {
     expect(row).toHaveTextContent('No FreshService sync');
     expect(row).not.toHaveTextContent(/Stale|Late|No syncs yet|Syncing now/);
     expect(row.innerHTML).not.toMatch(/red-|amber-/);
-    expect(row.querySelector('.rounded-full .rounded-full, span > span.rounded-full')).toHaveClass('bg-muted-foreground/40');
+    const status = screen.getByTestId('sync-health-fs-off');
+    expect(status).toHaveTextContent('FreshService off');
+    expect(status).not.toHaveClass('rounded-full'); // plain text with a dot, not a badge
+    expect(status.querySelector('span.rounded-full')).toHaveClass('bg-muted-foreground/40');
+    expect(status.querySelector('svg.lucide-circle-pause')).not.toBeNull();
   });
 
   test('surfaces a load error (e.g. 403 for non-admins) instead of a broken table', async () => {

@@ -133,6 +133,30 @@ describe('before meta loads ("hold")', () => {
   });
 });
 
+describe('meta fails', () => {
+  test('retries once after ~2 s, then falls back to FreshService on: strip, link and Edit as before', async () => {
+    apiOverrides.get = vi.fn(() => Promise.resolve({ data: { ...FS_BORN, status: 'Open' } }));
+    apiOverrides.meta = vi.fn(() => Promise.reject(new Error('Network Error')));
+    await ready();
+    expect(screen.queryByTestId('fs-owner-strip')).not.toBeInTheDocument(); // still holding during the retry
+    await waitFor(() => expect(apiOverrides.meta).toHaveBeenCalledTimes(2), { timeout: 4000 });
+    expect(await screen.findByTestId('fs-owner-strip', {}, { timeout: 2000 })).toHaveTextContent('FreshService owns this ticket');
+    expect(screen.getByRole('link', { name: /Open in FreshService/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^edit$/i })).toBeInTheDocument();
+    expect(screen.queryByTestId('fs-imported-line')).not.toBeInTheDocument();
+  }, 10000);
+
+  test('a retry that succeeds uses the real answer (Off → imported)', async () => {
+    apiOverrides.get = vi.fn(() => Promise.resolve({ data: FS_BORN }));
+    apiOverrides.meta = vi.fn()
+      .mockImplementationOnce(() => Promise.reject(new Error('Network Error')))
+      .mockImplementationOnce(() => Promise.resolve({ data: META_OFF }));
+    await ready();
+    expect(await screen.findByTestId('fs-imported-line', {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(screen.queryByTestId('fs-owner-strip')).not.toBeInTheDocument();
+  }, 10000);
+});
+
 describe('FreshService off', () => {
   test('an FS-born ticket is imported history: no FS strip, link or Edit; Adopt to edit adopts and reloads', async () => {
     setup(FS_BORN, META_OFF);

@@ -1621,10 +1621,22 @@ export default function TicketDetail() {
   }, [ticketId]);
 
   useEffect(() => { fetchTicket(); }, [fetchTicket]);
+  // FreshService switch: a meta that never arrives must not leave FS-born
+  // tickets on hold forever — retry once after 2 s, then fall back to today's
+  // default (FreshService on) via metaFailed.
+  const [metaFailed, setMetaFailed] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    ticketsAPI.meta().then((res) => { if (!cancelled) setMeta(res.data); }).catch(() => {});
-    return () => { cancelled = true; };
+    let retryTimer = null;
+    const fetchMeta = (retry) => ticketsAPI.meta()
+      .then((res) => { if (!cancelled) setMeta(res.data); })
+      .catch(() => {
+        if (cancelled) return;
+        if (retry) retryTimer = setTimeout(() => fetchMeta(false), 2000);
+        else setMetaFailed(true);
+      });
+    fetchMeta(true);
+    return () => { cancelled = true; if (retryTimer) clearTimeout(retryTimer); };
   }, []);
 
   // Browser tab shows the ticket ref
@@ -1662,12 +1674,13 @@ export default function TicketDetail() {
   // FreshService switch (25 Nov 2026): Off (or never connected) hides every
   // FreshService affordance. An FS-born ticket is then imported history —
   // read-only until someone adopts it. An old meta without the flag reads as
-  // on; before meta has loaded the answer is "hold": no FreshService-only
-  // affordance (strip, Edit, Open in FreshService, inline write-backs) shows
-  // until it is known, and nothing reads as imported either.
-  const metaLoaded = Boolean(meta);
+  // on. While meta is still loading the answer is "hold": no FreshService-only
+  // affordance (strip, Edit, Open in FreshService, inline write-backs) shows,
+  // and nothing reads as imported. If meta fails (after one retry), today's
+  // default applies: FreshService on, everything as before.
+  const metaLoaded = Boolean(meta) || metaFailed;
   const fsOn = metaLoaded && freshserviceEnabledFrom(meta);
-  const isImported = metaLoaded && isImportedTicket(ticket, freshserviceEnabledFrom(meta));
+  const isImported = Boolean(meta) && isImportedTicket(ticket, freshserviceEnabledFrom(meta));
   // QA 10-28 #4: closed into another ticket by grouping (kept out of totals with is_noise).
   const isGroupedCopy = isGroupedCopyOf(ticket);
   const ticketingOn = meta?.nativeTicketingEnabled !== false;

@@ -514,10 +514,18 @@ export default function Tickets() {
 
   useEffect(() => {
     let cancelled = false;
-    ticketsAPI.meta()
+    let retryTimer = null;
+    // One retry after 2 s before the page shows the error (a blip on a busy
+    // pool should not leave the queue without its vocabulary).
+    const fetchMeta = (retry) => ticketsAPI.meta()
       .then((res) => { if (!cancelled) { setMeta(res.data); setMetaError(null); } })
-      .catch((err) => { if (!cancelled) setMetaError(err.response?.data?.message || err.message); });
-    return () => { cancelled = true; };
+      .catch((err) => {
+        if (cancelled) return;
+        if (retry) retryTimer = setTimeout(() => fetchMeta(false), 2000);
+        else setMetaError(err.response?.data?.message || err.message);
+      });
+    fetchMeta(true);
+    return () => { cancelled = true; if (retryTimer) clearTimeout(retryTimer); };
   }, [workspaceId]);
 
   // Stat cards count in the list's date window (QA 10-16 #7). Read through a

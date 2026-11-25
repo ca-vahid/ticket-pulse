@@ -11,6 +11,8 @@ import FreshServiceSwitchView from './FreshServiceSwitchView';
  */
 
 const POLL_MS = 2000;
+// A "done" record without finishedAt whose process died would never finish: stop after ~1 min.
+const MAX_UNFINISHED_DONE_POLLS = 30;
 const errorText = (err, fallback) => err?.response?.data?.message || err?.data?.message || err?.message || fallback;
 
 export default function FreshServiceSwitchPanel({ workspaceId, onModeChanged = null }) {
@@ -19,6 +21,7 @@ export default function FreshServiceSwitchPanel({ workspaceId, onModeChanged = n
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const pollRef = useRef(null);
+  const settledRef = useRef(false); // the current job's polling has ended
 
   const load = useCallback(async () => {
     try {
@@ -34,20 +37,28 @@ export default function FreshServiceSwitchPanel({ workspaceId, onModeChanged = n
 
   useEffect(() => { load(); }, [load]);
 
-  // Poll the Off job while it runs; reload everything when it ends.
-  const running = data?.job?.state === 'running';
+  // Poll the Off job while it runs; reload everything when it ends. "Ends"
+  // means the record is finished: once the mode is Off the job already reads
+  // done while its second adoption pass is still writing (finishedAt unset),
+  // so keep polling a little longer for that pass's note.
+  const job0 = data?.job;
+  const running = job0?.state === 'running' || (job0?.state === 'done' && !job0?.finishedAt && !settledRef.current);
   useEffect(() => {
     if (!running) return undefined;
     let cancelled = false;
+    let unfinishedDonePolls = 0;
     const tick = async () => {
       try {
         const res = await workspaceAPI.getFreshServiceOff(workspaceId);
         const job = res?.data || null;
         if (cancelled) return;
-        if (job?.state === 'running') {
+        const stillWriting = job?.state === 'done' && !job.finishedAt && unfinishedDonePolls < MAX_UNFINISHED_DONE_POLLS;
+        if (stillWriting) unfinishedDonePolls += 1;
+        if (job?.state === 'running' || stillWriting) {
           setData((d) => (d ? { ...d, job } : d));
           pollRef.current = setTimeout(tick, POLL_MS);
         } else {
+          settledRef.current = true; // finished, or gave up waiting: do not start polling again
           const fresh = await load();
           if (!cancelled && fresh) {
             setData({ ...fresh, job: job || fresh.job });
@@ -81,6 +92,7 @@ export default function FreshServiceSwitchPanel({ workspaceId, onModeChanged = n
     setError(null);
     try {
       const res = await workspaceAPI.startFreshServiceOff(workspaceId, confirmName);
+      settledRef.current = false;
       setData((d) => (d ? { ...d, job: res?.data || { state: 'running', step: 'check' } } : d));
     } catch (err) {
       setError(errorText(err, 'FreshService could not be switched off'));

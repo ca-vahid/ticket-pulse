@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  AlertTriangle, CheckCircle2, Clock3, Database, HelpCircle, RefreshCw,
+  AlertTriangle, CheckCircle2, CirclePause, Clock3, Database, HelpCircle, RefreshCw,
 } from 'lucide-react';
 import { syncAPI } from '../../services/api';
 
@@ -11,7 +11,7 @@ const STATUS_META = {
   unknown: { label: 'No syncs yet', Icon: HelpCircle, badge: 'bg-secondary text-muted-foreground', dot: 'bg-muted-foreground/60' },
   // FreshService switch (25 Nov 2026): an Off workspace has nothing to sync —
   // calm and muted, never red or amber, never a stale alarm.
-  freshservice_off: { label: 'FreshService off', Icon: HelpCircle, badge: 'bg-secondary text-muted-foreground', dot: 'bg-muted-foreground/40' },
+  freshservice_off: { label: 'FreshService off', Icon: CirclePause, badge: 'text-muted-foreground', dot: 'bg-muted-foreground/40' },
 };
 
 // Manual refresh feedback: the request often returns in <100ms, which read as
@@ -165,7 +165,14 @@ export default function SyncHealthCard() {
                       {row.dataFreshAt ? `Data fresh ${relativeAge(row.dataAgeMs)}` : '—'}
                     </td>
                     <td className="whitespace-nowrap px-3 py-2">
-                      {row.syncRunning && !fsOff ? (
+                      {fsOff ? (
+                        // FreshService switch: calm plain text with a dot and a pause icon — no badge, no alarm.
+                        <span className="inline-flex items-center gap-1.5 text-muted-foreground" data-testid="sync-health-fs-off">
+                          <span className={`h-1.5 w-1.5 rounded-full ${rowMeta.dot}`} aria-hidden="true" />
+                          <CirclePause className="h-3.5 w-3.5" aria-hidden="true" />
+                          {row.statusLabel || rowMeta.label}
+                        </span>
+                      ) : row.syncRunning ? (
                         // An in-flight run is liveness, not lateness — show it
                         // instead of a misleading Stale/Late chip.
                         <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-100 dark:bg-blue-500/20 px-2 py-0.5 font-semibold text-blue-700 dark:text-blue-200">
@@ -175,7 +182,7 @@ export default function SyncHealthCard() {
                       ) : (
                         <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-semibold ${rowMeta.badge}`}>
                           <span className={`h-1.5 w-1.5 rounded-full ${rowMeta.dot}`} />
-                          {fsOff ? (row.statusLabel || rowMeta.label) : rowMeta.label}
+                          {rowMeta.label}
                         </span>
                       )}
                     </td>
