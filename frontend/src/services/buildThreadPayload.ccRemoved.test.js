@@ -1,6 +1,28 @@
 /** @vitest-environment jsdom */
-import { describe, expect, test } from 'vitest';
-import { buildThreadPayload } from './api';
+import { describe, expect, test, vi } from 'vitest';
+import api, { buildThreadPayload, ticketsAPI } from './api';
+
+// Review 24 Nov 2026: files from internal notes go only with an explicit flag.
+describe('ticketsAPI.forward — includePrivateAttachments', () => {
+  test('sent only when set and only with ids, in JSON and multipart', async () => {
+    const post = vi.spyOn(api, 'post').mockResolvedValue({ success: true });
+    try {
+      await ticketsAPI.forward(5, { to: ['a@example.com'], note: '', includeAttachmentIds: [12] });
+      expect(post.mock.calls[0][1]).toEqual({ to: ['a@example.com'], note: '', includeAttachmentIds: [12] });
+      await ticketsAPI.forward(5, { to: ['a@example.com'], note: '', includeAttachmentIds: [12, 31], includePrivateAttachments: true });
+      expect(post.mock.calls[1][1]).toMatchObject({ includeAttachmentIds: [12, 31], includePrivateAttachments: true });
+      await ticketsAPI.forward(5, {
+        to: ['a@example.com'], note: '', includeAttachmentIds: [31], includePrivateAttachments: true,
+        files: [new File(['x'], 'a.pdf', { type: 'application/pdf' })],
+      });
+      expect(post.mock.calls[2][1].get('includePrivateAttachments')).toBe('true');
+      await ticketsAPI.forward(5, { to: ['a@example.com'], note: '', includePrivateAttachments: true });
+      expect(post.mock.calls[3][1]).toEqual({ to: ['a@example.com'], note: '' });
+    } finally {
+      post.mockRestore();
+    }
+  });
+});
 
 /**
  * QA 09-09 #6 — the composer names the addresses the agent took off the Cc row

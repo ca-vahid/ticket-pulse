@@ -1158,7 +1158,9 @@ export const ticketsAPI = {
   // QA 11-16: the composer's HTML rides as `noteHtml` (links survive) and files
   // go multipart, `to` then as one comma-separated field like a reply's Cc.
   // QA 11-24 #5: `includeAttachmentIds` = the ticket's own files to send along.
-  forward: async (id, { to, note, noteHtml, files, includeAttachmentIds }) => {
+  // `includePrivateAttachments`: one of the ids is a file from an internal note
+  // the agent ticked on purpose; the server refuses such files without it.
+  forward: async (id, { to, note, noteHtml, files, includeAttachmentIds, includePrivateAttachments = false }) => {
     const ids = Array.isArray(includeAttachmentIds) ? includeAttachmentIds.filter((n) => Number.isInteger(n) && n > 0) : [];
     if (files && files.length > 0) {
       const form = new FormData();
@@ -1166,12 +1168,17 @@ export const ticketsAPI = {
       if (note) form.append('note', note);
       if (noteHtml) form.append('noteHtml', noteHtml);
       if (ids.length) form.append('includeAttachmentIds', ids.join(','));
+      if (ids.length && includePrivateAttachments === true) form.append('includePrivateAttachments', 'true');
       for (const file of files) form.append('files', file);
       return await api.post(`/tickets/${id}/forward`, form, { headers: { 'Content-Type': undefined }, timeout: 120000 });
     }
     const body = { to, note, ...(noteHtml ? { noteHtml } : {}) };
     // The ticket's files are read from storage server-side: give it time.
-    if (ids.length) return await api.post(`/tickets/${id}/forward`, { ...body, includeAttachmentIds: ids }, { timeout: 120000 });
+    if (ids.length) {
+      return await api.post(`/tickets/${id}/forward`, {
+        ...body, includeAttachmentIds: ids, ...(includePrivateAttachments === true ? { includePrivateAttachments: true } : {}),
+      }, { timeout: 120000 });
+    }
     return await api.post(`/tickets/${id}/forward`, body);
   },
 

@@ -1629,13 +1629,16 @@ class FreshServiceActionService {
       return { success: true, dryRun: true, actions, preview };
     }
 
+    // QA 11-24 #4: a ticket in a workspace with no FreshService link keeps no
+    // fallback copy ('none'); never flip it back to 'pending'.
+    const nextMirrorState = ticket.mirrorState === 'none' ? 'none' : 'pending';
     try {
       const now = new Date();
       for (const action of actions) {
         if (action.type === 'local_category') {
           await prisma.ticket.update({
             where: { id: ticket.id },
-            data: { tpSkill: action.tpSkill, tpSubskill: action.tpSubskill, mirrorState: 'pending' },
+            data: { tpSkill: action.tpSkill, tpSubskill: action.tpSubskill, mirrorState: nextMirrorState },
           });
         } else if (action.type === 'local_close') {
           await prisma.ticket.update({
@@ -1644,7 +1647,7 @@ class FreshServiceActionService {
               status: 'Resolved',
               resolvedAt: now,
               resolutionTimeSeconds: Math.max(0, Math.round((now.getTime() - new Date(ticket.createdAt).getTime()) / 1000)),
-              mirrorState: 'pending',
+              mirrorState: nextMirrorState,
             },
           });
         } else if (action.type === 'local_assign') {
@@ -1662,7 +1665,7 @@ class FreshServiceActionService {
               firstAssignedAt: ticket.firstAssignedAt || now,
               assignedBy: 'Ticket Pulse',
               isSelfPicked: false,
-              mirrorState: 'pending',
+              mirrorState: nextMirrorState,
             },
           });
           await prisma.ticketAssignmentEpisode.create({

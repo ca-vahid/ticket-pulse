@@ -10,6 +10,8 @@
  * 202 sandbox tickets reached the real FreshService on 14 Sep.
  */
 
+import { ConflictError } from './errors.js';
+
 /** True when the row carries an FS workspace id other than 0. */
 export function isFreshServiceBound(workspace) {
   if (!workspace) return false;
@@ -30,4 +32,24 @@ export function isFreshServiceUnlinked(workspace) {
   return !isFreshServiceBound(workspace);
 }
 
-export default { isFreshServiceBound, isFreshServiceUnlinked };
+export const NOT_LINKED_MESSAGE = "This workspace isn't linked to FreshService, so there is nothing to sync or backfill from FreshService.";
+
+/**
+ * 409 for a FreshService action asked of an unlinked workspace (review of
+ * QA 11-24 #4). Without a link the FS config has no workspace filter, so a
+ * "Sync week" or backfill there would pull EVERY FreshService workspace's
+ * tickets and re-home them (the ticket upsert rewrites workspaceId).
+ */
+export class FreshServiceNotLinkedError extends ConflictError {
+  constructor(message = NOT_LINKED_MESSAGE) {
+    super(message);
+    this.code = 'freshservice_not_linked';
+  }
+}
+
+/** Throws FreshServiceNotLinkedError when the row says it has no link. */
+export function assertFreshServiceLinked(workspace) {
+  if (isFreshServiceUnlinked(workspace)) throw new FreshServiceNotLinkedError();
+}
+
+export default { isFreshServiceBound, isFreshServiceUnlinked, assertFreshServiceLinked, FreshServiceNotLinkedError, NOT_LINKED_MESSAGE };

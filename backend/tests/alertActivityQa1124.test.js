@@ -42,10 +42,10 @@ describe('alert sentences', () => {
   });
 
   test('partial and total failure say so', () => {
-    expect(alertSentence({ kind: 'priority', priority: 'High', technicianName: 'Sam Park', sent: ['email'], failed: [{ channel: 'sms' }] }))
-      .toBe('High-priority alert sent to Sam Park by e-mail (SMS failed)');
-    expect(alertSentence({ kind: 'assignment', priority: 'Urgent', technicianName: 'Sam Park', failed: [{ channel: 'email' }] }))
-      .toBe('Urgent-priority assignment alert to Sam Park could not be sent by e-mail');
+    expect(alertSentence({ kind: 'priority', priority: 'High', technicianName: 'Pat Example', sent: ['email'], failed: [{ channel: 'sms' }] }))
+      .toBe('High-priority alert sent to Pat Example by e-mail (SMS failed)');
+    expect(alertSentence({ kind: 'assignment', priority: 'Urgent', technicianName: 'Pat Example', failed: [{ channel: 'email' }] }))
+      .toBe('Urgent-priority assignment alert to Pat Example could not be sent by e-mail');
   });
 });
 
@@ -86,12 +86,12 @@ describe('recordAlertActivity', () => {
       { id: 4, ticketId: 501, technicianId: 18, channel: 'sms', status: 'failed', error: 'Twilio 21614', payload: {} },
     ]);
     await recordAlertActivityForDeliveries(['a', 'b'], {
-      kind: 'escalation', priority: 'Urgent', technicianNames: { 17: 'Jordan Lee', 18: 'Sam Park' }, reason: 'after-hours urgent escalation',
+      kind: 'escalation', priority: 'Urgent', technicianNames: { 17: 'Jordan Lee', 18: 'Pat Example' }, reason: 'after-hours urgent escalation',
     });
     const sentences = prismaMock.ticketActivity.create.mock.calls.map(([arg]) => arg.data.details.sentence);
     expect(sentences).toEqual([
       'Urgent escalation sent to Jordan Lee by SMS: after-hours urgent escalation',
-      'Urgent escalation to Sam Park could not be sent by SMS: after-hours urgent escalation',
+      'Urgent escalation to Pat Example could not be sent by SMS: after-hours urgent escalation',
     ]);
   });
 

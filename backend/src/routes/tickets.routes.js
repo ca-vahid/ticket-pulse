@@ -2438,9 +2438,17 @@ router.post('/:id/forward', requireNativeTicketing, messageFilesUpload, asyncHan
   // QA 11-24 #5: the ticket's own files to send along (ids), a JSON array or,
   // multipart, one comma-separated field.
   const includeAttachmentIds = parseIdList(req.body?.includeAttachmentIds);
+  // Files from internal notes go only when the agent ticked one on purpose
+  // (the composer's "From internal notes" section sets this).
+  const rawPrivate = req.body?.includePrivateAttachments;
+  const includePrivateAttachments = rawPrivate === true || rawPrivate === 'true';
   const result = await ticketService.forwardTicket(
     parseTicketId(req), req.workspaceId,
-    { to, note: req.body?.note, noteHtml: req.body?.noteHtml, ...(includeAttachmentIds ? { includeAttachmentIds } : {}) },
+    {
+      to, note: req.body?.note, noteHtml: req.body?.noteHtml,
+      ...(includeAttachmentIds ? { includeAttachmentIds } : {}),
+      ...(includeAttachmentIds && includePrivateAttachments ? { includePrivateAttachments: true } : {}),
+    },
     req.ticketActor,
     req.files || [],
   );

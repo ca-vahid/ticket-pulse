@@ -35,7 +35,7 @@ describe('alert_sent on the Activity tab', () => {
   test('a fallback and a failed channel are in the details', () => {
     const items = buildHistoryItems({
       activities: [alertRow(2, {
-        sentence: 'High-priority alert sent to Sam Park by e-mail (SMS failed): assignee, subscribed to High and Urgent alerts',
+        sentence: 'High-priority alert sent to Pat Example by e-mail (SMS failed): assignee, subscribed to High and Urgent alerts',
         channels: { sent: ['email'], failed: [{ channel: 'sms', error: 'Twilio 21614' }], queued: [] },
         fallbackReasons: [{ channel: 'email', reason: 'The ticket could not be read when the alert was sent, so it went as a plain one-line message.' }],
       })],
@@ -51,7 +51,7 @@ describe('alert_sent on the Activity tab', () => {
     const items = buildHistoryItems({
       activities: [
         alertRow(3, { sentence: 'Urgent-priority alert sent to Jordan Lee by e-mail: assignee, subscribed to Urgent alerts' }),
-        alertRow(4, { sentence: 'Urgent escalation sent to Sam Park by SMS: after-hours urgent escalation' }),
+        alertRow(4, { sentence: 'Urgent escalation sent to Pat Example by SMS: after-hours urgent escalation' }),
       ],
     });
     expect(items.filter((i) => i.event === 'alert')).toHaveLength(2);

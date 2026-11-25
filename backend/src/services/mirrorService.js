@@ -170,11 +170,21 @@ function isCcEmailsRejection(err) {
 
 // A source FreshService will not take on this ticket (QA 11-24 item 10): the
 // copy is still made (as Portal) or synced (without the source).
-function isSourceRejection(err) {
+// The message test only reads a complaint ABOUT the source field ("source: It
+// should be one of these values", "field 'source'", "Invalid source", "source
+// is invalid"), never any text that merely contains the word (review 11-24).
+const SOURCE_FIELD_COMPLAINT = [
+  /(^|[\s,;{([])["']?source["']?\s*[:=]/i,
+  /\bfield["']?\s*[:=]?\s*["']?source\b(?![-\w])/i,
+  /\b(invalid|unknown|unsupported)\s+(value\s+for\s+)?["']?source\b(?![-\w])/i,
+  /(^|[^-\w])["']?source["']?\s+(is|was)\s+(invalid|not valid|not allowed|unknown|not supported)\b/i,
+];
+export function isSourceRejection(err) {
   const detail = err?.freshserviceDetail;
   const fieldErrors = Array.isArray(detail?.errors) ? detail.errors : [];
   if (fieldErrors.some((fe) => String(fe.field || '').toLowerCase() === 'source')) return true;
-  return /\bsource\b.*\b(invalid|not|must|should)\b|\b(invalid|unknown)\b.*\bsource\b/i.test(String(err?.message || ''));
+  const message = String(err?.message || '');
+  return SOURCE_FIELD_COMPLAINT.some((re) => re.test(message));
 }
 
 // A support address id FreshService does not know or will not take (a typo in
@@ -890,16 +900,23 @@ class MirrorService {
       try {
         fsTicket = await client.createTicket({ ...basePayload });
       } catch (err) {
-        if (isSourceRejection(err) && basePayload.source !== FS_SOURCE.PORTAL) {
-          // A source this FreshService will not take must not cost the copy: make it as Portal.
+        // One retry repairs EVERY field FreshService named (review 11-24): one
+        // error can refuse both the source and the support address.
+        //  - a source it will not take: the copy is made as Portal;
+        //  - a support address it refuses: the copy is made with its default.
+        const badSource = isSourceRejection(err) && basePayload.source !== FS_SOURCE.PORTAL;
+        const badAddress = basePayload.email_config_id !== undefined && isEmailConfigRejection(err);
+        if (!badSource && !badAddress) throw err;
+        const retry = { ...basePayload };
+        if (badSource) {
           logger.warn(`Mirror: FreshService refused source ${basePayload.source} for ${ref} (${err.message}) — creating the copy as Portal`);
-          fsTicket = await client.createTicket({ ...basePayload, source: FS_SOURCE.PORTAL });
-        } else {
-          // A support address FreshService refuses must not cost the copy: make it with the default.
-          if (basePayload.email_config_id === undefined || !isEmailConfigRejection(err)) throw err;
-          logger.warn(`Mirror: FreshService refused support address ${basePayload.email_config_id} for ${ref} (${err.message}) — creating the copy with its default address`);
-          fsTicket = await client.createTicket({ ...basePayload, email_config_id: undefined });
+          retry.source = FS_SOURCE.PORTAL;
         }
+        if (badAddress) {
+          logger.warn(`Mirror: FreshService refused support address ${basePayload.email_config_id} for ${ref} (${err.message}) — creating the copy with its default address`);
+          retry.email_config_id = undefined;
+        }
+        fsTicket = await client.createTicket(retry);
       }
       if (!fsTicket?.id) throw new Error('FreshService did not return a ticket id');
     } catch (err) {
@@ -1018,8 +1035,10 @@ class MirrorService {
       await client.updateTicket(Number(ticket.freshserviceTicketId), payload);
     } catch (err) {
       if (payload.source !== undefined && isSourceRejection(err)) {
-        logger.warn(`Mirror: FreshService rejected source ${payload.source} on update for #${ticket.freshserviceTicketId} (${err.message}) — re-sending the field sync without it`);
-        await client.updateTicket(Number(ticket.freshserviceTicketId), { ...payload, source: undefined });
+        // The same one error may refuse the support address too: drop both in one retry.
+        const alsoAddress = payload.email_config_id !== undefined && isEmailConfigRejection(err);
+        logger.warn(`Mirror: FreshService rejected source ${payload.source}${alsoAddress ? ` and support address ${payload.email_config_id}` : ''} on update for #${ticket.freshserviceTicketId} (${err.message}) — re-sending the field sync without ${alsoAddress ? 'them' : 'it'}`);
+        await client.updateTicket(Number(ticket.freshserviceTicketId), { ...payload, source: undefined, ...(alsoAddress ? { email_config_id: undefined } : {}) });
       } else if (payload.email_config_id !== undefined && isEmailConfigRejection(err)) {
         logger.warn(`Mirror: FreshService rejected support address ${payload.email_config_id} on update for #${ticket.freshserviceTicketId} (${err.message}) — re-sending the field sync without it`);
         await client.updateTicket(Number(ticket.freshserviceTicketId), { ...payload, email_config_id: undefined });

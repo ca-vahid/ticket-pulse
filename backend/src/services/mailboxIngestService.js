@@ -1833,7 +1833,8 @@ class MailboxIngestService {
         lastRealActivityAt: now,
         // The FS fallback copy carries ccEmails as cc_emails — same mirror
         // churn the manual "Also for" editor triggers.
-        ...(ccAdded ? { ccEmails: ccMerge.next, mirrorState: 'pending' } : {}),
+        // A workspace with no FreshService link keeps 'none' (QA 11-24 #4).
+        ...(ccAdded ? { ccEmails: ccMerge.next, mirrorState: ticket.mirrorState === 'none' ? 'none' : 'pending' } : {}),
       },
     });
     // QA 11-12 #2: workflows can ask "does this reply answer a workflow e-mail?"

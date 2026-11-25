@@ -43,7 +43,7 @@ jest.unstable_mockModule('../src/services/ticketLifecycleNotificationService.js'
 }));
 
 const mirrorInFlight = await import('../src/utils/mirrorInFlight.js');
-const { default: mirrorService } = await import('../src/services/mirrorService.js');
+const { default: mirrorService, isSourceRejection } = await import('../src/services/mirrorService.js');
 
 const baseTicket = {
   id: 501,
@@ -834,6 +834,67 @@ describe('the FreshService copy\'s source', () => {
     clientMock.createTicket.mockRejectedValueOnce(refused).mockResolvedValueOnce({ id: 90003, requester_id: 555001 });
     expect(await mirrorService._processJob({ id: 20, ticketId: 501, workspaceId: 1, kind: 'create_ticket', attempts: 0 })).toBe(true);
     expect(clientMock.createTicket.mock.calls.map(([p]) => p.source)).toEqual([3, 2]);
+  });
+
+  // Review 11-24: one FreshService error can refuse BOTH the source and the
+  // support address; the one retry must repair both, or the copy still fails.
+  test('create: one error naming source AND email_config_id → one retry as Portal with the default address', async () => {
+    settingsMock.get.mockImplementation(async (key) => (key === 'fs_email_config_by_group_ws1' ? JSON.stringify({ 1000210021: 999 }) : null));
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, nativeNumber: 2011, source: 3, groupId: 1000210021n });
+    const both = Object.assign(new Error('Validation failed'), {
+      freshserviceStatus: 400,
+      freshserviceDetail: { errors: [
+        { field: 'source', message: 'It should be one of these values' },
+        { field: 'email_config_id', message: 'is invalid' },
+      ] },
+    });
+    clientMock.createTicket.mockReset();
+    clientMock.createTicket.mockRejectedValueOnce(both).mockResolvedValueOnce({ id: 90004, requester_id: 555001 });
+    expect(await mirrorService._processJob({ id: 23, ticketId: 501, workspaceId: 1, kind: 'create_ticket', attempts: 0 })).toBe(true);
+    expect(clientMock.createTicket).toHaveBeenCalledTimes(2);
+    expect(clientMock.createTicket.mock.calls[0][0]).toEqual(expect.objectContaining({ source: 3, email_config_id: 999 }));
+    expect(clientMock.createTicket.mock.calls[1][0].source).toBe(2);
+    expect(clientMock.createTicket.mock.calls[1][0].email_config_id).toBeUndefined();
+    settingsMock.get.mockResolvedValue(null);
+  });
+
+  test('create: an error about something else (that happens to say "source") is not retried', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, nativeNumber: 2012, source: 3 });
+    clientMock.createTicket.mockReset();
+    clientMock.createTicket.mockRejectedValueOnce(new Error('Ticket Pulse is the source of truth; requester is not valid'));
+    expect(await mirrorService._processJob({ id: 24, ticketId: 501, workspaceId: 1, kind: 'create_ticket', attempts: 0 })).toBe(false);
+    expect(clientMock.createTicket).toHaveBeenCalledTimes(1);
+  });
+
+  test('update: one error naming source AND email_config_id → one re-send without both', async () => {
+    settingsMock.get.mockImplementation(async (key) => (key === 'fs_email_config_by_group_ws1' ? JSON.stringify({ 1000210021: 999 }) : null));
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, freshserviceTicketId: BigInt(90001), source: 3, groupId: 1000210021n });
+    const both = Object.assign(new Error('Validation failed'), { freshserviceDetail: { errors: [{ field: 'source' }, { field: 'email_config_id' }] } });
+    clientMock.updateTicket.mockReset();
+    clientMock.updateTicket.mockRejectedValueOnce(both).mockResolvedValue({ id: 90001 });
+    expect(await mirrorService._processJob({ id: 25, ticketId: 501, workspaceId: 1, kind: 'update_fields', attempts: 0, payload: { syncSource: true } })).toBe(true);
+    expect(clientMock.updateTicket).toHaveBeenCalledTimes(2);
+    expect(clientMock.updateTicket.mock.calls[1][1].source).toBeUndefined();
+    expect(clientMock.updateTicket.mock.calls[1][1].email_config_id).toBeUndefined();
+    settingsMock.get.mockResolvedValue(null);
+  });
+
+  test('the source-error match reads only a complaint about the source field', () => {
+    const msg = (message) => isSourceRejection(new Error(message));
+    // A source-field complaint, by field list or in words.
+    expect(isSourceRejection({ freshserviceDetail: { errors: [{ field: 'source' }] } })).toBe(true);
+    expect(msg('Validation failed (source: It should be one of these values)')).toBe(true);
+    expect(msg('{"field":"source","message":"is invalid"}')).toBe(true);
+    expect(msg('Invalid source')).toBe(true);
+    expect(msg('Invalid value for source')).toBe(true);
+    expect(msg('source is not allowed')).toBe(true);
+    // Any other message that merely contains the word.
+    expect(msg('Ticket Pulse is the source of truth; requester is not valid')).toBe(false);
+    expect(msg('Resource not found')).toBe(false);
+    expect(msg('The source ticket could not be found')).toBe(false);
+    expect(msg('Invalid source_id')).toBe(false);
+    expect(msg('open-source library error: email_config_id is invalid')).toBe(false);
+    expect(isSourceRejection({ freshserviceDetail: { errors: [{ field: 'email_config_id' }] }, message: 'Validation failed' })).toBe(false);
   });
 
   test('update: the source is sent only when the job says it changed', async () => {

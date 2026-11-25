@@ -36,7 +36,7 @@ import { rememberTicket } from '../utils/recentSearches';
 import { RichBody, SentSignature, IMG_REF_RE, cleanRefName, openingMessageHtml, openingRepeatsDescription, picturesShownInBody } from '../components/tickets/InlineImageBody';
 import { bareEmail, ccAddressesOf, forwardRecipientsOf, incomingAuthorRole, participantReplySubject, senderFirstName } from '../components/tickets/threadAuthorRole';
 import ForwardAttachmentPicker from '../components/tickets/ForwardAttachmentPicker';
-import { defaultForwardSelection, forwardAttachmentIds, groupForwardAttachments } from '../components/tickets/forwardAttachments';
+import { defaultForwardSelection, forwardAttachmentIds, groupForwardAttachments, includesInternal } from '../components/tickets/forwardAttachments';
 import { replyBodyParts } from '../utils/quotedHistory';
 import { EntryMenu, InlineAnswers, OriginalEmailDialog } from '../components/tickets/InlineAnswers';
 import { integrationIdentity, requesterIntegrationIdentity } from '../utils/integrationIdentity';
@@ -2035,7 +2035,11 @@ export default function TicketDetail() {
     }
     return ids;
   }, [descriptionImages, ticket?.description, ticket?.descriptionText, conversationEntries, attachmentsByEntry]);
-  const forwardGroups = useMemo(() => groupForwardAttachments(ticketAttachments, inlinePictureIds), [ticketAttachments, inlinePictureIds]);
+  // Files of internal notes / earlier forwards are set apart, never ticked by default (review 24 Nov 2026).
+  const forwardGroups = useMemo(
+    () => groupForwardAttachments(ticketAttachments, inlinePictureIds, conversationEntries),
+    [ticketAttachments, inlinePictureIds, conversationEntries],
+  );
   const forwardSelection = forwardPick || defaultForwardSelection(forwardGroups.files);
 
   // QA 11-24 #7: who wrote each incoming message, on this ticket.
@@ -2793,6 +2797,8 @@ export default function TicketDetail() {
           ...(isRichContent(composerBody) ? { noteHtml: composerBody } : {}),
           ...(composerFiles.length ? { files: composerFiles } : {}),
           ...(includeAttachmentIds.length ? { includeAttachmentIds } : {}),
+          // Only when the agent ticked a file under "From internal notes".
+          ...(includesInternal(includeAttachmentIds, forwardGroups.internal) ? { includePrivateAttachments: true } : {}),
         });
         const sentFiles = composerFiles.length + includeAttachmentIds.length;
         setComposerBody('');
@@ -3975,7 +3981,9 @@ export default function TicketDetail() {
                                       onPreview={previewImage}
                                       onImageRef={previewImageRef}
                                       authorRole={authorRoleFor(item.e)}
-                                      onReplyToSender={canConverse ? (entry) => startReplyToSender(entry, authorRoleFor(entry)) : null}
+                                      /* FreshService tickets: only where Ticket Pulse sends their replies
+                                         (FreshService itself can only write to the requester). */
+                                      onReplyToSender={canConverse && (isNative || ticket?.replyLane === 'ticketpulse') ? (entry) => startReplyToSender(entry, authorRoleFor(entry)) : null}
                                       photoFor={photoFor}
                                       nameForEmail={nameForEmail}
                                       onCopy={copyText}
@@ -4462,6 +4470,7 @@ export default function TicketDetail() {
                             <ForwardAttachmentPicker
                               files={forwardGroups.files}
                               pictures={forwardGroups.pictures}
+                              internal={forwardGroups.internal}
                               value={forwardSelection}
                               onChange={setForwardPick}
                               disabled={isSending}

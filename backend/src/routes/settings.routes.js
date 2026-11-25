@@ -6,6 +6,7 @@ import {
 } from '../middleware/auth.js';
 import { requireWorkspace } from '../middleware/workspace.js';
 import { AuthorizationError, NotFoundError, ValidationError } from '../utils/errors.js';
+import { isFreshServiceUnlinked, NOT_LINKED_MESSAGE } from '../utils/workspaceFsBinding.js';
 import settingsRepository from '../services/settingsRepository.js';
 import prisma from '../services/prisma.js';
 import technicianRepository from '../services/technicianRepository.js';
@@ -1119,6 +1120,11 @@ router.post(
       where: { id: req.workspaceId },
       select: { freshserviceWorkspaceId: true },
     });
+    // QA 11-24 #4 review: no FS link → no FS workspace filter; never read the
+    // whole FreshService account's ticket-type choices into this workspace.
+    if (isFreshServiceUnlinked(workspace)) {
+      return res.status(409).json({ success: false, code: 'freshservice_not_linked', message: NOT_LINKED_MESSAGE });
+    }
     const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(req.workspaceId);
     if (!workspace || !fsConfig?.domain || !fsConfig?.apiKey) {
       return res.status(400).json({ success: false, message: 'FreshService is not configured for this workspace' });

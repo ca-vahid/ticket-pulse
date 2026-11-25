@@ -107,6 +107,26 @@ describe('POST /api/tickets/:id/forward (QA 11-16)', () => {
     expect(ticketServiceMock.forwardTicket.mock.calls[1][2].includeAttachmentIds).toEqual([12, 14]);
   });
 
+  test('includePrivateAttachments rides only when set (JSON true or the form\'s "true"), and only with ids', async () => {
+    await request(buildApp()).post('/api/tickets/501/forward')
+      .send({ to: ['eng@example.com'], includeAttachmentIds: [12] })
+      .expect(201);
+    expect(ticketServiceMock.forwardTicket.mock.calls[0][2]).not.toHaveProperty('includePrivateAttachments');
+    await request(buildApp()).post('/api/tickets/501/forward')
+      .send({ to: ['eng@example.com'], includeAttachmentIds: [12], includePrivateAttachments: true })
+      .expect(201);
+    expect(ticketServiceMock.forwardTicket.mock.calls[1][2].includePrivateAttachments).toBe(true);
+    await request(buildApp()).post('/api/tickets/501/forward')
+      .field('to', 'eng@example.com').field('includeAttachmentIds', '12').field('includePrivateAttachments', 'true')
+      .attach('files', Buffer.from('%PDF-1.4'), 'quote.pdf')
+      .expect(201);
+    expect(ticketServiceMock.forwardTicket.mock.calls[2][2].includePrivateAttachments).toBe(true);
+    await request(buildApp()).post('/api/tickets/501/forward')
+      .send({ to: ['eng@example.com'], includePrivateAttachments: true })
+      .expect(201);
+    expect(ticketServiceMock.forwardTicket.mock.calls[3][2]).not.toHaveProperty('includePrivateAttachments');
+  });
+
   test('an id that is not a number is a 400, nothing forwarded', async () => {
     const res = await request(buildApp()).post('/api/tickets/501/forward')
       .send({ to: ['eng@example.com'], includeAttachmentIds: ['12', 'abc'] })

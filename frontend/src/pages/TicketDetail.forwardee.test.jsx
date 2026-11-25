@@ -34,6 +34,13 @@ const INVOICE = { id: 12, threadEntryId: null, fileName: 'scan0001.pdf', display
 const PO = { id: 14, threadEntryId: 60, fileName: 'po.pdf', contentType: 'application/pdf', sizeBytes: 90000 };
 const SHOT_1 = { id: 21, threadEntryId: 60, fileName: 'pasted-image-1.png', contentType: 'image/png', sizeBytes: 5000 };
 const SHOT_2 = { id: 22, threadEntryId: 61, fileName: 'pasted-image-1.png', contentType: 'image/png', sizeBytes: 6000 };
+// Review 24 Nov 2026: a file on an internal note must not go out with a forward by default.
+const TEAM_NOTE = {
+  id: 65, eventType: 'note', source: 'ticketpulse_user', authorType: 'agent', incoming: false, isPrivate: true,
+  actorName: 'Quinn Agent', actorEmail: 'qa@example.com', occurredAt: '2026-11-23T20:00:00Z',
+  bodyText: 'Vendor portal shows the invoice as disputed.', bodyHtml: null, rawPayload: null,
+};
+const NOTE_FILE = { id: 31, threadEntryId: 65, fileName: 'vendor-portal.pdf', contentType: 'application/pdf', sizeBytes: 7000 };
 
 const NATIVE = {
   id: 501,
@@ -57,10 +64,10 @@ const NATIVE = {
   tags: [],
   activities: [],
   approvals: [],
-  attachments: [INVOICE, PO, SHOT_1, SHOT_2],
+  attachments: [INVOICE, PO, SHOT_1, SHOT_2, NOTE_FILE],
   mergedInto: null,
   stateChip: null,
-  thread: [RITA_MAIL, FORWARD, TIM_REPLY, RITA_AGAIN],
+  thread: [RITA_MAIL, FORWARD, TIM_REPLY, RITA_AGAIN, TEAM_NOTE],
   origin: 'ticketpulse',
   freshserviceTicketId: null,
   nativeNumber: 1042,
@@ -236,6 +243,27 @@ describe('a reply from the person the ticket was forwarded to (QA 11-24 #7/#8)',
   });
 });
 
+// Review (c): FreshService sends FS-born replies, and it can only write to the requester.
+describe('"Reply to <name>" on a FreshService ticket', () => {
+  const fsTicket = (lane) => ({ ...NATIVE, origin: 'freshservice', freshserviceTicketId: '24800', nativeNumber: null, displayRef: '#24800', replyLane: lane, replySubjectDefault: null });
+  afterEach(() => apiOverrides.get.mockImplementation(() => Promise.resolve({ data: NATIVE })));
+
+  test('hidden where FreshService sends the replies', async () => {
+    apiOverrides.get.mockImplementation(() => Promise.resolve({ data: fsTicket('freshservice') }));
+    renderPage();
+    await ready();
+    expect(within(bubbleOf('There was no attachment to the email.')).getByTestId('entry-kind-badge')).toHaveTextContent('Reply to your forward');
+    expect(screen.queryByTestId('reply-to-sender')).toBeNull();
+  });
+
+  test('offered where Ticket Pulse sends FS-born replies', async () => {
+    apiOverrides.get.mockImplementation(() => Promise.resolve({ data: fsTicket('ticketpulse') }));
+    renderPage();
+    await ready();
+    expect(screen.getByRole('button', { name: 'Reply to Tim' })).toBeInTheDocument();
+  });
+});
+
 describe('forward with the ticket\'s files (QA 11-24 #5)', () => {
   test('the files are listed ticked under their shown name; the ticked ids go with the forward', async () => {
     renderPage();
@@ -252,6 +280,33 @@ describe('forward with the ticket\'s files (QA 11-24 #5)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Forward thread' }));
     await waitFor(() => expect(apiOverrides.forward).toHaveBeenCalledTimes(1));
     expect(apiOverrides.forward.mock.calls[0][1]).toMatchObject({ to: ['eng@example.com'], includeAttachmentIds: [12] });
+    expect(apiOverrides.forward.mock.calls[0][1].includePrivateAttachments).toBeUndefined();
+  });
+
+  test('an internal note\'s file is not ticked by default; ticked on purpose it goes, and the server is told', async () => {
+    renderPage();
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: /^Forward$/ }));
+    // Not in the list of files, and not counted.
+    expect(screen.getByRole('checkbox', { name: 'Include the original attachments (2)' })).toBeChecked();
+    expect(screen.queryByRole('checkbox', { name: 'Include vendor-portal.pdf' })).toBeNull();
+
+    // Sent as is: only the public files.
+    fireEvent.change(screen.getByLabelText('Forward recipients'), { target: { value: 'eng@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Forward thread' }));
+    await waitFor(() => expect(apiOverrides.forward).toHaveBeenCalledTimes(1));
+    expect(apiOverrides.forward.mock.calls[0][1].includeAttachmentIds).toEqual([12, 14]);
+    expect(apiOverrides.forward.mock.calls[0][1].includePrivateAttachments).toBeUndefined();
+
+    // Chosen deliberately under "From internal notes".
+    fireEvent.click(screen.getByRole('button', { name: 'From internal notes (1)' }));
+    const noteFile = screen.getByRole('checkbox', { name: 'Include vendor-portal.pdf' });
+    expect(noteFile).not.toBeChecked();
+    fireEvent.click(noteFile);
+    fireEvent.change(screen.getByLabelText('Forward recipients'), { target: { value: 'lead@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Forward thread' }));
+    await waitFor(() => expect(apiOverrides.forward).toHaveBeenCalledTimes(2));
+    expect(apiOverrides.forward.mock.calls[1][1]).toMatchObject({ includeAttachmentIds: [12, 14, 31], includePrivateAttachments: true });
   });
 
   test('with the box unticked nothing of the ticket\'s goes', async () => {
@@ -273,12 +328,12 @@ describe('pictures open at the one clicked (QA 11-24 #12)', () => {
     const refs = await screen.findAllByRole('button', { name: 'Open picture pasted-image-1.png' });
     expect(refs).toHaveLength(2);
     fireEvent.click(refs[1]);
-    expect(await screen.findByTestId('preview')).toHaveTextContent('22 · 4 of 4');
+    expect(await screen.findByTestId('preview')).toHaveTextContent('22 · 4 of 5');
     cleanup();
     renderPage();
     await ready();
     fireEvent.click((await screen.findAllByRole('button', { name: 'Open picture pasted-image-1.png' }))[0]);
     // In conversation order: the invoice, po.pdf, then this picture.
-    expect(await screen.findByTestId('preview')).toHaveTextContent('21 · 3 of 4');
+    expect(await screen.findByTestId('preview')).toHaveTextContent('21 · 3 of 5');
   });
 });

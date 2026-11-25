@@ -616,6 +616,46 @@ export function forwardBlockHtml(html, text, cap = FORWARD_BLOCK_CAP) {
 }
 
 /**
+ * A "Reply to <name>" subject always carries the ticket's `[TP-n]` token (the
+ * inbound threading signal, and what the composer shows): appended when the
+ * subject does not hold it already. Case-insensitive.
+ */
+export function withTicketToken(subject, ref) {
+  const s = cleanReplySubject(subject || '');
+  if (!ref) return s;
+  const token = `[${ref}]`;
+  if (s.toLowerCase().includes(token.toLowerCase())) return s;
+  return `${s} ${token}`.trim();
+}
+
+/**
+ * The mail-loop guard for "Reply to <name>" (QA 11-24 review): refuses our own
+ * mailboxes (any workspace's, their aliases and +tag variants, the global
+ * sender, FreshService relays) and machine senders (the no-reply / daemon
+ * defaults and the workspace's machine-sender list). When our mailbox list
+ * cannot be read even from the last good copy, nothing is sent.
+ */
+export async function assertParticipantIsAPerson(workspaceId, address) {
+  const { ownMailboxAddresses, isOwnAddress } = await import('./originalRecipientsService.js');
+  let own;
+  try {
+    own = await ownMailboxAddresses({ staleOk: true });
+  } catch (err) {
+    logger.warn(`Reply to a participant refused: our mailbox list could not be read (${err.message})`);
+    throw new ValidationError('Ticket Pulse could not check its own mailboxes just now, so nothing was sent. Try again in a minute.');
+  }
+  if (isOwnAddress(address, own)) {
+    throw new ValidationError(`${address} is one of our own mailboxes. A reply to it would come straight back into Ticket Pulse, so it is not sent.`);
+  }
+  const { DEFAULT_ENTRIES, entryMatches, machineSenderMatch } = await import('./machineSenderService.js');
+  const machine = DEFAULT_ENTRIES.find((entry) => entryMatches(entry, address))
+    || await machineSenderMatch(workspaceId, address).catch(() => null);
+  if (machine) {
+    throw new ValidationError(`${address} is an automated sender (it matches "${machine}"), so nobody would read a reply. It is not sent.`);
+  }
+}
+
+/**
  * The quote under a reply to someone who is not the requester (QA 11-24 #8):
  * their message only, "On <date>, <name> <address> wrote:" over it, so the
  * requester's own conversation is never e-mailed to them. Null without a body.
@@ -5902,6 +5942,17 @@ class TicketService {
     if (address === bare(ticket.requester?.email)) {
       throw new ValidationError('That message is from the requester. Use Reply to requester.');
     }
+    // FreshService tickets: only where Ticket Pulse already sends their replies
+    // (the composer hides the button otherwise). Like a forward, it is kept on
+    // this ticket and not copied to FreshService.
+    if (!isNative && !(await isFsBornRepliesViaTicketPulseEnabled(workspaceId))) {
+      throw new ValidationError('Replies on this FreshService ticket are sent by FreshService, which can only write to the requester. Forward the ticket to this person instead.');
+    }
+    // Mail-loop guard (24 Nov 2026): never answer one of our own mailboxes (the
+    // reply would come straight back in) or a machine sender (no-reply, a
+    // daemon, the workspace's machine-sender list). Fail safe: when our mailbox
+    // list cannot be read at all, nothing is sent.
+    await assertParticipantIsAPerson(workspaceId, address);
 
     // Pasted pictures become attachments, as on a reply (30 Sep 2026).
     const inline = extractInlineImages(input?.bodyHtml);
@@ -5970,11 +6021,11 @@ class TicketService {
     }
     const ref = ticketDisplayRef(ticket);
     const storedSubject = cleanReplySubject(source.rawPayload?.subject || '');
-    const subject = storedSubject
+    const subject = withTicketToken(storedSubject
       ? (/^re:/i.test(storedSubject) ? storedSubject : `Re: ${storedSubject}`)
       : wasForwardedTo
         ? `Re: FW: ${ticket.subject || 'Ticket'} [${ref}]`
-        : effectiveReplySubject(ticket, null, await refPositionFor(ticket.workspaceId));
+        : effectiveReplySubject(ticket, null, await refPositionFor(ticket.workspaceId)), ref);
 
     const signature = await getEnabledSignatureForSend(workspaceId, actorEmail);
     const sentSignature = signature ? signatureAsSent(signature) : null;
@@ -6592,7 +6643,7 @@ class TicketService {
    * the e-mail (≤3 MB each, like a reply) and are stored on the forward's
    * entry, which therefore mirrors them to FreshService as well.
    */
-  async forwardTicket(ticketId, workspaceId, { to, note, noteHtml: rawNoteHtml, includeAttachmentIds = [] }, actor, files = []) {
+  async forwardTicket(ticketId, workspaceId, { to, note, noteHtml: rawNoteHtml, includeAttachmentIds = [], includePrivateAttachments = false }, actor, files = []) {
     // Same as a reply (QA 11-16 review): a picture pasted into the note as data: becomes an
     // attachment with an "[Pasted image attached: …]" line (Outlook's reading pane blocks
     // data: images), and the note is held to the reply text limit.
@@ -6629,7 +6680,9 @@ class TicketService {
     // QA 11-24 #5: the ticket's own files the agent ticked ("Include the
     // original attachments"). Checked and read before anything is sent, so a
     // refusal never leaves a forward out in the world without its files.
-    const originals = await this._forwardOriginals(ticket, workspaceId, includeAttachmentIds, uploads);
+    const originals = await this._forwardOriginals(ticket, workspaceId, includeAttachmentIds, uploads, {
+      allowPrivate: includePrivateAttachments === true,
+    });
 
     const entries = await ticketThreadRepository.listForTicket(ticket.id, { limit: 300 });
     const publicEntries = entries
@@ -6690,8 +6743,9 @@ class TicketService {
 
     const now = new Date();
     // Which of the ticket's files went with it (QA 11-24 #5), by id and the name sent.
-    const forwardedAttachments = originals.map(({ row }) => ({
+    const forwardedAttachments = originals.map(({ row, fromPrivateEntry }) => ({
       id: row.id, name: attachmentShownName(row), sizeBytes: Number(row.sizeBytes) || null,
+      ...(fromPrivateEntry ? { fromInternalNote: true } : {}),
     }));
     const withFiles = forwardedAttachments.length
       ? ` (with ${forwardedAttachments.map((a) => a.name).join(', ')})`
@@ -6755,7 +6809,7 @@ class TicketService {
    * message. Over either, a 400 names the files to untick. Returns
    * [{ row, buffer }] in the order asked.
    */
-  async _forwardOriginals(ticket, workspaceId, includeAttachmentIds, uploads = []) {
+  async _forwardOriginals(ticket, workspaceId, includeAttachmentIds, uploads = [], { allowPrivate = false } = {}) {
     const raw = Array.isArray(includeAttachmentIds) ? includeAttachmentIds : [];
     if (raw.length === 0) return [];
     const ids = [...new Set(raw.map((v) => Number(v)))];
@@ -6782,6 +6836,17 @@ class TicketService {
       const names = list.map((r) => `"${attachmentShownName(r)}"`);
       return names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
     };
+    // A file of a PRIVATE entry (an internal note, an earlier forward, a
+    // "Reply to <name>") never goes to an outside address by default: the
+    // forward's own body carries public messages only. It goes only when the
+    // agent picked it under "From internal notes" (`allowPrivate`). An entry we
+    // cannot read counts as private (fail safe).
+    const privateIds = await this._privateEntryIds(ticket.id, workspaceId, ordered.map((r) => r.threadEntryId));
+    const isPrivateFile = (r) => r.threadEntryId !== null && r.threadEntryId !== undefined && privateIds.has(r.threadEntryId);
+    const privateFiles = ordered.filter(isPrivateFile);
+    if (privateFiles.length && !allowPrivate) {
+      throw new ValidationError(`${nameList(privateFiles)} ${privateFiles.length === 1 ? 'comes' : 'come'} from an internal note, which the forward does not share by default. Tick ${privateFiles.length === 1 ? 'it' : 'them'} under "From internal notes" to send ${privateFiles.length === 1 ? 'it' : 'them'} on purpose, or untick ${privateFiles.length === 1 ? 'it' : 'them'}.`);
+    }
     const mb = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
     const tooBig = ordered.filter((r) => Number(r.sizeBytes) > MAIL_FILE_BYTES);
     if (tooBig.length) {
@@ -6815,9 +6880,34 @@ class TicketService {
       if (buffer.length > MAIL_FILE_BYTES) {
         throw new ValidationError(`"${attachmentShownName(row)}" is over 3 MB, too big to send by e-mail. Untick it and forward again.`);
       }
-      out.push({ row, buffer });
+      out.push({ row, buffer, fromPrivateEntry: isPrivateFile(row) });
     }
     return out;
+  }
+
+  /**
+   * Of these thread entry ids, the ones that are private: an internal note, a
+   * forward or "Reply to <name>" (stored as a forward), or any entry marked
+   * private. An id that is not found, or a failed lookup, counts as private.
+   */
+  async _privateEntryIds(ticketId, workspaceId, entryIds) {
+    const ids = [...new Set((entryIds || []).filter((id) => id !== null && id !== undefined).map(Number))];
+    if (ids.length === 0) return new Set();
+    let rows;
+    try {
+      rows = await prisma.ticketThreadEntry.findMany({
+        where: { id: { in: ids }, ticketId, workspaceId },
+        select: { id: true, isPrivate: true, eventType: true, visibility: true },
+      });
+    } catch (err) {
+      logger.warn(`Forward: entry privacy lookup failed for ticket ${ticketId}; their files count as private: ${err.message}`);
+      return new Set(ids);
+    }
+    const PRIVATE_EVENT_TYPES = new Set(['note', 'private_note', 'forward']);
+    const publicIds = new Set((rows || [])
+      .filter((e) => e.isPrivate !== true && e.visibility !== 'private' && !PRIVATE_EVENT_TYPES.has(e.eventType))
+      .map((e) => e.id));
+    return new Set(ids.filter((id) => !publicIds.has(id)));
   }
 
   /**

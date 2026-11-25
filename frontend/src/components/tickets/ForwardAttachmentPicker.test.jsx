@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test } from 'vitest';
 import { useState } from 'react';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import ForwardAttachmentPicker from './ForwardAttachmentPicker';
-import { defaultForwardSelection, forwardAttachmentIds, groupForwardAttachments } from './forwardAttachments';
+import { defaultForwardSelection, forwardAttachmentIds, groupForwardAttachments, includesInternal } from './forwardAttachments';
 
 // QA 11-24 #5: "Include the original attachments" on a forward.
 
@@ -32,6 +32,29 @@ describe('grouping and the default selection', () => {
     const { files } = groupForwardAttachments(all, new Set([18]));
     expect(defaultForwardSelection(files)).toEqual({ include: true, ids: [12, 14, 17] });
     expect(defaultForwardSelection([])).toEqual({ include: false, ids: [] });
+  });
+
+  // Review 24 Nov 2026: an internal note's screenshot went to outside recipients by default.
+  test('files of internal notes, earlier forwards and unknown entries are set apart and never in the default', () => {
+    const entries = [
+      { id: 60, eventType: 'original_email', isPrivate: false },
+      { id: 61, eventType: 'note', isPrivate: true },
+      { id: 62, eventType: 'forward', isPrivate: true, rawPayload: { directReply: { email: 'tim@example.com' } } },
+      { id: 63, eventType: 'reply', isPrivate: false },
+    ];
+    const list = [
+      { ...invoice, threadEntryId: null },
+      { ...po, threadEntryId: 63 },
+      { id: 30, threadEntryId: 61, fileName: 'internal-screenshot.png', contentType: 'image/png', sizeBytes: 5000 },
+      { id: 31, threadEntryId: 62, fileName: 'sent-to-tim.pdf', contentType: 'application/pdf', sizeBytes: 5000 },
+      { id: 32, threadEntryId: 999, fileName: 'unknown.pdf', contentType: 'application/pdf', sizeBytes: 5000 },
+    ];
+    const { files, internal } = groupForwardAttachments(list, null, entries);
+    expect(files.map((a) => a.id)).toEqual([12, 14]);
+    expect(internal.map((a) => a.id)).toEqual([30, 31, 32]);
+    expect(defaultForwardSelection(files).ids).toEqual([12, 14]);
+    expect(includesInternal([12, 14], internal)).toBe(false);
+    expect(includesInternal([12, 30], internal)).toBe(true);
   });
 
   test('the ids sent: none when the box is off, never a file no longer on the ticket', () => {
@@ -95,6 +118,28 @@ describe('ForwardAttachmentPicker', () => {
     const many = Array.from({ length: 8 }, (_, i) => ({ id: 100 + i, fileName: `page-${i}.pdf`, contentType: 'application/pdf', sizeBytes: 2.9 * MB }));
     render(<ForwardAttachmentPicker files={many} pictures={[]} value={{ include: true, ids: many.map((a) => a.id) }} onChange={() => {}} />);
     expect(screen.getByRole('alert')).toHaveTextContent(/more than one e-mail can carry .* Untick some/);
+  });
+
+  test('"From internal notes (n)": folded, unticked, and a file can still be ticked on purpose', () => {
+    const note = { id: 30, threadEntryId: 61, fileName: 'internal-screenshot.png', contentType: 'image/png', sizeBytes: 5000 };
+    function WithInternal() {
+      const [value, setValue] = useState(defaultForwardSelection([invoice]));
+      return (
+        <>
+          <ForwardAttachmentPicker files={[invoice]} pictures={[]} internal={[note]} value={value} onChange={setValue} />
+          <output data-testid="ids">{forwardAttachmentIds(value, [invoice, note]).join(',')}</output>
+        </>
+      );
+    }
+    render(<WithInternal />);
+    expect(screen.getByTestId('ids')).toHaveTextContent('12');
+    expect(screen.queryByRole('checkbox', { name: 'Include internal-screenshot.png' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'From internal notes (1)' }));
+    expect(screen.getByText(/Only your team has seen these/)).toBeInTheDocument();
+    const box = screen.getByRole('checkbox', { name: 'Include internal-screenshot.png' });
+    expect(box).not.toBeChecked();
+    fireEvent.click(box);
+    expect(screen.getByTestId('ids')).toHaveTextContent('12,30');
   });
 
   test('nothing to offer: nothing rendered', () => {
