@@ -1061,9 +1061,14 @@ class AfterHoursUrgentEscalationService {
       });
       count = result.count;
       if (count > 0) {
+        const dedupeKeys = deliveries.map((delivery) => delivery.dedupeKey);
+        // QA 11-24 item 9: the ticket says who was alerted, how, and why.
+        const technicianNames = Object.fromEntries(selectedRows
+          .filter((row) => row?.technicianId && row.technician?.name)
+          .map((row) => [row.technicianId, row.technician.name]));
         notificationDeliveryService.processQueuedDeliveries({
           limit: count,
-          dedupeKeys: deliveries.map((delivery) => delivery.dedupeKey),
+          dedupeKeys,
         }).catch((error) => {
           logger.warn('Urgent escalation delivery processing failed', {
             eventId: event.id,
@@ -1071,7 +1076,14 @@ class AfterHoursUrgentEscalationService {
             source,
             error: error.message,
           });
-        });
+        }).then(() => import('./alertActivityService.js'))
+          .then(({ recordAlertActivityForDeliveries, alertReason }) => recordAlertActivityForDeliveries(dedupeKeys, {
+            kind: 'escalation',
+            priority: URGENT_PRIORITY_LABEL,
+            technicianNames,
+            reason: alertReason({ kind: 'escalation', escalationType: source }),
+          }))
+          .catch((error) => logger.warn(`Urgent escalation: alert history row not written (non-fatal): ${error.message}`));
       }
     }
 

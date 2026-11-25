@@ -291,6 +291,8 @@ export async function deliverTransactionalEmail({
       messageId,
       from: laneFrom || null,
       replyTo: sendgridReplyTo,
+      // QA 11-24 item 9: why this went by SendGrid when a mailbox was there to send it.
+      ...(graphError ? { graphFallbackReason: String(graphError.message || graphError).slice(0, 300) } : {}),
     };
   } catch (err) {
     if (graphError) err.graphError = graphError.message;

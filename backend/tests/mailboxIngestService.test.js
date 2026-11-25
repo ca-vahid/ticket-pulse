@@ -421,19 +421,21 @@ describe('recipient capture', () => {
         rawPayload: {
           to_emails: ['helpdesk-pilot@example.com'],
           cc_emails: ['boss@example.com'],
+          // QA 11-24 item 11: the mailbox it came in through.
+          intakeMailbox: { connectionId: 1, address: 'helpdesk-pilot@example.com' },
         },
       }),
     }));
   });
 
-  test('created tickets without to/cc touch neither the row nor rawPayload', async () => {
+  test('created tickets without to/cc leave the row alone; the entry keeps only the intake mailbox', async () => {
     const outcome = await mailboxIngestService.processEmail(connection, baseEmail);
 
     expect(outcome).toBe('created');
     expect(prismaMock.ticket.update).not.toHaveBeenCalled();
     const { data } = prismaMock.ticketThreadEntry.create.mock.calls[0][0];
     expect(data.eventType).toBe('original_email');
-    expect(data.rawPayload).toBeUndefined();
+    expect(data.rawPayload).toEqual({ intakeMailbox: { connectionId: 1, address: 'helpdesk-pilot@example.com' } });
   });
 
   test('ingested replies stash {to_emails, cc_emails} in rawPayload', async () => {
@@ -789,7 +791,7 @@ describe('agent forwards (Phase FW)', () => {
     const [ws, input, actor, options] = ticketServiceMock.createTicket.mock.calls[0];
     expect(ws).toBe(1);
     expect(actor).toEqual(expect.objectContaining({ role: 'system' }));
-    expect(options).toEqual({ sourceChannel: 1, createdVia: 'forward' });
+    expect(options).toEqual({ sourceChannel: 1, createdVia: 'forward', intakeMailbox: { connectionId: 1, address: 'helpdesk-pilot@example.com' } });
     expect(input.requesterEmail).toBe(RITA);
     expect(input.requesterName).toBe('Rita Requester');
     expect(input.subject).toBe('Invoice 4471 still unpaid'); // the original subject, no FW:
@@ -844,7 +846,7 @@ describe('agent forwards (Phase FW)', () => {
     expect(input.requesterEmail).toBe('someone@customer.example');
     expect(input.subject).toBe('FW: Invoice 4471 still unpaid');
     // 24 Nov 2026: the mail's To/Cc ride along so the row has them at creation.
-    expect(options).toEqual({ sourceChannel: 1, createdVia: 'email', mailRecipients: { toEmails: ['helpdesk-pilot@example.com'], ccEmails: [], viaMailbox: true } });
+    expect(options).toEqual({ sourceChannel: 1, createdVia: 'email', mailRecipients: { toEmails: ['helpdesk-pilot@example.com'], ccEmails: [], viaMailbox: true }, intakeMailbox: { connectionId: 1, address: 'helpdesk-pilot@example.com' } });
     const original = prismaMock.ticketThreadEntry.create.mock.calls[0][0].data;
     expect(original.rawPayload?.forwarded).toBeUndefined();
     expect(activityMock.create).not.toHaveBeenCalledWith(expect.objectContaining({ activityType: 'forwarded_intake' }));
@@ -938,7 +940,7 @@ describe('agent Cc intake + hold decisions (Phase RL-3)', () => {
     expect(holdMock.holdMessage).not.toHaveBeenCalled();
     const [, input, actor, options] = ticketServiceMock.createTicket.mock.calls[0];
     expect(actor).toEqual(expect.objectContaining({ role: 'system' }));
-    expect(options).toEqual({ sourceChannel: 1, createdVia: 'agent_cc' });
+    expect(options).toEqual({ sourceChannel: 1, createdVia: 'agent_cc', intakeMailbox: { connectionId: 1, address: 'helpdesk-pilot@example.com' } });
     expect(input).toEqual(expect.objectContaining({
       requesterEmail: RITA,
       requesterName: 'Rita Requester', // from the quoted From: block
@@ -1056,7 +1058,7 @@ describe('agent Cc intake + hold decisions (Phase RL-3)', () => {
     });
     expect(outcome).toBe('created');
     expect(holdMock.holdMessage).not.toHaveBeenCalled();
-    expect(ticketServiceMock.createTicket).toHaveBeenCalledWith(1, expect.objectContaining({ requesterEmail: 'rita@example.com' }), expect.anything(), { sourceChannel: 1, createdVia: 'email' });
+    expect(ticketServiceMock.createTicket).toHaveBeenCalledWith(1, expect.objectContaining({ requesterEmail: 'rita@example.com' }), expect.anything(), { sourceChannel: 1, createdVia: 'email', intakeMailbox: { connectionId: 1, address: 'helpdesk-pilot@example.com' } });
   });
 
   test('newTicketPolicy=replies_only → fresh external mail is held, not created', async () => {
@@ -1107,12 +1109,13 @@ describe('hold-queue callbacks (RL-4 contract)', () => {
     });
     expect(ticketServiceMock.createTicket).toHaveBeenCalledWith(1, expect.objectContaining({
       requesterEmail: 'chosen.person@customer.example', requesterName: null, subject: 'Printer on 3rd floor jammed',
-    }), expect.objectContaining({ role: 'system' }), { sourceChannel: 1, createdVia: 'held_reply', mailRecipients: { toEmails: ['helpdesk-pilot@example.com'], ccEmails: [], viaMailbox: true } });
+    }), expect.objectContaining({ role: 'system' }), { sourceChannel: 1, createdVia: 'held_reply', mailRecipients: { toEmails: ['helpdesk-pilot@example.com'], ccEmails: [], viaMailbox: true }, intakeMailbox: { connectionId: 1, address: 'helpdesk-pilot@example.com' } });
     const original = prismaMock.ticketThreadEntry.create.mock.calls[0][0].data;
     expect(original).toEqual(expect.objectContaining({ eventType: 'original_email', actorEmail: 'rita@example.com', emailMessageId: '<held-1@example.com>' }));
     expect(original.rawPayload).toEqual({
       to_emails: ['helpdesk-pilot@example.com'], cc_emails: [],
       heldReply: { heldMessageId: 31, resolvedBy: 'Kirsten (coordinator)', forcedRequester: 'chosen.person@customer.example' },
+      intakeMailbox: { connectionId: 1, address: 'helpdesk-pilot@example.com' },
     });
   });
 
@@ -1128,8 +1131,11 @@ describe('hold-queue callbacks (RL-4 contract)', () => {
 
   test('no forcedRequester → email.from; no createdVia → email', async () => {
     await mailboxIngestService.createTicketFromEmail(connection, baseEmail, { kind: 'fresh', heldMessageId: 32, resolvedBy: 'x' });
-    expect(ticketServiceMock.createTicket).toHaveBeenCalledWith(1, expect.objectContaining({ requesterEmail: 'rita@example.com', requesterName: 'Rita Requester' }), expect.anything(), { sourceChannel: 1, createdVia: 'email' });
-    expect(prismaMock.ticketThreadEntry.create.mock.calls[0][0].data.rawPayload).toEqual({ heldReply: { heldMessageId: 32, resolvedBy: 'x' } });
+    expect(ticketServiceMock.createTicket).toHaveBeenCalledWith(1, expect.objectContaining({ requesterEmail: 'rita@example.com', requesterName: 'Rita Requester' }), expect.anything(), { sourceChannel: 1, createdVia: 'email', intakeMailbox: { connectionId: 1, address: 'helpdesk-pilot@example.com' } });
+    expect(prismaMock.ticketThreadEntry.create.mock.calls[0][0].data.rawPayload).toEqual({
+      heldReply: { heldMessageId: 32, resolvedBy: 'x' },
+      intakeMailbox: { connectionId: 1, address: 'helpdesk-pilot@example.com' },
+    });
   });
 
   test('attach → ingestReply(connection, ticket, email, held_reply_attach) with no 5th argument', async () => {

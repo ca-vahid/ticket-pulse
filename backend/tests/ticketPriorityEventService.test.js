@@ -66,6 +66,18 @@ describe('ticketPriorityEventService', () => {
     }));
   });
 
+  test('QA 11-24 item 9: a Ticket Pulse ticket\'s FreshService copy never records a second priority event', async () => {
+    const result = await ticketPriorityEventService.recordFreshServicePriorityChange({
+      processAsync: false,
+      existingTicket: { id: 502, workspaceId: 1, origin: 'ticketpulse', priority: 1 },
+      upsertedTicket: { id: 502, workspaceId: 1, origin: 'ticketpulse', priority: 4, freshserviceUpdatedAt: new Date('2026-11-23T18:00:00.000Z') },
+      source: 'freshservice_sync',
+    });
+    expect(result).toEqual({ recorded: false, skipped: 'ticketpulse_origin' });
+    expect(prismaMock.ticketPriorityEvent.create).not.toHaveBeenCalled();
+    expect(queueNotificationsForPriorityChangeMock).not.toHaveBeenCalled();
+  });
+
   test('records FreshService priority changes with stable labels and dedupe', async () => {
     const result = await ticketPriorityEventService.recordFreshServicePriorityChange({
       processAsync: false,

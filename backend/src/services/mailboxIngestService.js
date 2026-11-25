@@ -24,6 +24,13 @@ import { looksAutomated } from './ticketGrouping/rules.js';
 import { DEFAULT_MESSAGE_ID_DOMAIN } from './emailThreadingService.js';
 import { ValidationError } from '../utils/errors.js';
 import { wasRecentlySent } from '../utils/recentSentMessageIds.js';
+import { intakeMailboxRecord } from './intakeMailboxService.js';
+
+/** createTicket's `intakeMailbox` option for mail on this connection (QA 11-24 item 11). */
+function intakeMailboxOption(connection) {
+  const record = intakeMailboxRecord(connection);
+  return record ? { intakeMailbox: record } : {};
+}
 
 /**
  * A forward that Live invoice matching may hold (24 Nov 2026): NEW mail (intake
@@ -2453,10 +2460,13 @@ class MailboxIngestService {
     const mailboxOwn = ownAddresses(connection);
     const viaMailbox = Boolean(recipients)
       && [...(recipients.to_emails || []), ...(recipients.cc_emails || [])].some((a) => isOwnAddress(a, mailboxOwn));
+    const intakeMailbox = intakeMailboxRecord(connection);
     const options = {
       sourceChannel: TICKET_SOURCE.EMAIL,
       createdVia,
       ...(recipients ? { mailRecipients: { toEmails: recipients.to_emails, ccEmails, viaMailbox } } : {}),
+      // QA 11-24 item 11: the "Intake mailbox" workflow condition.
+      ...(intakeMailbox ? { intakeMailbox } : {}),
     };
     let ticket;
     try {
@@ -2532,7 +2542,14 @@ class MailboxIngestService {
           occurredAt: email.receivedAt || new Date(),
           emailMessageId: email.internetMessageId,
           title: 'Original email',
-          ...(recipients || heldReply || email.onBehalfOf ? { rawPayload: { ...(recipients || {}), ...(heldReply ? { heldReply } : {}), ...(email.onBehalfOf ? { onBehalfOf: email.onBehalfOf } : {}) } } : {}),
+          ...(recipients || heldReply || email.onBehalfOf || intakeMailbox ? {
+            rawPayload: {
+              ...(recipients || {}),
+              ...(heldReply ? { heldReply } : {}),
+              ...(email.onBehalfOf ? { onBehalfOf: email.onBehalfOf } : {}),
+              ...(intakeMailbox ? { intakeMailbox } : {}),
+            },
+          } : {}),
         },
       }).catch(() => {});
     }
@@ -2626,7 +2643,7 @@ class MailboxIngestService {
       runAiTriage: true,
       // ccEmails deliberately stays [] — agents are never Cc'd (d7).
       ...this._routingDefaults(connection),
-    }, SYSTEM_ACTOR, { sourceChannel: TICKET_SOURCE.EMAIL, createdVia: 'forward' });
+    }, SYSTEM_ACTOR, { sourceChannel: TICKET_SOURCE.EMAIL, createdVia: 'forward', ...intakeMailboxOption(connection) });
 
     const recipients = this._withoutAttendees(emailRecipients(email), email, connection);
     if (recipients?.to_emails?.length) {
@@ -2782,7 +2799,7 @@ class MailboxIngestService {
       suppressRequesterAck: true, // …but the requester already got the agent's reply — no second ack
       ...(otherExternals.length ? { ccEmails: otherExternals } : {}),
       ...this._routingDefaults(connection),
-    }, SYSTEM_ACTOR, { sourceChannel: TICKET_SOURCE.EMAIL, createdVia: 'agent_cc' });
+    }, SYSTEM_ACTOR, { sourceChannel: TICKET_SOURCE.EMAIL, createdVia: 'agent_cc', ...intakeMailboxOption(connection) });
 
     const recipients = emailRecipients(email);
     if (recipients?.to_emails?.length) {

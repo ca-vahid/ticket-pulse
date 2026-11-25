@@ -1,5 +1,5 @@
 import { describe, expect, test } from '@jest/globals';
-import { priorityChangedExtra } from '../src/services/ticketLifecycleNotificationService.js';
+import { priorityChangedExtra, priorityLabel } from '../src/services/ticketLifecycleNotificationService.js';
 import { NOTIFICATION_EVENT_TYPES } from '../src/services/notificationWorkflowDefinition.js';
 
 /**
@@ -33,5 +33,23 @@ describe('ticket.priority_changed', () => {
 
   test('a workflow write keeps its workflowId so the dispatcher can skip it', () => {
     expect(priorityChangedExtra({ workflowId: 12, changes: { priority: { from: 1, to: 4 } } })).toMatchObject({ workflowId: 12 });
+  });
+});
+
+/**
+ * QA 11-24 item 9: an agent raised a Ticket Pulse ticket Low → Urgent and the
+ * "Ticket urgent priority" workflow did not run. The "Priority" condition read
+ * the AI's old assessment ("Low") before the ticket's own priority, so the run
+ * stopped at its first condition (shown only as hidden machine activity).
+ */
+describe('the Priority condition field (ticket.priorityLabel)', () => {
+  test('a Ticket Pulse ticket: its own priority, whatever the AI assessed', () => {
+    expect(priorityLabel({ origin: 'ticketpulse', priority: 4, assessedPriority: 'Low' })).toBe('Urgent');
+    expect(priorityLabel({ origin: 'ticketpulse', priority: 2, assessedPriority: null })).toBe('Medium');
+  });
+
+  test('a FreshService ticket keeps the assessed level first, as before', () => {
+    expect(priorityLabel({ origin: 'freshservice', priority: 1, assessedPriority: 'High' })).toBe('High');
+    expect(priorityLabel({ origin: 'freshservice', priority: 3, assessedPriority: null })).toBe('High');
   });
 });

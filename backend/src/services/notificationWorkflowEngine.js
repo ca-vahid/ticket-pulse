@@ -205,6 +205,17 @@ function groupReferencesReplyClocks(group) {
  * names it; a failed read is null (the condition then fails closed).
  */
 const DUPLICATE_FIELD = 'ticket.isDuplicate';
+const INTAKE_MAILBOX_FIELD = 'ticket.intakeMailbox';
+/** QA 11-24 item 11: ticket.intakeMailbox for a condition that names it (intakeMailboxService). Never throws. */
+async function withIntakeMailbox(scope, eventContext) {
+  try {
+    const { withIntakeMailbox: fill } = await import('./intakeMailboxService.js');
+    return await fill(scope, eventContext);
+  } catch (err) {
+    logger.warn(`intake mailbox unavailable (condition sees none): ${err.message}`);
+    return { ...scope, ticket: { ...(scope?.ticket || {}), intakeMailbox: null } };
+  }
+}
 function groupReferencesField(group, field) {
   if (!group || typeof group !== 'object') return false;
   const entries = Array.isArray(group.conditions) ? group.conditions : [];
@@ -342,7 +353,9 @@ export async function refreshLiveTicketFields(eventContext, definition) {
           status: row.status,
           statusBase,
           priority: row.priority,
-          priorityLabel: row.assessedPriority || RESUME_PRIORITY_LABELS[Number(row.priority)] || String(row.priority ?? ''),
+          // QA 11-24 item 9: a Ticket Pulse ticket's own priority (as at the trigger).
+          priorityLabel: (next.ticket?.origin === 'ticketpulse' && RESUME_PRIORITY_LABELS[Number(row.priority)])
+            || row.assessedPriority || RESUME_PRIORITY_LABELS[Number(row.priority)] || String(row.priority ?? ''),
           assessedPriority: row.assessedPriority || null,
           groupId: row.groupId === null || row.groupId === undefined ? null : String(row.groupId),
           isNoise: row.isNoise === true,
@@ -2615,6 +2628,8 @@ async function executeNode({
         rule = compileConditionGroup(node.data.conditionGroup, { customFieldTypes });
         if (groupReferencesReplyClocks(node.data.conditionGroup)) evalScope = await withReplyClocks(scope, eventContext);
         if (groupReferencesField(node.data.conditionGroup, DUPLICATE_FIELD)) evalScope = await withDuplicateFlag(evalScope, eventContext);
+        // QA 11-24 item 11: the mailbox the ticket came in through, read only when a row names it.
+        if (groupReferencesField(node.data.conditionGroup, INTAKE_MAILBOX_FIELD)) evalScope = await withIntakeMailbox(evalScope, eventContext);
       } catch (error) {
         compileError = error.message;
         rule = false;
@@ -2751,6 +2766,9 @@ async function executeNode({
       : scope;
     if (branches.some((b) => b?.conditionGroup && groupReferencesField(b.conditionGroup, DUPLICATE_FIELD))) {
       branchScope = await withDuplicateFlag(branchScope, eventContext);
+    }
+    if (branches.some((b) => b?.conditionGroup && groupReferencesField(b.conditionGroup, INTAKE_MAILBOX_FIELD))) {
+      branchScope = await withIntakeMailbox(branchScope, eventContext);
     }
     for (const candidate of branches) {
       const key = String(candidate?.key || '').trim().toLowerCase();

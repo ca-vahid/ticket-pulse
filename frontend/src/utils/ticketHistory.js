@@ -267,6 +267,15 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
       // line, and stays visible with machine activity hidden (a move is part
       // of the ticket's story).
       item = baseItem({ event: 'urgent', verb: d.sentence || d.note || 'Urgent response', importance: 2, machine: false });
+    } else if (t === 'alert_sent') {
+      // QA 11-24 item 9: an alert went to an agent about this ticket (priority,
+      // assignment, after-hours or their own alert). The server writes the
+      // sentence ("Urgent-priority alert sent to Jordan Lee by e-mail and SMS:
+      // assignee, subscribed to Urgent alerts"); a plain-text fallback says why.
+      const fallbacks = Array.isArray(d.fallbackReasons) ? d.fallbackReasons.map((f) => f?.reason).filter(Boolean) : [];
+      const failed = Array.isArray(d.channels?.failed) ? d.channels.failed.filter((f) => f?.error).map((f) => `${f.channel}: ${f.error}`) : [];
+      item = baseItem({ event: 'alert', verb: d.sentence || 'Alert sent', importance: 2, machine: false });
+      item.extra = [...fallbacks, ...failed];
     } else if (String(t || '').startsWith('auto_help_')) {
       // Auto-help P1: every step of the answer → check-in → close loop.
       const verbs = {
@@ -437,14 +446,14 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
       item = baseItem({ event: 'system', verb: humanize(t), detail: d.note || null });
     }
     const shownActor = priorityRow ? priorityRow.actor
-      : t === 'urgent_response'
+      : t === 'urgent_response' || t === 'alert_sent'
         ? 'Ticket Pulse'
         : ((t === 'merged_from' || t === 'merged_into') && d.actorName) ? d.actorName : actor;
     const rowKind = priorityRow ? priorityRow.actorKind : kind;
     const rowSource = priorityRow ? priorityRow.source : source;
     // A requester raising the priority is a person, whatever the row's actorKind says.
     const typeHint = priorityRow ? (priorityRow.source === 'freshservice' && priorityRow.machine === false ? 'human' : rowKind) : (fsName ? 'human' : kind);
-    items.push({ ...item, key: `a-${a.id}`, at, kind: rowKind, atype: t, actorType: actorTypeFor(shownActor, typeHint), machine: item.machine ?? machine, actor: shownActor, source: rowSource, sig: `a|${t}|${shownActor}|${item.from || ''}|${item.to || ''}|${item.detail || (t === 'urgent_response' || priorityRow ? item.verb : '')}` });
+    items.push({ ...item, key: `a-${a.id}`, at, kind: rowKind, atype: t, actorType: actorTypeFor(shownActor, typeHint), machine: item.machine ?? machine, actor: shownActor, source: rowSource, sig: `a|${t}|${shownActor}|${item.from || ''}|${item.to || ''}|${item.detail || (t === 'urgent_response' || t === 'alert_sent' || priorityRow ? item.verb : '')}` });
   }
 
   // QA 11-05 #9: an episode is the ASSIGNER's action. "Ticket Pulse AI ·
