@@ -2,6 +2,7 @@ import VacationTrackerClient from '../integrations/vacationTracker.js';
 import vtRepo from './vacationTrackerRepository.js';
 import technicianRepository from './technicianRepository.js';
 import logger from '../utils/logger.js';
+import { sameLeaveKind } from './availability/siteVisit.js';
 
 const syncState = {
   running: false,
@@ -199,6 +200,28 @@ class VacationTrackerService {
         logger.warn(`VT leave sync: could not read Availability's own leaves (${err.message})`);
       }
 
+      // 25 Nov 2026: a visit booked in Vacation Pulse AND in Vacation Tracker
+      // counts once. A Vacation Tracker leave-day that repeats a Vacation Pulse
+      // row (same person, day and kind of leave) is not written; the stale
+      // clean-up below then removes any copy an earlier sync wrote.
+      let appRows = [];
+      let avTypes = [];
+      try {
+        [appRows, avTypes] = await Promise.all([
+          vtRepo.getAvailabilityRows(workspaceId, new Date(startDate + 'T00:00:00Z'), new Date(endDate + 'T00:00:00Z')),
+          vtRepo.getAvailabilityLeaveTypes(),
+        ]);
+      } catch (err) {
+        logger.warn(`VT leave sync: could not read Vacation Pulse's own rows (${err.message}); duplicates are not skipped this run`);
+      }
+      const appRowsByDay = new Map();
+      for (const r of appRows || []) {
+        const k = `${r.technicianId}|${formatDateUTC(new Date(r.leaveDate))}`;
+        if (!appRowsByDay.has(k)) appRowsByDay.set(k, []);
+        appRowsByDay.get(k).push(r);
+      }
+      let duplicateDays = 0;
+
       syncState.progress = { step: 'processing leaves', pct: 40 };
       const leaveRows = [];
       // Track every (vtLeaveId, leaveDate) tuple that should exist post-sync.
@@ -222,6 +245,11 @@ class VacationTrackerService {
           // on single-day partial leaves. Anything spanning multiple days is
           // treated as full on every day.
           const meta = deriveHalfDayMeta(leave, /*isBoundaryDay=*/!isMultiDay);
+          const twins = appRowsByDay.get(`${mapping.technicianId}|${formatDateUTC(date)}`) || [];
+          if (twins.some((a) => sameLeaveKind({ leaveTypeName: ltInfo.vtLeaveTypeName, category: ltInfo.category }, a, avTypes))) {
+            duplicateDays += 1;
+            continue;
+          }
           leaveRows.push({
             workspaceId,
             technicianId: mapping.technicianId,
@@ -238,6 +266,8 @@ class VacationTrackerService {
           validKeys.add(`${leave.id}|${date.toISOString().slice(0, 10)}`);
         }
       }
+
+      if (duplicateDays) logger.info(`VT leave sync ws ${workspaceId}: ${duplicateDays} leave-day(s) skipped, already booked in Vacation Pulse`);
 
       syncState.progress = { step: 'saving to database', pct: 70 };
       await vtRepo.bulkUpsertLeaves(leaveRows);
@@ -256,6 +286,7 @@ class VacationTrackerService {
         leavesProcessed: leaves.length,
         leaveDaysCreated: leaveRows.length,
         staleRemoved: deleted.count || 0,
+        duplicateDaysSkipped: duplicateDays,
       };
     } finally {
       syncState.running = false;

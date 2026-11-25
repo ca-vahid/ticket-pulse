@@ -8,10 +8,10 @@ import {
   fmtDay, parseDay, todayKey,
 } from './availabilityUi';
 import {
-  WEEKDAY_LETTER, coverageByDay, coverageTone, entrySegments, groupPeople, isWeekend, monthRange, nextWeeksRange, rangeDays,
+  WEEKDAY_LETTER, collapseDuplicateEntries, coverageByDay, coverageTone, entrySegments, groupPeople, isWeekend, monthRange, nextWeeksRange, rangeDays,
 } from './calendarModel';
 import {
-  AgendaList, DayTypeLegend, Segmented, TeamAvatar, barLook, entryWords, personName, useRoster,
+  AgendaList, DayTypeLegend, Segmented, TeamAvatar, barLook, entryLabel, entryWords, personName, useRoster,
 } from './teamViews';
 
 /**
@@ -23,8 +23,12 @@ import {
  * away each day. Weekends are grey, holidays rose with their name, today
  * marked. Below `md` the same data is a list by day.
  *
+ * A site visit's bar names its place ("Site visit · Toronto", 25 Nov 2026),
+ * and a visit booked both in Vacation Tracker and here is one bar.
+ *
  * View choices live in the address (?range=4w&group=group&office=2&month=2026-11)
- * so a view can be shared.
+ * so a view can be shared. The grid itself is `Wallchart` below: props in,
+ * no network, so it renders on its own (tests, screenshots).
  */
 
 function useViewParams() {
@@ -38,6 +42,134 @@ function useViewParams() {
     setParams(next, { replace: true });
   }, [params, setParams]);
   return [params, set];
+}
+
+function groupByEmail(entries) {
+  const m = new Map();
+  for (const e of entries || []) {
+    if (!m.has(e.email)) m.set(e.email, []);
+    m.get(e.email).push(e);
+  }
+  return m;
+}
+
+/**
+ * The wallchart grid. `sections` are rows grouped under a heading:
+ * [{ key, label, people: [{ email, name }] }] (one section shows no heading).
+ * `entries` are calendar entries ({ email, startDate, endDate, dayPart,
+ * status, label, place, color, availability, source }); duplicates of one
+ * visit collapse here too.
+ */
+export function Wallchart({
+  title, days, sections = [], entries = [], holidayNames = {}, today = todayKey(), byEmail = null, teamSize = null, emptyText = 'No people to show.',
+}) {
+  const shown = useMemo(() => collapseDuplicateEntries(entries), [entries]);
+  const entriesByEmail = useMemo(() => groupByEmail(shown), [shown]);
+  const isNonWorking = useCallback((d) => isWeekend(d.dow) || Boolean(holidayNames[d.key]), [holidayNames]);
+  const coverage = useMemo(() => coverageByDay(shown, days, isNonWorking), [shown, days, isNonWorking]);
+  const peopleCount = sections.reduce((n, s) => n + s.people.length, 0);
+  const size = teamSize ?? peopleCount;
+  const gridCols = `minmax(10.5rem, 12rem) repeat(${days.length}, minmax(1.75rem, 1fr))`;
+  const n = days.length;
+
+  return (
+    <div className="settings-scrollbar overflow-x-auto" data-testid="team-calendar-scroll">
+      <div role="grid" aria-label={`Wallchart, ${title}`} aria-rowcount={peopleCount + 1} className="min-w-max text-xs" style={{ display: 'grid', gridTemplateColumns: gridCols }}>
+        {/* dates */}
+        <div role="row" style={{ display: 'contents' }}>
+          <div role="columnheader" className="sticky left-0 z-20 flex items-end border-b border-border bg-card px-3 pb-1.5 text-[11px] text-muted-foreground">
+            {size} {size === 1 ? 'person' : 'people'}
+          </div>
+          {days.map((d) => {
+            const holiday = holidayNames[d.key];
+            const isToday = d.key === today;
+            return (
+              <div
+                key={d.key}
+                role="columnheader"
+                aria-current={isToday ? 'date' : undefined}
+                title={holiday ? `${fmtDay(d.key)} · ${holiday}` : fmtDay(d.key)}
+                className={`relative border-b border-border pb-1 pt-2 text-center leading-none ${isToday ? TODAY_COL : holiday ? HOLIDAY_BG : isWeekend(d.dow) ? WEEKEND_BG : ''}`}
+              >
+                {holiday && <span className={`absolute right-1 top-1 h-1.5 w-1.5 rounded-full ${HOLIDAY_DOT}`} aria-hidden="true" />}
+                <span className="block text-[10px] text-muted-foreground">{WEEKDAY_LETTER[d.dow]}</span>
+                <span className={`mx-auto mt-1 block w-6 rounded-md py-0.5 tabular-nums ${isToday ? 'bg-primary font-semibold text-primary-foreground' : 'text-foreground/85'}`}>{d.n}</span>
+                {holiday && <span className="sr-only">{holiday}</span>}
+              </div>
+            );
+          })}
+        </div>
+        {/* who is away each day */}
+        <div role="row" style={{ display: 'contents' }} data-testid="wallchart-coverage">
+          <div role="rowheader" className="sticky left-0 z-20 bg-card px-3 py-1 text-[11px] text-muted-foreground">Away</div>
+          {days.map((d) => {
+            const out = coverage.get(d.key) || [];
+            const tone = isNonWorking(d) ? 'none' : coverageTone(out.length, size);
+            const names = out.map((e) => personName(e, byEmail)).join(', ');
+            return (
+              <div key={d.key} role="gridcell" className={`px-[3px] py-1.5 ${d.key === today ? TODAY_COL : ''}`} title={out.length ? `${out.length} away: ${names}` : 'Nobody away'}>
+                <span className={`block h-1.5 rounded-full ${COVERAGE_BG[tone]}`} aria-hidden="true" />
+                <span className="sr-only">{out.length ? `${out.length} away: ${names}` : 'Nobody away'}</span>
+              </div>
+            );
+          })}
+        </div>
+        {sections.map((section) => (
+          <div key={section.key} style={{ display: 'contents' }}>
+            {sections.length > 1 && (
+              <div role="row" style={{ display: 'contents' }}>
+                <div role="rowheader" className="sticky left-0 z-10 col-span-1 bg-card px-3 pb-1 pt-4 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">{section.label}</div>
+                <div aria-hidden="true" style={{ gridColumn: `2 / span ${n}` }} />
+              </div>
+            )}
+            {section.people.map((p) => (
+              <div key={`${section.key}-${p.email}`} role="row" style={{ display: 'contents' }} data-testid={`cal-row-${p.email}`}>
+                <div role="rowheader" className="sticky left-0 z-10 flex h-10 items-center gap-2 border-t border-border/60 bg-card px-3">
+                  <TeamAvatar email={p.email} name={p.name} byEmail={byEmail} size="h-6 w-6" />
+                  <span className="truncate text-[13px] text-foreground">{p.name}</span>
+                </div>
+                <div className="relative h-10 border-t border-border/60" style={{ gridColumn: `2 / span ${n}`, display: 'grid', gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` }}>
+                  {days.map((d) => (
+                    <div
+                      key={d.key}
+                      role="gridcell"
+                      data-testid={`cal-cell-${p.email}-${d.key}`}
+                      data-today={d.key === today ? 'true' : undefined}
+                      className={d.key === today ? TODAY_COL : holidayNames[d.key] ? HOLIDAY_BG : isWeekend(d.dow) ? WEEKEND_BG : ''}
+                    />
+                  ))}
+                  {(entriesByEmail.get(p.email) || []).flatMap((e, ei) => entrySegments(e, days, isNonWorking).map((seg) => {
+                    const look = barLook(e);
+                    const len = seg.end - seg.start + 1;
+                    const half = e.dayPart === 'am' || e.dayPart === 'pm';
+                    const leftDays = seg.start + (e.dayPart === 'pm' ? 0.5 : 0);
+                    const widthDays = half ? 0.5 : len;
+                    const hours = e.dayPart === 'hours';
+                    const words = entryWords(e, p.name);
+                    return (
+                      <span
+                        key={`${e.id ?? ei}-${seg.start}`}
+                        role="img"
+                        aria-label={words}
+                        title={words}
+                        data-testid={`cal-bar-${p.email}-${days[seg.start].key}`}
+                        data-status={e.status}
+                        className={`absolute flex items-center overflow-hidden whitespace-nowrap rounded-md px-1.5 text-[11px] font-medium ${look.className} ${hours ? 'bottom-1.5 h-1.5 px-0' : 'top-1/2 h-6 -translate-y-1/2'}`}
+                        style={{ ...look.style, left: `calc(${leftDays} * 100% / ${n} + 2px)`, width: `calc(${widthDays} * 100% / ${n} - 4px)` }}
+                      >
+                        {!hours && seg.first && len >= 2 ? entryLabel(e) : ''}
+                      </span>
+                    );
+                  }))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+      {!peopleCount && emptyText && <p className="px-3 py-8 text-center text-sm text-muted-foreground">{emptyText}</p>}
+    </div>
+  );
 }
 
 export default function TeamCalendarPanel({ me }) {
@@ -74,18 +206,10 @@ export default function TeamCalendarPanel({ me }) {
   }, [from, to, officeId]);
 
   const holidayNames = useMemo(() => data?.holidayNames || Object.fromEntries((data?.holidays || []).map((k) => [k, 'Holiday'])), [data]);
-  const isNonWorking = useCallback((d) => isWeekend(d.dow) || Boolean(holidayNames[d.key]), [holidayNames]);
   const canSeePending = Boolean(data?.canSeePending) || (data?.entries || []).some((e) => e.status === 'pending');
-  const entries = useMemo(() => (data?.entries || []).filter((e) => showPending || e.status !== 'pending'), [data, showPending]);
-  const entriesByEmail = useMemo(() => {
-    const m = new Map();
-    for (const e of entries) {
-      if (!m.has(e.email)) m.set(e.email, []);
-      m.get(e.email).push(e);
-    }
-    return m;
-  }, [entries]);
-  const coverage = useMemo(() => coverageByDay(entries, days, isNonWorking), [entries, days, isNonWorking]);
+  // 25 Nov 2026: a visit booked in Vacation Tracker and here is one bar.
+  const entries = useMemo(() => collapseDuplicateEntries(data?.entries).filter((e) => showPending || e.status !== 'pending'), [data, showPending]);
+  const entriesByEmail = useMemo(() => groupByEmail(entries), [entries]);
 
   const people = useMemo(() => {
     const all = (data?.people || []).map((p) => ({ ...p, name: personName(p.email, byEmail, p.name) }));
@@ -110,8 +234,6 @@ export default function TeamCalendarPanel({ me }) {
   const title = range === '4w'
     ? `${fmtDay(from, { month: 'short', day: 'numeric' })} – ${fmtDay(to, { month: 'short', day: 'numeric' })}`
     : `${MONTHS[cursor.month]} ${cursor.year}`;
-  const gridCols = `minmax(10.5rem, 12rem) repeat(${days.length}, minmax(1.75rem, 1fr))`;
-  const n = days.length;
 
   return (
     <div className="space-y-3">
@@ -139,104 +261,17 @@ export default function TeamCalendarPanel({ me }) {
       <ErrorNote>{error}</ErrorNote>
 
       <div className={`${CARD} hidden p-0 md:block`}>
-        <div className="settings-scrollbar overflow-x-auto" data-testid="team-calendar-scroll">
-          <div role="grid" aria-label={`Wallchart, ${title}`} aria-rowcount={people.length + 1} className="min-w-max text-xs" style={{ display: 'grid', gridTemplateColumns: gridCols }}>
-            {/* dates */}
-            <div role="row" style={{ display: 'contents' }}>
-              <div role="columnheader" className="sticky left-0 z-20 flex items-end border-b border-border bg-card px-3 pb-1.5 text-[11px] text-muted-foreground">
-                {teamSize} {teamSize === 1 ? 'person' : 'people'}
-              </div>
-              {days.map((d) => {
-                const holiday = holidayNames[d.key];
-                const isToday = d.key === today;
-                return (
-                  <div
-                    key={d.key}
-                    role="columnheader"
-                    aria-current={isToday ? 'date' : undefined}
-                    title={holiday ? `${fmtDay(d.key)} · ${holiday}` : fmtDay(d.key)}
-                    className={`relative border-b border-border pb-1 pt-2 text-center leading-none ${isToday ? TODAY_COL : holiday ? HOLIDAY_BG : isWeekend(d.dow) ? WEEKEND_BG : ''}`}
-                  >
-                    {holiday && <span className={`absolute right-1 top-1 h-1.5 w-1.5 rounded-full ${HOLIDAY_DOT}`} aria-hidden="true" />}
-                    <span className="block text-[10px] text-muted-foreground">{WEEKDAY_LETTER[d.dow]}</span>
-                    <span className={`mx-auto mt-1 block w-6 rounded-md py-0.5 tabular-nums ${isToday ? 'bg-primary font-semibold text-primary-foreground' : 'text-foreground/85'}`}>{d.n}</span>
-                    {holiday && <span className="sr-only">{holiday}</span>}
-                  </div>
-                );
-              })}
-            </div>
-            {/* who is away each day */}
-            <div role="row" style={{ display: 'contents' }} data-testid="wallchart-coverage">
-              <div role="rowheader" className="sticky left-0 z-20 bg-card px-3 py-1 text-[11px] text-muted-foreground">Away</div>
-              {days.map((d) => {
-                const out = coverage.get(d.key) || [];
-                const tone = isNonWorking(d) ? 'none' : coverageTone(out.length, teamSize);
-                const names = out.map((e) => personName(e, byEmail)).join(', ');
-                return (
-                  <div key={d.key} role="gridcell" className={`px-[3px] py-1.5 ${d.key === today ? TODAY_COL : ''}`} title={out.length ? `${out.length} away: ${names}` : 'Nobody away'}>
-                    <span className={`block h-1.5 rounded-full ${COVERAGE_BG[tone]}`} aria-hidden="true" />
-                    <span className="sr-only">{out.length ? `${out.length} away: ${names}` : 'Nobody away'}</span>
-                  </div>
-                );
-              })}
-            </div>
-            {sections.map((section) => (
-              <div key={section.key} style={{ display: 'contents' }}>
-                {sections.length > 1 && (
-                  <div role="row" style={{ display: 'contents' }}>
-                    <div role="rowheader" className="sticky left-0 z-10 col-span-1 bg-card px-3 pb-1 pt-4 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">{section.label}</div>
-                    <div aria-hidden="true" style={{ gridColumn: `2 / span ${n}` }} />
-                  </div>
-                )}
-                {section.people.map((p) => (
-                  <div key={`${section.key}-${p.email}`} role="row" style={{ display: 'contents' }} data-testid={`cal-row-${p.email}`}>
-                    <div role="rowheader" className="sticky left-0 z-10 flex h-10 items-center gap-2 border-t border-border/60 bg-card px-3">
-                      <TeamAvatar email={p.email} name={p.name} byEmail={byEmail} size="h-6 w-6" />
-                      <span className="truncate text-[13px] text-foreground">{p.name}</span>
-                    </div>
-                    <div className="relative h-10 border-t border-border/60" style={{ gridColumn: `2 / span ${n}`, display: 'grid', gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` }}>
-                      {days.map((d) => (
-                        <div
-                          key={d.key}
-                          role="gridcell"
-                          data-testid={`cal-cell-${p.email}-${d.key}`}
-                          data-today={d.key === today ? 'true' : undefined}
-                          className={d.key === today ? TODAY_COL : holidayNames[d.key] ? HOLIDAY_BG : isWeekend(d.dow) ? WEEKEND_BG : ''}
-                        />
-                      ))}
-                      {(entriesByEmail.get(p.email) || []).flatMap((e, ei) => entrySegments(e, days, isNonWorking).map((seg) => {
-                        const look = barLook(e);
-                        const len = seg.end - seg.start + 1;
-                        const half = e.dayPart === 'am' || e.dayPart === 'pm';
-                        const leftDays = seg.start + (e.dayPart === 'pm' ? 0.5 : 0);
-                        const widthDays = half ? 0.5 : len;
-                        const hours = e.dayPart === 'hours';
-                        const words = entryWords(e, p.name);
-                        return (
-                          <span
-                            key={`${e.id ?? ei}-${seg.start}`}
-                            role="img"
-                            aria-label={words}
-                            title={words}
-                            data-testid={`cal-bar-${p.email}-${days[seg.start].key}`}
-                            data-status={e.status}
-                            className={`absolute flex items-center overflow-hidden whitespace-nowrap rounded-md px-1.5 text-[11px] font-medium ${look.className} ${hours ? 'bottom-1.5 h-1.5 px-0' : 'top-1/2 h-6 -translate-y-1/2'}`}
-                            style={{ ...look.style, left: `calc(${leftDays} * 100% / ${n} + 2px)`, width: `calc(${widthDays} * 100% / ${n} - 4px)` }}
-                          >
-                            {!hours && seg.first && len >= 2 ? (e.label || 'Away') : ''}
-                          </span>
-                        );
-                      }))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
-          {!people.length && !loading && (
-            <p className="px-3 py-8 text-center text-sm text-muted-foreground">{onlyAway ? 'Nobody is away in this period.' : 'No people to show.'}</p>
-          )}
-        </div>
+        <Wallchart
+          title={title}
+          days={days}
+          sections={sections}
+          entries={entries}
+          holidayNames={holidayNames}
+          today={today}
+          byEmail={byEmail}
+          teamSize={teamSize}
+          emptyText={loading ? '' : onlyAway ? 'Nobody is away in this period.' : 'No people to show.'}
+        />
       </div>
 
       <div className={`${CARD} md:hidden`}>

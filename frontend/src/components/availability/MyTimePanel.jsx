@@ -85,7 +85,7 @@ export default function MyTimePanel({ me, onChanged, toast, bookType = null }) {
         </div>
         <div className="min-w-0">
           <ErrorNote>{error}</ErrorNote>
-          <MyRequestsList requests={requests} typeById={typeById} onCancel={cancel} onEdit={startEditing} editingId={editing?.id ?? null} />
+          <MyRequestsList requests={requests} typeById={typeById} onCancel={cancel} onEdit={startEditing} editingId={editing?.id ?? null} offices={me.offices || []} />
         </div>
       </div>
     </div>

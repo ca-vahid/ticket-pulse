@@ -3,7 +3,7 @@ import { ChevronDown, Loader2 } from 'lucide-react';
 import { PersonAvatar } from '../tickets/ticketUi';
 import { availabilityAPI } from '../../services/api';
 import {
-  BTN_QUIET, ColorSwatch, ErrorNote, Field, INPUT, Loading, REQUEST_STATUS, SectionTitle, StatusDot, fmtAmount, fmtRange, nameFromEmail,
+  BTN_QUIET, ColorSwatch, ErrorNote, Field, INPUT, Loading, REQUEST_STATUS, SectionTitle, StatusDot, fmtAmount, fmtRange, leaveLabel, nameFromEmail, sitePlace,
 } from './availabilityUi';
 
 /**
@@ -77,7 +77,7 @@ function eventDetail(e) {
   return d.reason || d.note || d.error || null;
 }
 
-function HistoryRow({ r, type, nameOf }) {
+function HistoryRow({ r, type, nameOf, offices = [] }) {
   const [open, setOpen] = useState(false);
   const name = r.name || nameOf(r.email);
   const status = REQUEST_STATUS[r.status] || { tone: 'grey', label: r.status };
@@ -95,7 +95,7 @@ function HistoryRow({ r, type, nameOf }) {
           </span>
         </span>
         <span className="min-w-[13rem] flex-[2] text-sm">
-          <span className="flex items-center gap-1.5 text-foreground"><ColorSwatch color={type?.color} />{type?.name || 'Time away'} · {fmtAmount(r, type?.unit)}</span>
+          <span className="flex items-center gap-1.5 text-foreground"><ColorSwatch color={type?.color} />{leaveLabel(type?.name, sitePlace(r, offices))} · {fmtAmount(r, type?.unit)}</span>
           <span className="block text-foreground/85">{fmtRange(r)}</span>
         </span>
         <span className="min-w-[10rem] flex-1 space-y-1">
@@ -223,7 +223,7 @@ export default function RequestHistoryPanel({ me, config }) {
             <p className="py-6 text-sm text-muted-foreground">No requests match.</p>
           ) : (
             <ul className="divide-y divide-border">
-              {rows.map((r) => <HistoryRow key={r.id} r={r} type={typeById.get(r.leaveTypeId)} nameOf={nameOf} />)}
+              {rows.map((r) => <HistoryRow key={r.id} r={r} type={typeById.get(r.leaveTypeId)} nameOf={nameOf} offices={config?.offices || me?.offices || []} />)}
             </ul>
           )}
         </>

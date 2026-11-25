@@ -3,7 +3,7 @@ import { AlertTriangle, CheckCircle2, Clock3, Loader2, Pencil, XCircle } from 'l
 import { availabilityAPI } from '../../services/api';
 import {
   BTN_LINK, BTN_PRIMARY, BTN_QUIET, COLOR_DOT, COLOR_FILL, ErrorNote, Field, INPUT, TEXTAREA, Toggle,
-  addDaysKey, fmtDay, fmtRange, minuteToTime, nextWorkdayKey, parseDay, timeToMinute, todayKey, trimNum,
+  addDaysKey, fmtDay, fmtRange, isSiteVisitType, leaveLabel, minuteToTime, nextWorkdayKey, parseDay, sitePlace, timeToMinute, todayKey, trimNum,
 } from './availabilityUi';
 
 /**
@@ -26,6 +26,8 @@ const DAY_PARTS = [
 ];
 
 const STRIP_MAX = 14;
+const OTHER_SITE = 'other';
+const SITE_LOCATION_MAX = 160;
 
 const emptyForm = (typeId) => ({
   leaveTypeId: typeId ? String(typeId) : '',
@@ -35,6 +37,8 @@ const emptyForm = (typeId) => ({
   startTime: '09:00',
   endTime: '10:00',
   note: '',
+  siteOfficeId: '',
+  siteLocation: '',
   wantsOutlookEvent: false,
   wantsAutoReply: false,
 });
@@ -49,10 +53,25 @@ export function formFromRequest(r) {
     startTime: r.startMinute != null ? minuteToTime(r.startMinute) : '09:00',
     endTime: r.endMinute != null ? minuteToTime(r.endMinute) : '10:00',
     note: r.note || '',
+    siteOfficeId: r.siteOfficeId ? String(r.siteOfficeId) : (r.siteLocation ? OTHER_SITE : ''),
+    siteLocation: r.siteLocation || '',
     wantsOutlookEvent: Boolean(r.wantsOutlookEvent),
     wantsAutoReply: Boolean(r.wantsAutoReply),
   };
 }
+
+/** The "Which office?" answer as the API takes it: { siteOfficeId } or { siteLocation }, or nothing. */
+export function siteBody(form, type) {
+  if (!isSiteVisitType(type)) return {};
+  if (form.siteOfficeId === OTHER_SITE) {
+    const text = String(form.siteLocation || '').trim();
+    return text ? { siteLocation: text } : {};
+  }
+  return form.siteOfficeId ? { siteOfficeId: Number(form.siteOfficeId) } : {};
+}
+
+/** Is the site visit's place answered? */
+export const siteAnswered = (form) => (form.siteOfficeId === OTHER_SITE ? Boolean(String(form.siteLocation || '').trim()) : Boolean(form.siteOfficeId));
 
 export function buildRequestBody(form, type) {
   const isHours = type?.unit === 'hour';
@@ -62,12 +81,54 @@ export function buildRequestBody(form, type) {
     endDate: isHours ? form.startDate : form.endDate,
     dayPart: isHours ? 'hours' : (type?.allowHalfDays ? form.dayPart : 'full'),
     note: form.note.trim() || undefined,
+    ...siteBody(form, type),
   };
   if (isHours) {
     body.startMinute = timeToMinute(form.startTime);
     body.endMinute = timeToMinute(form.endTime);
   }
   return body;
+}
+
+/**
+ * "Which office?" (25 Nov 2026) for a site visit: a plain select of the active
+ * offices by name, then "Other site…", which opens a short text box. Props in,
+ * so it renders on its own.
+ */
+export function SiteOfficeField({ offices = [], value = '', location = '', onChange, required = true, keepOfficeId = null }) {
+  const choices = (offices || [])
+    .filter((o) => o.isActive !== false || String(o.id) === String(keepOfficeId))
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  const other = value === OTHER_SITE;
+  return (
+    <div className="space-y-1.5" data-testid="site-office-field">
+      <Field label={required ? 'Which office? (required)' : 'Which office?'} hint="So the team and the assigner know where you are that day.">
+        <select
+          className={INPUT}
+          value={value}
+          onChange={(e) => onChange?.({ siteOfficeId: e.target.value, ...(e.target.value === OTHER_SITE ? {} : { siteLocation: '' }) })}
+          aria-label="Which office?"
+          aria-required={required}
+        >
+          <option value="">Pick an office…</option>
+          {choices.map((o) => <option key={o.id} value={String(o.id)}>{o.name}</option>)}
+          <option value={OTHER_SITE}>Other site…</option>
+        </select>
+      </Field>
+      {other && (
+        <input
+          type="text"
+          className={INPUT}
+          value={location}
+          onChange={(e) => onChange?.({ siteOfficeId: OTHER_SITE, siteLocation: e.target.value })}
+          aria-label="Which site"
+          placeholder="Client site, city or address"
+          maxLength={SITE_LOCATION_MAX}
+          aria-required={required}
+        />
+      )}
+    </div>
+  );
 }
 
 /** Monday to Friday of next week. */
@@ -178,8 +239,20 @@ export default function BookTimeForm({ me, onBooked, toast, editing = null, onSt
 
   const valid = Boolean(type && form.startDate && (isHours || (form.endDate && form.endDate >= form.startDate))
     && (!isHours || (form.startTime && form.endTime && form.endTime > form.startTime)));
+  // "Which office?" (25 Nov 2026): required for a site visit when booking, and
+  // when a change touches the type or the dates (an older booking without one
+  // can still have its note changed).
+  const onSite = isSiteVisitType(type);
+  const siteRequired = onSite && (!original || original.leaveTypeId !== form.leaveTypeId
+    || original.startDate !== form.startDate || original.endDate !== form.endDate);
+  const siteOk = !siteRequired || siteAnswered(form);
   const body = useMemo(() => (type ? buildRequestBody(form, type) : null), [form, type]);
   const bodyKey = JSON.stringify(body);
+  // The dry run does not depend on the place, so typing a site does not re-ask it.
+  const previewKey = useMemo(() => {
+    if (!body) return 'null';
+    return JSON.stringify(Object.fromEntries(Object.entries(body).filter(([k]) => k !== 'siteOfficeId' && k !== 'siteLocation')));
+  }, [body]);
   const originalKey = useMemo(() => {
     if (!original) return null;
     const t = types.find((x) => String(x.id) === original.leaveTypeId);
@@ -194,17 +267,18 @@ export default function BookTimeForm({ me, onBooked, toast, editing = null, onSt
     const mine = ++seq.current;
     setPreviewing(true);
     const t = setTimeout(() => {
-      availabilityAPI.preview({ ...JSON.parse(bodyKey), ...(editing ? { requestId: editing.id } : {}) })
+      availabilityAPI.preview({ ...JSON.parse(previewKey), ...(editing ? { requestId: editing.id } : {}) })
         .then((res) => { if (mine === seq.current) { setPreview(res?.data || null); setPreviewError(null); } })
         .catch((err) => { if (mine === seq.current) { setPreview(null); setPreviewError(err?.message || 'Could not check this request'); } })
         .finally(() => { if (mine === seq.current) setPreviewing(false); });
     }, 350);
     return () => clearTimeout(t);
-  }, [bodyKey, valid, editing]);
+  }, [previewKey, valid, editing]);
 
   const submit = async (e) => {
     e.preventDefault();
     if (!valid || saving || unchanged) return;
+    if (!siteOk) { setSubmitError(form.siteOfficeId === OTHER_SITE ? 'Say which site you are visiting' : 'Pick which office the site visit is at'); return; }
     if (type?.requiresNote && !form.note.trim()) { setSubmitError(`${type.name} needs a note`); return; }
     setSaving(true);
     setSubmitError(null);
@@ -255,7 +329,7 @@ export default function BookTimeForm({ me, onBooked, toast, editing = null, onSt
             <Pencil className="h-4 w-4 text-primary" aria-hidden="true" />Change your request
           </h2>
           <p className="text-xs text-muted-foreground">
-            Now: {types.find((t) => t.id === editing.leaveTypeId)?.name || 'Time away'}, {fmtRange(editing)}
+            Now: {leaveLabel(types.find((t) => t.id === editing.leaveTypeId)?.name, sitePlace(editing, me.offices))}, {fmtRange(editing)}
             {waitingOn.length > 0 && ` · waiting for ${waitingOn.join(' or ')}`}.
             {' '}It stays the same request; the rules check it again and your approvers see what changed.
           </p>
@@ -285,6 +359,17 @@ export default function BookTimeForm({ me, onBooked, toast, editing = null, onSt
         </div>
         {stays && <p className="mt-1.5 text-xs text-muted-foreground">Shows on the team calendar; you stay available.</p>}
       </fieldset>
+
+      {onSite && (
+        <SiteOfficeField
+          offices={me.offices || []}
+          value={form.siteOfficeId}
+          location={form.siteLocation}
+          onChange={set}
+          required={siteRequired}
+          keepOfficeId={editing?.siteOfficeId ?? null}
+        />
+      )}
 
       <fieldset className="space-y-2" aria-labelledby="av-when-label">
         <div className="flex flex-wrap items-baseline justify-between gap-x-2">
@@ -363,7 +448,7 @@ export default function BookTimeForm({ me, onBooked, toast, editing = null, onSt
       <ErrorNote>{submitError}</ErrorNote>
 
       <div className="flex flex-wrap items-center justify-end gap-2">
-        {editing && unchanged && <span className="mr-auto text-xs text-muted-foreground">Change the type, dates or note to save.</span>}
+        {editing && unchanged && <span className="mr-auto text-xs text-muted-foreground">Change the type, dates, place or note to save.</span>}
         {editing && (
           <button type="button" className={BTN_QUIET} onClick={() => onStopEditing?.()} disabled={saving}>Keep it as it was</button>
         )}

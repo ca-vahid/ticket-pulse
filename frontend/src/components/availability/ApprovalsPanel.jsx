@@ -3,7 +3,7 @@ import { Check, Loader2, X } from 'lucide-react';
 import { PersonAvatar } from '../tickets/ticketUi';
 import { availabilityAPI } from '../../services/api';
 import {
-  BTN_PRIMARY, BTN_QUIET, ColorSwatch, ErrorNote, Loading, SectionTitle, TEXTAREA, fmtAmount, fmtRange, nameFromEmail,
+  BTN_PRIMARY, BTN_QUIET, ColorSwatch, ErrorNote, Loading, SectionTitle, TEXTAREA, fmtAmount, fmtRange, leaveLabel, nameFromEmail, sitePlace,
 } from './availabilityUi';
 
 /**
@@ -18,7 +18,7 @@ import {
  * the team and the approvers named.
  */
 
-function ApprovalRow({ r, type, nameOf, onDecided }) {
+function ApprovalRow({ r, type, nameOf, onDecided, offices = [] }) {
   const [denying, setDenying] = useState(false);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(null);
@@ -51,7 +51,7 @@ function ApprovalRow({ r, type, nameOf, onDecided }) {
           </span>
         </span>
         <span className="min-w-[14rem] flex-[2] text-sm">
-          <span className="flex items-center gap-1.5 text-foreground"><ColorSwatch color={type?.color} />{type?.name || 'Time away'} · {fmtAmount(r, type?.unit)}</span>
+          <span className="flex items-center gap-1.5 text-foreground"><ColorSwatch color={type?.color} />{leaveLabel(type?.name, sitePlace(r, offices))} · {fmtAmount(r, type?.unit)}</span>
           <span className="block text-foreground/85">{fmtRange(r)}</span>
         </span>
         <span className="ml-auto flex items-center gap-1">
@@ -133,7 +133,7 @@ export default function ApprovalsPanel({ me, nameByEmail = null, toast, onChange
           <p className="py-6 text-sm text-muted-foreground">Nothing waiting for you.</p>
         ) : (
           <ul className="divide-y divide-border">
-            {mine.map((r) => <ApprovalRow key={r.id} r={r} type={typeById.get(r.leaveTypeId)} nameOf={nameOf} onDecided={decided} />)}
+            {mine.map((r) => <ApprovalRow key={r.id} r={r} type={typeById.get(r.leaveTypeId)} nameOf={nameOf} onDecided={decided} offices={me.offices} />)}
           </ul>
         )}
       </section>
@@ -141,7 +141,7 @@ export default function ApprovalsPanel({ me, nameByEmail = null, toast, onChange
         <section aria-label="Waiting on other approvers">
           <SectionTitle hint="Not yours to decide. As a Ticket Pulse admin you can step in when an approver is away.">Waiting on other approvers</SectionTitle>
           <ul className="divide-y divide-border">
-            {others.map((r) => <ApprovalRow key={r.id} r={r} type={typeById.get(r.leaveTypeId)} nameOf={nameOf} onDecided={decided} />)}
+            {others.map((r) => <ApprovalRow key={r.id} r={r} type={typeById.get(r.leaveTypeId)} nameOf={nameOf} onDecided={decided} offices={me.offices} />)}
           </ul>
         </section>
       )}

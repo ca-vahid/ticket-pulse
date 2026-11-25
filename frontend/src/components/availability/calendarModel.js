@@ -90,6 +90,20 @@ export function coverageByDay(entries, days, isNonWorking = () => false) {
   return new Map([...map.entries()].map(([k, v]) => [k, [...v]]));
 }
 
+/**
+ * One visit, one bar (25 Nov 2026): an entry imported from Vacation Tracker
+ * that a Vacation Pulse booking of the same person and type already covers
+ * is the same leave booked twice — it is dropped. The server does this too;
+ * this keeps the views right whatever it sends.
+ */
+export function collapseDuplicateEntries(entries) {
+  const list = entries || [];
+  const own = list.filter((e) => e.source !== 'vacation_tracker');
+  const sameType = (a, b) => (a.leaveTypeId != null && b.leaveTypeId != null ? a.leaveTypeId === b.leaveTypeId : a.label === b.label);
+  return list.filter((e) => e.source !== 'vacation_tracker' || !own.some((o) => o.email === e.email && sameType(o, e)
+    && o.startDate <= e.startDate && o.endDate >= e.endDate && (o.status === e.status || o.status === 'approved')));
+}
+
 /** none / light / medium / heavy, by the share of the team away. */
 export function coverageTone(count, size) {
   if (!count || !size) return 'none';

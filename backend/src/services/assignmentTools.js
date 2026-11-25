@@ -16,6 +16,7 @@ import { countsForAgentMetrics, withAgentMetricTickets } from '../utils/autoHelp
 import { requesterTitle } from '../utils/requesterTitle.js';
 import { countAssignedToday } from './assignmentTodayCount.js';
 import { isSiteVisitLeave } from '../utils/leaveKinds.js';
+import { collapseLeaveRows } from './availability/siteVisit.js';
 
 // Workload scans historically match legacy row variants too (lowercase labels
 // and raw FS status ints from very old syncs). Phase 8b: the canonical pair is
@@ -715,6 +716,49 @@ function buildHalfDayAvailabilityNote(category, leave, nowMinutes) {
   return `${verb} (off ${window}) — leave window already ended; available.`;
 }
 
+/**
+ * A site visit that names one of our offices (25 Nov 2026): { location,
+ * timezone } from the Vacation Pulse booking, copied onto the leave row when
+ * it is projected. A visit with no office, or an "Other site" text (no time
+ * zone), returns null and keeps the person's own location. The caller has
+ * already decided the leave is a site visit.
+ */
+function siteOfficeOf(leave) {
+  if (!leave) return null;
+  const location = String(leave.siteLocation || '').trim();
+  const timezone = String(leave.siteTimezone || '').trim();
+  return location && timezone ? { location, timezone } : null;
+}
+
+/** The agent's row while at a site office: its name, its time zone, and their shift in that time zone. */
+function atSiteOffice(tech, hqTimezone, agentInfo, site) {
+  const shift = getAgentShiftStatus({ ...tech, timezone: site.timezone }, hqTimezone);
+  return {
+    ...agentInfo,
+    location: site.location,
+    homeLocation: agentInfo.location,
+    siteLocation: site.location,
+    timezone: shift.timezone,
+    localDate: shift.localDate,
+    localDayOfWeek: shift.localDayOfWeek,
+    localDateTime: shift.localDateTime,
+    localTime: shift.localTime,
+    onShift: shift.onShift,
+    shiftStatus: shift.shiftNote,
+  };
+}
+
+/** Today's site office per technician id, from their leave rows (find_matching_agents, risk signals). */
+function siteOfficesByTech(leaves = []) {
+  const out = new Map();
+  for (const l of leaves) {
+    if (out.has(l.technicianId) || !isSiteVisitLeave(l)) continue;
+    const site = siteOfficeOf(l);
+    if (site) out.set(l.technicianId, site);
+  }
+  return out;
+}
+
 async function getAgentAvailability(workspaceId) {
   const workspace = await prisma.workspace.findUnique({
     where: { id: workspaceId },
@@ -741,8 +785,11 @@ async function getAgentAvailability(workspaceId) {
   // One row per technician for today. If the same person has both a half-day
   // OFF and a half-day WFH on the same day (rare but possible), keep both —
   // we store an array per tech and let the renderer split them.
+  // 25 Nov 2026: the same visit booked in Vacation Tracker and in Vacation
+  // Pulse arrives as two rows; collapseLeaveRows keeps one (the Vacation
+  // Pulse row, which knows the site office).
   const leavesByTech = {};
-  for (const l of leaves) {
+  for (const l of collapseLeaveRows(leaves || [])) {
     if (!leavesByTech[l.technicianId]) leavesByTech[l.technicianId] = [];
     leavesByTech[l.technicianId].push({
       leaveType: l.leaveTypeName,
@@ -752,6 +799,8 @@ async function getAgentAvailability(workspaceId) {
       halfDayPart: l.halfDayPart || null,
       startMinute: l.startMinute ?? null,
       endMinute: l.endMinute ?? null,
+      siteLocation: l.siteLocation || null,
+      siteTimezone: l.siteTimezone || null,
     });
   }
 
@@ -807,10 +856,19 @@ async function getAgentAvailability(workspaceId) {
       } else if (otherLeave) {
         off.push({ ...agentInfo, leaveType: otherLeave.leaveType, note: `Leave type: ${otherLeave.category} — treat as unavailable.` });
       } else if (siteVisitLeave) {
-        inOffice.push({
+        // 25 Nov 2026: a visit that names one of our offices puts the person
+        // there for the day (location, time zone, local time and shift).
+        const site = siteOfficeOf(siteVisitLeave);
+        inOffice.push(site ? {
+          ...atSiteOffice(t, hqTimezone, agentInfo, site),
+          siteVisit: true,
+          leaveType: siteVisitLeave.leaveType,
+          note: `On a site visit in ${site.location} today — in the office there; good for on-site work in ${site.location}`,
+        } : {
           ...agentInfo,
           siteVisit: true,
           leaveType: siteVisitLeave.leaveType,
+          ...(siteVisitLeave.siteLocation ? { siteLocation: siteVisitLeave.siteLocation } : {}),
           note: 'On a site visit today — working, available for assignment (may be at another office)',
         });
       } else if (ignored) {
@@ -824,13 +882,17 @@ async function getAgentAvailability(workspaceId) {
       const window = `${formatMinutes(leave.startMinute)}-${formatMinutes(leave.endMinute)}`;
       if (leave.siteVisit) {
         // A site-visit half day is not a half day off: working, available.
+        const site = siteOfficeOf(leave);
         inOffice.push({
-          ...agentInfo,
+          ...(site ? atSiteOffice(t, hqTimezone, agentInfo, site) : agentInfo),
           siteVisit: true,
           leaveType: leave.leaveType,
           halfDayPart: leave.halfDayPart,
           leaveWindow: window,
-          note: `On a site visit ${window} — working, available`,
+          ...(!site && leave.siteLocation ? { siteLocation: leave.siteLocation } : {}),
+          note: site
+            ? `On a site visit in ${site.location} ${window} — in the office there; good for on-site work in ${site.location} during that window`
+            : `On a site visit ${window} — working, available`,
         });
         continue;
       }
@@ -1628,6 +1690,9 @@ async function getAssignmentRiskSignals(workspaceId, input = {}) {
     leaveMap.get(leave.technicianId).push(leave);
   }
 
+  // 25 Nov 2026: where a person on a site visit to one of our offices is today.
+  const siteByTech = siteOfficesByTech(leaves);
+
   const episodesByTech = new Map();
   for (const episode of episodes) {
     if (!episodesByTech.has(episode.technicianId)) episodesByTech.set(episode.technicianId, []);
@@ -1668,7 +1733,8 @@ async function getAssignmentRiskSignals(workspaceId, input = {}) {
     const techLeaves = leaveMap.get(tech.id) || [];
     const fullDayOff = techLeaves.some((leave) => leave.isFullDay !== false && leave.category === 'OFF');
     const fullDayWfh = techLeaves.some((leave) => leave.isFullDay !== false && leave.category === 'WFH');
-    const shift = getAgentShiftStatus(tech, timezone);
+    const site = siteByTech.get(tech.id) || null;
+    const shift = getAgentShiftStatus(site ? { ...tech, timezone: site.timezone } : tech, timezone);
     const openTickets = openMap[tech.id] || 0;
     const todayAssigned = todayMap.get(tech.id) || 0;
 
@@ -1697,7 +1763,8 @@ async function getAssignmentRiskSignals(workspaceId, input = {}) {
     return {
       techId: tech.id,
       techName: tech.name,
-      location: tech.location || 'Not set',
+      location: (site ? site.location : tech.location) || 'Not set',
+      ...(site ? { siteVisit: true, homeLocation: tech.location || 'Not set' } : {}),
       sameTicketRejected,
       sameDayRejectedCount: sameDayEpisodes.length,
       sameShiftRejectedCount: sameDayEpisodes.length,
@@ -1904,6 +1971,9 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
     if (isSiteVisitLeave(l)) continue;
     leaveMap[l.technicianId] = l.category;
   }
+  // 25 Nov 2026: on a site visit to one of our offices, the person is in that
+  // office today: location matching and their local time use it.
+  const siteByTech = siteOfficesByTech(leaves);
 
   const compMap = {};
   for (const c of competencies) {
@@ -1953,15 +2023,18 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
 
     const open = openMap[t.id] || 0;
     const today = todayMap.get(t.id) || 0;
+    const site = siteByTech.get(t.id) || null;
+    const where = site ? site.location : t.location;
     const locationMatch = preferred_location
-      ? (t.location || '').toLowerCase().includes(preferred_location.toLowerCase())
+      ? (where || '').toLowerCase().includes(preferred_location.toLowerCase())
       : null;
 
-    const shift = getAgentShiftStatus(t, timezone);
+    const shift = getAgentShiftStatus(site ? { ...t, timezone: site.timezone } : t, timezone);
     results.push({
       techId: t.id,
       techName: t.name,
-      location: t.location || 'Not set',
+      location: where || 'Not set',
+      ...(site ? { siteVisit: true, homeLocation: t.location || 'Not set', siteNote: `On a site visit in ${site.location} today` } : {}),
       timezone: shift.timezone,
       localDate: shift.localDate,
       localDayOfWeek: shift.localDayOfWeek,
