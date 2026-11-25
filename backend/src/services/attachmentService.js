@@ -520,6 +520,36 @@ class AttachmentService {
     await this._container().getBlockBlobClient(attachment.blobName).deleteIfExists();
     await prisma.ticketAttachment.delete({ where: { id: attachment.id } });
     logger.info(`Attachment removed: ${attachment.fileName} (id ${attachment.id}) by ${actor?.email || 'unknown'}`);
+    // 25 Nov 2026: a removal leaves a History line ("Vahid Haeri removed an attachment
+    // · teams-picture-1.png") and refreshes open copies of the ticket. Both are best-effort:
+    // the file is already gone, so neither may fail the request.
+    const actorName = actor?.name || actor?.email || 'Someone';
+    try {
+      await prisma.ticketActivity.create({
+        data: {
+          ticketId,
+          activityType: 'attachment_removed',
+          performedBy: actorName,
+          performedAt: new Date(),
+          details: {
+            attachmentId: attachment.id,
+            fileName: attachment.displayName || attachment.fileName,
+            originalName: attachment.fileName,
+            sizeBytes: attachment.sizeBytes ?? null,
+            actorName,
+            actorEmail: actor?.email || null,
+            actorKind: 'human',
+            source: 'ticketpulse_native',
+          },
+        },
+      });
+    } catch (err) {
+      logger.warn(`Attachment ${attachment.id} removed, but its history row failed: ${err.message}`);
+    }
+    try {
+      const { sseManager } = await import('../routes/sse.routes.js');
+      sseManager.broadcast('ticket-change', { action: 'attachment_removed', workspaceId, ticketId, attachmentId: attachment.id }, workspaceId);
+    } catch { /* live refresh is a nicety */ }
     return { removed: true };
   }
 }

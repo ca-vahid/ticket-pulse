@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Download, FileStack, FileText, Image as ImageIcon, Inbox, LayoutGrid, List, Loader2, MessageSquare, Paperclip, Send, StickyNote, Upload } from 'lucide-react';
+import { Download, FileStack, FileText, Image as ImageIcon, Inbox, LayoutGrid, List, Loader2, MessageSquare, Paperclip, Send, StickyNote, Trash2, Upload } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
 import { formatBytes, formatDayTime } from './ticketUi';
 import { DownloadAllButton, DownloadAllPanel } from './AttachmentsDownloadAll';
@@ -77,17 +77,76 @@ export default function TicketAttachmentsTab({
   onMerged = null, loadPdfLib,
   // 4.4.08: agents who can edit the ticket may edit or revert a file's name.
   canRename = false, onRenamed = null,
+  // 25 Nov 2026: the uploader or an admin may remove a file here (the side panel's card, which
+  // had the only Remove, is hidden in some layouts). canRemove(a) decides per file.
+  canRemove = null, onRemoved = null,
 }) {
   // A rename shows straight away; the ticket's next load carries it for real.
   const [nameOverrides, setNameOverrides] = useState({});
   useEffect(() => { setNameOverrides((o) => (Object.keys(o).length ? {} : o)); }, [attachmentsIn]);
+  // A removed file leaves the tab at once; the ticket's reload confirms it.
+  const [removedIds, setRemovedIds] = useState(() => new Set());
+  useEffect(() => { setRemovedIds((s) => (s.size ? new Set() : s)); }, [attachmentsIn]);
   const attachments = useMemo(
-    () => attachmentsIn.map((a) => (nameOverrides[a.id] ? { ...a, ...nameOverrides[a.id] } : a)),
-    [attachmentsIn, nameOverrides],
+    () => attachmentsIn
+      .filter((a) => !removedIds.has(a.id))
+      .map((a) => (nameOverrides[a.id] ? { ...a, ...nameOverrides[a.id] } : a)),
+    [attachmentsIn, nameOverrides, removedIds],
   );
   const nameChanged = (id, fields, data) => {
     setNameOverrides((o) => ({ ...o, [id]: fields }));
     onRenamed?.(id, fields, data);
+  };
+  const [confirmRemoveId, setConfirmRemoveId] = useState(null);
+  const [removingId, setRemovingId] = useState(null);
+  const [removeError, setRemoveError] = useState(null); // { id, text }
+  const mayRemove = (a) => typeof canRemove === 'function' && canRemove(a) === true;
+  const removeFile = async (a) => {
+    if (removingId) return;
+    setRemovingId(a.id);
+    setRemoveError(null);
+    try {
+      await ticketsAPI.removeAttachment(ticketId, a.id);
+      setRemovedIds((s) => new Set(s).add(a.id));
+      setSelectedIds((ids) => ids.filter((id) => id !== a.id));
+      setConfirmRemoveId(null);
+      onRemoved?.(a);
+    } catch (err) {
+      const why = err?.response?.data?.message || err?.message || 'unknown error';
+      setRemoveError({ id: a.id, text: `Could not remove it: ${String(why).replace(/[.!]+$/, '')}.` });
+    } finally {
+      setRemovingId(null);
+    }
+  };
+  const removeButton = (a, size = 'h-3.5 w-3.5') => (mayRemove(a) ? (
+    <button type="button" onClick={() => { setRemoveError(null); setConfirmRemoveId(a.id); }} disabled={Boolean(removingId)}
+      aria-label={`Remove ${attachmentName(a)}`} title="Remove"
+      className="tp-focus-ring flex-none rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive disabled:opacity-60">
+      <Trash2 className={size} aria-hidden="true" />
+    </button>
+  ) : null);
+  // Asked in place, never a browser dialog: removal deletes the stored file for good.
+  const removeConfirm = (a, className = '') => {
+    if (confirmRemoveId !== a.id && removeError?.id !== a.id) return null;
+    if (confirmRemoveId !== a.id) return <p role="alert" className={`text-[11px] text-destructive ${className}`}>{removeError.text}</p>;
+    const busy = removingId === a.id;
+    return (
+      <div role="alertdialog" aria-label={`Remove ${attachmentName(a)}?`} className={`border-l-2 border-destructive/60 pl-2 ${className}`} data-testid="attachment-remove-confirm">
+        <p className="text-[11px] text-foreground">Remove it for good? It can&rsquo;t be restored.</p>
+        {removeError?.id === a.id && <p role="alert" className="text-[11px] text-destructive">{removeError.text}</p>}
+        <span className="mt-1 flex flex-wrap items-center gap-2">
+          <button type="button" onClick={() => removeFile(a)} disabled={busy}
+            className="tp-focus-ring inline-flex items-center gap-1 rounded bg-destructive px-2 py-0.5 text-[11px] font-semibold text-destructive-foreground hover:bg-destructive/90 disabled:opacity-60">
+            {busy && <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />}
+            Remove
+          </button>
+          <button type="button" onClick={() => { setConfirmRemoveId(null); setRemoveError(null); }} disabled={busy}
+            className="tp-focus-ring rounded text-[11px] font-semibold text-muted-foreground hover:text-foreground disabled:opacity-60">
+            Cancel
+          </button>
+        </span>
+      </div>
+    );
   };
   const [filter, setFilter] = useState('all');
   const [view, setView] = useState(() => { try { return localStorage.getItem('tp_attach_view') || 'grid'; } catch { return 'grid'; } });
@@ -272,7 +331,9 @@ export default function TicketAttachmentsTab({
                   <button type="button" onClick={() => onDownload?.(a)} aria-label={`Download ${attachmentName(a)}`} title="Download" className="tp-focus-ring ml-auto rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground">
                     <Download className="h-3.5 w-3.5" aria-hidden="true" />
                   </button>
+                  {removeButton(a)}
                 </span>
+                {removeConfirm(a, 'mt-1.5')}
               </div>
             </li>
           ))}
@@ -280,7 +341,7 @@ export default function TicketAttachmentsTab({
       ) : (
         <ul className="mt-2 divide-y divide-border">
           {shown.map(({ a, kind, who, at, entryId }) => (
-            <li key={a.id} className="flex items-center gap-3 py-2">
+            <li key={a.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2">
               {selectBox(a)}
               {isImage(a) ? <ImageIcon className="h-4 w-4 flex-none text-muted-foreground/75" aria-hidden="true" /> : <Paperclip className="h-4 w-4 flex-none text-muted-foreground/75" aria-hidden="true" />}
               <div className="min-w-0 flex-1">
@@ -293,6 +354,8 @@ export default function TicketAttachmentsTab({
                 ? <button type="button" onClick={() => onJumpToEntry?.(entryId)} title="Show in conversation" aria-label="Show in conversation" className="tp-focus-ring flex-none rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"><MessageSquare className="h-3.5 w-3.5" aria-hidden="true" /></button>
                 : <span className="w-[22px] flex-none" />}
               <button type="button" onClick={() => onDownload?.(a)} aria-label={`Download ${attachmentName(a)}`} title="Download" className="tp-focus-ring flex-none rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"><Download className="h-3.5 w-3.5" aria-hidden="true" /></button>
+              {removeButton(a)}
+              {removeConfirm(a, 'basis-full sm:ml-7')}
             </li>
           ))}
         </ul>

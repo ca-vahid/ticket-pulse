@@ -4890,6 +4890,13 @@ export default function TicketDetail() {
                     subject={ticket.subject}
                     // 4.4.08: edit / revert a file's name (agents who can work the ticket).
                     canRename={canConverse && !actorReadOnly}
+                    // 25 Nov 2026: Remove on the tab too, with the same rule as the side panel's
+                    // card (the uploader or an admin, on a ticket you can write to).
+                    canRemove={(a) => Boolean(canWrite && !actorReadOnly && (meta?.actor?.email === a.uploadedBy || meta?.actor?.kind === 'admin' || meta?.actor?.workspaceRole === 'admin'))}
+                    onRemoved={(a) => {
+                      fetchTicket({ silent: true });
+                      showToast('emerald', `${attachmentName(a)} removed`);
+                    }}
                     onRenamed={attachmentRenamed}
                   />
                 )}
