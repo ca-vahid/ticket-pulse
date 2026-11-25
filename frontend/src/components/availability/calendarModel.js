@@ -90,6 +90,25 @@ export function coverageByDay(entries, days, isNonWorking = () => false) {
   return new Map([...map.entries()].map(([k, v]) => [k, [...v]]));
 }
 
+/**
+ * One visit, one bar (25 Nov 2026): an entry imported from Vacation Tracker
+ * that a Vacation Pulse booking of the same person and type already covers
+ * (its dates and its part of the day) is the same leave booked twice — it is
+ * dropped. A morning booked here never hides a full day from Vacation Tracker. The server does this too;
+ * this keeps the views right whatever it sends.
+ */
+export function collapseDuplicateEntries(entries) {
+  const list = entries || [];
+  const own = list.filter((e) => e.source !== 'vacation_tracker');
+  const sameType = (a, b) => (a.leaveTypeId != null && b.leaveTypeId != null ? a.leaveTypeId === b.leaveTypeId : a.label === b.label);
+  // A full-day booking covers any part of the day; otherwise only the same part and hours.
+  const minute = (v) => (v == null || v === '' ? null : Number(v));
+  const coversPart = (o, x) => (o.dayPart || 'full') === 'full'
+    || ((o.dayPart || 'full') === (x.dayPart || 'full') && minute(o.startMinute) === minute(x.startMinute) && minute(o.endMinute) === minute(x.endMinute));
+  return list.filter((e) => e.source !== 'vacation_tracker' || !own.some((o) => o.email === e.email && sameType(o, e)
+    && o.startDate <= e.startDate && o.endDate >= e.endDate && coversPart(o, e) && (o.status === e.status || o.status === 'approved')));
+}
+
 /** none / light / medium / heavy, by the share of the team away. */
 export function coverageTone(count, size) {
   if (!count || !size) return 'none';

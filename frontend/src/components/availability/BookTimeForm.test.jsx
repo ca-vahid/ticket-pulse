@@ -10,7 +10,7 @@ const api = vi.hoisted(() => ({
 }));
 vi.mock('../../services/api', () => ({ availabilityAPI: api }));
 
-const { default: BookTimeForm, DayStrip } = await import('./BookTimeForm');
+const { default: BookTimeForm, DayStrip, SiteOfficeField } = await import('./BookTimeForm');
 const { default: MyRequestsList } = await import('./MyRequestsList');
 
 const ME = {
@@ -85,6 +85,108 @@ describe('booking anew', () => {
   });
 });
 
+// 25 Nov 2026: a site visit says which office (or "Other site" with a short text).
+describe('"Which office?" on a site visit', () => {
+  const SITE_ME = {
+    ...ME,
+    leaveTypes: [...ME.leaveTypes, { id: 4, name: 'Site visit', color: 'amber', unit: 'day', availability: 'ONSITE', allowHalfDays: true, sortOrder: 3 }],
+    offices: [
+      { id: 2, name: 'Toronto', isActive: true },
+      { id: 1, name: 'Vancouver', isActive: true },
+      { id: 9, name: 'Old Depot', isActive: false },
+    ],
+  };
+  beforeEach(() => {
+    api.preview.mockResolvedValue({ data: { outcome: 'approved', days: 1, dates: [] } });
+    api.createRequest.mockResolvedValue({ data: { id: 9001, status: 'approved' } });
+  });
+
+  test('only a site visit asks; the active offices by name, then "Other site…"', () => {
+    render(<BookTimeForm me={SITE_ME} />);
+    expect(screen.queryByLabelText(/^Which office\?/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: 'Site visit' }));
+    const select = screen.getByLabelText(/^Which office\?/);
+    expect([...select.options].map((o) => o.textContent)).toEqual(['Pick an office…', 'Toronto', 'Vancouver', 'Other site…']);
+    expect(select).toBeRequired();
+  });
+
+  test('booking without an office says so and sends nothing; with Toronto it sends the office', async () => {
+    render(<BookTimeForm me={SITE_ME} />);
+    fireEvent.click(screen.getByRole('radio', { name: 'Site visit' }));
+    await flushPreview();
+    fireEvent.click(screen.getByRole('button', { name: 'Book' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Pick which office the site visit is at');
+    expect(api.createRequest).not.toHaveBeenCalled();
+    // The select is marked invalid and described by the error.
+    const select = screen.getByLabelText(/^Which office\?/);
+    expect(select).toHaveAttribute('aria-invalid', 'true');
+    expect(select.getAttribute('aria-describedby').split(' ')).toContain(alert.id);
+    expect(select).toHaveAccessibleDescription(/Pick which office the site visit is at/);
+
+    fireEvent.change(screen.getByLabelText(/^Which office\?/), { target: { value: '2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Book' }));
+    await waitFor(() => expect(api.createRequest).toHaveBeenCalledWith(expect.objectContaining({ leaveTypeId: 4, siteOfficeId: 2 })));
+    expect(api.createRequest.mock.calls[0][0]).not.toHaveProperty('siteLocation');
+  });
+
+  test('"Other site…" opens a short text box, and the text is what is sent', async () => {
+    render(<BookTimeForm me={SITE_ME} />);
+    fireEvent.click(screen.getByRole('radio', { name: 'Site visit' }));
+    fireEvent.change(screen.getByLabelText(/^Which office\?/), { target: { value: 'other' } });
+    const box = screen.getByLabelText(/^Which site\?/);
+    expect(box).toHaveAttribute('maxLength', '160');
+    fireEvent.click(screen.getByRole('button', { name: /Book|Send for approval/ }));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Say which site you are visiting');
+    // The "Which site?" box has a visible label, is marked invalid and described by the error.
+    expect(screen.getByText('Which site? (required)').tagName).toBe('LABEL');
+    expect(box).toHaveAttribute('aria-invalid', 'true');
+    expect(box).toHaveAttribute('aria-describedby', alert.id);
+    expect(screen.getByLabelText(/^Which office\?/)).not.toHaveAttribute('aria-invalid');
+    fireEvent.change(box, { target: { value: '  Client plant, Kamloops ' } });
+    fireEvent.click(screen.getByRole('button', { name: /Book|Send for approval/ }));
+    await waitFor(() => expect(api.createRequest).toHaveBeenCalledWith(expect.objectContaining({ siteLocation: 'Client plant, Kamloops' })));
+    expect(api.createRequest.mock.calls[0][0]).not.toHaveProperty('siteOfficeId');
+  });
+
+  test('choosing the place does not re-run the dry run', async () => {
+    render(<BookTimeForm me={SITE_ME} />);
+    fireEvent.click(screen.getByRole('radio', { name: 'Site visit' }));
+    await flushPreview();
+    const calls = api.preview.mock.calls.length;
+    fireEvent.change(screen.getByLabelText(/^Which office\?/), { target: { value: '1' } });
+    await flushPreview();
+    expect(api.preview.mock.calls.length).toBe(calls);
+    expect(api.preview.mock.calls.at(-1)[0]).not.toHaveProperty('siteOfficeId');
+  });
+
+  test('changing an older site visit with no office: optional while type and dates stay, the header names the office when there is one', async () => {
+    const older = { ...THU_FRI, id: 9030, leaveTypeId: 4, siteOfficeId: null, siteLocation: null };
+    const { unmount } = render(<BookTimeForm me={SITE_ME} editing={older} onStopEditing={vi.fn()} />);
+    expect(screen.getByLabelText(/^Which office\?/)).not.toBeRequired();
+    fireEvent.change(screen.getByLabelText('Note'), { target: { value: 'Bring the badge' } });
+    await flushPreview();
+    fireEvent.click(screen.getByRole('button', { name: /Save changes|Send changes for approval/ }));
+    await waitFor(() => expect(api.updateRequest).toHaveBeenCalledWith(9030, expect.objectContaining({ note: 'Bring the badge' })));
+    unmount();
+
+    render(<BookTimeForm me={SITE_ME} editing={{ ...older, id: 9031, siteOfficeId: 2 }} onStopEditing={vi.fn()} />);
+    expect(screen.getByText(/Now: Site visit · Toronto/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Which office\?/)).toHaveValue('2');
+  });
+});
+
+describe('the "Which office?" field on its own (props in)', () => {
+  test('renders for a harness and reports changes', () => {
+    const onChange = vi.fn();
+    render(<SiteOfficeField offices={[{ id: 2, name: 'Toronto' }]} value="other" location="Client plant" onChange={onChange} />);
+    expect(screen.getByLabelText(/^Which site\?/)).toHaveValue('Client plant');
+    fireEvent.change(screen.getByLabelText(/^Which office\?/), { target: { value: '2' } });
+    expect(onChange).toHaveBeenCalledWith({ siteOfficeId: '2', siteLocation: '' });
+  });
+});
+
 describe('the day strip', () => {
   test('counted days are filled; weekends and holidays are struck through', () => {
     // Fri 13 – Mon 16 Nov 2099; the server counts Fri only (Mon a holiday).
@@ -107,6 +209,17 @@ describe('my requests', () => {
     expect(change).toHaveLength(1);
     fireEvent.click(change[0]);
     expect(onEdit).toHaveBeenCalledWith(THU_FRI);
+  });
+
+  test('a site visit reads "Site visit · Toronto" (or its other site)', () => {
+    const types = new Map([[4, { id: 4, name: 'Site visit', color: 'amber' }]]);
+    const rows = [
+      { ...THU_FRI, id: 9032, leaveTypeId: 4, status: 'approved', siteOfficeId: 2, sitePlace: null },
+      { ...THU_FRI, id: 9033, leaveTypeId: 4, status: 'approved', siteLocation: 'Client plant, Kamloops', startDate: '2099-11-20', endDate: '2099-11-20' },
+    ];
+    render(<MyRequestsList requests={rows} typeById={types} onCancel={vi.fn()} offices={[{ id: 2, name: 'Toronto' }]} />);
+    expect(screen.getByText('Site visit · Toronto')).toBeInTheDocument();
+    expect(screen.getByText('Site visit · Client plant, Kamloops')).toBeInTheDocument();
   });
 
   test('the row being changed is marked, and its Change button steps aside', () => {

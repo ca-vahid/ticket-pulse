@@ -2354,6 +2354,11 @@ model TechnicianLeave {
   // so it can give precise "available from HH:MM onward" notes.
   startMinute   Int?       @map("start_minute")
   endMinute     Int?       @map("end_minute")
+  // Site visits (25 Nov 2026), copied from the Vacation Pulse booking when it
+  // is projected: the office name (or "Other site" text) and, for an office,
+  // its time zone. site_timezone set = the visit names one of our offices.
+  siteLocation  String?    @map("site_location") @db.VarChar(160)
+  siteTimezone  String?    @map("site_timezone") @db.VarChar(50)
   createdAt     DateTime   @default(now()) @map("created_at")
   updatedAt     DateTime   @updatedAt @map("updated_at")
 
@@ -5077,7 +5082,8 @@ model AvOffice {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  people AvPerson[]
+  people       AvPerson[]
+  siteRequests AvRequest[]
 
   @@unique([name])
   @@map("av_offices")
@@ -5212,6 +5218,11 @@ model AvRequest {
   externalId        String?   @map("external_id") @db.VarChar(255)
   wantsOutlookEvent Boolean   @default(false) @map("wants_outlook_event")
   wantsAutoReply    Boolean   @default(false) @map("wants_auto_reply")
+  // Site visits (25 Nov 2026): which office, or a short "Other site" text.
+  // A site visit booked here needs one of the two; older rows have neither.
+  siteOfficeId      Int?      @map("site_office_id")
+  siteOffice        AvOffice? @relation(fields: [siteOfficeId], references: [id], onDelete: SetNull)
+  siteLocation      String?   @map("site_location") @db.VarChar(160)
   createdBy         String?   @map("created_by") @db.VarChar(255)
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")

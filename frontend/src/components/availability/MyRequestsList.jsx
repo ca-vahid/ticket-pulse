@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ChevronDown, Loader2, Pencil } from 'lucide-react';
 import {
-  BTN_QUIET, ColorSwatch, REQUEST_STATUS, SectionTitle, StatusDot, fmtAmount, fmtRange, todayKey,
+  BTN_QUIET, ColorSwatch, REQUEST_STATUS, SectionTitle, StatusDot, fmtAmount, fmtRange, leaveLabel, sitePlace, todayKey,
 } from './availabilityUi';
 
 /**
@@ -15,7 +15,7 @@ import {
  * the cancelled row says to cancel it there as well.
  */
 
-function RequestRow({ r, type, onCancel, onEdit, isEditing }) {
+function RequestRow({ r, type, onCancel, onEdit, isEditing, offices = [] }) {
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -44,7 +44,7 @@ function RequestRow({ r, type, onCancel, onEdit, isEditing }) {
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)_6rem_11rem_auto]">
         <span className="flex min-w-0 items-center gap-2 text-sm text-foreground">
           <ColorSwatch color={type?.color} />
-          <span className="truncate">{type?.name || 'Time away'}</span>
+          <span className="truncate">{leaveLabel(type?.name, sitePlace(r, offices))}</span>
           {fromVt && <span className="shrink-0 text-xs text-muted-foreground" title="Booked in Vacation Tracker; change it there or cancel it here">· Vacation Tracker</span>}
           {!fromVt && r.inVacationTracker && r.status === 'approved' && <span className="shrink-0 text-xs text-muted-foreground" title="Ticket Pulse added this to Vacation Tracker when it was approved">· also in Vacation Tracker</span>}
         </span>
@@ -105,7 +105,7 @@ function RequestRow({ r, type, onCancel, onEdit, isEditing }) {
   );
 }
 
-export default function MyRequestsList({ requests, typeById, onCancel, onEdit = null, editingId = null }) {
+export default function MyRequestsList({ requests, typeById, onCancel, onEdit = null, editingId = null, offices = [] }) {
   if (requests === null) {
     return <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />Loading your requests…</p>;
   }
@@ -115,7 +115,7 @@ export default function MyRequestsList({ requests, typeById, onCancel, onEdit = 
 
   const list = (rows) => (
     <ul className="divide-y divide-border">
-      {rows.map((r) => <RequestRow key={r.id} r={r} type={typeById.get(r.leaveTypeId)} onCancel={onCancel} onEdit={onEdit} isEditing={editingId === r.id} />)}
+      {rows.map((r) => <RequestRow key={r.id} r={r} type={typeById.get(r.leaveTypeId)} onCancel={onCancel} onEdit={onEdit} isEditing={editingId === r.id} offices={offices} />)}
     </ul>
   );
 

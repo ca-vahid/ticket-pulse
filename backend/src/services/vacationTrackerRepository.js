@@ -169,6 +169,26 @@ class VacationTrackerRepository {
     return res;
   }
 
+  /**
+   * Vacation Pulse's own dashboard rows ('av:<requestId>:w<ws>') in the
+   * window: a Vacation Tracker leave repeating one of them is not written a
+   * second time (25 Nov 2026).
+   */
+  async getAvailabilityRows(workspaceId, startDate, endDate) {
+    return prisma.technicianLeave.findMany({
+      where: { workspaceId, leaveDate: { gte: startDate, lte: endDate }, vtLeaveId: { startsWith: 'av:' } },
+      select: {
+        technicianId: true, leaveDate: true, leaveTypeName: true, category: true, vtLeaveId: true,
+        isFullDay: true, halfDayPart: true, startMinute: true, endMinute: true,
+      },
+    });
+  }
+
+  /** Vacation Pulse leave types: which one a Vacation Tracker type name maps to. */
+  async getAvailabilityLeaveTypes() {
+    return prisma.avLeaveType.findMany({ select: { id: true, name: true, availability: true, vtLeaveTypeNames: true } });
+  }
+
   async getLeavesByDateRange(workspaceId, startDate, endDate) {
     return prisma.technicianLeave.findMany({
       where: {

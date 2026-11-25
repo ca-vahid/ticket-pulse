@@ -3,7 +3,7 @@ import { PersonAvatar } from '../tickets/ticketUi';
 import { availabilityAPI, getWorkspaceId } from '../../services/api';
 import {
   COLOR_BAR, COLOR_BAR_PENDING, COLOR_DOT, ColorSwatch, HATCH, HOLIDAY_BG, WEEKEND_BG,
-  fmtDay, fmtRange, nameFromEmail, parseDay, todayKey,
+  fmtDay, fmtRange, leaveLabel, nameFromEmail, parseDay, todayKey,
 } from './availabilityUi';
 import { WEEKDAY_SHORT } from './calendarModel';
 
@@ -65,9 +65,14 @@ export function TeamAvatar({ email, name, byEmail, size = 'h-6 w-6', textSize = 
   return <PersonAvatar name={name || personName(email, byEmail)} photoUrl={byEmail?.get(email)?.photoUrl || null} size={size} textSize={textSize} />;
 }
 
+/** A calendar entry's name: "Vacation", or "Site visit · Toronto" for a visit that names its place. */
+export function entryLabel(entry) {
+  return leaveLabel(entry?.label || 'Away', entry?.place || null);
+}
+
 /** A leave's words for tooltips and screen readers. */
 export function entryWords(entry, name) {
-  const parts = [name, entry.label || 'Away', fmtRange(entry)];
+  const parts = [name, entryLabel(entry), fmtRange(entry)];
   if (entry.status === 'pending') parts.push('waiting for approval');
   return parts.filter(Boolean).join(', ');
 }
@@ -140,7 +145,7 @@ export function AgendaList({ days, entries, byEmail, holidayNames = {}, emptyTex
                     <p className="truncate text-sm text-foreground">{name}</p>
                     <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                       <span className={`h-1.5 w-1.5 rounded-full ${COLOR_DOT[e.color] || COLOR_DOT.slate}`} aria-hidden="true" />
-                      {e.label || 'Away'}{e.status === 'pending' ? ' · waiting' : ''}
+                      {entryLabel(e)}{e.status === 'pending' ? ' · waiting' : ''}
                       {e.dayPart === 'am' ? ' · morning' : e.dayPart === 'pm' ? ' · afternoon' : ''}
                     </p>
                   </div>

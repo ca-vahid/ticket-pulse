@@ -27,6 +27,10 @@ import {
   decide, workingDates, requestSize, holidayMatcher, toDay, dayKey, addDays, weekKey,
   leaveYearOf, leaveYearRange, entitlementFor, RULE_KINDS, RULE_OUTCOMES,
 } from './availabilityRules.js';
+import {
+  isSiteVisitType, siteFieldsFor, editTouchesTypeOrDates, sitePlaceOf, projectionSiteFields,
+  findAppTwin, collapseCalendarEntries,
+} from './siteVisit.js';
 
 const lc = (s) => String(s || '').trim().toLowerCase();
 const num = (d) => ((d === null || d === undefined) ? 0 : Number(d));
@@ -39,6 +43,8 @@ const roleView = (user) => {
   return v?.mode === 'role' ? v : null;
 };
 const AVAILABILITY_TO_CATEGORY = { OFF: 'OFF', WFH: 'WFH', ONSITE: 'OTHER', PARTIAL: 'OTHER' };
+// The office a site visit names (25 Nov 2026), read with the request.
+const SITE_OFFICE = { select: { id: true, name: true, timezone: true } };
 
 /** Today in BC (YYYY-MM-DD): "over" means over where the people are. */
 export function pacificTodayKey(now = new Date()) {
@@ -371,6 +377,17 @@ class AvailabilityService {
   // ------------------------------------------------------------------ catalogue CRUD (admin)
 
   listOffices() { return prisma.avOffice.findMany({ orderBy: { name: 'asc' } }); }
+
+  /**
+   * "Which office?" for a site visit (25 Nov 2026): { siteOfficeId,
+   * siteLocation }, both null for any other type. Required on a new booking
+   * and on an edit that touches the type or the dates.
+   */
+  async _siteFields(leaveType, input, { existing = null, required = true } = {}) {
+    if (!isSiteVisitType(leaveType)) return { siteOfficeId: null, siteLocation: null };
+    const offices = await prisma.avOffice.findMany({ select: { id: true, name: true, isActive: true } });
+    return siteFieldsFor({ leaveType, input: input || {}, offices, existing, required });
+  }
 
   async saveOffice(input, actor) {
     await this.assertAdmin(actor);
@@ -746,6 +763,7 @@ class AvailabilityService {
       person = await this.ensurePerson({ email: onBehalfOf });
     }
     const shaped = await this._shape(person, input);
+    const site = await this._siteFields(shaped.leaveType, input, { required: true });
     const overlap = await prisma.avRequest.findFirst({
       where: { email: person.email, status: { in: ACTIVE }, startDate: { lte: shaped.endDate }, endDate: { gte: shaped.startDate }, leaveTypeId: shaped.leaveType.id },
       select: { id: true },
@@ -773,6 +791,7 @@ class AvailabilityService {
         days: shaped.days,
         hours: shaped.hours,
         note: shaped.note,
+        ...(isSiteVisitType(shaped.leaveType) ? site : {}),
         status,
         decision: { outcome: verdict.outcome, reason: verdict.reason, fired: verdict.fired, approvers },
         decidedBy: status === 'approved' ? 'rules' : null,
@@ -798,7 +817,7 @@ class AvailabilityService {
   }
 
   async getRequest(id, user) {
-    const r = await prisma.avRequest.findUnique({ where: { id: Number(id) }, include: { events: { orderBy: { createdAt: 'asc' } } } });
+    const r = await prisma.avRequest.findUnique({ where: { id: Number(id) }, include: { events: { orderBy: { createdAt: 'asc' } }, siteOffice: SITE_OFFICE } });
     if (!r) throw new NotFoundError('Request not found');
     const mine = lc(r.email) === lc(user?.email);
     if (!mine && !(await this.canDecide(user, r)) && !(await this.canManagePerson(user, r.email))) throw new NotFoundError('Request not found');
@@ -914,6 +933,12 @@ class AvailabilityService {
     const r = await this._editableRequest(id, user);
     const person = await this.ensurePerson(lc(r.email) === lc(user.email) ? user : { email: r.email });
     const shaped = await this._shape(person, input);
+    // "Which office?" is asked again only when the type or the dates change;
+    // a note-only change of an older site visit without one stays valid.
+    const site = await this._siteFields(shaped.leaveType, input, {
+      existing: r,
+      required: editTouchesTypeOrDates(r, { leaveTypeId: shaped.leaveType.id, startDate: shaped.startDate, endDate: shaped.endDate }),
+    });
     const overlap = await prisma.avRequest.findFirst({
       where: {
         email: person.email, status: { in: ACTIVE }, startDate: { lte: shaped.endDate }, endDate: { gte: shaped.startDate },
@@ -931,10 +956,12 @@ class AvailabilityService {
     const before = {
       leaveTypeId: r.leaveTypeId, startDate: dayKey(r.startDate), endDate: dayKey(r.endDate), dayPart: r.dayPart,
       startMinute: r.startMinute, endMinute: r.endMinute, days: num(r.days), hours: num(r.hours), note: r.note,
+      siteOfficeId: r.siteOfficeId ?? null, siteLocation: r.siteLocation ?? null,
     };
     const after = {
       leaveTypeId: shaped.leaveType.id, startDate: dayKey(shaped.startDate), endDate: dayKey(shaped.endDate), dayPart: shaped.dayPart,
       startMinute: shaped.startMinute, endMinute: shaped.endMinute, days: shaped.days, hours: shaped.hours, note: shaped.note,
+      siteOfficeId: site.siteOfficeId, siteLocation: site.siteLocation,
     };
     const changed = Object.keys(after).filter((k) => String(before[k] ?? '') !== String(after[k] ?? ''));
     if (!changed.length) return this.getRequest(r.id, user);
@@ -956,6 +983,7 @@ class AvailabilityService {
         days: shaped.days,
         hours: shaped.hours,
         note: shaped.note,
+        ...(isSiteVisitType(shaped.leaveType) || r.siteOfficeId || r.siteLocation ? site : {}),
         status,
         decision: { outcome: verdict.outcome, reason: verdict.reason, fired: verdict.fired, approvers },
         decidedBy: status === 'approved' ? 'rules' : null,
@@ -1008,6 +1036,7 @@ class AvailabilityService {
     const { start, end } = leaveYearRange(y, settings.yearStartMonth);
     const rows = await prisma.avRequest.findMany({
       where: { email: person.email, startDate: { lte: addDays(end, 366) }, endDate: { gte: start } },
+      include: { siteOffice: SITE_OFFICE },
       orderBy: { startDate: 'desc' },
       take: 500,
     });
@@ -1062,7 +1091,7 @@ class AvailabilityService {
     const take = Math.min(Math.max(Number(limit) || 200, 1), 500);
     const rows = await prisma.avRequest.findMany({
       where,
-      include: { events: { orderBy: { createdAt: 'asc' }, take: 40 } },
+      include: { events: { orderBy: { createdAt: 'asc' }, take: 40 }, siteOffice: SITE_OFFICE },
       orderBy: [{ startDate: 'desc' }, { id: 'desc' }],
       take: take + 1,
     });
@@ -1085,7 +1114,7 @@ class AvailabilityService {
    */
   async listPendingFor(user) {
     const stepIn = await this.isSuperAdmin(user);
-    const rows = await prisma.avRequest.findMany({ where: { status: 'pending' }, orderBy: { startDate: 'asc' }, take: 500 });
+    const rows = await prisma.avRequest.findMany({ where: { status: 'pending' }, include: { siteOffice: SITE_OFFICE }, orderBy: { startDate: 'asc' }, take: 500 });
     const out = [];
     for (const r of rows) {
       if (lc(r.email) === lc(user.email)) continue;
@@ -1136,7 +1165,7 @@ class AvailabilityService {
       prisma.avBalanceAdjustment.findMany({ where: { email: person.email, leaveTypeId: leaveType.id, year }, select: { days: true, kind: true } }),
       prisma.avRequest.findMany({
         where: { email: person.email, leaveTypeId: leaveType.id, status: { in: ACTIVE }, startDate: { gte: start, lte: end }, ...(excludeRequestId ? { id: { not: excludeRequestId } } : {}) },
-        select: { days: true, status: true, endDate: true },
+        select: { days: true, status: true, startDate: true, endDate: true, dayPart: true, startMinute: true, endMinute: true, source: true },
       }),
     ]);
     const adjustments = adj.reduce((s, a) => s + num(a.days), 0);
@@ -1144,7 +1173,9 @@ class AvailabilityService {
     let taken = 0;
     let scheduled = 0;
     let pending = 0;
-    for (const r of reqs) {
+    // 25 Nov 2026: days booked here and again in Vacation Tracker count once.
+    const counted = collapseCalendarEntries((reqs || []).map((r) => ({ ...r, email: person.email, leaveTypeId: leaveType.id })));
+    for (const r of counted) {
       if (r.status === 'pending') pending += num(r.days);
       else if (toDay(r.endDate) < today) taken += num(r.days);
       else scheduled += num(r.days);
@@ -1210,14 +1241,20 @@ class AvailabilityService {
       people = people.filter((p) => members.has(p.email));
     }
     const emails = people.map((p) => p.email);
-    const [rows, types] = await Promise.all([
+    const [found, types] = await Promise.all([
       prisma.avRequest.findMany({
         where: { email: { in: emails }, status: { in: ACTIVE }, startDate: { lte: end }, endDate: { gte: start } },
-        select: { id: true, email: true, leaveTypeId: true, startDate: true, endDate: true, dayPart: true, startMinute: true, endMinute: true, status: true, days: true, source: true },
+        select: {
+          id: true, email: true, leaveTypeId: true, startDate: true, endDate: true, dayPart: true, startMinute: true, endMinute: true, status: true, days: true, source: true,
+          siteOfficeId: true, siteLocation: true, siteOffice: { select: { name: true } },
+        },
         take: 10000,
       }),
       prisma.avLeaveType.findMany(),
     ]);
+    // 25 Nov 2026: a visit booked both in Vacation Tracker and here shows once
+    // (the imported copy goes when a booking of the same type covers it).
+    const rows = collapseCalendarEntries(found || []);
     const typeById = new Map(types.map((t) => [t.id, t]));
     const approverOf = new Set();
     for (const r of rows) {
@@ -1243,6 +1280,8 @@ class AvailabilityService {
         status: r.status,
         leaveTypeId: redact ? null : t.id,
         label: redact ? 'Away' : t.name,
+        // Where a site visit is ("Site visit · Toronto"), never on a redacted entry.
+        place: redact || !isSiteVisitType(t) ? null : sitePlaceOf(r),
         color: redact ? 'slate' : t.color,
         availability: t.availability,
         source: r.source || 'app',
@@ -1288,6 +1327,15 @@ class AvailabilityService {
     const targets = await this._projectionTargets(request);
     const half = request.dayPart === 'am' ? 'AM' : request.dayPart === 'pm' ? 'PM' : null;
     const partial = request.dayPart !== 'full';
+    // 25 Nov 2026: a site visit's office (name + time zone) rides along, so
+    // the assigner knows where the person is that day.
+    const office = isSiteVisitType(type) && request.siteOfficeId
+      ? await Promise.resolve()
+        .then(() => prisma.avOffice.findUnique({ where: { id: request.siteOfficeId }, select: { id: true, name: true, timezone: true } }))
+        .catch(() => null)
+      : null;
+    const site = projectionSiteFields(request, type, office);
+    const siteData = site.siteLocation ? site : {};
     let written = 0;
     for (const t of targets) {
       const key = `av:${request.id}:w${t.workspaceId}`;
@@ -1306,6 +1354,7 @@ class AvailabilityService {
             halfDayPart: half || (request.dayPart === 'hours' ? (((request.startMinute + request.endMinute) / 2) < 720 ? 'AM' : 'PM') : null),
             startMinute: request.dayPart === 'hours' ? request.startMinute : (half === 'AM' ? 0 : half === 'PM' ? 720 : null),
             endMinute: request.dayPart === 'hours' ? request.endMinute : (half === 'AM' ? 720 : half === 'PM' ? 1440 : null),
+            ...siteData,
           },
         });
         written += 1;
@@ -1334,6 +1383,15 @@ class AvailabilityService {
 
   // ------------------------------------------------------------------ notifications
 
+  /** Where a site visit is: the office's name, or the "Other site" text. Never throws. */
+  async _sitePlace(request) {
+    if (request?.siteOffice?.name || !request?.siteOfficeId) return sitePlaceOf(request);
+    const office = await Promise.resolve()
+      .then(() => prisma.avOffice.findUnique({ where: { id: request.siteOfficeId }, select: { name: true } }))
+      .catch(() => null);
+    return office?.name || sitePlaceOf(request);
+  }
+
   async _baseUrl() {
     const { resolvePublicBaseUrl } = await import('../../utils/publicBaseUrl.js');
     return resolvePublicBaseUrl({ fallback: 'https://ticketpulse.bgcsaas.com' });
@@ -1344,10 +1402,12 @@ class AvailabilityService {
     const { sendEmail } = await import('../sendgridNotificationService.js');
     const base = await this._baseUrl();
     const range = describeRange(request);
+    const place = isSiteVisitType(leaveType) ? await this._sitePlace(request) : null;
     const html = emailHtml({
       title: was ? `${person.name} changed their ${leaveType.name.toLowerCase()} request` : `${person.name} asked for ${leaveType.name.toLowerCase()}`,
       lines: [
         was ? `Now: ${range}` : range,
+        ...(place ? [`Where: ${place}`] : []),
         was ? `Was: ${was}` : null,
         request.note ? `Note: ${request.note}` : null,
         request.decision?.reason ? `Why it needs you: ${request.decision.reason}` : null,
@@ -1386,10 +1446,11 @@ class AvailabilityService {
       icon: approved ? '✅' : '🕓',
     });
     if (!approved) {
+      const place = isSiteVisitType(leaveType) ? await this._sitePlace(request) : null;
       for (const to of [...new Set(approvers.map(lc).filter(Boolean))]) {
         await availabilityTeams.notify(to, 'av_approval_waiting', {
           title: changedTag ? `${person.name} changed their ${leaveType.name.toLowerCase()} request` : `${person.name} asked for ${leaveType.name.toLowerCase()}`,
-          lines: [range, request.note ? `Note: ${request.note}` : null, request.decision?.reason ? `Why it needs you: ${request.decision.reason}` : null],
+          lines: [range, ...(place ? [`Where: ${place}`] : []), request.note ? `Note: ${request.note}` : null, request.decision?.reason ? `Why it needs you: ${request.decision.reason}` : null],
           refKey: `av:${request.id}:approval${suffix}`,
           path: '/availability/approvals',
           button: 'Review the request',
@@ -1590,6 +1651,10 @@ class AvailabilityService {
    *   - changed dates / type / part -> request updated, projection rebuilt
    *   - no longer approved, or gone from VT within the window -> cancelled
    *   - cancelled by a person in Ticket Pulse -> stays cancelled (QA 11-09 #2)
+   *   - a Vacation Pulse booking of the same person and type already covers
+   *     its dates and part of the day -> not imported, logged; a partial
+   *     overlap is imported (25 Nov 2026: one leave, one request; the leave
+   *     sync skips its dashboard rows the same way)
    * Unknown VT leave types become new types so nothing is lost; people are
    * matched by e-mail.
    */
@@ -1659,12 +1724,24 @@ class AvailabilityService {
     // Imported leaves a person cancelled in Ticket Pulse: never brought back,
     // even while Vacation Tracker still lists them as approved.
     const cancelledHere = await vtWriteBack.cancelledHereExternalIds({ since: toDay(start), strict: true });
+    // 25 Nov 2026: a visit booked in Vacation Pulse and again in Vacation
+    // Tracker counts once. The Vacation Pulse bookings (approved or waiting)
+    // in the window; a new Vacation Tracker leave of the same person and type
+    // that one of them covers (all its dates, and its part of the day) is not
+    // imported (the booking stays the one request, and the leave sync writes
+    // no second dashboard row for it either). A partial overlap is imported.
+    const appBookings = (await prisma.avRequest.findMany({
+      where: { source: { not: 'vacation_tracker' }, status: { in: ACTIVE }, startDate: { lte: toDay(end) }, endDate: { gte: toDay(start) } },
+      select: { id: true, email: true, leaveTypeId: true, startDate: true, endDate: true, dayPart: true, startMinute: true, endMinute: true, status: true, source: true, externalId: true },
+      take: 50000,
+    })) || [];
 
     let created = 0;
     let updated = 0;
     let cancelled = 0;
     let skipped = 0;
     let unmatched = 0;
+    let duplicates = 0;
     const seen = new Set();
     for (const leave of vtLeaves || []) {
       const externalId = `vt:${leave.id}`;
@@ -1717,6 +1794,12 @@ class AvailabilityService {
         updated += 1;
         continue;
       }
+      const twin = findAppTwin(fields, appBookings);
+      if (twin) {
+        logger.info(`Availability: Vacation Tracker leave ${leave.id} not imported: ${email} already booked ${type.name} ${dayKey(twin.startDate)}..${dayKey(twin.endDate)} in Vacation Pulse (request ${twin.id})`);
+        duplicates += 1;
+        continue;
+      }
       const request = await prisma.avRequest.create({
         data: {
           ...fields, note: leave.reason ? String(leave.reason).slice(0, 2000) : null,
@@ -1756,7 +1839,7 @@ class AvailabilityService {
         cancelled += 1;
       }
     }
-    const summary = { created, updated, cancelled, skipped, unmatched, from: start, to: end };
+    const summary = { created, updated, cancelled, skipped, unmatched, duplicates, from: start, to: end };
     if (created || updated || cancelled) logger.info(`Availability: Vacation Tracker sync ws ${workspaceId} (${start}..${end})`, summary);
     return summary;
   }
@@ -1878,6 +1961,10 @@ export function serializeRequest(r) {
     days: num(r.days),
     hours: num(r.hours),
     note: r.note,
+    // Site visits (25 Nov 2026): the office, or the "Other site" text.
+    siteOfficeId: r.siteOfficeId ?? null,
+    siteLocation: r.siteLocation ?? null,
+    sitePlace: sitePlaceOf(r),
     status: r.status,
     decision: r.decision || null,
     decidedBy: r.decidedBy,

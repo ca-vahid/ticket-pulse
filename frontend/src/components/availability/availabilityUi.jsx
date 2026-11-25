@@ -310,6 +310,32 @@ export const WEEKDAYS = [
   { n: 7, short: 'S', label: 'Sunday' },
 ];
 
+// ---------------------------------------------------------------- site visits (25 Nov 2026)
+
+/** True when the leave type is a site visit (availability ONSITE). */
+export const isSiteVisitType = (type) => String(type?.availability || '').toUpperCase() === 'ONSITE';
+
+/**
+ * Where a site visit is: a calendar entry's `place`, else the request's
+ * office (looked up in `offices`, which holds retired ones too), else its
+ * "Other site" text. null when the booking names no place.
+ */
+export function sitePlace(r, offices = []) {
+  if (!r) return null;
+  if (r.place) return r.place;
+  if (r.siteOfficeId) {
+    const office = (offices || []).find((o) => Number(o.id) === Number(r.siteOfficeId));
+    if (office?.name) return office.name;
+  }
+  return r.sitePlace || (String(r.siteLocation || '').trim() || null);
+}
+
+/** "Site visit · Toronto"; just the type name when there is no place. */
+export function leaveLabel(name, place = null) {
+  const base = name || 'Time away';
+  return place ? `${base} · ${place}` : base;
+}
+
 export const AVAILABILITY_LABEL = {
   OFF: 'Away', WFH: 'Working from home', ONSITE: 'On site', PARTIAL: 'Partly away', NONE: 'No change',
 };

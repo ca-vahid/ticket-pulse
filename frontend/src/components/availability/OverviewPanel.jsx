@@ -3,12 +3,12 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, ChevronLeft, ChevronRight } from 'lucide-react';
 import { availabilityAPI } from '../../services/api';
 import {
-  CARD, COLOR_DOT, ErrorNote, REQUEST_STATUS, addDaysKey, fmtDay, fmtMinute, fmtRange, parseDay, todayKey, trimNum,
+  CARD, COLOR_DOT, ErrorNote, REQUEST_STATUS, addDaysKey, fmtDay, fmtMinute, fmtRange, leaveLabel, parseDay, sitePlace, todayKey, trimNum,
 } from './availabilityUi';
 import {
-  WEEKDAY_SHORT, daysUntil, isWeekend, nextWorkingDayKey, rangeDays, weekStartKey,
+  WEEKDAY_SHORT, collapseDuplicateEntries, daysUntil, isWeekend, nextWorkingDayKey, rangeDays, weekStartKey,
 } from './calendarModel';
-import { TeamAvatar, personName, useRoster } from './teamViews';
+import { TeamAvatar, entryLabel, personName, useRoster } from './teamViews';
 
 /**
  * Overview, the default tab (redesigned 15 Nov 2026, Vahid).
@@ -201,7 +201,7 @@ function DayItem({ entry, kind, byEmail, holidays, phoneOnly = false }) {
       <span className="min-w-0 leading-tight">
         <span className="block truncate text-[13px] font-medium text-foreground">{name}</span>
         <span className={`block truncate text-xs ${pending ? 'text-muted-foreground' : kind === 'part' ? PART_TEXT : AWAY_TEXT}`}>
-          {entry.label || 'Away'} · {kind === 'part' ? partWords(entry) : <span>back {back}</span>}
+          {entryLabel(entry)} · {kind === 'part' ? partWords(entry) : <span>back {back}</span>}
           {pending ? ' · waiting for approval' : ''}
         </span>
       </span>
@@ -227,7 +227,7 @@ function WeekBoard({ week, today, byEmail, holidays, holidayNames, teamSize }) {
                 <TeamAvatar email={entry.email} name={personName(entry.email, byEmail)} byEmail={byEmail} size="h-6 w-6" textSize="text-[10px]" />
                 <span className="truncate">
                   <span className="font-semibold">{personName(entry.email, byEmail)}</span>
-                  <span className="opacity-85"> · {entry.label || 'Away'}{pending ? ' · waiting for approval' : ''} · back {fmtDay(nextWorkingDayKey(entry.endDate, holidays))}</span>
+                  <span className="opacity-85"> · {entryLabel(entry)}{pending ? ' · waiting for approval' : ''} · back {fmtDay(nextWorkingDayKey(entry.endDate, holidays))}</span>
                 </span>
               </div>
             );
@@ -271,7 +271,7 @@ function WeekBoard({ week, today, byEmail, holidays, holidayNames, teamSize }) {
                   </ul>
                 )}
                 {remotePeople.length > 0 && !holiday && (
-                  <p className="mt-3 flex items-center gap-2 border-t border-dashed border-border pt-2 text-[11px] text-muted-foreground" title={remotePeople.map((e) => `${personName(e.email, byEmail)} (${e.label || 'remote'})`).join(', ')}>
+                  <p className="mt-3 flex items-center gap-2 border-t border-dashed border-border pt-2 text-[11px] text-muted-foreground" title={remotePeople.map((e) => `${personName(e.email, byEmail)} (${e.label ? entryLabel(e) : 'remote'})`).join(', ')}>
                     <span className="flex -space-x-1.5">
                       {remotePeople.slice(0, 3).map((e) => (
                         <span key={e.email} className="rounded-full ring-2 ring-card"><TeamAvatar email={e.email} name={personName(e.email, byEmail)} byEmail={byEmail} size="h-5 w-5" textSize="text-[8px]" /></span>
@@ -334,7 +334,8 @@ export default function OverviewPanel({ me, base = '/availability', onBook = nul
 
   const holidayNames = useMemo(() => data?.holidayNames || {}, [data]);
   const holidaySet = useMemo(() => new Set(Object.keys(holidayNames)), [holidayNames]);
-  const entries = useMemo(() => data?.entries || [], [data]);
+  // 25 Nov 2026: a visit booked in Vacation Tracker and here counts once.
+  const entries = useMemo(() => collapseDuplicateEntries(data?.entries), [data]);
   const teamSize = (data?.people || []).length;
   const typeById = useMemo(() => new Map((me.leaveTypes || []).map((t) => [t.id, t])), [me.leaveTypes]);
   const weekEntries = useMemo(() => entries.filter((e) => e.startDate <= weekTo && e.endDate >= weekFrom), [entries, weekFrom, weekTo]);
@@ -390,7 +391,7 @@ export default function OverviewPanel({ me, base = '/availability', onBook = nul
             <h2 className="mt-3 text-lg font-semibold leading-snug tracking-tight text-foreground" data-testid="my-next">
               {mine === null ? <span className="invisible">Loading</span> : nextMine ? (
                 <>
-                  Your next time away: {typeById.get(nextMine.leaveTypeId)?.name || 'time away'}, {fmtRange(nextMine)}
+                  Your next time away: {leaveLabel(typeById.get(nextMine.leaveTypeId)?.name || 'time away', sitePlace(nextMine, me.offices))}, {fmtRange(nextMine)}
                   {nextMine.status === 'pending' && <span className="text-sm font-normal text-muted-foreground"> · {REQUEST_STATUS.pending.label.toLowerCase()}</span>}
                 </>
               ) : `Nothing booked for you${firstName ? `, ${firstName}` : ''}.`}
@@ -459,7 +460,7 @@ export default function OverviewPanel({ me, base = '/availability', onBook = nul
                     <TeamAvatar email={r.email} name={name} byEmail={byEmail} size="h-7 w-7" textSize="text-[10px]" />
                     <span className="min-w-0 flex-1 leading-tight">
                       <span className="block truncate text-sm font-medium text-foreground">{name}</span>
-                      <span className="block truncate text-xs text-muted-foreground">{typeById.get(r.leaveTypeId)?.name || 'Time away'} · {fmtRange(r)}</span>
+                      <span className="block truncate text-xs text-muted-foreground">{leaveLabel(typeById.get(r.leaveTypeId)?.name, sitePlace(r, me.offices))} · {fmtRange(r)}</span>
                       {why && <span className={`block truncate text-xs ${PART_TEXT}`}>{why}</span>}
                     </span>
                   </li>
@@ -486,7 +487,7 @@ export default function OverviewPanel({ me, base = '/availability', onBook = nul
                       <span className="block truncate text-sm font-medium text-foreground">{name}</span>
                       <span className="block truncate text-xs text-muted-foreground">
                         <span className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle ${COLOR_DOT[e.color] || COLOR_DOT.slate}`} aria-hidden="true" />
-                        {e.label || 'Away'} · {fmtRange(e)}
+                        {entryLabel(e)} · {fmtRange(e)}
                       </span>
                     </span>
                     <span className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">{n === 1 ? 'tomorrow' : `in ${n} days`}</span>

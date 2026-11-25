@@ -5,7 +5,7 @@ import { availabilityAPI } from '../../services/api';
 import {
   BTN_QUIET, CARD, ErrorNote, HOLIDAY_BG, MONTHS, Toggle, WEEKEND_BG, parseDay, todayKey,
 } from './availabilityUi';
-import { isWeekend, monthWeeks, rangeDays, weekLanes } from './calendarModel';
+import { collapseDuplicateEntries, isWeekend, monthWeeks, rangeDays, weekLanes } from './calendarModel';
 import { AgendaList, DayTypeLegend, barLook, entryWords, personName, useRoster } from './teamViews';
 
 /**
@@ -49,7 +49,7 @@ export default function MonthCalendarPanel({ me }) {
 
   const holidayNames = useMemo(() => data?.holidayNames || {}, [data]);
   const canSeePending = Boolean(data?.canSeePending) || (data?.entries || []).some((e) => e.status === 'pending');
-  const entries = useMemo(() => (data?.entries || []).filter((e) => showPending || e.status !== 'pending'), [data, showPending]);
+  const entries = useMemo(() => collapseDuplicateEntries(data?.entries).filter((e) => showPending || e.status !== 'pending'), [data, showPending]);
   const monthIndex = cursor.month;
 
   const step = (k) => setCursor((c) => {

@@ -39,7 +39,8 @@ Object.assign(api, {
 });
 vi.mock('../../services/api', () => ({ get availabilityAPI() { return api; }, getWorkspaceId: () => 1 }));
 
-const { default: TeamCalendarPanel } = await import('./TeamCalendarPanel');
+const { default: TeamCalendarPanel, Wallchart } = await import('./TeamCalendarPanel');
+const { collapseDuplicateEntries, rangeDays } = await import('./calendarModel');
 const { default: MonthCalendarPanel } = await import('./MonthCalendarPanel');
 const { default: OverviewPanel } = await import('./OverviewPanel');
 const { resetRosterCache } = await import('./teamViews');
@@ -113,6 +114,72 @@ describe('Wallchart', () => {
     await screen.findAllByText('Ann Lo');
     const strip = screen.getByTestId('wallchart-coverage');
     expect(within(strip).getAllByText(/2 away: Ann Lo, Bo Chen/).length).toBe(1);
+  });
+});
+
+// 25 Nov 2026: a site visit names its place, and a visit booked both in
+// Vacation Tracker and here is one bar. The grid renders with props only.
+describe('Wallchart grid (props in)', () => {
+  const days = rangeDays(fri, tue);
+  const sections = [{ key: 'o1', label: 'Vancouver', people: [{ email: 'a@x.ca', name: 'Ann Lo' }, { email: 'b@x.ca', name: 'Bo Chen' }] }];
+  const visit = { email: 'a@x.ca', startDate: mon, endDate: tue, dayPart: 'full', status: 'approved', leaveTypeId: 4, label: 'Site visit', color: 'amber', availability: 'ONSITE' };
+
+  test('a site visit bar reads "Site visit · Toronto"; without a place just the type', () => {
+    render(<Wallchart title="Test" days={days} sections={sections} entries={[
+      { ...visit, id: 1, source: 'app', place: 'Toronto' },
+      { ...visit, id: 2, email: 'b@x.ca', source: 'app', place: null },
+    ]} />);
+    const ann = screen.getByTestId(`cal-bar-a@x.ca-${mon}`);
+    expect(ann).toHaveTextContent('Site visit · Toronto');
+    expect(ann).toHaveAttribute('aria-label', expect.stringContaining('Ann Lo, Site visit · Toronto'));
+    expect(screen.getByTestId(`cal-bar-b@x.ca-${mon}`)).toHaveTextContent(/^Site visit$/);
+    // On site is working: nobody counted away.
+    expect(within(screen.getByTestId('wallchart-coverage')).queryByText(/away:/)).not.toBeInTheDocument();
+  });
+
+  test('the Vacation Tracker copy of the same visit is dropped: one bar', () => {
+    const { container } = render(<Wallchart title="Test" days={days} sections={sections} entries={[
+      { ...visit, id: 1, source: 'app', place: 'Toronto' },
+      { ...visit, id: 7, source: 'vacation_tracker', place: null },
+    ]} />);
+    expect(container.querySelectorAll('[data-testid^="cal-bar-a@x.ca-"]')).toHaveLength(1);
+    expect(screen.getByTestId(`cal-bar-a@x.ca-${mon}`)).toHaveTextContent('Site visit · Toronto');
+  });
+
+  test('the panel collapses duplicates from the server too', async () => {
+    calendarData = { ...calendarData, entries: [
+      { ...visit, id: 1, source: 'app', place: 'Toronto' },
+      { ...visit, id: 7, source: 'vacation_tracker', place: null },
+    ] };
+    inRouter(<TeamCalendarPanel me={ME} />);
+    const bar = await screen.findByTestId(`cal-bar-a@x.ca-${mon}`);
+    expect(bar).toHaveTextContent('Site visit · Toronto');
+    expect(screen.getAllByTestId(`cal-bar-a@x.ca-${mon}`)).toHaveLength(1);
+  });
+});
+
+describe('collapsing duplicate entries', () => {
+  const e = (extra) => ({ email: 'a@x.ca', leaveTypeId: 4, startDate: mon, endDate: tue, status: 'approved', label: 'Site visit', ...extra });
+  test('a covered Vacation Tracker copy goes; a longer one, another type or another person stays', () => {
+    const out = collapseDuplicateEntries([
+      e({ id: 1, source: 'app' }),
+      e({ id: 2, source: 'vacation_tracker' }),
+      e({ id: 3, source: 'vacation_tracker', startDate: fri }),
+      e({ id: 4, source: 'vacation_tracker', leaveTypeId: 1, label: 'Vacation' }),
+      e({ id: 5, source: 'vacation_tracker', email: 'b@x.ca' }),
+    ]);
+    expect(out.map((x) => x.id)).toEqual([1, 3, 4, 5]);
+    expect(collapseDuplicateEntries(null)).toEqual([]);
+  });
+
+  test('a morning booked here does not hide a full day from Vacation Tracker; the same morning does', () => {
+    const out = collapseDuplicateEntries([
+      e({ id: 1, source: 'app', dayPart: 'am' }),
+      e({ id: 2, source: 'vacation_tracker', dayPart: 'full' }),
+      e({ id: 3, source: 'vacation_tracker', dayPart: 'am' }),
+      e({ id: 4, source: 'vacation_tracker', dayPart: 'pm' }),
+    ]);
+    expect(out.map((x) => x.id)).toEqual([1, 2, 4]);
   });
 });
 

@@ -22,6 +22,7 @@ import logger from '../../utils/logger.js';
 import VacationTrackerV2Client, { describeV2Error, looksLikeV2Key } from '../../integrations/vacationTrackerV2.js';
 import { dayKey, toDay } from './availabilityRules.js';
 import { cancelledInTicketPulse } from './vtImportPolicy.js';
+import { avTypeForVtName as mapVtTypeName } from './siteVisit.js';
 
 const lc = (s) => String(s || '').trim().toLowerCase();
 const CACHE_MS = 10 * 60 * 1000;
@@ -34,12 +35,7 @@ export { cancelledInTicketPulse };
 
 /** The Availability leave type a Vacation Tracker type name imports as (same three steps as the import). */
 export function avTypeForVtName(vtName, types) {
-  const name = lc(vtName);
-  const names = (t) => (Array.isArray(t.vtLeaveTypeNames) ? t.vtLeaveTypeNames.map(lc) : []);
-  return types.find((t) => names(t).includes(name))
-    || types.find((t) => lc(t.name) === name)
-    || types.find((t) => names(t).some((n) => name.includes(n)))
-    || null;
+  return mapVtTypeName(vtName, types);
 }
 
 /** The Vacation Tracker type an Availability type is written as: one that imports back as the same type. */

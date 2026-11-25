@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.4.17-preview';
+export const APP_VERSION = '4.4.18-preview';
 
 export const changelog = [
+  {
+    version: '4.4.18-preview',
+    date: 'November 25, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Site visits say where</strong> &mdash; booking a site visit in Vacation Pulse now asks &ldquo;Which office?&rdquo; (or another site), and the wallchart, overview and approvals show it as &ldquo;Site visit &middot; Toronto&rdquo;.' },
+      { type: 'improved', html: '<strong>Assignment knows where you are</strong> &mdash; on a site-visit day, ticket assignment treats the person as working at the office they are visiting, in that office&rsquo;s time zone, so on-site work there can go to them.' },
+      { type: 'fixed', html: '<strong>One booking, counted once</strong> &mdash; the same leave booked in both Vacation Tracker and Vacation Pulse no longer shows or counts twice.' }
+    ],
+  },
   {
     version: '4.4.17-preview',
     date: 'November 25, 2026',
