@@ -1,6 +1,22 @@
-export const APP_VERSION = '4.4.15-preview';
+export const APP_VERSION = '4.4.16-preview';
 
 export const changelog = [
+  {
+    version: '4.4.16-preview',
+    date: 'November 24, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Department and City shown apart</strong> &mdash; a ticket now shows the requester&rsquo;s department (from their Microsoft profile, without the level, so &ldquo;Software III&rdquo; reads Software) and their city as two separate lines, instead of the two run together.' },
+      { type: 'new', html: '<strong>Tickets by department</strong> &mdash; a new card on Analytics &rarr; Demand shows how many tickets each department raised in the chosen period, with each department&rsquo;s share, and can switch to cities.' },
+      { type: 'new', html: '<strong>Create a workspace</strong> &mdash; super admins can create a new Ticket Pulse workspace from Settings &rarr; Workspaces. It starts with the standard statuses, a General group and your access, and never syncs with FreshService.' },
+      { type: 'new', html: '<strong>Forward with the original attachments</strong> &mdash; forwarding a ticket can now include its files, ticked by default, with a box for each so you can leave some out. Files from internal notes stay out unless you add them.' },
+      { type: 'new', html: '<strong>Reply to the person you forwarded to</strong> &mdash; when someone answers a forward, their message is labelled as a reply to your forward (not the requester), and a &ldquo;Reply to&rdquo; button writes back to them alone.' },
+      { type: 'improved', html: '<strong>Priority alerts explain themselves</strong> &mdash; the alert e-mail sent when a ticket becomes Urgent now has a proper layout with the TP number and a button, every alert sent is listed in the ticket&rsquo;s history with the reason, and workflows that check the priority read the ticket&rsquo;s own priority.' },
+      { type: 'fixed', html: '<strong>Source on the FreshService copy</strong> &mdash; a Ticket Pulse ticket&rsquo;s source (phone, walk-up, Teams and so on) is now carried to its FreshService copy instead of always showing Email.' },
+      { type: 'new', html: '<strong>Workflow condition: intake mailbox</strong> &mdash; workflows can check which mailbox an e-mail came in through, for example to skip notices for one team mailbox but not another.' },
+      { type: 'fixed', html: '<strong>Pictures open at the one you clicked</strong> &mdash; when a message has several pictures with the same file name, clicking one now opens that picture instead of the first.' },
+      { type: 'fixed', html: '<strong>Same-day repeats raise priority only for people</strong> &mdash; a second e-mail from a vendor, an automated notice or a monitoring alert no longer raises a ticket&rsquo;s priority; a colleague reporting the same problem again still does.' }
+    ],
+  },
   {
     version: '4.4.15-preview',
     date: 'November 24, 2026',
