@@ -11,6 +11,7 @@ import { applyWidth, useLayoutWidth } from '../contexts/LayoutContext';
 import { PersonAvatar, StatusPill, PriorityDot, SolutionMark, formatDayTime, formatPhone, timeAgo, ticketCategoryLabels } from '../components/tickets/ticketUi';
 import { FRESHSERVICE_DOMAIN } from '../components/tech-detail/constants';
 import { useRequesterPhoto } from '../hooks/useRequesterPhoto';
+import { cityOf, departmentOf, useDepartmentMap } from '../utils/requesterDepartment';
 
 /**
  * Search v2 (16 Sep 2026) — the requester page (/requesters/:id): who the
@@ -229,7 +230,9 @@ export default function RequesterDetail() {
   const stats = data?.stats;
   const photo = useRequesterPhoto(r?.email);
   const title = r?.entraJobTitle || r?.jobTitle || null;
-  const department = r?.entraDepartment || r?.department || null;
+  // QA 11-24 #1: department = Entra job class without its level; the FS department is the office city.
+  const departmentMap = useDepartmentMap();
+  const department = r ? departmentOf(r, departmentMap) : null;
   const place = useMemo(() => [...new Set([r?.entraOfficeLocation, r?.entraCity, r?.entraState, r?.entraCountry].filter(Boolean))].join(' · '), [r]);
   const backTo = location.state?.from || '/tickets';
 
@@ -389,9 +392,9 @@ export default function RequesterDetail() {
                   <Field label="Name">{r.name}</Field>
                   <Field label="E-mail">{r.email}</Field>
                   <Field label="Title">{r.entraJobTitle || r.jobTitle}</Field>
-                  <Field label="Department">{r.entraDepartment || r.department}</Field>
+                  <Field label="Department">{department}</Field>
                   <Field label="Office">{r.entraOfficeLocation}</Field>
-                  <Field label="City">{[r.entraCity, r.entraState].filter(Boolean).join(', ')}</Field>
+                  <Field label="City">{[...new Set([cityOf(r, departmentMap), r.entraState].filter(Boolean))].join(', ')}</Field>
                   <Field label="Country">{[r.entraCountry, r.entraCountryCode].filter(Boolean).join(' · ')}</Field>
                   <Field label="Work phone">{r.phone}</Field>
                   <Field label="Mobile">{r.mobile}</Field>

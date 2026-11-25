@@ -30,6 +30,7 @@ import {
 import AnalyticsReports from '../components/analytics/AnalyticsReports';
 import UrgentResponseOps from '../components/analytics/UrgentResponseOps';
 import AiPickAccuracy from '../components/analytics/AiPickAccuracy';
+import TicketsByDepartment from '../components/analytics/TicketsByDepartment';
 import MetricHint from '../components/analytics/MetricHint';
 import NoiseRepeatsLine from '../components/analytics/NoiseRepeatsLine';
 import { Switch } from '../components/ui/switch';
@@ -2715,6 +2716,8 @@ export default function Analytics({ view = 'standard' }) {
           <IntakeBreakdown intake={demand?.breakdowns?.intake} />
         </Panel>
       </div>
+      {/* QA 11-24 #2: where demand comes from, by the requester's department or city. */}
+      <TicketsByDepartment params={params} ChartBlock={HighchartsBlock} isMobile={isMobile} palette={palette} />
     </div>
   );
 

@@ -822,6 +822,11 @@ export const ticketsAPI = {
     return await api.get('/tickets/meta');
   },
 
+  // QA 11-24 #1: job class → department table (defaults + admin override), read-only.
+  getDepartmentMap: async () => {
+    return await api.get('/tickets/department-map');
+  },
+
   // "Also notify additional requesters" workspace toggle (Phase MR6).
   getAlsoForSettings: async () => await api.get('/tickets/also-for-settings'),
   updateAlsoForSettings: async (notifyAdditionalRequesters) => await api.put('/tickets/also-for-settings', { notifyAdditionalRequesters }),
@@ -1855,6 +1860,11 @@ export const workspaceAPI = {
     return await api.post('/workspaces', data);
   },
 
+  // QA 11-24 #4: a Ticket Pulse-only workspace (super admins). { name, defaultTimezone, internalDomains }
+  createNative: async (data) => {
+    return await api.post('/workspaces/native', data);
+  },
+
   update: async (id, data) => {
     return await api.put(`/workspaces/${id}`, data);
   },
@@ -2214,6 +2224,8 @@ export const analyticsAPI = {
   // Automation Ops, first section (QA 10-13 #16): the AI's pick against who did the ticket.
   getAiPickAccuracy: (params = {}) => apiAnalytics.get('/analytics/ai-pick-accuracy', { params }),
   getAiPickAccuracyExport: (params = {}) => apiAnalytics.get('/analytics/ai-pick-accuracy/export', { params }),
+  // Demand (QA 11-24 #2): tickets created in range by the requester's department / city.
+  getTicketsByDepartment: (params = {}) => apiAnalytics.get('/analytics/tickets-by-department', { params }),
   getInsights: (params = {}) => apiAnalytics.get('/analytics/insights', { params }),
   // Reports (feedback 07-14): saved snapshots; generation runs the LLM (10-20s)
   listReports: () => apiAnalytics.get('/analytics/reports'),

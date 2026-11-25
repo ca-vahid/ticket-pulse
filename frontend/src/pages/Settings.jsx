@@ -1323,7 +1323,7 @@ export default function Settings() {
                 {/* Workspaces */}
                 {activeSectionId === 'workspaces' && (
                   <div className="p-6">
-                    <WorkspaceManagementPanel />
+                    <WorkspaceManagementPanel canCreate={isGlobalAdmin} />
                   </div>
                 )}
 

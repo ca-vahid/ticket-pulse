@@ -1,5 +1,6 @@
 import prisma from './prisma.js';
 import { fsOnlyAssigneeEmail } from '../utils/fsOnlyAssignee.js';
+import { isFreshServiceUnlinked } from '../utils/workspaceFsBinding.js';
 import { markCreating, settleCreating, clearCreating } from '../utils/mirrorInFlight.js';
 import { fsNoteHeader } from '../utils/fsNoteHeader.js';
 import { inlineAnswersHtml } from '../utils/inlineAnswers.js';
@@ -484,8 +485,11 @@ class MirrorService {
     if (hit && Date.now() - hit.at < 60_000) return hit.active;
     let active = true;
     try {
-      const ws = await prisma.workspace?.findUnique?.({ where: { id: workspaceId }, select: { isActive: true } });
+      const ws = await prisma.workspace?.findUnique?.({ where: { id: workspaceId }, select: { isActive: true, freshserviceWorkspaceId: true } });
       if (ws && ws.isActive === false) active = false;
+      // QA 11-24 #4: an ACTIVE workspace created in Ticket Pulse has no
+      // FreshService link (id 0) and no fallback copy — same refusal.
+      if (ws && isFreshServiceUnlinked(ws)) active = false;
     } catch { /* treat lookup failure as active — never block a live workspace */ }
     this._activeCache.set(workspaceId, { at: Date.now(), active });
     return active;

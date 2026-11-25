@@ -30,6 +30,7 @@ import { agoWords, formatPacificFull, formatPacificWhen } from '../../utils/tick
 import { readHideMachinePreference } from './activityKind';
 import { HistoryRow } from './TicketHistoryTimeline';
 import { buildHistoryItems, countMachine } from '../../utils/ticketHistory';
+import { cityOf, departmentOf, ticketRequesterPlace, useDepartmentMap } from '../../utils/requesterDepartment';
 
 // Known-tag detector (QA 08-06 #5): plain text carrying angle-bracket tokens
 // like <Processed> renders via the plain-text branch with the tokens intact.
@@ -52,6 +53,7 @@ const TABS = [
 export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onChanged, onStep, stepInfo }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const departmentMap = useDepartmentMap();
   // Return address so /tickets/:id's Back control comes back to the exact
   // originating queue view (filters + peek param intact).
   const openFullTicket = () => navigate(`/tickets/${ticketId}`, {
@@ -466,12 +468,16 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                       ? <Link to={`/requesters/${ticket.requesterId}`} className="tp-focus-ring rounded hover:text-primary hover:underline" title="Open this requester's page">{ticket.requester?.name || 'Unknown requester'}</Link>
                       : (ticket.requester?.name || 'Unknown requester')}
                   </p>
-                  {(ticket.requester?.entraJobTitle || ticket.requester?.jobTitle || ticket.requester?.entraDepartment || ticket.requester?.department) && (
-                    <p className="text-muted-foreground truncate">
-                      {[...new Set([ticket.requester.entraJobTitle || ticket.requester.jobTitle, ticket.requester.entraDepartment || ticket.requester.department]
-                        .filter(Boolean))].join(' · ')}
-                    </p>
-                  )}
+                  {(() => {
+                    // QA 11-24 #1: title · department (job class, no level) · city — never the mixed string.
+                    const place = ticketRequesterPlace(ticket);
+                    const line = [...new Set([
+                      ticket.requester?.entraJobTitle || ticket.requester?.jobTitle,
+                      departmentOf(place, departmentMap),
+                      cityOf(place, departmentMap),
+                    ].filter(Boolean))].join(' · ');
+                    return line ? <p className="text-muted-foreground truncate" title={line}>{line}</p> : null;
+                  })()}
                   {ticket.requester?.email && (
                     <p className="flex items-center gap-1.5 text-muted-foreground/75 truncate">
                       <Mail className="w-3 h-3 flex-shrink-0" aria-hidden="true" />{ticket.requester.email}

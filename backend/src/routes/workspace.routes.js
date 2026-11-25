@@ -3,7 +3,7 @@ import { recordAccessEvent, listAccessEvents, ACTIONS } from '../services/access
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import config from '../config/index.js';
-import { requireAuth, requireAdmin, sessionUser } from '../middleware/auth.js';
+import { requireAuth, requireAdmin, requireGlobalAdmin, sessionUser } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { resolveUserAccess } from './auth.routes.js';
 import workspaceRepository from '../services/workspaceRepository.js';
@@ -178,6 +178,35 @@ router.post(
     await initializeWorkspace(ws);
 
     res.status(201).json({ success: true, data: ws });
+  }),
+);
+
+/**
+ * POST /api/workspaces/native  { name, defaultTimezone?, internalDomains? }
+ * "New workspace" (QA 11-24 #4): super admins only (global role admin; a
+ * workspace admin gets 403 super_admin_required). Creates a Ticket Pulse-only
+ * workspace — native ticketing on, no FreshService link — seeds statuses, a
+ * default group and ticket types, gives the creator admin access and records
+ * it in Access history. FreshService jobs skip it (utils/workspaceFsBinding.js).
+ */
+router.post(
+  '/native',
+  requireGlobalAdmin,
+  asyncHandler(async (req, res) => {
+    const { createNativeWorkspace } = await import('../services/workspaceCreationService.js');
+    const actor = sessionUser(req);
+    const { workspace, seeded, creatorGranted } = await createNativeWorkspace({
+      name: req.body?.name,
+      defaultTimezone: req.body?.defaultTimezone,
+      internalDomains: req.body?.internalDomains,
+      actorEmail: actor?.email || null,
+    });
+    await initializeWorkspace(workspace);
+    await import('../services/holidayAutoloadService.js')
+      .then(({ default: holidays }) => holidays.ensureHolidaysLoaded({ reason: 'workspace_created' }))
+      .catch((err) => logger.warn(`Holidays not loaded for new workspace ${workspace.id}: ${err.message}`));
+    await workspaceLinkNameService.refresh().catch(() => {});
+    res.status(201).json({ success: true, data: { ...workspace, linkName: workspace.slug, seeded, creatorGranted } });
   }),
 );
 
