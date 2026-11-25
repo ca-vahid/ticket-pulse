@@ -40,6 +40,7 @@ import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { clearReadCache } from './dashboardReadCache.js';
 import { ExternalAPIError } from '../utils/errors.js';
+import { FreshServiceNotLinkedError, assertFreshServiceLinked } from '../utils/workspaceFsBinding.js';
 import { TICKET_ORIGIN, isTicketPulseOrigin } from '../utils/ticketOrigin.js';
 import { repairMojibake } from '../utils/textEncoding.js';
 import groupSyncService from './groupSyncService.js';
@@ -284,10 +285,33 @@ class SyncService {
    */
   async _getWorkspaceConfig(workspaceId) {
     if (workspaceId) {
-      return settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
+      const config = await settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
+      // QA 11-24 #4 review: a workspace with no FreshService link has a null
+      // FS workspace filter, which would read EVERY FreshService workspace and
+      // re-home their tickets here. Refuse it (configs without the flag —
+      // older callers, test doubles — are taken as linked).
+      if (config && config.freshserviceLinked === false) throw new FreshServiceNotLinkedError();
+      return config;
     }
     const config = await settingsRepository.getFreshServiceConfig();
     return { ...config, defaultTimezone: 'America/Vancouver', syncIntervalMinutes: 5 };
+  }
+
+  /**
+   * Refuse a FreshService entry point (sync week, backfills, technician sync)
+   * for a workspace with no FreshService link, before any lock or run row is
+   * taken. A lookup failure is not a refusal — a live workspace is never
+   * blocked by a hiccup; _getWorkspaceConfig is the backstop.
+   */
+  async _assertWorkspaceLinked(workspaceId) {
+    if (!workspaceId) return;
+    let row = null;
+    try {
+      row = await prisma.workspace.findUnique({ where: { id: Number(workspaceId) }, select: { freshserviceWorkspaceId: true } });
+    } catch {
+      return;
+    }
+    assertFreshServiceLinked(row);
   }
 
   async _getTicketPulseLookupMaps(wsConfig) {
@@ -2083,6 +2107,9 @@ class SyncService {
    * @returns {Promise<number>} Number of technicians synced
    */
   async syncTechnicians(workspaceId = null) {
+    // Without a link the filter below is empty and EVERY FreshService agent
+    // would be upserted into this workspace (QA 11-24 #4 review).
+    await this._assertWorkspaceLinked(workspaceId);
     try {
       this.progress.currentStep = 'Syncing technicians from FreshService';
       this.progress.currentStepNumber = 1;
@@ -3277,6 +3304,7 @@ class SyncService {
     const daysToSync = options.daysToSync || 30;
     const processAll = options.processAll || false;
     const concurrency = options.concurrency || 5;
+    await this._assertWorkspaceLinked(options.workspaceId);
 
     try {
       logger.info(`Starting pickup time backfill (limit=${limit}, daysToSync=${daysToSync}, processAll=${processAll}, concurrency=${concurrency})`);
@@ -3374,6 +3402,7 @@ class SyncService {
     const daysToSync = options.daysToSync || 14;
     const processAll = options.processAll || false;
     const workspaceId = options.workspaceId || 1;
+    await this._assertWorkspaceLinked(workspaceId);
 
     try {
       logger.info(`Starting thread-entry backfill (workspace=${workspaceId}, limit=${limit}, days=${daysToSync})`);
@@ -3465,6 +3494,7 @@ class SyncService {
    * @returns {Promise<Object>} Sync result summary
    */
   async syncWeek({ startDate, endDate, concurrency = 10, workspaceId = 1 }) {
+    await this._assertWorkspaceLinked(workspaceId);
     try {
       this.runningWorkspaces.set(workspaceId, Date.now());
       this.progress = {
@@ -3619,6 +3649,8 @@ class SyncService {
       onProgress = null,
       triggeredByEmail = null,
     } = options;
+
+    await this._assertWorkspaceLinked(workspaceId);
 
     const backfillKey = `backfill:${workspaceId}`;
     if (this.runningWorkspaces.has(backfillKey)) {
@@ -4993,6 +5025,7 @@ class SyncService {
     const concurrency = options.concurrency || 3;
     const wsId = options.workspaceId || 1;
     const onProgress = options.onProgress || null;
+    await this._assertWorkspaceLinked(wsId);
 
     try {
       logger.info(`Starting episode backfill (days=${daysToSync}, limit=${limit}, concurrency=${concurrency})`);

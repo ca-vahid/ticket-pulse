@@ -9,6 +9,7 @@ import workspaceRepository from './workspaceRepository.js';
 import assignmentRepository from './assignmentRepository.js';
 import assignmentDailyReviewService from './assignmentDailyReviewService.js';
 import logger from '../utils/logger.js';
+import { isFreshServiceUnlinked } from '../utils/workspaceFsBinding.js';
 import { AVAILABILITY_VT_IMPORT_CRON, scheduledVtImportEnabled } from './availability/vtImportPolicy.js';
 
 /**
@@ -87,6 +88,14 @@ class ScheduledSyncService {
     const wsName = workspace.name;
 
     this.stopForWorkspace(wsId);
+
+    // QA 11-24 #4: a Ticket Pulse-only workspace (no FreshService link) has
+    // nothing to sync. Scheduling it would pull from the global FreshService
+    // account with no workspace filter.
+    if (isFreshServiceUnlinked(workspace)) {
+      logger.info(`Workspace "${wsName}" (id=${wsId}) has no FreshService link; FreshService sync not scheduled`);
+      return;
+    }
 
     let intervalMinutes = workspace.syncIntervalMinutes || 5;
     if (intervalMinutes < 1 || intervalMinutes > 60) {
@@ -264,6 +273,9 @@ class ScheduledSyncService {
     const every = clampFastSyncInterval(workspace.fastSyncIntervalMinutes);
 
     this.stopAssignmentFastSyncForWorkspace(wsId);
+
+    // QA 11-24 #4: the fast lane reads FreshService; nothing to read here.
+    if (isFreshServiceUnlinked(workspace)) return;
 
     logger.info(`Starting assignment fast sync for workspace "${wsName}" (id=${wsId}) every ${every}m at :${secondOffset.toString().padStart(2, '0')}`);
 
@@ -747,6 +759,11 @@ class ScheduledSyncService {
   async triggerManualSync(fullSync = false, daysToSync = 30, workspaceId = null) {
     const wsId = workspaceId || 1;
     logger.info(`Manual sync triggered for workspace ${wsId} (fullSync=${fullSync}, daysToSync=${daysToSync})`);
+    // QA 11-24 #4: "Sync now" in a workspace with no FreshService link is a no-op.
+    const ws = await workspaceRepository.getById(wsId).catch(() => null);
+    if (isFreshServiceUnlinked(ws)) {
+      return { status: 'skipped', reason: 'This workspace has no FreshService link, so there is nothing to sync.' };
+    }
     try {
       const options = { workspaceId: wsId };
       if (fullSync) {

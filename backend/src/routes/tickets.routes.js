@@ -337,6 +337,14 @@ router.get('/mentions/unseen-count', asyncHandler(async (req, res) => {
   res.json({ success: true, data: { count } });
 }));
 
+// QA 11-24 #1: the department table (job class → department) the ticket pages
+// use to show Department and City apart. Read-only; admins change it through
+// the app_settings key `department_map`.
+router.get('/department-map', asyncHandler(async (_req, res) => {
+  const { describeDepartmentMap } = await import('../services/departmentMapService.js');
+  res.json({ success: true, data: await describeDepartmentMap() });
+}));
+
 router.get('/meta', asyncHandler(async (req, res) => {
   const meta = await ticketService.getMeta(req.workspaceId);
   // QA 09-18 #4: the composer's greeting settings ride along so agents (who
@@ -2427,14 +2435,37 @@ router.post('/:id/pinned-cards/:cardId/dismiss', asyncHandler(async (req, res) =
 router.post('/:id/forward', requireNativeTicketing, messageFilesUpload, asyncHandler(async (req, res) => {
   const rawTo = req.body?.to;
   const to = typeof rawTo === 'string' ? rawTo.split(',').map((s) => s.trim()).filter(Boolean) : rawTo;
+  // QA 11-24 #5: the ticket's own files to send along (ids), a JSON array or,
+  // multipart, one comma-separated field.
+  const includeAttachmentIds = parseIdList(req.body?.includeAttachmentIds);
+  // Files from internal notes go only when the agent ticked one on purpose
+  // (the composer's "From internal notes" section sets this).
+  const rawPrivate = req.body?.includePrivateAttachments;
+  const includePrivateAttachments = rawPrivate === true || rawPrivate === 'true';
   const result = await ticketService.forwardTicket(
     parseTicketId(req), req.workspaceId,
-    { to, note: req.body?.note, noteHtml: req.body?.noteHtml },
+    {
+      to, note: req.body?.note, noteHtml: req.body?.noteHtml,
+      ...(includeAttachmentIds ? { includeAttachmentIds } : {}),
+      ...(includeAttachmentIds && includePrivateAttachments ? { includePrivateAttachments: true } : {}),
+    },
     req.ticketActor,
     req.files || [],
   );
   res.status(201).json({ success: true, data: result });
 }));
+
+/**
+ * A list of ids from JSON ([1, 2]) or a form field ("1,2"). Undefined when the
+ * field is absent; anything that is not a positive whole number is a 400.
+ */
+export function parseIdList(raw) {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  const parts = Array.isArray(raw) ? raw : String(raw).split(',').map((s) => s.trim()).filter(Boolean);
+  const ids = parts.map((v) => (typeof v === 'number' ? v : Number(String(v).trim())));
+  if (ids.some((n) => !Number.isInteger(n) || n <= 0)) throw new ValidationError('includeAttachmentIds must be a list of attachment ids');
+  return [...new Set(ids)];
+}
 
 // Noise flag works for any origin (it's Ticket Pulse's own classification),
 // so it deliberately skips requireNativeTicketing.
@@ -2472,8 +2503,18 @@ function threadInput(req) {
 }
 
 router.post('/:id/replies', requireNativeTicketing, messageFilesUpload, asyncHandler(async (req, res) => {
+  // QA 11-24 #7/#8: "Reply to <name>" on a message from someone who is not the
+  // requester (the person a ticket was forwarded to). The reply goes to that
+  // person only; the requester is never swapped in. Passed as an option, not
+  // in the body input, so no other caller of addReply (the public API, macros)
+  // can reach it.
+  const { replyToEntryId, replyToEmail, ...body } = threadInput(req);
+  const participant = replyToEntryId !== undefined && replyToEntryId !== null && replyToEntryId !== ''
+    ? { entryId: Number(replyToEntryId), email: typeof replyToEmail === 'string' ? replyToEmail : null }
+    : null;
   const result = await ticketService.addReply(
-    parseTicketId(req), req.workspaceId, threadInput(req), req.ticketActor, req.files || [],
+    parseTicketId(req), req.workspaceId, body, req.ticketActor, req.files || [],
+    ...(participant ? [{ replyToParticipant: participant }] : []),
   );
   if (result.deduped) res.set('Idempotent-Replayed', 'true');
   res.status(result.deduped ? 200 : 201).json({ success: true, data: result });

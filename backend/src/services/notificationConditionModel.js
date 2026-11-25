@@ -47,6 +47,11 @@ export const CONDITION_FIELDS = Object.freeze({
   'ticket.createdVia': { label: 'Created via', type: 'enum', path: 'ticket.createdVia', options: ['app', 'email', 'api', 'freshservice_sync', 'held_reply', 'agent_cc', 'forward'] },
   // Arrival channel (QA 07-07 #1) — how the ticket reached the helpdesk.
   'ticket.sourceLabel': { label: 'Ticket source', type: 'enum', path: 'ticket.sourceLabel', options: ['Email', 'Portal', 'Phone', 'Chat', 'API', 'Webhook', 'Agent'] },
+  // QA 11-24 item 11: the connected mailbox the ticket came in through (its
+  // address, lower-case), read on demand by the engine (intakeMailboxService).
+  // Empty for a ticket that did not come by e-mail: "is X" fails, "is not X" passes.
+  // The builder offers this workspace's mailbox connections as a pick-list.
+  'ticket.intakeMailbox': { label: 'Intake mailbox', type: 'enum', path: 'ticket.intakeMailbox', options: [], dynamicOptions: 'mailboxes' },
   // Ticket type — per-workspace vocabulary (registry-driven), so the builder
   // treats it as free text; the UI offers the workspace's types as hints.
   'ticket.ticketType': { label: 'Ticket type', type: 'string', path: 'ticket.ticketType' },

@@ -135,7 +135,17 @@ function emitPriorityChangedFrom(ticketId, fieldsExtra, stamp, source) {
     .catch((err) => logger.warn(`ticket.priority_changed dispatch failed for ticket ${ticketId} (non-fatal): ${err.message}`));
 }
 
-function priorityLabel(ticket) {
+/**
+ * The "Priority" condition field (ticket.priorityLabel). A FreshService ticket
+ * keeps the AI's assessed level first, as before. A Ticket Pulse ticket uses
+ * its own priority (QA 11-24 item 9): Ticket Pulse owns it, and an agent's
+ * Low → Urgent left the field at the AI's old "Low", so a "Priority is Urgent"
+ * workflow stopped at its first condition (a skipped run, hidden as machine
+ * activity on the ticket).
+ */
+export function priorityLabel(ticket) {
+  const own = PRIORITY_WORDS[Number(ticket?.priority)] || null;
+  if (ticket?.origin === 'ticketpulse' && own) return own;
   if (ticket?.assessedPriority) return ticket.assessedPriority;
   return {
     1: 'Low',
@@ -1000,7 +1010,11 @@ export async function emitTicketLifecycleNotifications({
   // FS-side field diff only for sync-observed writes (TU-10); TP-native
   // paths emit ticket.fields_updated themselves through ticketService.
   const fromFreshservice = source !== 'ticketpulse_native' && source !== 'preview';
-  const events = deriveTicketLifecycleEvents(existingTicket, upsertedTicket, { isTerminal, includeFieldDiff: fromFreshservice });
+  // A Ticket Pulse ticket's field changes are emitted where they are made
+  // (ticketService); a FreshService-side diff of its copy is the mirror's echo
+  // and must not fire "Ticket updated" / "Priority changed" a second time.
+  const tpBorn = upsertedTicket?.origin === 'ticketpulse' || existingTicket?.origin === 'ticketpulse';
+  const events = deriveTicketLifecycleEvents(existingTicket, upsertedTicket, { isTerminal, includeFieldDiff: fromFreshservice && !tpBorn });
   if (events.length === 0) return { status: 'skipped', reason: 'No lifecycle notification events' };
   const eventActorKind = actorKind || (fromFreshservice ? 'freshservice' : 'human');
   suppressRequesterAck = suppressRequesterAck === true || upsertedTicket?.suppressRequesterAck === true;
@@ -1073,9 +1087,14 @@ export async function emitTicketLifecycleNotifications({
     // A mail-in ticket's To/Cc (24 Nov 2026), in memory like createdVia: the
     // ticket row gets them only after this event, and only the workflows'
     // "Everyone on the original e-mail" reads them. Webhooks and Teams never see it.
-    const workflowContext = event.type === 'ticket.created' && upsertedTicket?.originalEmailRecipients
+    let workflowContext = event.type === 'ticket.created' && upsertedTicket?.originalEmailRecipients
       ? { ...eventContext, originalEmailRecipients: upsertedTicket.originalEmailRecipients }
       : eventContext;
+    // QA 11-24 item 11: the mailbox a new ticket came in through (null when it
+    // did not come by e-mail), in memory like the recipients above.
+    if (event.type === 'ticket.created' && upsertedTicket?.intakeMailbox !== undefined) {
+      workflowContext = { ...workflowContext, ticket: { ...workflowContext.ticket, intakeMailbox: upsertedTicket.intakeMailbox } };
+    }
     try {
       results.push(await notificationWorkflowEngine.executeForEvent(workflowContext, {
         triggerSource: source,
@@ -1172,6 +1191,11 @@ export async function emitTicketEvent(eventType, ticketId, {
   }
   const eventContext = buildEventContext({ event, ticket, previousAgent: null, source, statusBase, ...(createdVia ? { createdVia } : {}) });
   if (extra) eventContext.event.extra = extra;
+  // QA 11-24 item 9: on "Priority changed" the Priority field is the level it
+  // changed to, whatever an older AI assessment said.
+  if (eventType === 'ticket.priority_changed' && extra?.toLabel && eventContext.ticket) {
+    eventContext.ticket.priorityLabel = extra.toLabel;
+  }
   // One reopen path (MEGA 11-14, Part A). Before anything hears about the
   // reply: Auto-help's own reading (W3 — a reply to a ticket Auto-help closed
   // in the last 7 days; "thanks, that worked" rides as

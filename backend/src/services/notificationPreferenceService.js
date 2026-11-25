@@ -8,6 +8,8 @@ import { getNotificationProviderStatus } from './notificationProviders.js';
 import notificationDeliveryService from './notificationDeliveryService.js';
 import { sendVerificationSms } from './twilioNotificationService.js';
 import logger from '../utils/logger.js';
+import { isTicketPulseOrigin } from '../utils/ticketOrigin.js';
+import { alertReason, recordAlertActivityForDeliveries } from './alertActivityService.js';
 import {
   notificationTicketLink,
   notificationTicketRef,
@@ -107,17 +109,59 @@ export function buildPriorityChangeNotificationMessage({ ticket, priority }) {
 }
 
 // WhatsApp template variables: `ticketId` keeps its meaning (the bare
-// FreshService number) so approved templates read as before; `ticketRef`
-// (QA 11-23) is the ticket's own reference, TP-1042 / #250001.
+// FreshService number) for a FreshService ticket so approved templates read as
+// before; `ticketRef` (QA 11-23) is the ticket's own reference, TP-1042 / #250001.
+// A Ticket Pulse ticket is never called by its FreshService copy's number
+// (QA 11-24 item 9): its `ticketId` is its own reference too.
 function buildWhatsAppVariables({ ticket, priority, message }) {
   const fsId = fsTicketIdOrNull(ticket);
+  const ref = notificationTicketRef(ticket) || '';
+  const ticketId = isTicketPulseOrigin(ticket) ? ref : (fsId ? String(fsId) : '');
   return {
     message,
     priority: priority || '',
-    ticketId: fsId ? String(fsId) : '',
-    ticketRef: notificationTicketRef(ticket) || '',
+    ticketId,
+    ticketRef: ref,
     link: notificationTicketLink(ticket) || '',
   };
+}
+
+/**
+ * The delivery type of a priority alert (QA 11-24 item 9): a Ticket Pulse
+ * ticket's change is not a "FreshService priority change", even when the
+ * ticket has a FreshService copy.
+ */
+export function priorityAlertType(ticket) {
+  return isTicketPulseOrigin(ticket) ? 'ticketpulse_priority_change' : 'freshservice_priority_change';
+}
+
+const THRESHOLD_SENTENCE = Object.freeze({
+  urgent_only: 'Urgent tickets',
+  high_urgent: 'High and Urgent tickets',
+});
+
+/** The e-mail's "why you got this" line (QA 11-24 item 9). */
+export function alertReasonSentence(kind, threshold) {
+  const covers = THRESHOLD_SENTENCE[threshold] || 'tickets at this priority';
+  const who = kind === 'assignment' ? 'it was assigned to you' : 'you are the assignee';
+  return `You got this because ${who} and your alert setting covers ${covers}.`;
+}
+
+function technicianNameOf(preference, ticket) {
+  return preference?.technician?.name || ticket?.assignedTech?.name || null;
+}
+
+/** Process the queued alert deliveries, then write the ticket's "alert sent" row. Never throws. */
+function processAlertDeliveries(deliveries, count, activity, logContext) {
+  const dedupeKeys = deliveries.map((delivery) => delivery.dedupeKey);
+  return notificationDeliveryService.processQueuedDeliveries({ limit: count, dedupeKeys })
+    .catch((error) => {
+      logger.warn('Notification delivery processing failed', { ...logContext, error: error.message });
+    })
+    .then(() => recordAlertActivityForDeliveries(dedupeKeys, activity))
+    .catch((error) => {
+      logger.warn('Alert history row failed (non-fatal)', { ...logContext, error: error.message });
+    });
 }
 
 export function buildVoiceNotificationMessage({ ticket, priority }) {
@@ -472,7 +516,7 @@ class NotificationPreferenceService {
   }) {
     const preference = await prisma.technicianNotificationPreference.findUnique({
       where: { technicianId },
-      include: { technician: { select: { email: true } } },
+      include: { technician: { select: { email: true, name: true } } },
     });
     if (!preference) return { queued: 0, skipped: 'no_preferences' };
 
@@ -483,6 +527,7 @@ class NotificationPreferenceService {
     ));
     if (channels.length === 0) return { queued: 0, skipped: 'threshold_channel_or_provider_disabled' };
 
+    const reason = alertReasonSentence('assignment', preference.threshold);
     const message = buildNotificationMessage({ ticket, priority });
     const voiceMessage = buildVoiceNotificationMessage({ ticket, priority });
     const whatsappVariables = buildWhatsAppVariables({
@@ -516,6 +561,7 @@ class NotificationPreferenceService {
           ticketRef: notificationTicketRef(ticket),
           ticketLink: notificationTicketLink(ticket),
           notificationType,
+          reason,
           assignment: assignmentContext,
         },
       };
@@ -529,16 +575,12 @@ class NotificationPreferenceService {
     });
 
     if (result.count > 0) {
-      notificationDeliveryService.processQueuedDeliveries({
-        limit: result.count,
-        dedupeKeys: deliveries.map((delivery) => delivery.dedupeKey),
-      }).catch((error) => {
-        logger.warn('Notification delivery processing failed', {
-          runId: pipelineRunId,
-          ticketId: ticket.id,
-          error: error.message,
-        });
-      });
+      processAlertDeliveries(deliveries, result.count, {
+        kind: 'assignment',
+        priority,
+        technicianName: technicianNameOf(preference, ticket),
+        reason: alertReason({ kind: 'assignment', threshold: preference.threshold }),
+      }, { runId: pipelineRunId, ticketId: ticket.id });
     }
 
     return { queued: result.count, channels };
@@ -575,7 +617,7 @@ class NotificationPreferenceService {
 
     const preference = await prisma.technicianNotificationPreference.findUnique({
       where: { technicianId },
-      include: { technician: { select: { email: true } } },
+      include: { technician: { select: { email: true, name: true } } },
     });
     if (!preference) return { queued: 0, skipped: 'no_preferences' };
 
@@ -586,6 +628,9 @@ class NotificationPreferenceService {
     ));
     if (channels.length === 0) return { queued: 0, skipped: 'threshold_channel_or_provider_disabled' };
 
+    // QA 11-24 item 9: a Ticket Pulse ticket's change is named as such.
+    const notificationType = priorityAlertType(ticket);
+    const reason = alertReasonSentence('priority', preference.threshold);
     const message = buildPriorityChangeNotificationMessage({ ticket, priority });
     const voiceMessage = buildPriorityChangeVoiceNotificationMessage({ ticket, priority });
     const whatsappVariables = buildWhatsAppVariables({ ticket, priority, message });
@@ -603,6 +648,7 @@ class NotificationPreferenceService {
         channel,
         status: 'queued',
         assessedPriority: priority,
+        notificationType,
         recipient,
         provider: provider.provider,
         dedupeKey: `priority-change:${hydratedEvent.id}:${ticket.id}:${technicianId}:${channel}`,
@@ -615,7 +661,8 @@ class NotificationPreferenceService {
           freshserviceTicketId: fsTicketIdOrNull(ticket),
           ticketRef: notificationTicketRef(ticket),
           ticketLink: notificationTicketLink(ticket),
-          notificationType: 'freshservice_priority_change',
+          notificationType,
+          reason,
           priorityChange: {
             fromPriorityId: hydratedEvent.fromPriorityId,
             fromPriorityLabel: hydratedEvent.fromPriorityLabel,
@@ -635,16 +682,12 @@ class NotificationPreferenceService {
     });
 
     if (result.count > 0) {
-      notificationDeliveryService.processQueuedDeliveries({
-        limit: result.count,
-        dedupeKeys: deliveries.map((delivery) => delivery.dedupeKey),
-      }).catch((error) => {
-        logger.warn('Priority-change notification delivery processing failed', {
-          priorityEventId: hydratedEvent.id,
-          ticketId: ticket.id,
-          error: error.message,
-        });
-      });
+      processAlertDeliveries(deliveries, result.count, {
+        kind: 'priority',
+        priority,
+        technicianName: technicianNameOf(preference, ticket),
+        reason: alertReason({ kind: 'priority', threshold: preference.threshold }),
+      }, { priorityEventId: hydratedEvent.id, ticketId: ticket.id });
     }
 
     return { queued: result.count, channels };

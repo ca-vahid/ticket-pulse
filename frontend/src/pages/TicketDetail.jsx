@@ -6,7 +6,7 @@ import { personalKeyNameOf } from '../components/apiKeys/personalKeyText';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ticketShortLink } from '../utils/ticketShortLink';
 import {
-  Image as ImageIcon, Activity, SlidersHorizontal, GitBranch, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, BadgeCheck, CheckCheck, CheckCircle2, Lightbulb, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, CircleMinus, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, GitMerge, Hand, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, Plus, RefreshCw, Scissors, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle, PauseCircle, Play, Keyboard,
+  Image as ImageIcon, Reply, Activity, SlidersHorizontal, GitBranch, AlertCircle, AlertTriangle, ArrowLeft, Bell, BellRing, BadgeCheck, CheckCheck, CheckCircle2, Lightbulb, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, CircleMinus, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, GitMerge, Hand, History, Inbox, Info, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, Plus, RefreshCw, Scissors, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle, PauseCircle, Play, Keyboard,
 } from 'lucide-react';
 import ComposerShortcuts, { Keys, MOD } from '../components/tickets/composer/ComposerShortcuts';
 import EmojiPicker from '../components/tickets/composer/EmojiPicker';
@@ -33,7 +33,10 @@ import RequestApprovalModal from '../components/tickets/RequestApprovalModal';
 import ResolveReasonModal from '../components/tickets/ResolveReasonModal';
 import { ticketNeedsResolutionReason, reasonLabel } from '../utils/resolutionReasons';
 import { rememberTicket } from '../utils/recentSearches';
-import { RichBody, SentSignature, IMG_REF_RE, openingMessageHtml, openingRepeatsDescription, picturesShownInBody } from '../components/tickets/InlineImageBody';
+import { RichBody, SentSignature, IMG_REF_RE, cleanRefName, openingMessageHtml, openingRepeatsDescription, picturesShownInBody } from '../components/tickets/InlineImageBody';
+import { bareEmail, ccAddressesOf, forwardRecipientsOf, incomingAuthorRole, participantReplySubject, senderFirstName } from '../components/tickets/threadAuthorRole';
+import ForwardAttachmentPicker from '../components/tickets/ForwardAttachmentPicker';
+import { defaultForwardSelection, forwardAttachmentIds, groupForwardAttachments, includesInternal } from '../components/tickets/forwardAttachments';
 import { replyBodyParts } from '../utils/quotedHistory';
 import { EntryMenu, InlineAnswers, OriginalEmailDialog } from '../components/tickets/InlineAnswers';
 import { integrationIdentity, requesterIntegrationIdentity } from '../utils/integrationIdentity';
@@ -108,6 +111,7 @@ import TeamForwardDialog from '../components/tickets/TeamForwardDialog';
 import { baseStatusOf, fsBornStatusNames, isTerminalStatus, statusDefsFromMeta, statusDotClass, statusToneFromDefs } from '../components/tickets/statusDefs';
 import { looksLikeRealHtml } from '../utils/htmlContent';
 import { readTicketList } from '../utils/lastTicketList';
+import { cityOf, departmentOf, ticketRequesterPlace, useDepartmentMap } from '../utils/requesterDepartment';
 import { agoWords, formatPacificFull, formatPacificWhen, whenOnce } from '../utils/ticketDates';
 
 // Canonical 4 — FS-born tickets keep this vocabulary (FreshService owns their
@@ -402,7 +406,7 @@ export function forwardedMetaOf(entry) {
   return null;
 }
 
-export function ThreadEntry({ entry, attachments = [], ticketId = null, onPreview, onImageRef, photoFor, nameForEmail = null, onCopy, canDelete = false, onDelete, deleting = false, canEdit = false, onEdit, customFields = null, onEditField = null, onCopied = null, onFilterNavigate = undefined, onSplitFrom = null, openingHtml = null, openingImages = null }) {
+export function ThreadEntry({ entry, attachments = [], ticketId = null, onPreview, onImageRef, photoFor, nameForEmail = null, onCopy, canDelete = false, onDelete, deleting = false, canEdit = false, onEdit, customFields = null, onEditField = null, onCopied = null, onFilterNavigate = undefined, onSplitFrom = null, openingHtml = null, openingImages = null, authorRole = null, onReplyToSender = null }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   // QA 10-13 #3: the opening e-mail's entry held only a 255-character plain-text preview;
   // `openingHtml` is the description's formatted body for those older entries (display only).
@@ -432,6 +436,17 @@ export function ThreadEntry({ entry, attachments = [], ticketId = null, onPrevie
   }, [allImageAttachments, inlineImages]);
   const fileAttachments = useMemo(() => (ticketId ? attachments.filter((a) => !isImageAttachment(a)) : attachments), [attachments, ticketId]);
   const shownImageNames = useMemo(() => (ticketId ? new Set(imageAttachments.map((a) => String(a.fileName || '').trim().toLowerCase())) : null), [imageAttachments, ticketId]);
+  // QA 11-24 #12: a picture named in THIS message opens THIS message's file.
+  // Several messages often carry the same name (every Outlook mail has an
+  // image001.png, every composer paste starts at pasted-image-1.png), and the
+  // ticket-wide lookup by name opened the first one on the ticket.
+  const openImageRef = useCallback((name, hit = null) => {
+    if (hit) { onImageRef?.(name, hit); return; }
+    const wanted = cleanRefName(name).toLowerCase();
+    const own = (entry.eventType === 'original_email' ? [...attachments, ...(openingImages || [])] : attachments)
+      .find((a) => String(a.fileName || '').trim().toLowerCase() === wanted);
+    onImageRef?.(name, own || null);
+  }, [onImageRef, attachments, openingImages, entry.eventType]);
   // Inline note editing (FR 08-07 #8): the pencil swaps the note body for the
   // small rich-text composer variant; Save PATCHes through the parent.
   const [editing, setEditing] = useState(false);
@@ -459,6 +474,11 @@ export function ThreadEntry({ entry, attachments = [], ticketId = null, onPrevie
   // it went out by e-mail to the people named on it. QA 11-16 #1: keyed on
   // isPrivate alone, every forward read "Internal note".
   const isForward = isOutboundForward(entry);
+  // "Reply to <name>" (QA 11-24 #8): stored as a forward (private, the
+  // requester is not on it) with `directReply` naming who it answered.
+  const directReply = isForward && entry.rawPayload?.directReply && typeof entry.rawPayload.directReply === 'object'
+    ? entry.rawPayload.directReply : null;
+  const forwardedFiles = isForward && Array.isArray(entry.rawPayload?.forwardedAttachments) ? entry.rawPayload.forwardedAttachments : [];
   const isNote = !isForward && (entry.eventType === 'note' || entry.isPrivate === true);
   const body = entry.bodyText || entry.content || '';
   // Identity beats channel: an agent replying by email syncs from FS as
@@ -467,6 +487,12 @@ export function ThreadEntry({ entry, attachments = [], ticketId = null, onPrevie
   const isAgentAuthor = entry.authorType === 'agent';
   const incoming = !isAgentAuthor && (entry.incoming === true || entry.authorType === 'requester');
   const outgoing = !isNote && !incoming;
+  // QA 11-24 #7: who the sender is on this ticket. A forward recipient's
+  // answer is not "From requester".
+  const role = incoming && authorRole ? authorRole : null;
+  const notRequester = Boolean(role && role.kind !== 'requester');
+  const canReplyToSender = notRequester && typeof onReplyToSender === 'function' && Boolean(entry.actorEmail);
+  const senderFirst = canReplyToSender ? senderFirstName(entry) : '';
   const viaEmail = entry.source === 'email_inbound' || Boolean(entry.emailMessageId)
     || (entry.incoming === true && isAgentAuthor);
   const apEvent = approvalEventMeta(entry);
@@ -525,11 +551,13 @@ export function ThreadEntry({ entry, attachments = [], ticketId = null, onPrevie
       ) : (
         <PersonAvatar name={entry.actorName} photoUrl={photoFor?.(entry)} size="h-10 w-10" textSize="text-xs" />
       )}
-      <span className={`text-[9px] font-bold uppercase tracking-wide ${
-        isTicketPulse ? 'text-blue-400' : isNote ? 'text-amber-500' : incoming ? 'text-indigo-400' : 'text-blue-400'
-      }`}
+      <span
+        data-testid="entry-role"
+        className={`text-[9px] font-bold uppercase text-center leading-tight ${notRequester ? 'tracking-normal' : 'tracking-wide'} ${
+          isTicketPulse ? 'text-blue-400' : isNote ? 'text-amber-500' : notRequester ? 'text-violet-500 dark:text-violet-300' : incoming ? 'text-indigo-400' : 'text-blue-400'
+        }`}
       >
-        {isTicketPulse ? 'Auto' : integration ? (integration.key === 'rostam' ? 'Tier 2' : 'Agent') : isNote ? 'Note' : incoming ? 'Requester' : 'Agent'}
+        {isTicketPulse ? 'Auto' : integration ? (integration.key === 'rostam' ? 'Tier 2' : 'Agent') : isNote ? 'Note' : incoming ? (role?.avatarLabel || 'Requester') : 'Agent'}
       </span>
     </div>
   );
@@ -566,18 +594,27 @@ export function ThreadEntry({ entry, attachments = [], ticketId = null, onPrevie
             </span>
           ) : isForward ? (
             <span
+              data-testid={directReply ? 'direct-reply-badge' : undefined}
               className="inline-flex items-center gap-1 text-[10px] font-semibold text-violet-700 dark:text-violet-200 bg-violet-50 dark:bg-violet-500/15 border border-violet-200 dark:border-violet-500/30 rounded-full px-1.5 py-0.5"
-              title="E-mailed to the people named here. The requester was not included, and only your team sees this entry."
+              title={directReply
+                ? `E-mailed to ${directReply.name || directReply.email} only. The requester was not included, and only your team sees this entry.`
+                : 'E-mailed to the people named here. The requester was not included, and only your team sees this entry.'}
             >
-              <Forward className="w-2.5 h-2.5" aria-hidden="true" /> Forwarded
+              {directReply
+                ? <><Reply className="w-2.5 h-2.5" aria-hidden="true" /> Reply to {directReply.name || directReply.email}</>
+                : <><Forward className="w-2.5 h-2.5" aria-hidden="true" /> Forwarded</>}
               <Lock className="w-2.5 h-2.5 opacity-70" aria-label="Not visible to the requester" />
             </span>
           ) : (
-            <span className={`inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-1.5 py-0.5 border ${
-              incoming ? 'text-indigo-700 dark:text-indigo-200 bg-indigo-50 dark:bg-indigo-500/15 border-indigo-200 dark:border-indigo-500/30' : 'text-blue-700 dark:text-blue-200 bg-blue-50 dark:bg-blue-500/15 border-blue-200 dark:border-blue-500/30'
-            }`}
+            <span
+              data-testid="entry-kind-badge"
+              className={`inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-1.5 py-0.5 border ${
+                notRequester ? 'text-violet-700 dark:text-violet-200 bg-violet-50 dark:bg-violet-500/15 border-violet-200 dark:border-violet-500/30'
+                  : incoming ? 'text-indigo-700 dark:text-indigo-200 bg-indigo-50 dark:bg-indigo-500/15 border-indigo-200 dark:border-indigo-500/30' : 'text-blue-700 dark:text-blue-200 bg-blue-50 dark:bg-blue-500/15 border-blue-200 dark:border-blue-500/30'
+              }`}
+              title={notRequester ? `${entry.actorEmail || entry.actorName || 'This sender'} is not the requester of this ticket` : undefined}
             >
-              <Mail className="w-2.5 h-2.5" aria-hidden="true" /> {incoming ? 'From requester' : 'Reply to requester'}
+              <Mail className="w-2.5 h-2.5" aria-hidden="true" /> {incoming ? (role?.badge || 'From requester') : 'Reply to requester'}
             </span>
           )}
           {viaEmail && <span className="text-[10px] text-muted-foreground/75">via email</span>}
@@ -603,6 +640,19 @@ export function ThreadEntry({ entry, attachments = [], ticketId = null, onPrevie
             </span>
           )}
           <span className="ml-auto flex items-center gap-1">
+            {canReplyToSender && (
+              /* QA 11-24 #8: answer this person directly; the requester is not on it. */
+              <button
+                type="button"
+                onClick={() => onReplyToSender(entry)}
+                data-testid="reply-to-sender"
+                title={`Reply to ${entry.actorName || entry.actorEmail} only (${bareEmail(entry.actorEmail)}). The requester is not included.`}
+                className="tp-focus-ring inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-primary hover:bg-primary/10"
+              >
+                <Reply className="w-3 h-3" aria-hidden="true" />
+                Reply to {senderFirst}
+              </button>
+            )}
             {canEdit && isNote && entry.authorType !== 'system' && !editing && (
               <button
                 onClick={startEdit}
@@ -741,7 +791,7 @@ export function ThreadEntry({ entry, attachments = [], ticketId = null, onPrevie
             <RichBody
               html={showFullMail && replyParts.full ? replyParts.full : replyParts.fresh}
               text={body}
-              onImageRef={onImageRef}
+              onImageRef={openImageRef}
               shownImages={shownImageNames}
               ticketId={ticketId}
               inlineImages={inlineImages}
@@ -762,6 +812,15 @@ export function ThreadEntry({ entry, attachments = [], ticketId = null, onPrevie
             )}
             {/* QA 10-13 #4: the signature that was added when this reply was mailed. */}
             {!isNote && <SentSignature entry={entry} />}
+            {/* QA 11-24 #5: the ticket's own files this forward carried. */}
+            {forwardedFiles.length > 0 && (
+              <p data-testid="forwarded-files" className="mt-2 flex items-start gap-1.5 text-xs text-muted-foreground">
+                <Paperclip className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/75" aria-hidden="true" />
+                <span className="min-w-0">
+                  Sent with {forwardedFiles.length === 1 ? 'this file' : `these ${forwardedFiles.length} files`} from the ticket: {forwardedFiles.map((f) => f.name).join(', ')}
+                </span>
+              </p>
+            )}
           </>
         )}
         {/* Pictures as thumbnails (name on hover); other files as chips. */}
@@ -863,6 +922,8 @@ export default function TicketDetail() {
   // address — the Back control goes there instead of the generic queue.
   const backTo = location.state?.from || null;
   const ticketId = Number(id);
+  // QA 11-24 #1: job class → department table (defaults + admin override).
+  const departmentMap = useDepartmentMap();
   // This ticket belongs to the workspace it was opened in. If the user switches
   // workspace while viewing it, the ticket won't exist in the new one — bounce
   // to that workspace's queue instead of showing a "not found" error.
@@ -1012,6 +1073,12 @@ export default function TicketDetail() {
   }, [threadEmailsKey]);  
 
   const [composerMode, setComposerMode] = useState('note'); // default to internal note
+  // QA 11-24 #8: a reply to someone who is not the requester (the person the
+  // ticket was forwarded to): { entryId, email, name, firstName, wasForwardedTo }.
+  // Null = a reply goes to the requester, as always.
+  const [replyTarget, setReplyTarget] = useState(null);
+  // QA 11-24 #5: which of the ticket's files a forward carries; null = the default (all files).
+  const [forwardPick, setForwardPick] = useState(null);
   const [composerBody, setComposerBody] = useState(''); // sanitized html from the editor
   // Full-screen composer (25 Oct 2026): room for a long write-up such as a verified solution.
   const [composerExpanded, setComposerExpanded] = useState(false);
@@ -1255,6 +1322,8 @@ export default function TicketDetail() {
     setComposerCc([]);
     setComposerFiles([]);
     setHeldDraftNotice(false);
+    setReplyTarget(null);
+    setForwardPick(null);
     let restored = '';
     try {
       const raw = localStorage.getItem(draftKey);
@@ -1274,6 +1343,13 @@ export default function TicketDetail() {
           ccSeededRef.current = true;
         }
         if (draft.mode === 'note' || draft.mode === 'reply') setComposerMode(draft.mode);
+        // A draft written to someone other than the requester comes back
+        // addressed to them, never silently to the requester (QA 11-24 #8).
+        const to = draft.replyTo;
+        if (draft.mode === 'reply' && to && Number.isInteger(to.entryId) && typeof to.email === 'string' && to.email.includes('@')) {
+          setReplyTarget({ entryId: to.entryId, email: to.email, name: to.name || null, firstName: to.firstName || to.email, wasForwardedTo: to.wasForwardedTo === true });
+          ccSeededRef.current = true;
+        }
         // A reply that was waiting to send when the tab was closed.
         setHeldDraftNotice(Boolean(draft.held && draft.body));
       }
@@ -1297,6 +1373,8 @@ export default function TicketDetail() {
       setComposerText(htmlToText(draft.body));
       if (Array.isArray(draft.cc) && draft.cc.length) { setComposerCc(draft.cc); ccSeedRef.current = draft.cc; ccSeededRef.current = true; }
       if (draft.mode === 'note' || draft.mode === 'reply') setComposerMode(draft.mode);
+      // The server copy does not carry who a reply was to: it is the requester's.
+      setReplyTarget(null);
       showToast('sky', 'Picked up the draft you started on another computer', { duration: 5000 });
     },
     onDrop: () => {
@@ -1328,14 +1406,18 @@ export default function TicketDetail() {
     const timer = setTimeout(() => {
       try {
         if (composerText.trim() || composerCc.length) {
-          localStorage.setItem(draftKey, JSON.stringify({ body: composerBody, cc: composerCc, mode: composerMode, savedAt: Date.now(), ...(pendingSend ? { held: true } : {}) }));
+          localStorage.setItem(draftKey, JSON.stringify({
+            body: composerBody, cc: composerCc, mode: composerMode, savedAt: Date.now(),
+            ...(composerMode === 'reply' && replyTarget ? { replyTo: replyTarget } : {}),
+            ...(pendingSend ? { held: true } : {}),
+          }));
         } else {
           localStorage.removeItem(draftKey);
         }
       } catch { /* storage full/unavailable */ }
     }, 400);
     return () => clearTimeout(timer);
-  }, [composerBody, composerText, composerCc, composerMode, draftKey, pendingSend]);
+  }, [composerBody, composerText, composerCc, composerMode, draftKey, pendingSend, replyTarget]);
 
   // Tab-close guard while a draft is in flight (SPA navigation is already safe:
   // the stash restores the draft when the user comes back to this ticket).
@@ -1367,14 +1449,15 @@ export default function TicketDetail() {
       .then((res) => { const v = res?.data?.value; greetingPrefRef.current = v === 'manual' ? 'manual' : 'auto'; setGreetingPref(greetingPrefRef.current); })
       .catch(() => { greetingPrefRef.current = 'auto'; setGreetingPref('auto'); });
   }, [greetingOn]);
-  const greetingCtx = () => ({
-    requester: ticket?.requester || null,
+  // `target`: a reply to someone else greets them, not the requester (QA 11-24 #8).
+  const greetingCtx = (target = replyTarget) => ({
+    requester: target ? { name: target.name || target.firstName || '', email: target.email } : (ticket?.requester || null),
     agent: { name: meta?.actor?.name || '', email: meta?.actor?.email || '' },
     ticket: { displayRef: ticket?.displayRef || '', subject: ticket?.subject || '' },
   });
-  const applyGreeting = (currentBody = composerBody) => {
+  const applyGreeting = (currentBody = composerBody, target = replyTarget) => {
     if (!greetingOn) return;
-    const next = wrapWithGreeting(currentBody, greetingCfg, greetingCtx());
+    const next = wrapWithGreeting(currentBody, greetingCfg, greetingCtx(target));
     if (next === String(currentBody || '').trim()) return;
     setComposerBody(next);
     setComposerText(htmlToText(next));
@@ -1386,12 +1469,21 @@ export default function TicketDetail() {
   };
 
   const switchComposerMode = (mode) => {
+    // Any mode button ends a reply to someone else; "Reply to requester" then
+    // starts from the requester's Cc row as it always does.
+    let ccNow = composerCc;
+    if (replyTarget) {
+      setReplyTarget(null);
+      ccSeededRef.current = false;
+      ccNow = [];
+      setComposerCc([]);
+    }
     if (mode === 'reply' && greetingOn && greetingPrefRef.current !== 'manual' && !composerText.trim()) {
-      applyGreeting('');
+      applyGreeting('', null);
     }
     if (mode === 'reply' && !ccSeededRef.current) {
       ccSeededRef.current = true;
-      if (composerCc.length === 0) {
+      if (ccNow.length === 0) {
         const seed = seedReplyCc(ticket);
         ccSeedRef.current = seed;
         if (seed.length > 0) setComposerCc(seed);
@@ -1403,6 +1495,35 @@ export default function TicketDetail() {
     setComposerMode(mode);
     setTimeout(() => composerRef.current?.focus(), 0);
   };
+  // "Reply to <name>" on a message from someone who is not the requester (QA
+  // 11-24 #8): the composer, in reply mode, addressed To that person only. No
+  // requester, no Cc (a forward has none; the agent may add one), their
+  // subject, threaded under their message (the server does both).
+  const startReplyToSender = (entry, role = null) => {
+    const email = bareEmail(entry?.actorEmail);
+    if (!email) return;
+    const rawName = String(entry.actorName || '').trim();
+    const target = {
+      entryId: entry.id,
+      email,
+      name: rawName && !rawName.includes('@') ? rawName : null,
+      firstName: senderFirstName(entry),
+      wasForwardedTo: role?.kind === 'forwardee',
+    };
+    if (pageTab !== 'conversation') setPageTab('conversation');
+    setReplyTarget(target);
+    ccSeededRef.current = true;
+    setComposerCc([]);
+    setNoteToReplyNotice(false);
+    setMentionInReplyConfirm(false);
+    if (greetingOn && greetingPrefRef.current !== 'manual' && !composerText.trim()) applyGreeting('', target);
+    setComposerMode('reply');
+    setTimeout(() => {
+      composerSectionRef.current?.scrollIntoView?.({ behavior: 'auto', block: 'center' });
+      composerRef.current?.focus();
+    }, 80);
+  };
+
   // Phone action bar: jump to the composer in the chosen mode from anywhere.
   const jumpToComposer = (mode) => {
     if (pageTab !== 'conversation') setPageTab('conversation');
@@ -1419,7 +1540,7 @@ export default function TicketDetail() {
   // the last seed as a set; a user edit (add/remove/clear) ends re-seeding.
   const alsoForKey = (ticket?.ccEmails || []).join('|') + '||' + (ticket?.replyCcEmails || []).join('|');
   useEffect(() => {
-    if (composerMode !== 'reply' || !ccSeededRef.current) return;
+    if (composerMode !== 'reply' || !ccSeededRef.current || replyTarget) return;
     const current = [...composerCc].map((e) => String(e).toLowerCase()).sort();
     const lastSeed = [...ccSeedRef.current].map((e) => String(e).toLowerCase()).sort();
     const untouched = current.length === lastSeed.length && current.every((e, i) => e === lastSeed[i]);
@@ -1436,10 +1557,11 @@ export default function TicketDetail() {
   // #6). Drives both the composer hint and the `ccRemoved` the server needs to
   // stop its safety net putting them back.
   const removedAdditionalRequesters = useMemo(() => {
-    if (composerMode !== 'reply' || !ccSeededRef.current) return [];
+    // A reply to someone else never carries the requester's side (QA 11-24 #8).
+    if (composerMode !== 'reply' || !ccSeededRef.current || replyTarget) return [];
     const kept = new Set(composerCc.map((e) => String(e).toLowerCase()));
     return ccSourceForReply(ticket).filter((a) => !kept.has(a));
-  }, [composerMode, composerCc, ticket]);
+  }, [composerMode, composerCc, ticket, replyTarget]);
 
   // QA 11-16 #3: files past the cap are refused out loud (they were dropped
   // silently). Counted from a ref, not state, so twelve screenshots pasted at
@@ -1900,6 +2022,35 @@ export default function TicketDetail() {
     [ticketAttachments],
   );
 
+  // QA 11-24 #5: the ticket's files a forward can carry. Pictures a message
+  // shows in place (and signature logos) are "pictures from the e-mail", left
+  // out unless asked for.
+  const inlinePictureIds = useMemo(() => {
+    const ids = new Set();
+    for (const a of picturesShownInBody(descriptionImages, ticket?.description, ticket?.descriptionText)) ids.add(a.id);
+    for (const e of conversationEntries) {
+      const pictures = (attachmentsByEntry.get(e.id) || []).filter(isImageAttachment);
+      if (pictures.length === 0) continue;
+      for (const a of picturesShownInBody(pictures, e.bodyHtml, e.bodyText || e.content)) ids.add(a.id);
+    }
+    return ids;
+  }, [descriptionImages, ticket?.description, ticket?.descriptionText, conversationEntries, attachmentsByEntry]);
+  // Files of internal notes / earlier forwards are set apart, never ticked by default (review 24 Nov 2026).
+  const forwardGroups = useMemo(
+    () => groupForwardAttachments(ticketAttachments, inlinePictureIds, conversationEntries),
+    [ticketAttachments, inlinePictureIds, conversationEntries],
+  );
+  const forwardSelection = forwardPick || defaultForwardSelection(forwardGroups.files);
+
+  // QA 11-24 #7: who wrote each incoming message, on this ticket.
+  const forwardRecipients = useMemo(() => forwardRecipientsOf(conversationEntries), [conversationEntries]);
+  const ccAddresses = useMemo(() => ccAddressesOf(ticket, conversationEntries), [ticket, conversationEntries]);
+  const authorRoleFor = useCallback((e) => incomingAuthorRole(e, {
+    requesterEmail: ticket?.requester?.email || '',
+    forwardRecipients,
+    ccAddresses,
+  }), [ticket?.requester?.email, forwardRecipients, ccAddresses]);
+
   const techPhotoByEmail = useMemo(() => {
     const map = new Map();
     for (const t of meta?.technicians || []) {
@@ -2093,14 +2244,22 @@ export default function TicketDetail() {
   // Resolve an inline "[Image: name]" reference to an attachment by file name
   // (case/space-insensitive) and preview it; fall back to a download if the
   // exact bytes aren't attached (e.g. an inline paste that didn't upload).
-  const previewImageRef = useCallback((name) => {
+  // QA 11-24 #12: `resolved` is the clicked picture's own file (the message
+  // knows which one it showed); the name lookup is only the fallback, and it
+  // opened the FIRST file of that name on the ticket — with several
+  // "image001.png" or "pasted-image-1.png", the wrong picture.
+  const previewImageRef = useCallback((name, resolved = null) => {
+    if (resolved && resolved.id !== undefined && resolved.id !== null) {
+      setPreviewList(null);
+      setPreviewAttachment(resolved);
+      return;
+    }
     const wanted = String(name || '').trim().toLowerCase();
     if (!wanted) return;
     const all = ticketAttachments;
     const hit = all.find((a) => String(a.fileName || '').trim().toLowerCase() === wanted)
       || all.find((a) => String(a.fileName || '').trim().toLowerCase().includes(wanted));
-    if (hit) setPreviewAttachment(hit);
-    else showToast('sky', `No attachment named “${name}” on this ticket`);
+    if (hit) { setPreviewList(null); setPreviewAttachment(hit); } else showToast('sky', `No attachment named “${name}” on this ticket`);
   }, [ticketAttachments, showToast]);
 
   const attachmentInputRef = useRef(null);
@@ -2616,7 +2775,7 @@ export default function TicketDetail() {
       setHeldDraftNotice(false);
       // Marked straight away (the stash is otherwise debounced): a tab closed in
       // the next moment must come back saying "this was not sent".
-      try { localStorage.setItem(draftKey, JSON.stringify({ body: composerBody, cc: composerCc, mode: 'reply', savedAt: Date.now(), held: true })); } catch { /* storage unavailable */ }
+      try { localStorage.setItem(draftKey, JSON.stringify({ body: composerBody, cc: composerCc, mode: 'reply', savedAt: Date.now(), held: true, ...(replyTarget ? { replyTo: replyTarget } : {}) })); } catch { /* storage unavailable */ }
       return;
     }
     setHeldDraftNotice(false);
@@ -2630,16 +2789,22 @@ export default function TicketDetail() {
       try {
         // QA 11-16: the note's HTML rides along so its links survive, and the
         // staged files go with the forward (they were Reply/Note only).
+        // QA 11-24 #5: the ticket's own files that are ticked go too.
+        const includeAttachmentIds = forwardAttachmentIds(forwardSelection, ticketAttachments);
         const res = await ticketsAPI.forward(ticketId, {
           to: forwardTo,
           note: body,
           ...(isRichContent(composerBody) ? { noteHtml: composerBody } : {}),
           ...(composerFiles.length ? { files: composerFiles } : {}),
+          ...(includeAttachmentIds.length ? { includeAttachmentIds } : {}),
+          // Only when the agent ticked a file under "From internal notes".
+          ...(includesInternal(includeAttachmentIds, forwardGroups.internal) ? { includePrivateAttachments: true } : {}),
         });
-        const sentFiles = composerFiles.length;
+        const sentFiles = composerFiles.length + includeAttachmentIds.length;
         setComposerBody('');
         setComposerText('');
         setForwardTo([]);
+        setForwardPick(null);
         setComposerFiles([]);
         setComposerExpanded(false);
         try { localStorage.removeItem(draftKey); } catch { /* no-op */ }
@@ -2665,7 +2830,17 @@ export default function TicketDetail() {
         files: composerFiles,
         idempotencyKey: idemKeyRef.current,
       };
-      if (composerMode === 'reply') {
+      if (composerMode === 'reply' && replyTarget) {
+        // QA 11-24 #8: to that person only. The server checks the address is
+        // the sender of that message and never puts the requester in.
+        sendResult = await ticketsAPI.reply(ticketId, {
+          ...payload,
+          cc: composerCc,
+          replyToEntryId: replyTarget.entryId,
+          replyToEmail: replyTarget.email,
+        });
+        heldFlushRef.current = null;
+      } else if (composerMode === 'reply') {
         // Subject override only when the agent actually changed it (SN5);
         // the server keeps the [TP-n] token either way. FS-born never sends one.
         const subjectDraft = composerSubject.trim();
@@ -2719,7 +2894,10 @@ export default function TicketDetail() {
       const ccNote = composerMode === 'reply' && composerCc.length ? ` (+${composerCc.length} Cc)` : '';
       const fileNote = composerFiles.length ? ` · ${composerFiles.length} file${composerFiles.length === 1 ? '' : 's'}` : '';
       const failedNote = failedFilesMessage(sendResult?.data?.attachmentsFailed);
+      const sentTo = composerMode === 'reply' && replyTarget ? (replyTarget.name || replyTarget.email) : null;
+      if (sentTo) setReplyTarget(null);
       if (failedNote) showToast('red', `${composerMode === 'reply' ? 'Reply posted' : 'Note added'}. ${failedNote}`, { duration: 8000 });
+      else if (sentTo) showToast('emerald', `Reply sent to ${sentTo}${ccNote}${fileNote}. The requester was not included.`);
       else showToast('emerald', composerMode === 'reply' ? `Reply posted — requester emailed${ccNote}${fileNote}` : `Internal note added${fileNote}`);
     } catch (err) {
       showToast('red', err.response?.data?.message || err.message || 'Send failed');
@@ -2745,8 +2923,12 @@ export default function TicketDetail() {
         files: composerFiles,
         idempotencyKey: idemKeyRef.current,
         cc: composerCc,
-        ...(removedAdditionalRequesters.length ? { ccRemoved: removedAdditionalRequesters } : {}),
-        ...(subjectOverride ? { subject: subjectOverride } : {}),
+        ...(replyTarget
+          ? { replyToEntryId: replyTarget.entryId, replyToEmail: replyTarget.email }
+          : {
+            ...(removedAdditionalRequesters.length ? { ccRemoved: removedAdditionalRequesters } : {}),
+            ...(subjectOverride ? { subject: subjectOverride } : {}),
+          }),
       },
     } : null;
   } else if (!pendingSend) {
@@ -3381,7 +3563,7 @@ export default function TicketDetail() {
                           {(() => {
                             const role = [...new Set([
                               ticket.requester.entraJobTitle || ticket.requester.jobTitle,
-                              ticket.requester.entraDepartment || ticket.requester.department,
+                              departmentOf(ticketRequesterPlace(ticket), departmentMap),
                             ].filter(Boolean))].join(' · ');
                             return role ? <p className="text-xs text-muted-foreground truncate" title={role}>{role}</p> : null;
                           })()}
@@ -3798,6 +3980,10 @@ export default function TicketDetail() {
                                       openingImages={item.e.eventType === 'original_email' ? descriptionImages : null}
                                       onPreview={previewImage}
                                       onImageRef={previewImageRef}
+                                      authorRole={authorRoleFor(item.e)}
+                                      /* FreshService tickets: only where Ticket Pulse sends their replies
+                                         (FreshService itself can only write to the requester). */
+                                      onReplyToSender={canConverse && (isNative || ticket?.replyLane === 'ticketpulse') ? (entry) => startReplyToSender(entry, authorRoleFor(entry)) : null}
                                       photoFor={photoFor}
                                       nameForEmail={nameForEmail}
                                       onCopy={copyText}
@@ -3899,9 +4085,9 @@ export default function TicketDetail() {
                         <div role="group" aria-label="Composer mode" className="flex flex-wrap items-center gap-1.5 mb-2.5">
                           <button
                             onClick={() => switchComposerMode('reply')}
-                            aria-pressed={composerMode === 'reply'}
+                            aria-pressed={composerMode === 'reply' && !replyTarget}
                             className={`tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
-                              composerMode === 'reply' ? 'bg-blue-600 text-white border-blue-600' : 'bg-card text-muted-foreground border-border hover:border-blue-300 dark:hover:border-blue-500/40'
+                              composerMode === 'reply' && !replyTarget ? 'bg-blue-600 text-white border-blue-600' : 'bg-card text-muted-foreground border-border hover:border-blue-300 dark:hover:border-blue-500/40'
                             }`}
                           >
                             {/* One flex item: a separate span after the text node
@@ -3928,6 +4114,23 @@ export default function TicketDetail() {
                           >
                             <Forward className="w-3.5 h-3.5" aria-hidden="true" /> Forward
                           </button>
+                          {composerMode === 'reply' && replyTarget && (
+                            /* QA 11-24 #8: the fourth mode while it lasts. */
+                            <span className="inline-flex items-center rounded-lg border border-violet-600 bg-violet-600 text-xs font-semibold text-white">
+                              <span className="inline-flex items-center gap-1.5 py-1.5 pl-3 pr-1.5">
+                                <Reply className="w-3.5 h-3.5" aria-hidden="true" /> Reply to {replyTarget.firstName}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => switchComposerMode('reply')}
+                                aria-label={`Stop replying to ${replyTarget.firstName}; reply to the requester instead`}
+                                title="Reply to the requester instead"
+                                className="tp-focus-ring mr-1 rounded p-0.5 hover:bg-white/20"
+                              >
+                                <X className="w-3.5 h-3.5" aria-hidden="true" />
+                              </button>
+                            </span>
+                          )}
 
                           {composerMode === 'note' && visibleQuickNotes.length > 0 && (
                             <span ref={quickNotesRef} className="relative ml-auto">
@@ -4093,7 +4296,7 @@ export default function TicketDetail() {
                               </span>
                             </span>
                           )}
-                          {composerMode === 'reply' && (
+                          {composerMode === 'reply' && !replyTarget && (
                             <span className="text-[11px] text-muted-foreground/75 truncate">
                               {isNative
                                 ? (ticket.requester?.email ? `emails ${ticket.requester.email}` : '')
@@ -4114,8 +4317,29 @@ export default function TicketDetail() {
                           unattended={ticket?.requester?.unattended === true}
                           hasRequester={Boolean(ticket?.requester?.email)}
                           hasCc={(ticket?.ccEmails || []).length > 0 || (ticket?.replyCcEmails || []).length > 0}
-                          show={composerMode === 'reply'}
+                          show={composerMode === 'reply' && !replyTarget}
                         />
+                        {composerMode === 'reply' && replyTarget && (
+                          /* QA 11-24 #8: say plainly who this goes to, so nobody wonders. */
+                          <div data-testid="reply-target" className="mb-2 border-l-2 border-violet-500 pl-2.5 text-xs">
+                            <p className="flex flex-wrap items-baseline gap-x-1.5">
+                              <span className="text-sm font-semibold text-foreground">Reply to {replyTarget.name || replyTarget.email}</span>
+                              {replyTarget.name && <span className="text-muted-foreground">&lt;{replyTarget.email}&gt;</span>}
+                            </p>
+                            <p className="mt-0.5 text-muted-foreground">
+                              Only {replyTarget.firstName} gets this{replyTarget.wasForwardedTo ? ', as an answer to their reply to your forward' : ''}.
+                              {' '}{ticket?.requester?.name || 'The requester'} is not included, and it stays off the requester&rsquo;s conversation.
+                              {' '}
+                              <button
+                                type="button"
+                                onClick={() => switchComposerMode('reply')}
+                                className="tp-focus-ring rounded font-medium text-primary hover:underline"
+                              >
+                                Reply to the requester instead
+                              </button>
+                            </p>
+                          </div>
+                        )}
                         {composerMode === 'reply' && heldDraftNotice && !pendingSend && (
                           <div role="alert" data-testid="held-draft-notice" className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-l-2 border-amber-500 pl-2.5 text-xs text-amber-800 dark:text-amber-200">
                             <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -4129,8 +4353,8 @@ export default function TicketDetail() {
                             <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                             <span className="min-w-0 flex-1">
                               {mentionInReplyConfirm
-                                ? <>This text has an <strong>@mention</strong>, which only internal notes use. Sending it e-mails it to {ticket?.requester?.name || 'the requester'}.</>
-                                : <>You wrote this as an internal note. As a reply it is e-mailed to {ticket?.requester?.name || 'the requester'}.</>}
+                                ? <>This text has an <strong>@mention</strong>, which only internal notes use. Sending it e-mails it to {replyTarget ? (replyTarget.name || replyTarget.email) : (ticket?.requester?.name || 'the requester')}.</>
+                                : <>You wrote this as an internal note. As a reply it is e-mailed to {replyTarget ? (replyTarget.name || replyTarget.email) : (ticket?.requester?.name || 'the requester')}.</>}
                             </span>
                             <button
                               type="button"
@@ -4145,7 +4369,7 @@ export default function TicketDetail() {
                                 onClick={() => sendComposer({ mentionOk: true, ...(mentionInReplyConfirm.thenStatus ? { thenStatus: mentionInReplyConfirm.thenStatus } : {}) })}
                                 className="tp-focus-ring rounded-md px-2 py-1 font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
                               >
-                                Send to the requester anyway
+                                {replyTarget ? `Send to ${replyTarget.firstName} anyway` : 'Send to the requester anyway'}
                               </button>
                             ) : (
                               <button type="button" onClick={() => setNoteToReplyNotice(false)} className="tp-focus-ring rounded-md px-2 py-1 font-medium text-muted-foreground hover:bg-muted hover:text-foreground">
@@ -4156,7 +4380,12 @@ export default function TicketDetail() {
                         )}
                         {composerMode === 'reply' && (
                           <div className="mb-2" data-testid="reply-subject-row">
-                            {isNative ? (
+                            {replyTarget ? (
+                              <p className="flex items-center gap-2 px-1 py-0.5 text-xs text-muted-foreground" title="Their subject, so it threads under their message">
+                                <span className="shrink-0 font-medium">Subject</span>
+                                <span className="min-w-0 truncate" data-testid="reply-target-subject">{participantReplySubject(ticket, { wasForwardedTo: replyTarget.wasForwardedTo })}</span>
+                              </p>
+                            ) : isNative ? (
                               subjectOpen ? (
                                 <label className="flex items-center gap-2 text-xs text-muted-foreground">
                                   <span className="shrink-0 font-medium">Subject</span>
@@ -4236,8 +4465,16 @@ export default function TicketDetail() {
                             )}
                             <CcChips value={forwardTo} onChange={setForwardTo} placeholder="Forward to…" label="Forward recipients" />
                             <p className="mt-1 text-[10px] text-muted-foreground/75">
-                              Sends your note, any files you attach, the description and the last public replies. The requester is not included; the forward is kept on the ticket for your team.
+                              Sends your note, any files you attach, the ticket&rsquo;s own files ticked below, the description and the last public replies. The requester is not included; the forward is kept on the ticket for your team.
                             </p>
+                            <ForwardAttachmentPicker
+                              files={forwardGroups.files}
+                              pictures={forwardGroups.pictures}
+                              internal={forwardGroups.internal}
+                              value={forwardSelection}
+                              onChange={setForwardPick}
+                              disabled={isSending}
+                            />
                           </div>
                         )}
                         <Suspense fallback={<div className="rounded-lg border border-input bg-card" style={{ minHeight: 320 }} aria-busy="true" />}>
@@ -4262,7 +4499,7 @@ export default function TicketDetail() {
                               else setSendMenuOpen(true);
                             }}
                             placeholder={composerMode === 'reply'
-                              ? 'Write a reply to the requester… (Ctrl+Enter to send)'
+                              ? `Write a reply to ${replyTarget ? replyTarget.firstName : 'the requester'}… (Ctrl+Enter to send)`
                               : composerMode === 'forward'
                                 ? 'Optional note to include above the forwarded thread…'
                                 : 'Add context for the team (never emailed) · type @ to tell a colleague…'}
@@ -4363,7 +4600,7 @@ export default function TicketDetail() {
                                 <button
                                   onClick={sendComposer}
                                   disabled={sendDisabled}
-                                  title={`${composerMode === 'reply' ? `E-mails ${ticket?.requester?.name || 'the requester'}` : composerMode === 'forward' ? 'Forward the thread' : 'Only your team sees it'} (${MOD}+Enter)`}
+                                  title={`${composerMode === 'reply' ? `E-mails ${replyTarget ? `${replyTarget.name || replyTarget.email} only` : (ticket?.requester?.name || 'the requester')}` : composerMode === 'forward' ? 'Forward the thread' : 'Only your team sees it'} (${MOD}+Enter)`}
                                   className={`tp-focus-ring inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold transition-colors disabled:opacity-50 ${withStatus ? 'rounded-l-lg' : 'rounded-lg'} ${tone}`}
                                 >
                                   {isSending ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Send className="w-4 h-4" aria-hidden="true" />}
@@ -5009,20 +5246,38 @@ export default function TicketDetail() {
                     </SidebarField>
                   )}
 
-                  {/* Requester's department — Entra ID is the source of truth
-                      (FS "departments" are office names here); read-only since
-                      we have no Entra write access (QA 07-13 #4). */}
-                  <SidebarField label="Department">
-                    <div
-                      className="px-3 py-2 text-sm text-muted-foreground bg-muted/50 border border-border/60 rounded-lg truncate"
-                      title="From Entra ID — read-only"
-                    >
-                      {[
-                        ticket.requester?.entraDepartment || ticket.requester?.department,
-                        ticket.requester?.entraOfficeLocation,
-                      ].filter(Boolean).join(' · ') || '—'}
-                    </div>
-                  </SidebarField>
+                  {/* Requester's department and city, apart (QA 11-24 #1).
+                      Department is Entra's job class without its level
+                      ("Contracts III" → Contracts); City is Entra's city, or
+                      the FreshService "department", which is the office here.
+                      Read-only: we have no Entra write access (QA 07-13 #4). */}
+                  {(() => {
+                    const place = ticketRequesterPlace(ticket);
+                    const dept = departmentOf(place, departmentMap);
+                    const city = cityOf(place, departmentMap);
+                    return (
+                      <>
+                        <SidebarField label="Department">
+                          <div
+                            className="px-3 py-2 text-sm text-muted-foreground bg-muted/50 border border-border/60 rounded-lg truncate"
+                            title={ticket.requester?.entraDepartment ? `From Entra ID (${ticket.requester.entraDepartment}) — read-only` : 'From Entra ID — read-only'}
+                            data-testid="requester-department"
+                          >
+                            {dept || '—'}
+                          </div>
+                        </SidebarField>
+                        <SidebarField label="City">
+                          <div
+                            className="px-3 py-2 text-sm text-muted-foreground bg-muted/50 border border-border/60 rounded-lg truncate"
+                            title="From Entra ID, or the FreshService office — read-only"
+                            data-testid="requester-city"
+                          >
+                            {city || '—'}
+                          </div>
+                        </SidebarField>
+                      </>
+                    );
+                  })()}
 
                   {/* Tags — TP-side layer, editable on BOTH origins */}
                   <TicketTagEditor

@@ -49,6 +49,7 @@ describe('api auth/workspace helpers', () => {
       'getQuality',
       'getReport',
       'getTeamBalance',
+      'getTicketsByDepartment',
       'listReports',
       'renameReport',
     ]);

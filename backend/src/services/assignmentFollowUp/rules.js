@@ -20,10 +20,15 @@
  *   - Repeat report: the new ticket's priority goes one level above what the
  *     AI chose (Urgent at most, never down), whatever the routing mode —
  *     but High at most outside business hours, so a repeat never pages on-call.
+ *     Only a person reports again (24 Nov 2026): a machine sender (unattended,
+ *     no-reply, machine-sender list, monitoring alert) or a requester outside
+ *     the workspace's internal domains never raises it (senderNotAPerson).
  *
  * Pure: no database, no clock of its own.
  */
 import { normalizeSubject } from '../duplicateBurstService.js';
+import { looksAutomated } from '../ticketGrouping/rules.js';
+import { emailDomain, isInternalDomain } from '../attachmentNamingRules.js';
 import { ticketDisplayRef } from '../../utils/ticketOrigin.js';
 import { applyPatch as levelApplyPatch, toStored as levelToStored } from '../assignmentLevelMatch/rules.js';
 
@@ -192,10 +197,63 @@ export const MAX_REQUESTER_TICKETS_PER_DAY = 3;
 
 const SERVICE_MAILBOX = /^(no-?reply|do-?not-?reply|alerts?|alerting|monitor(ing)?|notifications?|notify|system|daemon|mailer-daemon|postmaster|automation|bot|svc|service)([._+-]|\d|@|$)/i;
 
-/** A mailbox that is a machine, not a person (no-reply@, alerts@, svc-backup@…). */
+/**
+ * A mailbox that is a machine, not a person (no-reply@, alerts@, svc-backup@…).
+ * SERVICE_MAILBOX only reads the START of the address, so a prefixed no-reply
+ * (azure-noreply@, billing.noreply@) slipped through (24 Nov 2026: an Azure
+ * Monitor alert was raised as a repeat report). ticketGrouping's looksAutomated
+ * catches those words anywhere in the name.
+ */
 export function isServiceMailbox(email) {
   const local = String(email || '').trim().toLowerCase();
-  return Boolean(local) && SERVICE_MAILBOX.test(local);
+  return Boolean(local) && (SERVICE_MAILBOX.test(local) || looksAutomated(local));
+}
+
+/** Monitoring alert subjects: Azure Monitor's "Fired:Sev3 …" / "Resolved:Sev3 …". */
+const MONITOR_SUBJECT = /^\s*(fired|resolved)\s*:\s*sev\s*\d/i;
+
+const cleanDomains = (list) => (Array.isArray(list) ? list : [])
+  .map((d) => String(d || '').trim().toLowerCase().replace(/^@/, ''))
+  .filter(Boolean);
+
+/**
+ * Is the new ticket's requester a person who can be "reporting again"? Only a
+ * person on staff counts (24 Nov 2026: of 7 raises in a day, 6 were vendors'
+ * duplicate invoice notices, an HR system notice and an Azure Monitor alert).
+ *   - machine_sender: the ticket was made by a machine (machineCreatedReason),
+ *     the requester is unattended, a no-reply / service mailbox, on the
+ *     workspace's machine-sender list, an alert pair rule's sender, or the
+ *     subject is a monitoring alert's.
+ *   - external_sender: the workspace has internal domains and the requester's
+ *     address is not on one of them (a vendor writing twice is not escalating).
+ * With no internal domains configured the domain test is skipped.
+ * @param {object} ticket  { subject, occurrenceCount, requester: { email, unattended } }
+ * @returns {null | { reason: 'machine_sender'|'external_sender', why: string, email: string|null }}
+ */
+export function senderNotAPerson(ticket, {
+  createdReason = null, machineSenderEntry = null, monitoringSender = false, internalDomains = [],
+} = {}) {
+  const email = String(ticket?.requester?.email || '').trim().toLowerCase() || null;
+  const machine = (why) => ({ reason: 'machine_sender', why, email });
+  if (createdReason) return machine(createdReason);
+  if (ticket?.requester?.unattended === true) return machine('unattended');
+  if (Number(ticket?.occurrenceCount) > 0) return machine('alert');
+  if (monitoringSender || MONITOR_SUBJECT.test(String(ticket?.subject || ''))) return machine('monitoring_alert');
+  if (isServiceMailbox(email)) return machine('service_mailbox');
+  if (machineSenderEntry) return machine('machine_sender_list');
+  const domains = cleanDomains(internalDomains);
+  if (domains.length && !(email && isInternalDomain(emailDomain(email), domains))) {
+    return { reason: 'external_sender', why: email ? 'outside_internal_domains' : 'no_email', email };
+  }
+  return null;
+}
+
+/** The run's sentence when the sender is not a person. */
+export function notAPersonSentence(verdict) {
+  const who = verdict?.email || 'the requester';
+  return verdict?.reason === 'external_sender'
+    ? `Not raised: ${who} is outside the workspace's internal domains; only a person on staff reporting again raises the priority.`
+    : `Not raised: ${who} is a machine sender, not a person reporting again.`;
 }
 
 const MACHINE_KINDS = new Set(['workflow', 'api']);

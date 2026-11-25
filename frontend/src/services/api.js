@@ -778,6 +778,10 @@ export function buildThreadPayload(body = {}) {
     if (subjectField.subject) form.append('subject', subjectField.subject);
     // @mentions: named explicitly too, or a note with a picture would lose them.
     if (mentionIds.length) form.append('mentions', mentionIds.join(','));
+    // QA 11-24 #8: a reply to someone who is not the requester keeps its
+    // addressee when it carries files (this branch lists fields one by one).
+    if (rest.replyToEntryId !== undefined && rest.replyToEntryId !== null) form.append('replyToEntryId', String(rest.replyToEntryId));
+    if (rest.replyToEmail) form.append('replyToEmail', rest.replyToEmail);
     for (const file of files) form.append('files', file);
     return [form, { headers: { 'Content-Type': undefined, ...headers }, timeout: 120000 }];
   }
@@ -816,6 +820,11 @@ export const ticketsAPI = {
 
   meta: async () => {
     return await api.get('/tickets/meta');
+  },
+
+  // QA 11-24 #1: job class → department table (defaults + admin override), read-only.
+  getDepartmentMap: async () => {
+    return await api.get('/tickets/department-map');
   },
 
   // "Also notify additional requesters" workspace toggle (Phase MR6).
@@ -1148,16 +1157,29 @@ export const ticketsAPI = {
 
   // QA 11-16: the composer's HTML rides as `noteHtml` (links survive) and files
   // go multipart, `to` then as one comma-separated field like a reply's Cc.
-  forward: async (id, { to, note, noteHtml, files }) => {
+  // QA 11-24 #5: `includeAttachmentIds` = the ticket's own files to send along.
+  // `includePrivateAttachments`: one of the ids is a file from an internal note
+  // the agent ticked on purpose; the server refuses such files without it.
+  forward: async (id, { to, note, noteHtml, files, includeAttachmentIds, includePrivateAttachments = false }) => {
+    const ids = Array.isArray(includeAttachmentIds) ? includeAttachmentIds.filter((n) => Number.isInteger(n) && n > 0) : [];
     if (files && files.length > 0) {
       const form = new FormData();
       form.append('to', (to || []).join(','));
       if (note) form.append('note', note);
       if (noteHtml) form.append('noteHtml', noteHtml);
+      if (ids.length) form.append('includeAttachmentIds', ids.join(','));
+      if (ids.length && includePrivateAttachments === true) form.append('includePrivateAttachments', 'true');
       for (const file of files) form.append('files', file);
       return await api.post(`/tickets/${id}/forward`, form, { headers: { 'Content-Type': undefined }, timeout: 120000 });
     }
-    return await api.post(`/tickets/${id}/forward`, { to, note, ...(noteHtml ? { noteHtml } : {}) });
+    const body = { to, note, ...(noteHtml ? { noteHtml } : {}) };
+    // The ticket's files are read from storage server-side: give it time.
+    if (ids.length) {
+      return await api.post(`/tickets/${id}/forward`, {
+        ...body, includeAttachmentIds: ids, ...(includePrivateAttachments === true ? { includePrivateAttachments: true } : {}),
+      }, { timeout: 120000 });
+    }
+    return await api.post(`/tickets/${id}/forward`, body);
   },
 
   // Reply templates (canned reply snippets)
@@ -1845,6 +1867,11 @@ export const workspaceAPI = {
     return await api.post('/workspaces', data);
   },
 
+  // QA 11-24 #4: a Ticket Pulse-only workspace (super admins). { name, defaultTimezone, internalDomains }
+  createNative: async (data) => {
+    return await api.post('/workspaces/native', data);
+  },
+
   update: async (id, data) => {
     return await api.put(`/workspaces/${id}`, data);
   },
@@ -2204,6 +2231,8 @@ export const analyticsAPI = {
   // Automation Ops, first section (QA 10-13 #16): the AI's pick against who did the ticket.
   getAiPickAccuracy: (params = {}) => apiAnalytics.get('/analytics/ai-pick-accuracy', { params }),
   getAiPickAccuracyExport: (params = {}) => apiAnalytics.get('/analytics/ai-pick-accuracy/export', { params }),
+  // Demand (QA 11-24 #2): tickets created in range by the requester's department / city.
+  getTicketsByDepartment: (params = {}) => apiAnalytics.get('/analytics/tickets-by-department', { params }),
   getInsights: (params = {}) => apiAnalytics.get('/analytics/insights', { params }),
   // Reports (feedback 07-14): saved snapshots; generation runs the LLM (10-20s)
   listReports: () => apiAnalytics.get('/analytics/reports'),

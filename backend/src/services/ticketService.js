@@ -11,6 +11,7 @@ import { paragraphSpacing } from '../utils/emailHtmlHardening.js';
 import { validateResolution, requiresResolutionReason, resolvedByKindFromActor } from './resolutionReasonService.js';
 import { AuthorizationError, AppError, ValidationError, NotFoundError, ServiceBusyError, ConflictError } from '../utils/errors.js';
 import { TICKET_ORIGIN, TICKET_SOURCE, TICKET_SOURCE_LABELS, APP_NATIVE_TRIGGER_SOURCE, AGENT_SELECTABLE_SOURCES, ticketDisplayRef } from '../utils/ticketOrigin.js';
+import { isFreshServiceUnlinked } from '../utils/workspaceFsBinding.js';
 import { refPositionFor, replyMailSubject } from './mailSubjectService.js';
 import noiseRuleService from './noiseRuleService.js';
 import ticketTypeService from './ticketTypeService.js';
@@ -52,7 +53,7 @@ import { sseManager } from '../routes/sse.routes.js';
 import { actorKindOf, deriveActorKind } from '../utils/actorKind.js';
 import { buildFieldsUpdatedExtra } from './ticketChangeRenderer.js';
 import { markRecurring } from './recurringImageService.js';
-import { NAME_SELECT as ATTACHMENT_NAME_SELECT, withNameFields as withAttachmentNameFields } from './attachmentNamingRules.js';
+import { NAME_SELECT as ATTACHMENT_NAME_SELECT, withNameFields as withAttachmentNameFields, shownName as attachmentShownName } from './attachmentNamingRules.js';
 import { recordPriorityChange, prioritySourceForActor, priorityReasonFrom } from './priorityHistoryService.js';
 import ticketHandBackService, {
   normalizeHandBack, isRealReason as isRealHandBackReason, handBackLabel, reasonForRebound as reasonForHandBackRebound,
@@ -585,6 +586,13 @@ function sanitizeBodyHtml(html) {
   return sanitizeHtml(raw, EMAIL_SANITIZE_OPTIONS).trim() || null;
 }
 
+// E-mail attachment limits, the reply lane's (QA 11-24 #5 reuses them for the
+// ticket's own files on a forward): Graph's simple attach takes ~3 MB a file,
+// and SendGrid caps the whole message, so its attachments are held to the same
+// 25 MB of base64 as sendgridNotificationService.MAX_ATTACHMENT_PAYLOAD_BYTES.
+export const MAIL_FILE_BYTES = 3 * 1024 * 1024;
+export const MAIL_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
 const FORWARD_BLOCK_CAP = 20000;
 const escapeForwardText = (s) => String(s || '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
@@ -605,6 +613,78 @@ export function forwardBlockHtml(html, text, cap = FORWARD_BLOCK_CAP) {
   }
   const plain = String(text || '').slice(0, 4000);
   return plain ? escapeForwardText(plain).replace(/\n/g, '<br/>') : '';
+}
+
+/**
+ * A "Reply to <name>" subject always carries the ticket's `[TP-n]` token (the
+ * inbound threading signal, and what the composer shows): appended when the
+ * subject does not hold it already. Case-insensitive.
+ */
+export function withTicketToken(subject, ref) {
+  const s = cleanReplySubject(subject || '');
+  if (!ref) return s;
+  const token = `[${ref}]`;
+  if (s.toLowerCase().includes(token.toLowerCase())) return s;
+  return `${s} ${token}`.trim();
+}
+
+/**
+ * The mail-loop guard for "Reply to <name>" (QA 11-24 review): refuses our own
+ * mailboxes (any workspace's, their aliases and +tag variants, the global
+ * sender, FreshService relays) and machine senders (the no-reply / daemon
+ * defaults and the workspace's machine-sender list). When our mailbox list
+ * cannot be read even from the last good copy, nothing is sent.
+ */
+export async function assertParticipantIsAPerson(workspaceId, address) {
+  const { ownMailboxAddresses, isOwnAddress } = await import('./originalRecipientsService.js');
+  let own;
+  try {
+    own = await ownMailboxAddresses({ staleOk: true });
+  } catch (err) {
+    logger.warn(`Reply to a participant refused: our mailbox list could not be read (${err.message})`);
+    throw new ValidationError('Ticket Pulse could not check its own mailboxes just now, so nothing was sent. Try again in a minute.');
+  }
+  if (isOwnAddress(address, own)) {
+    throw new ValidationError(`${address} is one of our own mailboxes. A reply to it would come straight back into Ticket Pulse, so it is not sent.`);
+  }
+  const { DEFAULT_ENTRIES, entryMatches, machineSenderMatch } = await import('./machineSenderService.js');
+  const machine = DEFAULT_ENTRIES.find((entry) => entryMatches(entry, address))
+    || await machineSenderMatch(workspaceId, address).catch(() => null);
+  if (machine) {
+    throw new ValidationError(`${address} is an automated sender (it matches "${machine}"), so nobody would read a reply. It is not sent.`);
+  }
+}
+
+/**
+ * The quote under a reply to someone who is not the requester (QA 11-24 #8):
+ * their message only, "On <date>, <name> <address> wrote:" over it, so the
+ * requester's own conversation is never e-mailed to them. Null without a body.
+ */
+export function participantQuote(source, timeZone = null) {
+  if (!source) return null;
+  const block = forwardBlockHtml(source.bodyHtml, source.bodyText || source.content);
+  const plain = String(source.bodyText || source.content || stripHtml(source.bodyHtml) || '').trim();
+  if (!block && !plain) return null;
+  const options = { dateStyle: 'medium', timeStyle: 'short' };
+  let when = '';
+  if (source.occurredAt) {
+    try {
+      when = new Date(source.occurredAt).toLocaleString('en-CA', timeZone ? { ...options, timeZone } : options);
+    } catch {
+      when = new Date(source.occurredAt).toLocaleString('en-CA', options);
+    }
+  }
+  const name = String(source.actorName || '').trim();
+  const address = String(source.actorEmail || '').trim();
+  const whoText = name && address ? `${name} <${address}>` : (name || address || 'they');
+  const head = `On ${when ? `${when}, ` : ''}${whoText} wrote:`;
+  const html = '<hr style="border:none;border-top:1px solid #d0d5dd;margin:28px 0 22px;" />'
+    + '<div class="gmail_quote">'
+    + `<p style="font-family:'Segoe UI',Arial,sans-serif;font-size:13px;color:#475569;margin:0 0 8px;">${escapeForwardText(head)}</p>`
+    + `<blockquote style="margin:0 0 0 4px;padding:0 0 0 12px;border-left:3px solid #d0d5dd;">${block || escapeForwardText(plain).replace(/\n/g, '<br/>')}</blockquote>`
+    + '</div>';
+  const text = `\n\n${head}\n${plain.split(/\r?\n/).map((line) => `> ${line}`).join('\n')}`;
+  return { html, text };
 }
 
 /**
@@ -3878,7 +3958,7 @@ class TicketService {
         ],
       },
       select: {
-        id: true, name: true, email: true, department: true,
+        id: true, name: true, email: true, department: true, entraDepartment: true,
         entraOfficeLocation: true, entraCity: true, jobTitle: true, entraJobTitle: true,
       },
       orderBy: { name: 'asc' },
@@ -3967,7 +4047,15 @@ class TicketService {
     // ticket.created workflows in memory, like createdVia, so "Everyone on the
     // original e-mail" can reach them. Internal: never read from the request body.
     mailRecipients = null,
+    // Mail intake only (QA 11-24 item 11): the connected mailbox the e-mail came
+    // in through, { connectionId, address }. Kept on the `created` audit row and
+    // handed to the ticket.created workflows ("Intake mailbox" condition).
+    // Internal: never read from the request body.
+    intakeMailbox = null,
   } = {}) {
+    const intakeMailboxAddress = String(intakeMailbox?.address || '').trim().toLowerCase() || null;
+    const intakeMailboxId = Number.isInteger(Number(intakeMailbox?.connectionId)) && Number(intakeMailbox?.connectionId) > 0
+      ? Number(intakeMailbox.connectionId) : null;
     const workspace = await this._getWorkspace(workspaceId);
     if (!workspace.nativeTicketingEnabled) {
       throw new ValidationError('Native ticketing is not enabled for this workspace');
@@ -4104,7 +4192,9 @@ class TicketService {
         origin: TICKET_ORIGIN.TICKETPULSE,
         nativeNumber,
         freshserviceTicketId: null,
-        mirrorState: 'pending',
+        // QA 11-24 #4: a workspace with no FreshService link never gets a
+        // fallback copy ('none' — the ticket shows no mirror chip).
+        mirrorState: isFreshServiceUnlinked(workspace) ? 'none' : 'pending',
         subject: data.subject,
         ...normalizeDescriptionInput(data.description),
         // Resubmission key (Phase PA) — partial unique (workspace_id, external_ref).
@@ -4213,6 +4303,7 @@ class TicketService {
       ...(data.notifyRequester === false ? { requesterEmailSuppressed: true } : {}),
       ...(suppressRequesterAck ? { requesterAckSuppressed: true } : {}),
       ...(intakeRunId ? { intakeRunId } : {}),
+      ...(intakeMailboxAddress ? { intakeMailbox: { connectionId: intakeMailboxId, address: intakeMailboxAddress } } : {}),
       // Intake bookkeeping (FR 08-05 #1): which keys were auto-provisioned
       // and which were rejected (with reasons) — the audit trail an admin
       // reads when a sender asks "where did my field go?".
@@ -4247,6 +4338,9 @@ class TicketService {
     if (suppressRequesterAck) ticket.suppressRequesterAck = true;
     const originalEmailRecipients = cleanMailRecipients(mailRecipients);
     if (originalEmailRecipients) ticket.originalEmailRecipients = originalEmailRecipients;
+    // QA 11-24 item 11: null for anything that did not come by e-mail, so the
+    // "Intake mailbox" condition needs no lookup on "Ticket arrived".
+    ticket.intakeMailbox = intakeMailboxAddress;
     await this._notifyLifecycle(null, ticket, {
       allow: data.notifyRequester,
       suppressRequesterAck: suppressRequesterAck === true,
@@ -4254,6 +4348,7 @@ class TicketService {
     });
     // In memory for the ticket.created workflows only: never broadcast or returned.
     delete ticket.originalEmailRecipients;
+    delete ticket.intakeMailbox;
     // Category/group watchers + custom agent alerts (both fire-and-forget;
     // creation never blocks on them).
     watcherNotificationService.notify('created', ticket.id).catch(() => {});
@@ -4564,7 +4659,11 @@ class TicketService {
       });
     }
     this._broadcast(workspaceId, 'updated', updated, { changes: Object.keys(changes) });
-    if (!dueOnly) await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
+    // QA 11-24 item 10: a source change is sent to the FreshService copy too.
+    if (!dueOnly) {
+      if (changes.source) await mirrorService.enqueueFieldSync(workspaceId, ticket.id, { syncSource: true });
+      else await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
+    }
     // Subject/description changed → the content embedding is stale (P5.2).
     if (changes.subject || changes.description) this._refreshEmbedding(ticket.id, workspaceId);
     // A manual (non-AI) category change should fire the same agent-alert trigger
@@ -5786,7 +5885,199 @@ class TicketService {
    *                   'answer' stamps firstAutomatedReplyAt (first one only).
    */
   async addReply(ticketId, workspaceId, input, actor, files = [], options = {}) {
+    if (options?.replyToParticipant) {
+      return this._replyToParticipant(ticketId, workspaceId, input, actor, files, options.replyToParticipant);
+    }
     return this._addThreadEntry(ticketId, workspaceId, input, actor, { isPrivate: false, files, replyOptions: options || {} });
+  }
+
+  /**
+   * "Reply to <name>" (QA 11-24 #7/#8): an answer to someone on the ticket who
+   * is not the requester — typically the person a ticket was forwarded to.
+   *
+   * - The To is that message's sender, and only them. The requester is never
+   *   swapped in (a requester's message is refused: Reply to requester is the
+   *   path for that). The Cc is only what the agent typed; the ticket's "Also
+   *   for" people are the requester's side and are not added.
+   * - Subject "Re: FW: <subject> [TP-n]" when they were forwarded the ticket
+   *   (what their reply came back as), else the ticket's reply subject; In-
+   *   Reply-To is their message, so it threads under it in their mailbox.
+   * - Stored PRIVATE, as a 'forward' entry (outbound mail to someone other than
+   *   the requester, with `directReply`): never quoted to the requester, never
+   *   on their status page, mirrored to FreshService as a private note.
+   * - Not a requester reply: no ticket.public_reply_added (so no "agent
+   *   replied to requester" workflows), no first-response stamp, no reply-
+   *   ownership claim, no status change. A status change happens only when the
+   *   agent picks one on the send button.
+   */
+  async _replyToParticipant(ticketId, workspaceId, input, actor, uploadedFiles = [], target = {}) {
+    const ticket = await prisma.ticket.findFirst({
+      where: { id: ticketId, workspaceId },
+      include: TICKET_INCLUDE,
+    });
+    if (!ticket) throw new NotFoundError(`Ticket ${ticketId} not found in this workspace`);
+    const isNative = ticket.origin === TICKET_ORIGIN.TICKETPULSE;
+    const bare = (value) => {
+      const match = String(value || '').match(/[^\s<>"',;]+@[^\s<>"',;]+/);
+      return match ? match[0].toLowerCase() : '';
+    };
+
+    const entryId = Number(target?.entryId);
+    if (!Number.isInteger(entryId) || entryId <= 0) throw new ValidationError('Choose the message you are replying to');
+    const source = await prisma.ticketThreadEntry.findFirst({
+      where: { id: entryId, ticketId: ticket.id, workspaceId },
+      select: {
+        id: true, actorName: true, actorEmail: true, authorType: true, incoming: true, emailMessageId: true,
+        bodyHtml: true, bodyText: true, content: true, occurredAt: true, rawPayload: true,
+      },
+    });
+    if (!source) throw new NotFoundError('That message is not on this ticket');
+    const address = bare(source.actorEmail);
+    if (!address || source.authorType === 'agent' || source.incoming !== true) {
+      throw new ValidationError('Only a message someone e-mailed to this ticket can be answered this way');
+    }
+    if (target?.email && bare(target.email) !== address) {
+      throw new ValidationError(`That message came from ${address}, not ${String(target.email).trim()}`);
+    }
+    if (address === bare(ticket.requester?.email)) {
+      throw new ValidationError('That message is from the requester. Use Reply to requester.');
+    }
+    // FreshService tickets: only where Ticket Pulse already sends their replies
+    // (the composer hides the button otherwise). Like a forward, it is kept on
+    // this ticket and not copied to FreshService.
+    if (!isNative && !(await isFsBornRepliesViaTicketPulseEnabled(workspaceId))) {
+      throw new ValidationError('Replies on this FreshService ticket are sent by FreshService, which can only write to the requester. Forward the ticket to this person instead.');
+    }
+    // Mail-loop guard (24 Nov 2026): never answer one of our own mailboxes (the
+    // reply would come straight back in) or a machine sender (no-reply, a
+    // daemon, the workspace's machine-sender list). Fail safe: when our mailbox
+    // list cannot be read at all, nothing is sent.
+    await assertParticipantIsAPerson(workspaceId, address);
+
+    // Pasted pictures become attachments, as on a reply (30 Sep 2026).
+    const inline = extractInlineImages(input?.bodyHtml);
+    const files = [...(Array.isArray(uploadedFiles) ? uploadedFiles : []), ...inline.files];
+    if (inline.files.length) input = { ...input, bodyHtml: inline.html };
+    logOversizeBody(input?.bodyHtml, { ticketId: ticket.id, kind: 'participant_reply' });
+    const parsed = threadBodySchema.safeParse(input || {});
+    if (!parsed.success) throw new ValidationError(zodMessage(parsed.error));
+    const cc = (parsed.data.cc || []).filter((a) => bare(a) !== address);
+
+    if (files.length > 0 && !attachmentService.isConfigured()) {
+      throw new ValidationError('Attachment storage is not configured for this environment');
+    }
+    for (const file of files) {
+      attachmentService.validateUpload({ fileName: file.originalname, sizeBytes: file.size ?? file.buffer?.length ?? 0 });
+    }
+    await this._assertTicketAttachmentRoom(ticket.id, files.length);
+
+    const bodyHtml = sanitizeBodyHtml(parsed.data.bodyHtml);
+    const bodyText = composerText(parsed.data.bodyText) || stripHtml(bodyHtml);
+    if (!bodyHtml && !bodyText) throw new ValidationError('Reply body is required');
+    const now = new Date();
+    const actorEmail = actor?.email || null;
+    const idempotencyKey = parsed.data.idempotencyKey || null;
+
+    // Same replay guard as a reply (Phase DR3): a double-click sends once.
+    const fingerprint = threadBodyFingerprint(bodyText);
+    try {
+      const recent = await prisma.ticketThreadEntry.findMany({
+        where: {
+          ticketId: ticket.id, workspaceId, source: 'ticketpulse_user', eventType: 'forward', actorEmail,
+          occurredAt: { gte: new Date(now.getTime() - THREAD_DEDUPE_WINDOW_MS) },
+        },
+        orderBy: { id: 'desc' },
+        take: 5,
+      });
+      const twin = (recent || []).find((row) => {
+        const raw = row.rawPayload && typeof row.rawPayload === 'object' ? row.rawPayload : {};
+        if (!raw.directReply) return false;
+        if (idempotencyKey && raw.idempotencyKey && raw.idempotencyKey === idempotencyKey) return true;
+        return threadBodyFingerprint(row.bodyText || row.content) === fingerprint;
+      });
+      if (twin) {
+        logger.info(`Duplicate participant reply suppressed on ticket ${ticket.id} (entry ${twin.id})`);
+        return { entry: twin, email: { sent: false, deduped: true }, attachments: [], deduped: true, to: address };
+      }
+    } catch (err) {
+      logger.warn(`Participant reply dedupe lookup failed for ticket ${ticket.id} (proceeding): ${err.message}`);
+    }
+
+    // Were they forwarded this ticket? Their reply then came back as "RE: FW: …".
+    let wasForwardedTo = false;
+    try {
+      const forwards = await prisma.ticketThreadEntry.findMany({
+        where: { ticketId: ticket.id, workspaceId, eventType: 'forward' },
+        select: { rawPayload: true },
+      });
+      wasForwardedTo = (forwards || []).some((f) => {
+        const raw = f.rawPayload && typeof f.rawPayload === 'object' ? f.rawPayload : {};
+        if (raw.directReply) return false;
+        const sentTo = [...(Array.isArray(raw.forwardTo) ? raw.forwardTo : []), ...(Array.isArray(raw.to_emails) ? raw.to_emails : [])];
+        return sentTo.some((a) => bare(a) === address);
+      });
+    } catch (err) {
+      logger.warn(`Forward lookup failed for ticket ${ticket.id} (subject falls back): ${err.message}`);
+    }
+    const ref = ticketDisplayRef(ticket);
+    const storedSubject = cleanReplySubject(source.rawPayload?.subject || '');
+    const subject = withTicketToken(storedSubject
+      ? (/^re:/i.test(storedSubject) ? storedSubject : `Re: ${storedSubject}`)
+      : wasForwardedTo
+        ? `Re: FW: ${ticket.subject || 'Ticket'} [${ref}]`
+        : effectiveReplySubject(ticket, null, await refPositionFor(ticket.workspaceId)), ref);
+
+    const signature = await getEnabledSignatureForSend(workspaceId, actorEmail);
+    const sentSignature = signature ? signatureAsSent(signature) : null;
+    const directReply = { entryId: source.id, email: address, name: source.actorName || null, wasForwardedTo };
+    const entry = await prisma.ticketThreadEntry.create({
+      data: {
+        ticketId: ticket.id,
+        workspaceId,
+        source: 'ticketpulse_user',
+        eventType: 'forward',
+        actorName: actor?.name || actorEmail || 'Ticket Pulse',
+        actorEmail,
+        authorType: 'agent',
+        incoming: false,
+        isPrivate: true,
+        visibility: 'private',
+        content: bodyText,
+        bodyHtml,
+        bodyText,
+        occurredAt: now,
+        mirrorState: isNative ? 'pending' : null,
+        rawPayload: {
+          to_emails: [address],
+          ...(cc.length ? { cc_emails: cc } : {}),
+          directReply,
+          subject,
+          ...(sentSignature ? { sentSignature } : {}),
+          ...(idempotencyKey ? { idempotencyKey } : {}),
+        },
+      },
+    });
+    const { stored, failed } = await this._storeEntryFiles(ticket, entry, files, actor, 'Reply');
+    await prisma.ticket.update({ where: { id: ticket.id }, data: { updatedAt: now, lastRealActivityAt: now } });
+
+    const email = await this._emailRequesterReply(ticket, entry, {
+      cc,
+      attachments: stored,
+      signature,
+      direct: { to: address, subject, inReplyTo: source.emailMessageId || null, quoteOf: source },
+    });
+    if (isNative) await mirrorService.enqueueThreadEntry(workspaceId, ticket.id, entry.id);
+    await this._audit(ticket.id, 'replied_to_participant', actor, {
+      to: address, ...(cc.length ? { cc } : {}), inReplyToEntryId: source.id, sent: email?.sent === true,
+    });
+    this._broadcast(workspaceId, 'forward', ticket, { entryId: entry.id });
+    return {
+      entry,
+      email,
+      to: address,
+      attachments: stored.map((s) => s.attachment),
+      ...(failed.length ? { attachmentsFailed: failed } : {}),
+    };
   }
 
   /** W2: who owns the first reply after this public reply. Never throws to the caller (caught there). */
@@ -6352,7 +6643,7 @@ class TicketService {
    * the e-mail (≤3 MB each, like a reply) and are stored on the forward's
    * entry, which therefore mirrors them to FreshService as well.
    */
-  async forwardTicket(ticketId, workspaceId, { to, note, noteHtml: rawNoteHtml }, actor, files = []) {
+  async forwardTicket(ticketId, workspaceId, { to, note, noteHtml: rawNoteHtml, includeAttachmentIds = [], includePrivateAttachments = false }, actor, files = []) {
     // Same as a reply (QA 11-16 review): a picture pasted into the note as data: becomes an
     // attachment with an "[Pasted image attached: …]" line (Outlook's reading pane blocks
     // data: images), and the note is held to the reply text limit.
@@ -6386,6 +6677,13 @@ class TicketService {
     }
     await this._assertTicketAttachmentRoom(ticket.id, uploads.length);
 
+    // QA 11-24 #5: the ticket's own files the agent ticked ("Include the
+    // original attachments"). Checked and read before anything is sent, so a
+    // refusal never leaves a forward out in the world without its files.
+    const originals = await this._forwardOriginals(ticket, workspaceId, includeAttachmentIds, uploads, {
+      allowPrivate: includePrivateAttachments === true,
+    });
+
     const entries = await ticketThreadRepository.listForTicket(ticket.id, { limit: 300 });
     const publicEntries = entries
       .filter((e) => (e.bodyText || e.content || e.bodyHtml) && !e.isPrivate)
@@ -6408,13 +6706,21 @@ class TicketService {
     ].join('');
 
     // Same per-file e-mail limit as a reply; bigger files stay on the ticket only.
-    const mailable = uploads
-      .filter((f) => f.buffer && f.buffer.length <= 3 * 1024 * 1024)
-      .map((f) => ({
-        name: f.originalname,
-        contentType: f.mimetype || 'application/octet-stream',
-        contentBytes: f.buffer.toString('base64'),
-      }));
+    // The ticket's own files go first, under the name people see on the ticket.
+    const mailable = [
+      ...originals.map(({ row, buffer }) => ({
+        name: attachmentShownName(row),
+        contentType: row.contentType || 'application/octet-stream',
+        contentBytes: buffer.toString('base64'),
+      })),
+      ...uploads
+        .filter((f) => f.buffer && f.buffer.length <= MAIL_FILE_BYTES)
+        .map((f) => ({
+          name: f.originalname,
+          contentType: f.mimetype || 'application/octet-stream',
+          contentBytes: f.buffer.toString('base64'),
+        })),
+    ];
 
     let sent;
     try {
@@ -6436,7 +6742,15 @@ class TicketService {
     const via = sent?.from || sent?.via || 'ticket pulse';
 
     const now = new Date();
-    const summary = `Forwarded to ${recipients.join(', ')}${noteText ? ` — ${noteText}` : ''}`;
+    // Which of the ticket's files went with it (QA 11-24 #5), by id and the name sent.
+    const forwardedAttachments = originals.map(({ row, fromPrivateEntry }) => ({
+      id: row.id, name: attachmentShownName(row), sizeBytes: Number(row.sizeBytes) || null,
+      ...(fromPrivateEntry ? { fromInternalNote: true } : {}),
+    }));
+    const withFiles = forwardedAttachments.length
+      ? ` (with ${forwardedAttachments.map((a) => a.name).join(', ')})`
+      : '';
+    const summary = `Forwarded to ${recipients.join(', ')}${withFiles}${noteText ? ` — ${noteText}` : ''}`;
     // The stored entry keeps the note's HTML (its links) under the "Forwarded
     // to …" line; the plain summary stays the text twin (search, mirror fallback).
     const entryHtml = noteBodyHtml
@@ -6460,7 +6774,7 @@ class TicketService {
         emailMessageId: sent?.messageId || null,
         occurredAt: now,
         mirrorState: ticket.origin === TICKET_ORIGIN.TICKETPULSE ? 'pending' : null,
-        rawPayload: { forwardTo: recipients },
+        rawPayload: { forwardTo: recipients, ...(forwardedAttachments.length ? { forwardedAttachments } : {}) },
       },
     });
     // Files land on the forward's entry before the mirror job is queued, so the
@@ -6472,6 +6786,7 @@ class TicketService {
     }
     await this._audit(ticket.id, 'forwarded', actor, {
       to: recipients, via, lane: sent?.via || null, ...(uploads.length ? { files: uploads.length } : {}),
+      ...(forwardedAttachments.length ? { ticketFiles: forwardedAttachments.map((a) => a.id) } : {}),
     });
     this._broadcast(workspaceId, 'forward', ticket, { entryId: entry.id });
     return {
@@ -6480,8 +6795,119 @@ class TicketService {
       from: via,
       via: sent?.via || null,
       attachments: stored.map((s) => s.attachment),
+      ...(forwardedAttachments.length ? { included: forwardedAttachments } : {}),
       ...(failed.length ? { attachmentsFailed: failed } : {}),
     };
+  }
+
+  /**
+   * The ticket's own files a forward carries (QA 11-24 #5): an invoice
+   * forwarded for approval reached the engineer with no invoice. Each id must
+   * be a file of THIS ticket in THIS workspace; each is read from storage
+   * through attachmentService. The e-mail limits are the reply lane's: 3 MB a
+   * file (Graph's simple attach) and the SendGrid payload cap for the whole
+   * message. Over either, a 400 names the files to untick. Returns
+   * [{ row, buffer }] in the order asked.
+   */
+  async _forwardOriginals(ticket, workspaceId, includeAttachmentIds, uploads = [], { allowPrivate = false } = {}) {
+    const raw = Array.isArray(includeAttachmentIds) ? includeAttachmentIds : [];
+    if (raw.length === 0) return [];
+    const ids = [...new Set(raw.map((v) => Number(v)))];
+    if (ids.some((n) => !Number.isInteger(n) || n <= 0)) {
+      throw new ValidationError('includeAttachmentIds must be a list of attachment ids');
+    }
+    if (!attachmentService.isConfigured()) {
+      throw new ValidationError('Attachment storage is not configured for this environment');
+    }
+    const rows = await prisma.ticketAttachment.findMany({
+      where: { id: { in: ids }, ticketId: ticket.id, workspaceId },
+      select: {
+        id: true, ticketId: true, threadEntryId: true, fileName: true, contentType: true, sizeBytes: true,
+        blobName: true, source: true, ...ATTACHMENT_NAME_SELECT,
+      },
+    });
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const missing = ids.filter((id) => !byId.has(id));
+    if (missing.length) {
+      throw new ValidationError(`${missing.length === 1 ? 'One of the files to include is' : `${missing.length} of the files to include are`} not on this ticket. Reload the ticket and choose again.`);
+    }
+    const ordered = ids.map((id) => byId.get(id));
+    const nameList = (list) => {
+      const names = list.map((r) => `"${attachmentShownName(r)}"`);
+      return names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+    };
+    // A file of a PRIVATE entry (an internal note, an earlier forward, a
+    // "Reply to <name>") never goes to an outside address by default: the
+    // forward's own body carries public messages only. It goes only when the
+    // agent picked it under "From internal notes" (`allowPrivate`). An entry we
+    // cannot read counts as private (fail safe).
+    const privateIds = await this._privateEntryIds(ticket.id, workspaceId, ordered.map((r) => r.threadEntryId));
+    const isPrivateFile = (r) => r.threadEntryId !== null && r.threadEntryId !== undefined && privateIds.has(r.threadEntryId);
+    const privateFiles = ordered.filter(isPrivateFile);
+    if (privateFiles.length && !allowPrivate) {
+      throw new ValidationError(`${nameList(privateFiles)} ${privateFiles.length === 1 ? 'comes' : 'come'} from an internal note, which the forward does not share by default. Tick ${privateFiles.length === 1 ? 'it' : 'them'} under "From internal notes" to send ${privateFiles.length === 1 ? 'it' : 'them'} on purpose, or untick ${privateFiles.length === 1 ? 'it' : 'them'}.`);
+    }
+    const mb = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+    const tooBig = ordered.filter((r) => Number(r.sizeBytes) > MAIL_FILE_BYTES);
+    if (tooBig.length) {
+      throw new ValidationError(`${nameList(tooBig)} ${tooBig.length === 1 ? 'is' : 'are'} over 3 MB, too big to send by e-mail (${tooBig.map((r) => mb(Number(r.sizeBytes))).join(', ')}). Untick ${tooBig.length === 1 ? 'it' : 'them'} and forward again.`);
+    }
+    // The whole message, as base64 (the unit SendGrid's cap is in). New files
+    // over 3 MB are not mailed, so they do not count.
+    const encoded = (bytes) => Math.ceil((Number(bytes) || 0) / 3) * 4;
+    const uploadsTotal = (uploads || [])
+      .filter((f) => f.buffer && f.buffer.length <= MAIL_FILE_BYTES)
+      .reduce((sum, f) => sum + encoded(f.buffer.length), 0);
+    const originalsTotal = ordered.reduce((sum, r) => sum + encoded(r.sizeBytes), 0);
+    if (uploadsTotal + originalsTotal > MAIL_TOTAL_ATTACHMENT_BYTES) {
+      // The fewest files to untick: the biggest first, until the rest fit.
+      const untick = [];
+      let total = uploadsTotal + originalsTotal;
+      for (const r of [...ordered].sort((a, b) => Number(b.sizeBytes) - Number(a.sizeBytes))) {
+        if (total <= MAIL_TOTAL_ATTACHMENT_BYTES) break;
+        untick.push(r);
+        total -= encoded(r.sizeBytes);
+      }
+      const rest = total > MAIL_TOTAL_ATTACHMENT_BYTES ? ' and remove some of the files you attached' : '';
+      throw new ValidationError(`These files are too big for one e-mail together (the limit is about ${Math.floor(MAIL_TOTAL_ATTACHMENT_BYTES * 0.75 / 1024 / 1024)} MB). Untick ${nameList(untick)}${rest}, then forward again.`);
+    }
+    const out = [];
+    for (const row of ordered) {
+      const buffer = await attachmentService.bufferFor(row);
+      if (!buffer) {
+        throw new ValidationError(`"${attachmentShownName(row)}" could not be read from storage. Untick it and forward again.`);
+      }
+      if (buffer.length > MAIL_FILE_BYTES) {
+        throw new ValidationError(`"${attachmentShownName(row)}" is over 3 MB, too big to send by e-mail. Untick it and forward again.`);
+      }
+      out.push({ row, buffer, fromPrivateEntry: isPrivateFile(row) });
+    }
+    return out;
+  }
+
+  /**
+   * Of these thread entry ids, the ones that are private: an internal note, a
+   * forward or "Reply to <name>" (stored as a forward), or any entry marked
+   * private. An id that is not found, or a failed lookup, counts as private.
+   */
+  async _privateEntryIds(ticketId, workspaceId, entryIds) {
+    const ids = [...new Set((entryIds || []).filter((id) => id !== null && id !== undefined).map(Number))];
+    if (ids.length === 0) return new Set();
+    let rows;
+    try {
+      rows = await prisma.ticketThreadEntry.findMany({
+        where: { id: { in: ids }, ticketId, workspaceId },
+        select: { id: true, isPrivate: true, eventType: true, visibility: true },
+      });
+    } catch (err) {
+      logger.warn(`Forward: entry privacy lookup failed for ticket ${ticketId}; their files count as private: ${err.message}`);
+      return new Set(ids);
+    }
+    const PRIVATE_EVENT_TYPES = new Set(['note', 'private_note', 'forward']);
+    const publicIds = new Set((rows || [])
+      .filter((e) => e.isPrivate !== true && e.visibility !== 'private' && !PRIVATE_EVENT_TYPES.has(e.eventType))
+      .map((e) => e.id));
+    return new Set(ids.filter((id) => !publicIds.has(id)));
   }
 
   /**
@@ -6962,13 +7388,24 @@ class TicketService {
     return { html, text };
   }
 
-  async _emailRequesterReply(ticket, entry, { cc = [], attachments = [], signature = null, subject: subjectOverride = null } = {}) {
+  /**
+   * `direct` (QA 11-24 #7/#8): a reply to someone who is not the requester —
+   * { to, subject, inReplyTo, quoteOf }. The To is that person, the subject is
+   * the caller's, In-Reply-To is their message and the quote is their message
+   * alone; the requester's conversation is never quoted to them. Same lanes,
+   * same files, same delivery record (notificationType
+   * 'native_reply_to_participant').
+   */
+  async _emailRequesterReply(ticket, entry, { cc = [], attachments = [], signature = null, subject: subjectOverride = null, direct = null } = {}) {
     const ref = ticketDisplayRef(ticket);
     // Simorgh A4: the requester is an unattended automation mailbox — the
     // reply stays on the ticket (where the system reads it). ContinuIT office
     // requesters (8 Oct 2026): when the ticket has Cc'd people, they ARE the
     // audience — the first becomes the To, the rest stay on Cc. With no Cc,
-    // nothing is sent (Simorgh, Sentinel).
+    // nothing is sent (Simorgh, Sentinel). A direct reply is not to the
+    // requester: its addressee stands in the requester's place for this mail
+    // only (never unattended), so none of that applies.
+    if (direct) ticket = { ...ticket, requester: { ...(ticket.requester || {}), email: String(direct.to || '').trim(), unattended: false } };
     const unattended = ticket.requester?.unattended === true;
     const ccPeople = (Array.isArray(cc) ? cc : []).map((a) => String(a || '').trim()).filter(Boolean);
     if (unattended && ccPeople.length === 0) {
@@ -6977,9 +7414,10 @@ class TicketService {
     }
     const toAddress = unattended ? ccPeople[0] : String(ticket.requester.email || '').trim();
     if (unattended) logger.info(`Reply to ${ref}: requester ${ticket.requester.email} is unattended — sent to the Cc list (${ccPeople.length})`);
+    const notificationType = direct ? 'native_reply_to_participant' : 'native_reply_to_requester';
     // Agent-edited subject (Phase SN4) or the default — either way the
     // `[TP-n]` token stays on: it is the inbound threading signal.
-    const subject = effectiveReplySubject(ticket, subjectOverride, await refPositionFor(ticket.workspaceId));
+    const subject = direct?.subject || effectiveReplySubject(ticket, subjectOverride, await refPositionFor(ticket.workspaceId));
     // The acting agent's signature (Phase D) joins the OUTBOUND email only —
     // entry.bodyHtml (the stored thread entry) intentionally stays clean.
     let html = entry.bodyHtml || textToReplyHtml(entry.bodyText);
@@ -6999,10 +7437,18 @@ class TicketService {
     // lanes — the Graph createReply draft's own quote is overwritten by our
     // PATCH, so this is the only quote either lane carries.
     try {
-      const quote = await this._lastInboundQuote(ticket.id, entry.id, {
-        reply: { text: entry.bodyText || stripHtml(entry.bodyHtml || ''), authorName: entry.actorName, authorEmail: entry.actorEmail },
-        budget,
-      });
+      let zone = ticket.workspace?.defaultTimezone || null;
+      if (direct && !zone) {
+        try {
+          zone = (await prisma.workspace.findUnique({ where: { id: ticket.workspaceId }, select: { defaultTimezone: true } }))?.defaultTimezone || null;
+        } catch { /* the quote's date falls back below */ }
+      }
+      const quote = direct
+        ? participantQuote(direct.quoteOf, zone || 'America/Vancouver')
+        : await this._lastInboundQuote(ticket.id, entry.id, {
+          reply: { text: entry.bodyText || stripHtml(entry.bodyHtml || ''), authorName: entry.actorName, authorEmail: entry.actorEmail },
+          budget,
+        });
       if (quote) {
         html = `${html}${quote.html}`;
         text = `${text}${quote.text}`;
@@ -7042,7 +7488,14 @@ class TicketService {
     // Threading anchors (Mega 08-31 Phase MB-1b): In-Reply-To = the newest
     // stored Message-ID on this ticket (the requester's last inbound mail or
     // our last send), References = the last <=10 oldest->newest. Both lanes.
-    const threading = await threadingHeadersForTicket(ticket.id);
+    // A direct reply answers one message: In-Reply-To is that message.
+    const ticketThreading = await threadingHeadersForTicket(ticket.id);
+    const threading = direct?.inReplyTo
+      ? {
+        inReplyTo: direct.inReplyTo,
+        references: [...new Set([...(ticketThreading?.references || []).filter((id) => id !== direct.inReplyTo), direct.inReplyTo])].slice(-10),
+      }
+      : ticketThreading;
 
     // Graph path: send from the workspace's connected mailbox when available
     // (centralized picker, MB-1g: primary first, then oldest).
@@ -7079,7 +7532,7 @@ class TicketService {
               channel: 'email',
               status: 'sent',
               eventType: 'ticket.reply_posted',
-              notificationType: 'native_reply_to_requester',
+              notificationType,
               recipient: toAddress,
               toRecipients: [toAddress],
               ccRecipients: ccForSend,
@@ -7147,7 +7600,7 @@ class TicketService {
           channel: 'email',
           status: 'sent',
           eventType: 'ticket.reply_posted',
-          notificationType: 'native_reply_to_requester',
+          notificationType,
           recipient: toAddress,
           toRecipients: [toAddress],
           ccRecipients: ccForSend,
@@ -7171,7 +7624,7 @@ class TicketService {
           channel: 'email',
           status: 'failed_permanent',
           eventType: 'ticket.reply_posted',
-          notificationType: 'native_reply_to_requester',
+          notificationType,
           recipient: toAddress,
           toRecipients: [toAddress],
           ccRecipients: ccForSend,

@@ -67,6 +67,10 @@ export const CG_FIELDS = [
   // ack skip FreshService sync-ins and hold-queue resolutions.
   { value: 'ticket.createdVia', label: 'Created via', type: 'enum', options: ['app', 'email', 'api', 'freshservice_sync', 'held_reply', 'agent_cc', 'forward'] },
   { value: 'ticket.sourceLabel', label: 'Ticket source (arrival channel)', type: 'enum', options: ['Email', 'Portal', 'Phone', 'Chat', 'API', 'Webhook', 'Agent'] },
+  // QA 11-24 item 11: the connected mailbox the ticket came in through. The
+  // server serves this workspace's mailboxes as { value: address, label };
+  // a ticket that did not come by e-mail never "is" one.
+  { value: 'ticket.intakeMailbox', label: 'Intake mailbox', type: 'enum', options: [] },
   // Per-workspace vocabulary (registry-driven) — string on the backend; the
   // builder swaps in the workspace's type names as enum options at runtime.
   { value: 'ticket.ticketType', label: 'Ticket type', type: 'string' },
@@ -453,11 +457,27 @@ export function DurationInput({ value, onChange, label = 'Duration' }) {
   );
 }
 
+/**
+ * Pick-list-only fields: their values come from the workspace, never typed.
+ * With nothing to pick, the row says so instead of offering a text box.
+ */
+const PICK_ONLY_EMPTY = {
+  'ticket.intakeMailbox': 'No mailbox is connected in this workspace',
+};
+
 function ValueInput({ row, onChange, fields }) {
   const spec = fieldSpecIn(fields, row.field);
   if (VALUELESS.has(row.operator)) return null;
   const options = optionValues(spec);
   const labelOf = (v) => labelFor(spec, v);
+
+  if (PICK_ONLY_EMPTY[spec.value] && options.length === 0 && asList(row.value).length === 0) {
+    return (
+      <select disabled aria-label="Value" className="w-full rounded-md border border-border bg-muted/50 px-2.5 py-1.5 text-sm text-muted-foreground">
+        <option>{PICK_ONLY_EMPTY[spec.value]}</option>
+      </select>
+    );
+  }
 
   if (LIST_OPERATORS.has(row.operator)) {
     if (options.length > 0) {

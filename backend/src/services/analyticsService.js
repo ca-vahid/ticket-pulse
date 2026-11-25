@@ -9,6 +9,8 @@ import { getCategoryMode, normalizeTicketCategory } from '../utils/ticketCategor
 import { computePickAccuracy, fetchPickInputs, pickAccuracyExportRows } from './aiPickAccuracy.js';
 import { assignerKind } from '../utils/assignerKind.js';
 import { isGroupedCopy, shareOf } from '../utils/groupedCopy.js';
+import { departmentOf, cityOf, UNKNOWN_DEPARTMENT } from '../utils/requesterDepartment.js';
+import { getDepartmentMap } from './departmentMapService.js';
 
 const DEFAULT_TIMEZONE = 'America/Vancouver';
 // Canonical fallbacks. Since Phase 8b every per-workspace site resolves the
@@ -1604,6 +1606,96 @@ export async function getDemandFlow(workspaceId, query = {}) {
   });
 }
 
+/**
+ * Demand → Tickets by department (QA 11-24, item 2). Deterministic counts, no
+ * AI: tickets CREATED in the range (same range, noise switch and category
+ * filter as the rest of the page), grouped by the requester's department —
+ * Entra's job class without its level, renamed through the department table
+ * (utils/requesterDepartment.js + the `department_map` override) — and,
+ * for the page's "By city" switch, by the requester's city.
+ *
+ * The database does the counting: one groupBy over (requester, ticket
+ * department) — a few hundred to a few thousand rows however many tickets —
+ * then one read of those requesters' four profile columns (never photoUrl).
+ * The ~90 distinct Entra values map to departments in JS, where the table
+ * lives. "Unknown" is a ticket whose requester has no department anywhere
+ * (no Entra department, no FreshService value that names one), and tickets
+ * with no requester at all.
+ */
+export function groupTicketsByPlace(pairs = [], requestersById = new Map(), map = undefined) {
+  const byDepartment = new Map();
+  const byCity = new Map();
+  let total = 0;
+  for (const pair of pairs) {
+    const count = Number(pair.count) || 0;
+    if (count <= 0) continue;
+    total += count;
+    const profile = pair.requesterId ? requestersById.get(pair.requesterId) : null;
+    // tickets.department holds the same FreshService value as the requester's.
+    const person = { ...(profile || {}), department: profile?.department || pair.ticketDepartment || null };
+    const department = (profile || pair.ticketDepartment) ? departmentOf(person, map) : null;
+    const city = (profile || pair.ticketDepartment) ? cityOf(person, map) : null;
+    increment(byDepartment, department || UNKNOWN_DEPARTMENT, count);
+    increment(byCity, city || UNKNOWN_DEPARTMENT, count);
+  }
+  const rowsOf = (m) => [...m.entries()]
+    .map(([label, count]) => ({
+      label,
+      count,
+      pct: total ? Number(((count / total) * 100).toFixed(1)) : 0,
+      unknown: label === UNKNOWN_DEPARTMENT,
+    }))
+    // Biggest first; Unknown always last so it never reads as a department.
+    .sort((a, b) => (Number(a.unknown) - Number(b.unknown)) || (b.count - a.count) || a.label.localeCompare(b.label));
+  const departments = rowsOf(byDepartment);
+  const cities = rowsOf(byCity);
+  const unknownOf = (rows) => rows.find((r) => r.unknown)?.count || 0;
+  return {
+    total,
+    departments,
+    cities,
+    coverage: {
+      departmentKnown: total - unknownOf(departments),
+      cityKnown: total - unknownOf(cities),
+      total,
+    },
+  };
+}
+
+export async function getTicketsByDepartment(workspaceId, query = {}) {
+  return withCache(workspaceId, 'tickets-by-department', query, async () => {
+    const rangeInfo = parseAnalyticsRange(query);
+    const excludeNoise = query.excludeNoise === 'true';
+    const categoryFilter = categoryFilterForQuery(workspaceId, query);
+    const grouped = await prisma.ticket.groupBy({
+      by: ['requesterId', 'department'],
+      where: ticketBaseWhere(workspaceId, rangeInfo, excludeNoise, 'createdAt', categoryFilter.where),
+      _count: { _all: true },
+    });
+    const requesterIds = [...new Set(grouped.map((g) => g.requesterId).filter((id) => id !== null && id !== undefined))];
+    const requesters = [];
+    // Chunked: a 12-month range can touch a few thousand requesters.
+    for (let i = 0; i < requesterIds.length; i += 1000) {
+      const chunk = requesterIds.slice(i, i + 1000);
+      requesters.push(...await prisma.requester.findMany({
+        where: { id: { in: chunk } },
+        select: { id: true, department: true, entraDepartment: true, entraCity: true, entraOfficeLocation: true },
+      }));
+    }
+    const requestersById = new Map(requesters.map((r) => [r.id, r]));
+    const map = await getDepartmentMap();
+    const result = groupTicketsByPlace(
+      grouped.map((g) => ({ requesterId: g.requesterId, ticketDepartment: g.department, count: g._count?._all || 0 })),
+      requestersById,
+      map,
+    );
+    return {
+      metadata: metadata(rangeInfo, { excludeNoise, categoryMode: categoryFilter.mode, categoryFilters: categoryFilter.selected }),
+      ...result,
+    };
+  });
+}
+
 export async function getCategoryIntelligence(workspaceId, query = {}) {
   return withCache(workspaceId, 'category-intelligence', query, async () => {
     const rangeInfo = parseAnalyticsRange(query);
@@ -2791,6 +2883,7 @@ export default {
   categoryBreakdownFromTickets,
   getOverview,
   getDemandFlow,
+  getTicketsByDepartment,
   getTeamBalance,
   getQuality,
   getAutomationOps,

@@ -1,5 +1,7 @@
 import express from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
+import { requireFreshServiceLink } from '../middleware/requireFreshServiceLink.js';
+import { isFreshServiceUnlinked } from '../utils/workspaceFsBinding.js';
 import assignmentRepository from '../services/assignmentRepository.js';
 import competencyRepository from '../services/competencyRepository.js';
 import agentCompetencyService from '../services/agentCompetencyService.js';
@@ -259,6 +261,9 @@ router.get('/groups', requireAdmin, asyncHandler(async (req, res) => {
     where: { id: req.workspaceId },
     select: { freshserviceWorkspaceId: true },
   });
+  // QA 11-24 #4 review: no FS link → no FreshService groups belong here (an
+  // empty filter would list every group in the account).
+  if (isFreshServiceUnlinked(workspace)) return res.json({ success: true, data: [] });
   const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey);
   const filters = workspace?.freshserviceWorkspaceId
     ? { workspace_id: Number(workspace.freshserviceWorkspaceId) }
@@ -463,7 +468,8 @@ router.get('/queue-status', requireAdmin, asyncHandler(async (req, res) => {
   });
 }));
 
-router.post('/sync-now', requireAdmin, asyncHandler(async (req, res) => {
+// QA 11-24 #4 review: refused (409) for a workspace with no FreshService link.
+router.post('/sync-now', requireAdmin, requireFreshServiceLink, asyncHandler(async (req, res) => {
   const lookbackMinutes = parseInt(req.query.lookbackMinutes || req.body?.lookbackMinutes, 10) || 90;
   const maxTickets = parseInt(req.query.maxTickets || req.body?.maxTickets, 10) || 50;
   const maxPipelineRuns = parseInt(req.query.maxPipelineRuns || req.body?.maxPipelineRuns, 10) || 10;

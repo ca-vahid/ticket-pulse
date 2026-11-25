@@ -1,6 +1,7 @@
 import logger from '../utils/logger.js';
 import { DatabaseError, NotFoundError } from '../utils/errors.js';
 import prisma from './prisma.js';
+import { isFreshServiceBound } from '../utils/workspaceFsBinding.js';
 
 /**
  * Get FreshService config for a specific workspace by reading the Workspace row
@@ -26,6 +27,10 @@ async function getFreshServiceConfigForWorkspace(workspaceId, settingsRepo) {
       domain,
       apiKey,
       workspaceId: workspace.freshserviceWorkspaceId ? String(workspace.freshserviceWorkspaceId) : null,
+      // QA 11-24 #4 review: false for a workspace with no FreshService link
+      // (id 0). Its workspaceId above is null, and a null filter means "every
+      // FreshService workspace" — syncService refuses such a config.
+      freshserviceLinked: isFreshServiceBound(workspace),
       defaultTimezone: workspace.defaultTimezone,
       syncIntervalMinutes: workspace.syncIntervalMinutes,
       categoryCustomField: workspace.categoryCustomField || 'security',

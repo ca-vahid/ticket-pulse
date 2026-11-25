@@ -27,6 +27,7 @@ import { OverridePromptToast, useOverridePrompt } from '../components/tickets/Ov
 import { queueSearchToKeep, readQueueScroll, recallQueueScroll, recallQueueView, rememberQueueScroll, rememberQueueView, restoredQueueSearch } from '../utils/queueMemory';
 import { initialPull, stepPull, touchPull } from '../utils/pullToReveal';
 import { rememberTicketList } from '../utils/lastTicketList';
+import { useDepartmentMap } from '../utils/requesterDepartment';
 import AiAssignModal from '../components/tickets/AiAssignModal';
 import BulkActionBar from '../components/tickets/BulkActionBar';
 import BulkDeleteDialog from '../components/tickets/BulkDeleteDialog';
@@ -102,7 +103,8 @@ const SORT_OPTIONS = [
   { value: 'requester', label: 'Requester' },
   // Optional-column sorts (Phase QC) — nulls-last on the backend, like dueBy.
   { value: 'source', label: 'Source' },
-  { value: 'department', label: 'Department' },
+  // tickets.department is FreshService's department = the office city (QA 11-24 #1).
+  { value: 'department', label: 'City' },
   // Parked view: soonest wake first.
   { value: 'parkedUntil', label: 'Wake date (parked)' },
   // Alert / rule-tuning tickets (Simorgh Phase C): noisiest first.
@@ -267,6 +269,9 @@ function Pagination({ page, totalPages, total, pageSize, onPage, compact = false
 export default function Tickets() {
   const navigate = useNavigate();
   const location = useLocation();
+  // QA 11-24 #1: the Department column reads the job-class table; re-render
+  // once the admin override (if any) has loaded.
+  useDepartmentMap();
   // Return address so /tickets/:id's Back control comes back to this exact
   // queue view (filters, page, view — everything in the query string).
   const openTicket = useCallback((id) => navigate(`/tickets/${id}`, {

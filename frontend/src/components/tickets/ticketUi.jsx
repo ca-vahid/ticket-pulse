@@ -1006,6 +1006,8 @@ export function ProvenanceChip({ ticket, iconOnly = false }) {
 export function MirrorChip({ ticket }) {
   if (ticket?.origin !== 'ticketpulse') return null;
   const state = ticket.mirrorState;
+  // QA 11-24 #4: a workspace with no FreshService link keeps no fallback copy.
+  if (state === 'none') return null;
   if (state === 'mirrored') {
     return (
       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-500/30" title="A fallback copy exists in FreshService">
@@ -1329,6 +1331,7 @@ export function TypeBadge({ type, className = '' }) {
 export function MirrorBadge({ ticket, fsUrl = null, onRetry = null, busy = false }) {
   if (ticket?.origin !== 'ticketpulse') return null;
   const state = ticket.mirrorState;
+  if (state === 'none') return null; // no FreshService link (QA 11-24 #4)
   const base = 'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium';
   if (state === 'mirrored') {
     const inner = <><BrandArt name="mirror-synced" className="h-4 w-4" /> Mirrored{ticket.freshserviceTicketId ? <span className="font-mono text-muted-foreground/75">#{String(ticket.freshserviceTicketId)}</span> : null}</>;

@@ -175,6 +175,14 @@ describe('30 Sep 2026 lines', () => {
   });
 });
 
+describe('a reply to someone who is not the requester (QA 11-24 #8)', () => {
+  test('reads as who it went to, and that it was not the requester', () => {
+    const rows = [{ id: 81, activityType: 'replied_to_participant', performedBy: 'Dana Agent', performedAt: iso(0), details: { to: 'tim@example.com', inReplyToEntryId: 88, sent: true } }];
+    const [item] = buildHistoryItems({ activities: rows });
+    expect(item).toMatchObject({ event: 'forward', verb: 'replied to tim@example.com (not the requester)' });
+  });
+});
+
 describe('friendlyDays', () => {
   test('bare ISO days become short days; full stamps too; other text untouched', () => {
     expect(friendlyDays('closing 2026-10-16 if there is no reply')).toBe('closing Fri 16 Oct if there is no reply');

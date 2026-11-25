@@ -115,20 +115,44 @@ export function _resetPictureCache() {
  *  - `shownImages`: names already shown as thumbnails under the message; their
  *    link reads "picture" instead of repeating the file name.
  */
+/**
+ * QA 11-24 #12: the picture each "[Image: name]" stands for. Names repeat — a
+ * message can hold two "image001.png" refs and so can the files under it — so
+ * the n-th ref of a name is the n-th picture of that name (the last one when
+ * there are more refs than pictures). Returns name key -> [attachment, ...].
+ */
+export function picturesByName(images) {
+  const map = new Map();
+  for (const a of images || []) {
+    const key = keyOf(a?.fileName);
+    if (!key) continue;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(a);
+  }
+  return map;
+}
+
 export function RichBody({ html, text, onImageRef, className = '', shownImages = null, ticketId = null, inlineImages = null, after = null }) {
   const rootRef = useRef(null);
-  const inlineByName = useMemo(() => {
-    const map = new Map();
-    if (ticketId) for (const a of inlineImages || []) map.set(keyOf(a.fileName), a);
-    return map;
-  }, [inlineImages, ticketId]);
+  const inlineByName = useMemo(() => (ticketId ? picturesByName(inlineImages) : new Map()), [inlineImages, ticketId]);
+  const pictureFor = (name, index) => {
+    const list = inlineByName.get(keyOf(name));
+    if (!list || list.length === 0) return null;
+    const i = Number.isInteger(index) && index >= 0 ? index : 0;
+    return list[Math.min(i, list.length - 1)];
+  };
 
   const source = useMemo(() => {
+    const seen = new Map();
     const injectRefs = (s) => String(s).replace(IMG_REF_RE, (_m, name) => {
       const plain = cleanRefName(name);
       const clean = escapeHtml(plain);
-      if (inlineByName.has(plain.toLowerCase())) {
-        return `<span class="tp-img-ref tp-img-ref--inline" data-img="${clean}" title="Open ${clean}" aria-label="Open picture ${clean}" role="button" tabindex="0">🖼 ${clean}</span>`;
+      const key = plain.toLowerCase();
+      if (inlineByName.has(key)) {
+        // Which of the pictures with this name this ref is (0-based).
+        const nth = seen.get(key) || 0;
+        seen.set(key, nth + 1);
+        return `<span class="tp-img-ref tp-img-ref--inline" data-img="${clean}" data-img-index="${nth}" title="Open ${clean}" aria-label="Open picture ${clean}" role="button" tabindex="0">🖼 ${clean}</span>`;
       }
       const shown = shownImages && shownImages.has(plain.toLowerCase());
       return `<span class="tp-img-ref" data-img="${clean}" title="${clean}" role="button" tabindex="0">🖼 ${shown ? 'picture' : clean}</span>`;
@@ -146,7 +170,7 @@ export function RichBody({ html, text, onImageRef, className = '', shownImages =
     const root = rootRef.current;
     if (!root || !ticketId || inlineByName.size === 0) return;
     root.querySelectorAll('.tp-img-ref--inline:not([data-filled])').forEach((el) => {
-      const attachment = inlineByName.get(keyOf(el.getAttribute('data-img')));
+      const attachment = pictureFor(el.getAttribute('data-img'), Number(el.getAttribute('data-img-index')));
       if (!attachment) return;
       el.setAttribute('data-filled', 'pending');
       pictureUrl(ticketId, attachment.id).then((url) => {
@@ -168,7 +192,13 @@ export function RichBody({ html, text, onImageRef, className = '', shownImages =
     });
   });
 
-  const open = (el) => onImageRef?.(el.getAttribute('data-img'));
+  // The clicked picture's own file goes with the name, so the preview opens at
+  // it, not at the first file of that name on the ticket (QA 11-24 #12).
+  const open = (el) => {
+    const name = el.getAttribute('data-img');
+    const hit = el.hasAttribute('data-img-index') ? pictureFor(name, Number(el.getAttribute('data-img-index'))) : null;
+    onImageRef?.(name, hit);
+  };
   const handleClick = (e) => {
     const el = e.target.closest?.('.tp-img-ref');
     if (el) { e.preventDefault(); open(el); }

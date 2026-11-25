@@ -419,6 +419,7 @@ class AgentAlertService {
     const anyChannel = sub.channelEmail || sub.channelSms || sub.channelWhatsapp || sub.channelPhone || sub.channelTeams;
     if (delivered || !anyChannel) {
       await prisma.agentAlertEvent.updateMany({ where: { id: { in: ids } }, data: { sentAt: new Date(), deliveryResult: result } });
+      if (delivered) await this._recordOnTickets(sub, tickets, result);
       return;
     }
     // Nothing was delivered (transient email outage, unverified phone, …). Leave
@@ -427,8 +428,40 @@ class AgentAlertService {
     const attempts = Math.max(0, ...events.map((e) => e.attempts || 0)) + 1;
     if (attempts >= MAX_DELIVERY_ATTEMPTS) {
       await prisma.agentAlertEvent.updateMany({ where: { id: { in: ids } }, data: { sentAt: new Date(), attempts, deliveryResult: { ...result, gaveUpAfter: attempts } } });
+      await this._recordOnTickets(sub, tickets, result);
     } else {
       await prisma.agentAlertEvent.updateMany({ where: { id: { in: ids } }, data: { attempts } });
+    }
+  }
+
+  /**
+   * QA 11-24 item 9: each ticket in a delivered (or given-up) batch says on its
+   * Activity tab that this person's own alert went out, how, and why. Never throws.
+   */
+  async _recordOnTickets(sub, tickets, result) {
+    try {
+      const { recordAlertActivity, alertReason } = await import('./alertActivityService.js');
+      const channelKey = { phone: 'phone_call' };
+      const deliveries = Object.entries(result?.channels || {}).map(([channel, outcome]) => ({
+        channel: channelKey[channel] || channel,
+        sent: Boolean(outcome?.sent),
+        error: outcome?.error || outcome?.reason || null,
+      }));
+      if (!deliveries.length) return;
+      const reason = alertReason({ kind: 'custom', subscriptionLabel: result?.scope || null });
+      for (const ticket of tickets || []) {
+        await recordAlertActivity({
+          ticketId: ticket.id,
+          kind: 'custom',
+          priority: PRIORITY_LABELS[ticket.priority] || null,
+          technicianId: sub.technicianId,
+          technicianName: sub.technician?.name || null,
+          reason,
+          deliveries,
+        });
+      }
+    } catch (err) {
+      logger.warn(`Agent alert history rows not written (non-fatal): ${err.message}`);
     }
   }
 
@@ -464,7 +497,7 @@ class AgentAlertService {
     const listed = refs.slice(0, MAX_LISTED).join(', ') + (refs.length > MAX_LISTED ? ` …and ${refs.length - MAX_LISTED} more` : '');
     const publicBase = resolvePublicBaseUrl({ warn: (m) => logger.warn(m) });
 
-    const out = { channels: {} };
+    const out = { channels: {}, scope };
 
     // Teams — one message per batch from the Ticket Pulse bot. A failure here
     // never stops the other channels.

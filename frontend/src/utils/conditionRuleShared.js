@@ -33,6 +33,7 @@ const FIELD_ROWS = [
   ['ticket.origin', 'ticket.origin', 'enum', 'the ticket origin'],
   ['ticket.createdVia', 'ticket.createdVia', 'enum', 'the way the ticket was created'],
   ['ticket.sourceLabel', 'ticket.sourceLabel', 'enum', 'the ticket source'],
+  ['ticket.intakeMailbox', 'ticket.intakeMailbox', 'enum', 'the intake mailbox'],
   ['ticket.ticketType', 'ticket.ticketType', 'string', 'the ticket type'],
   ['ticket.subject', 'ticket.subject', 'string', 'the subject'],
   ['ticket.descriptionText', 'ticket.descriptionText', 'string', 'the description'],

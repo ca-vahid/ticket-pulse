@@ -8,6 +8,8 @@ import ticketRepository from '../services/ticketRepository.js';
 import logger from '../utils/logger.js';
 import { sseManager } from './sse.routes.js';
 import { clearReadCache } from '../services/dashboardReadCache.js';
+// QA 11-24 #4 review: FreshService pulls refuse a workspace with no FS link (409).
+import { requireFreshServiceLink } from '../middleware/requireFreshServiceLink.js';
 
 const router = express.Router();
 
@@ -223,6 +225,7 @@ router.post(
 router.post(
   '/backfill-pickup-times',
   requireAdmin,
+  requireFreshServiceLink,
   asyncHandler(async (req, res) => {
     const limit = parseInt(req.query.limit, 10) || 100;
     const daysToSync = parseInt(req.query.daysToSync, 10) || 30;
@@ -258,6 +261,7 @@ router.post(
 router.post(
   '/backfill-thread-entries',
   requireAdmin,
+  requireFreshServiceLink,
   asyncHandler(async (req, res) => {
     const limit = parseInt(req.query.limit, 10) || 100;
     const daysToSync = parseInt(req.query.daysToSync, 10) || 14;
@@ -337,6 +341,7 @@ router.post(
 router.post(
   '/week',
   requireAdmin,
+  requireFreshServiceLink,
   asyncHandler(async (req, res) => {
     const { startDate, endDate } = req.body;
 
@@ -373,6 +378,7 @@ router.post(
 router.post(
   '/backfill',
   requireAdmin,
+  requireFreshServiceLink,
   asyncHandler(async (req, res) => {
     const { startDate, endDate, skipExisting = true, activityConcurrency = 3 } = req.body;
 
@@ -534,6 +540,7 @@ router.post(
 router.post(
   '/backfill-episodes',
   requireAdmin,
+  requireFreshServiceLink,
   asyncHandler(async (req, res) => {
     const daysToSync = parseInt(req.query.daysToSync, 10) || 180;
     const limit = parseInt(req.query.limit, 10) || 100;

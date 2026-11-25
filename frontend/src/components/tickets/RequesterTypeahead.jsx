@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useId, useImperativeHandle, useRef, useState } f
 import { Building2, Loader2, Search, X } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
 import { initials } from './ticketUi';
+import { cityOf, departmentOf, normalizeDepartment } from '../../utils/requesterDepartment';
 
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -16,15 +17,20 @@ const DEFAULT_FIELD_CLASS = 'tp-focus-ring w-full text-sm bg-card border border-
  * the picked-requester shape the create form and the edit modal both use.
  */
 export function toPickedRequester(person, fromDirectory = false) {
-  const location = person.entraOfficeLocation || person.entraCity || null;
+  // QA 11-24 #1: a directory hit's `department` is Entra's (job class + level);
+  // a known requester's is FreshService's, which is the office city.
+  const location = fromDirectory
+    ? (person.entraOfficeLocation || person.entraCity || null)
+    : cityOf(person);
+  const department = fromDirectory ? normalizeDepartment(person.department) : departmentOf(person);
   return {
     id: fromDirectory ? null : (person.id ?? null),
     name: person.name,
     email: person.email,
     jobTitle: person.jobTitle || null,
-    department: person.department || null,
+    department: department || null,
     location,
-    hint: [person.jobTitle, location || person.department].filter(Boolean).join(' · '),
+    hint: [person.jobTitle, location || department].filter(Boolean).join(' · '),
     fromDirectory,
   };
 }

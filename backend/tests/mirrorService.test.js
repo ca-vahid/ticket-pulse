@@ -43,7 +43,7 @@ jest.unstable_mockModule('../src/services/ticketLifecycleNotificationService.js'
 }));
 
 const mirrorInFlight = await import('../src/utils/mirrorInFlight.js');
-const { default: mirrorService } = await import('../src/services/mirrorService.js');
+const { default: mirrorService, isSourceRejection } = await import('../src/services/mirrorService.js');
 
 const baseTicket = {
   id: 501,
@@ -804,6 +804,117 @@ describe('the FreshService copy of front-door mail', () => {
     await mirrorService._processJob({ id: 9, ticketId: 501, workspaceId: 1, kind: 'thread_entry', threadEntryId: 9006, attempts: 0 });
     expect(clientMock.addNote.mock.calls[0][2].notifyEmails).toBeUndefined();
     delete prismaMock.technician;
+  });
+});
+
+// QA 11-24 item 10: the copy's source follows the Ticket Pulse source.
+describe('the FreshService copy\'s source', () => {
+  beforeEach(() => {
+    mirrorInFlight._resetMirrorInFlight();
+    jest.clearAllMocks();
+    prismaMock.ticket.update.mockResolvedValue({});
+    prismaMock.requester.update.mockResolvedValue({});
+    clientMock.updateTicket.mockResolvedValue({ id: 90001 });
+    clientMock.addNote.mockResolvedValue({ conversation: { id: 1 } });
+    clientMock.createTicket.mockResolvedValue({ id: 90001, requester_id: 555001 });
+  });
+  afterEach(() => { delete prismaMock.mailboxConnection; });
+
+  test('create: Phone as Phone, Walk-up as Walkup, Teams as Chat', async () => {
+    for (const [tp, fs] of [[3, 3], [9, 9], [102, 4], [100, 2]]) {
+      prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, nativeNumber: 2000 + tp, source: tp });
+      await mirrorService._processJob({ id: tp, ticketId: 501, workspaceId: 1, kind: 'create_ticket', attempts: 0 });
+      expect(clientMock.createTicket).toHaveBeenLastCalledWith(expect.objectContaining({ source: fs }));
+    }
+  });
+
+  test('create: a source FreshService refuses still makes the copy, as Portal', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, nativeNumber: 2010, source: 3 });
+    const refused = Object.assign(new Error('Validation failed'), { freshserviceDetail: { errors: [{ field: 'source', message: 'It should be one of these values' }] } });
+    clientMock.createTicket.mockRejectedValueOnce(refused).mockResolvedValueOnce({ id: 90003, requester_id: 555001 });
+    expect(await mirrorService._processJob({ id: 20, ticketId: 501, workspaceId: 1, kind: 'create_ticket', attempts: 0 })).toBe(true);
+    expect(clientMock.createTicket.mock.calls.map(([p]) => p.source)).toEqual([3, 2]);
+  });
+
+  // Review 11-24: one FreshService error can refuse BOTH the source and the
+  // support address; the one retry must repair both, or the copy still fails.
+  test('create: one error naming source AND email_config_id → one retry as Portal with the default address', async () => {
+    settingsMock.get.mockImplementation(async (key) => (key === 'fs_email_config_by_group_ws1' ? JSON.stringify({ 1000210021: 999 }) : null));
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, nativeNumber: 2011, source: 3, groupId: 1000210021n });
+    const both = Object.assign(new Error('Validation failed'), {
+      freshserviceStatus: 400,
+      freshserviceDetail: { errors: [
+        { field: 'source', message: 'It should be one of these values' },
+        { field: 'email_config_id', message: 'is invalid' },
+      ] },
+    });
+    clientMock.createTicket.mockReset();
+    clientMock.createTicket.mockRejectedValueOnce(both).mockResolvedValueOnce({ id: 90004, requester_id: 555001 });
+    expect(await mirrorService._processJob({ id: 23, ticketId: 501, workspaceId: 1, kind: 'create_ticket', attempts: 0 })).toBe(true);
+    expect(clientMock.createTicket).toHaveBeenCalledTimes(2);
+    expect(clientMock.createTicket.mock.calls[0][0]).toEqual(expect.objectContaining({ source: 3, email_config_id: 999 }));
+    expect(clientMock.createTicket.mock.calls[1][0].source).toBe(2);
+    expect(clientMock.createTicket.mock.calls[1][0].email_config_id).toBeUndefined();
+    settingsMock.get.mockResolvedValue(null);
+  });
+
+  test('create: an error about something else (that happens to say "source") is not retried', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, nativeNumber: 2012, source: 3 });
+    clientMock.createTicket.mockReset();
+    clientMock.createTicket.mockRejectedValueOnce(new Error('Ticket Pulse is the source of truth; requester is not valid'));
+    expect(await mirrorService._processJob({ id: 24, ticketId: 501, workspaceId: 1, kind: 'create_ticket', attempts: 0 })).toBe(false);
+    expect(clientMock.createTicket).toHaveBeenCalledTimes(1);
+  });
+
+  test('update: one error naming source AND email_config_id → one re-send without both', async () => {
+    settingsMock.get.mockImplementation(async (key) => (key === 'fs_email_config_by_group_ws1' ? JSON.stringify({ 1000210021: 999 }) : null));
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, freshserviceTicketId: BigInt(90001), source: 3, groupId: 1000210021n });
+    const both = Object.assign(new Error('Validation failed'), { freshserviceDetail: { errors: [{ field: 'source' }, { field: 'email_config_id' }] } });
+    clientMock.updateTicket.mockReset();
+    clientMock.updateTicket.mockRejectedValueOnce(both).mockResolvedValue({ id: 90001 });
+    expect(await mirrorService._processJob({ id: 25, ticketId: 501, workspaceId: 1, kind: 'update_fields', attempts: 0, payload: { syncSource: true } })).toBe(true);
+    expect(clientMock.updateTicket).toHaveBeenCalledTimes(2);
+    expect(clientMock.updateTicket.mock.calls[1][1].source).toBeUndefined();
+    expect(clientMock.updateTicket.mock.calls[1][1].email_config_id).toBeUndefined();
+    settingsMock.get.mockResolvedValue(null);
+  });
+
+  test('the source-error match reads only a complaint about the source field', () => {
+    const msg = (message) => isSourceRejection(new Error(message));
+    // A source-field complaint, by field list or in words.
+    expect(isSourceRejection({ freshserviceDetail: { errors: [{ field: 'source' }] } })).toBe(true);
+    expect(msg('Validation failed (source: It should be one of these values)')).toBe(true);
+    expect(msg('{"field":"source","message":"is invalid"}')).toBe(true);
+    expect(msg('Invalid source')).toBe(true);
+    expect(msg('Invalid value for source')).toBe(true);
+    expect(msg('source is not allowed')).toBe(true);
+    // Any other message that merely contains the word.
+    expect(msg('Ticket Pulse is the source of truth; requester is not valid')).toBe(false);
+    expect(msg('Resource not found')).toBe(false);
+    expect(msg('The source ticket could not be found')).toBe(false);
+    expect(msg('Invalid source_id')).toBe(false);
+    expect(msg('open-source library error: email_config_id is invalid')).toBe(false);
+    expect(isSourceRejection({ freshserviceDetail: { errors: [{ field: 'email_config_id' }] }, message: 'Validation failed' })).toBe(false);
+  });
+
+  test('update: the source is sent only when the job says it changed', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, freshserviceTicketId: BigInt(90001), source: 3 });
+    await mirrorService._processJob({ id: 21, ticketId: 501, workspaceId: 1, kind: 'update_fields', attempts: 0 });
+    expect(clientMock.updateTicket.mock.calls.at(-1)[1].source).toBeUndefined();
+    await mirrorService._processJob({ id: 22, ticketId: 501, workspaceId: 1, kind: 'update_fields', attempts: 0, payload: { syncSource: true } });
+    expect(clientMock.updateTicket.mock.calls.at(-1)).toEqual([90001, expect.objectContaining({ source: 3 })]);
+  });
+
+  test('enqueueFieldSync marks a source change, on a new job or the pending one', async () => {
+    prismaMock.mirrorJob.findFirst.mockResolvedValue(null);
+    prismaMock.mirrorJob.create.mockImplementation(({ data }) => Promise.resolve({ id: 1, ...data }));
+    const created = await mirrorService.enqueueFieldSync(1, 501, { syncSource: true });
+    expect(created).toEqual(expect.objectContaining({ kind: 'update_fields', payload: { syncSource: true } }));
+
+    prismaMock.mirrorJob.findFirst.mockResolvedValue({ id: 99, payload: null });
+    prismaMock.mirrorJob.update.mockResolvedValue({});
+    await mirrorService.enqueueFieldSync(1, 501, { syncSource: true });
+    expect(prismaMock.mirrorJob.update).toHaveBeenCalledWith({ where: { id: 99 }, data: { payload: { syncSource: true } } });
   });
 });
 

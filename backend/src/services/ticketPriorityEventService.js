@@ -51,6 +51,12 @@ class TicketPriorityEventService {
     if (fromPriorityId === toPriorityId) {
       return { recorded: false, skipped: 'priority_unchanged' };
     }
+    // QA 11-24 item 9: a Ticket Pulse ticket's priority changes in Ticket Pulse
+    // (recordNativePriorityChange). Its FreshService copy showing the same move
+    // later is the mirror's echo: never a second event, alert or reassessment.
+    if (existingTicket.origin === 'ticketpulse' || upsertedTicket.origin === 'ticketpulse') {
+      return { recorded: false, skipped: 'ticketpulse_origin' };
+    }
 
     const sourceUpdatedAt = upsertedTicket.freshserviceUpdatedAt || existingTicket.freshserviceUpdatedAt || null;
     const dedupeKey = eventDedupeKey({
