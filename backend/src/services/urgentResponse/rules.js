@@ -1,4 +1,5 @@
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
+import { isAwayLeave } from '../../utils/leaveKinds.js';
 
 /**
  * Urgent response — the rules (plans/URGENT_RESPONSE_PLAN.md).
@@ -118,10 +119,10 @@ function shiftOf(tech) {
   return { start, end, overnight: end < start };
 }
 
-/** Leave rows that take the person away (approved, not WFH, not ignored), with a plain date. */
+/** Leave rows that take the person away (approved, not WFH, not ignored, not a site visit), with a plain date. */
 function awayLeaves(leaves) {
   return (Array.isArray(leaves) ? leaves : [])
-    .filter((l) => l && !['WFH', 'IGNORED'].includes(String(l.category || '').toUpperCase()))
+    .filter((l) => l && isAwayLeave(l))
     .filter((l) => !l.status || String(l.status).toUpperCase() === 'APPROVED')
     .map((l) => ({ ...l, dateStr: toDateStr(l.date ?? l.leaveDate) }))
     .filter((l) => l.dateStr);
@@ -177,8 +178,8 @@ function workingAt(tech, at, away, isBusinessDay, leaveTimezone) {
  * window only. `graceMinutes` counts "starts within N minutes" as at work.
  *
  * `leaves`: rows of technician_leaves for this person (`leaveDate` or `date`,
- * category, isFullDay, startMinute, endMinute, halfDayPart). WFH and IGNORED
- * are not leave. Part-day windows are minutes in `leaveTimezone` (the
+ * category, leaveTypeName, isFullDay, startMinute, endMinute, halfDayPart). WFH,
+ * IGNORED and site visits are not leave. Part-day windows are minutes in `leaveTimezone` (the
  * workspace zone they were recorded in; default the technician's own).
  *
  * @returns {{ atWork: boolean, reason: string, startsInMinutes: number|null, nextStartAt: Date|null, nextStartLocal: string|null }}

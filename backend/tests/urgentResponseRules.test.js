@@ -63,6 +63,9 @@ describe('atWork', () => {
     expect(atWork(DAVID, at, { leaves: [leaveDay('2026-10-12', { category: 'WFH' })] }).atWork).toBe(true);
     expect(atWork(DAVID, at, { leaves: [leaveDay('2026-10-12', { category: 'IGNORED' })] }).atWork).toBe(true);
     expect(atWork(DAVID, at, { leaves: [leaveDay('2026-10-12', { status: 'PENDING' })] }).atWork).toBe(true);
+    // 25 Nov 2026: a site visit (OTHER, "Site visit") is work, not leave; physio still is.
+    expect(atWork(DAVID, at, { leaves: [leaveDay('2026-10-12', { category: 'OTHER', leaveTypeName: 'Site visit' })] }).atWork).toBe(true);
+    expect(atWork(DAVID, at, { leaves: [leaveDay('2026-10-12', { category: 'OTHER', leaveTypeName: 'Physio' })] }).reason).toBe('on_leave');
     expect(atWork(DAVID, at, { leaves: [leaveDay('2026-10-13')] }).atWork).toBe(true);
     // `date` as a plain string works like the DATE column.
     expect(atWork(DAVID, at, { leaves: [{ date: '2026-10-12', category: 'OTHER', isFullDay: true }] }).reason).toBe('on_leave');

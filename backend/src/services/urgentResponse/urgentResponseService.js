@@ -85,7 +85,7 @@ const TECH_SELECT = {
   timezone: true, workStartTime: true, workEndTime: true,
 };
 const LEAVE_SELECT = {
-  technicianId: true, leaveDate: true, category: true, status: true, isFullDay: true, halfDayPart: true, startMinute: true, endMinute: true,
+  technicianId: true, leaveDate: true, category: true, leaveTypeName: true, status: true, isFullDay: true, halfDayPart: true, startMinute: true, endMinute: true,
 };
 const TICKET_SELECT = {
   id: true, workspaceId: true, origin: true, nativeNumber: true, freshserviceTicketId: true, subject: true, status: true, priority: true,

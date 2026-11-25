@@ -1,5 +1,6 @@
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
 import { addDaysStr, safeZone, toDateStr } from '../urgentResponse/rules.js';
+import { isAwayLeave } from '../../utils/leaveKinds.js';
 
 /**
  * Ticket shares — the rules (QA 10-16 item 4, proof of concept).
@@ -218,15 +219,16 @@ function leaveWindow(leave) {
 }
 
 /**
- * Is a person on approved leave at an instant? WFH and IGNORED are not leave.
- * A part-day leave counts only during its hours (workspace time).
+ * Is a person on approved leave at an instant? WFH, IGNORED and site visits
+ * (work at another site) are not leave. A part-day leave counts only during
+ * its hours (workspace time).
  */
 export function onLeaveAt(leaves, at, timeZone = 'America/Vancouver') {
   const tz = safeZone(timeZone);
   const [dateStr, hh, mm] = formatInTimeZone(at, tz, 'yyyy-MM-dd HH mm').split(' ');
   const minutes = Number(hh) * 60 + Number(mm);
   return (leaves || []).some((l) => {
-    if (!l || ['WFH', 'IGNORED'].includes(String(l.category || '').toUpperCase())) return false;
+    if (!l || !isAwayLeave(l)) return false;
     if (l.status && String(l.status).toUpperCase() !== 'APPROVED') return false;
     if (toDateStr(l.date ?? l.leaveDate) !== dateStr) return false;
     if (l.isFullDay !== false) return true;
@@ -296,7 +298,7 @@ export function awayDays(leaves, dates) {
   const span = new Set(dates || []);
   const weight = new Map();
   for (const l of leaves || []) {
-    if (!l || ['WFH', 'IGNORED'].includes(String(l.category || '').toUpperCase())) continue;
+    if (!l || !isAwayLeave(l)) continue;
     if (l.status && String(l.status).toUpperCase() !== 'APPROVED') continue;
     const date = toDateStr(l.date ?? l.leaveDate);
     if (!date || !span.has(date)) continue;

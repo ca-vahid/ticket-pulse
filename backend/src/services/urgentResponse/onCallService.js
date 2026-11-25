@@ -35,7 +35,7 @@ const COVER_SELECT = {
   note: true, source: true, requestId: true, createdBy: true, createdAt: true, cancelledAt: true,
 };
 const LEAVE_SELECT = {
-  technicianId: true, leaveDate: true, category: true, status: true, isFullDay: true, halfDayPart: true, startMinute: true, endMinute: true,
+  technicianId: true, leaveDate: true, category: true, leaveTypeName: true, status: true, isFullDay: true, halfDayPart: true, startMinute: true, endMinute: true,
 };
 
 const person = (map, id) => (id === null || id === undefined ? null : { id, name: map.get(id)?.name || `Technician ${id}` });

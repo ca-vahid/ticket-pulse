@@ -242,7 +242,7 @@ class AssignmentSharesService {
         status: 'APPROVED',
         leaveDate: { gte: new Date(period.start.getTime() - 2 * DAY_MS), lte: new Date(new Date(now).getTime() + 2 * DAY_MS) },
       },
-      select: { technicianId: true, leaveDate: true, category: true, status: true, isFullDay: true, halfDayPart: true, startMinute: true, endMinute: true },
+      select: { technicianId: true, leaveDate: true, category: true, leaveTypeName: true, status: true, isFullDay: true, halfDayPart: true, startMinute: true, endMinute: true },
       take: 5000,
     }), []) : [];
     const leavesByTech = new Map(memberIds.map((id) => [id, []]));
@@ -504,7 +504,7 @@ class AssignmentSharesService {
         status: 'APPROVED',
         leaveDate: { gte: new Date(`${past[0]}T00:00:00Z`), lte: new Date(`${ahead[ahead.length - 1]}T00:00:00Z`) },
       },
-      select: { technicianId: true, leaveDate: true, category: true, status: true, isFullDay: true },
+      select: { technicianId: true, leaveDate: true, category: true, leaveTypeName: true, status: true, isFullDay: true },
       take: 5000,
     }), null);
     if (!Array.isArray(leaves)) return null;

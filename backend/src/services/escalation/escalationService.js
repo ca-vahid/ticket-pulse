@@ -32,7 +32,7 @@ const TECH_SELECT = {
   timezone: true, workStartTime: true, workEndTime: true, routingGuidance: true,
 };
 const LEAVE_SELECT = {
-  technicianId: true, leaveDate: true, category: true, status: true, isFullDay: true, halfDayPart: true, startMinute: true, endMinute: true,
+  technicianId: true, leaveDate: true, category: true, leaveTypeName: true, status: true, isFullDay: true, halfDayPart: true, startMinute: true, endMinute: true,
 };
 
 async function competencyRows(workspaceId, techIds, categoryIds) {

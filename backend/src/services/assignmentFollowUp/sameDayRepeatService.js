@@ -4,6 +4,7 @@ import logger from '../../utils/logger.js';
 import { getLocalDateBounds, getTodayRange } from '../../utils/timezone.js';
 import { onShiftAt } from '../assignmentLevelMatch/rules.js';
 import { machineSenderMatch } from '../machineSenderService.js';
+import { isAwayLeave } from '../../utils/leaveKinds.js';
 import {
   MAX_REQUESTER_TICKETS_PER_DAY, MODES, OUTCOMES, applyPatch, categoryNameWords, machineCreatedReason, mergeNote, normalizeSettings,
   notAPersonSentence, priorityId, raisedPriority, routingSentence, sameProblem, senderNotAPerson, ticketRef, toStored,
@@ -33,7 +34,6 @@ export const settingsKey = (workspaceId) => `followup_routing_ws${Number(workspa
 export const PRIORITY_SOURCE = 'repeat_report';
 export const AFTER_HOURS_SENTENCE = 'Kept at High: after hours, a repeat report doesn\'t page on-call.';
 const SETTINGS_CACHE_MS = 15 * 1000;
-const NOT_AWAY = ['WFH', 'IGNORED'];
 const NOTE_ACTOR = Object.freeze({ name: 'Ticket Pulse', email: null, role: 'automation' });
 const MATCH_STRENGTH = { subcategory: 4, category: 3, subject: 2, text: 1 };
 const LADDER = ['Low', 'Medium', 'High', 'Urgent'];
@@ -476,7 +476,7 @@ class SameDayRepeatService {
         const { start, end } = getLocalDateBounds(tz, now);
         return soft(() => prisma.technicianLeave.findMany({
           where: { workspaceId: ws, technicianId: techId, leaveDate: { gte: start, lte: end }, status: 'APPROVED' },
-          select: { category: true },
+          select: { category: true, leaveTypeName: true },
         }), []);
       })(),
       toId(ticketId)
@@ -488,7 +488,8 @@ class SameDayRepeatService {
     // A local (app-only) person can never hold a FreshService-born ticket.
     if (ticketOrigin && ticketOrigin !== 'ticketpulse' && !tech.freshserviceId) return { ok: false, reason: 'cannot hold FreshService tickets' };
     if (rejected) return { ok: false, reason: 'handed this ticket back' };
-    if ((leaves || []).some((l) => !NOT_AWAY.includes(l.category))) return { ok: false, reason: 'away today' };
+    // WFH, IGNORED and site visits (work at another site) are not away.
+    if ((leaves || []).some((l) => isAwayLeave(l))) return { ok: false, reason: 'away today' };
     try {
       const { default: away } = await import('../assigneeAwayService.js');
       if (await away.forTechnician(ws, techId, { now })) return { ok: false, reason: 'away' };

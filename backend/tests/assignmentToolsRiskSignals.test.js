@@ -254,3 +254,65 @@ describe('competency factor of the assignment score', () => {
     expect(competencyMatchScore('toString')).toBe(0.1);
   });
 });
+
+// 25 Nov 2026: a Vacation Pulse "Site visit" is stored as OTHER and was read as
+// a day off. A site visit is work at another site: available.
+describe('get_agent_availability: site visits are working, not off', () => {
+  const people = [
+    { id: 1, name: 'Ari Stone', email: 'ari@example.com', location: 'Vancouver', timezone: 'America/Vancouver', workStartTime: '09:00', workEndTime: '17:00' },
+    { id: 2, name: 'Bo Reyes', email: 'bo@example.com', location: 'Vancouver', timezone: 'America/Vancouver', workStartTime: '09:00', workEndTime: '17:00' },
+    { id: 3, name: 'Cy Nolan', email: 'cy@example.com', location: 'Calgary', timezone: 'America/Vancouver', workStartTime: '09:00', workEndTime: '17:00' },
+  ];
+  const row = (technicianId, extra) => ({ technicianId, status: 'APPROVED', isFullDay: true, halfDayPart: null, startMinute: null, endMinute: null, ...extra });
+
+  beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-05-22T19:00:00.000Z'));
+    jest.clearAllMocks();
+    prismaMock.workspace.findUnique.mockResolvedValue({ defaultTimezone: 'America/Vancouver' });
+    prismaMock.technician.findMany.mockResolvedValue(people);
+  });
+  afterEach(() => jest.useRealTimers());
+
+  test('a full-day site visit is in inOffice with the flag; physio stays off', async () => {
+    prismaMock.technicianLeave.findMany.mockResolvedValue([
+      row(1, { category: 'OTHER', leaveTypeName: 'Site visit' }),
+      row(2, { category: 'OTHER', leaveTypeName: 'Physio' }),
+    ]);
+    const out = await executeTool('get_agent_availability', {}, { workspaceId: 1 });
+    const ari = out.inOffice.find((p) => p.techId === 1);
+    expect(ari).toMatchObject({
+      siteVisit: true,
+      leaveType: 'Site visit',
+      note: 'On a site visit today — working, available for assignment (may be at another office)',
+    });
+    expect(out.off.map((p) => p.techId)).toEqual([2]);
+    expect(out.summary).toMatchObject({ inOffice: 2, off: 1 });
+  });
+
+  test('a half-day site visit is in inOffice, not halfDayOff; a half-day physio stays halfDayOff', async () => {
+    prismaMock.technicianLeave.findMany.mockResolvedValue([
+      row(1, { category: 'OTHER', leaveTypeName: 'Site Visit', isFullDay: false, halfDayPart: 'PM', startMinute: 780, endMinute: 1020 }),
+      row(2, { category: 'OTHER', leaveTypeName: 'Physio', isFullDay: false, halfDayPart: 'PM', startMinute: 780, endMinute: 900 }),
+    ]);
+    const out = await executeTool('get_agent_availability', {}, { workspaceId: 1 });
+    expect(out.inOffice.find((p) => p.techId === 1)).toMatchObject({ siteVisit: true, note: 'On a site visit 13:00-17:00 — working, available' });
+    expect(out.halfDayOff.map((p) => p.techId)).toEqual([2]);
+  });
+
+  test('find_matching_agents keeps a person on a site visit as a candidate', async () => {
+    prismaMock.technicianLeave.findMany.mockResolvedValue([
+      row(1, { category: 'OTHER', leaveTypeName: 'Site visit' }),
+      row(2, { category: 'OTHER', leaveTypeName: 'Physio' }),
+    ]);
+    prismaMock.technicianCompetency.findMany.mockResolvedValue([]);
+    prismaMock.assignmentConfig.findUnique.mockResolvedValue(null);
+    prismaMock.ticket.groupBy.mockResolvedValue([]);
+    prismaMock.ticketAssignmentEpisode.findMany.mockResolvedValue([]);
+    prismaMock.ticketThreadEntry.findMany.mockResolvedValue([]);
+    prismaMock.competencyCategory.findMany.mockResolvedValue([]);
+    const out = await executeTool('find_matching_agents', {}, { workspaceId: 1, ticketId: 900 });
+    const names = out.matches.map((m) => m.techName);
+    expect(names).toContain('Ari Stone');
+    expect(names).not.toContain('Bo Reyes');
+  });
+});

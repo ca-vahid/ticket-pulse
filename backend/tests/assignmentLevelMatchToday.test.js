@@ -70,6 +70,18 @@ test('loadCandidates: "today" is tickets given today, once each; the skill carri
   expect(byId.get(ELI)).toMatchObject({ today: 3, open: 22 });
 });
 
+test('a site visit (OTHER, "Site visit") is not away; physio still is (25 Nov 2026)', async () => {
+  prismaMock.technicianLeave.findMany.mockResolvedValue([
+    { technicianId: DANA, category: 'OTHER', leaveTypeName: 'Site Visit' },
+    { technicianId: ELI, category: 'OTHER', leaveTypeName: 'Physio' },
+  ]);
+  const list = await service.loadCandidates({ workspaceId: 1, ticketId: 900, recommendation: REC, now: NOW });
+  const byId = new Map(list.map((c) => [c.techId, c]));
+  expect(byId.get(DANA).onLeave).toBe(false);
+  expect(byId.get(ELI).onLeave).toBe(true);
+  expect(prismaMock.technicianLeave.findMany.mock.calls[0][0].select).toMatchObject({ category: true, leaveTypeName: true });
+});
+
 test('the TP-1042 shape is kept with the AI pick and the run says why', async () => {
   settingsStore.set(settingsKey(1), JSON.stringify({ mode: 'live' }));
   const out = await service.guard({ workspaceId: 1, ticketId: 900, runId: 1, techId: DANA, decision: 'auto_assigned', recommendation: REC, now: NOW });
