@@ -4264,6 +4264,31 @@ export async function applyFsBornStatusWriteback({ node, ticket, setStatus, stat
   const label = String(setStatus).toLowerCase();
   const what = label === 'open' ? 'reopen' : `status "${setStatus}"`;
   const attemptsSoFar = Number(state?.__fsWritebackAttempts?.[node.id]) || 0;
+  // FreshService switch (25 Nov 2026): Off → imported history. FreshService is
+  // not asked; ticketService.updateFsTicket adopts the ticket and sets the
+  // status in Ticket Pulse. Any failure fails the step once — never a retry
+  // loop against a FreshService that is not there.
+  const { isFreshServiceOff } = await import('./fsModeService.js');
+  if (await isFreshServiceOff(ticket.workspaceId)) {
+    try {
+      const { default: ticketService } = await import('./ticketService.js');
+      await ticketService.updateFsTicket(ticket.id, ticket.workspaceId, { status: setStatus }, actor?.name
+        ? { name: who.name, email: null, role: 'automation' }
+        : FS_WRITEBACK_ACTOR, { notifyLifecycle: false });
+      return {
+        applied: true,
+        adopted: true,
+        via: 'adopted_freshservice_off',
+        status: { from: ticket.status, to: setStatus },
+        note: 'FreshService is off for this workspace: the ticket was adopted and its status set in Ticket Pulse',
+      };
+    } catch (error) {
+      logger.warn('Workflow status write on an imported ticket failed (FreshService off)', {
+        ticketId: ticket.id, workspaceId: ticket.workspaceId, nodeId: node.id, error: error.message,
+      });
+      throw new Error(`FreshService is off for this workspace: ${what} was not applied (${error.message})`);
+    }
+  }
   try {
     const { default: mirrorService } = await import('./mirrorService.js');
     const { getStatusString } = await import('../integrations/freshserviceTransformer.js');

@@ -2,6 +2,7 @@ import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { TICKET_ORIGIN, ticketDisplayRef } from '../utils/ticketOrigin.js';
+import { fsGate, isFreshServiceOff } from './fsModeService.js';
 import { sendTransactionalEmail } from './transactionalEmailService.js';
 
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
@@ -100,19 +101,46 @@ class TicketTaskService {
   async _ticket(ticketId, workspaceId) {
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
-      select: { id: true, workspaceId: true, origin: true, freshserviceTicketId: true, nativeNumber: true, subject: true, status: true, externalRef: true, assignedTechId: true, assignedTech: { select: { id: true, name: true, email: true } } },
+      select: { id: true, workspaceId: true, origin: true, mirrorState: true, freshserviceTicketId: true, nativeNumber: true, subject: true, status: true, externalRef: true, assignedTechId: true, assignedTech: { select: { id: true, name: true, email: true } } },
     });
     if (!ticket) throw new NotFoundError(`Ticket ${ticketId} not found in this workspace`);
     return ticket;
+  }
+
+  /**
+   * FreshService switch: may this ticket's tasks be read from / written to
+   * FreshService? Never for an adopted ticket (its FS id is a tombstone) or
+   * an Off workspace; Shadow counts the call ('tasks').
+   */
+  async _fsLive(ticket) {
+    if (!ticket?.freshserviceTicketId || ticket.mirrorState === 'adopted') return false;
+    return fsGate(ticket.workspaceId, 'tasks');
+  }
+
+  /**
+   * A task write on imported history (FS-born, FreshService Off) adopts the
+   * ticket first; the write then runs as on any Ticket Pulse ticket. Returns
+   * the ticket to work with (re-read when adopted).
+   */
+  async _adoptIfImported(ticket, actor) {
+    if (ticket.origin !== TICKET_ORIGIN.FRESHSERVICE || !ticket.freshserviceTicketId) return ticket;
+    if (!(await isFreshServiceOff(ticket.workspaceId))) return ticket;
+    const { default: fsAdoptionService } = await import('./fsAdoptionService.js');
+    await fsAdoptionService.adoptForWrite(ticket.id, ticket.workspaceId, actor);
+    return this._ticket(ticket.id, ticket.workspaceId);
   }
 
   /** List tasks for a ticket. FS-born tickets pull live from FreshService (and
    *  refresh the local shadow cache); TP-born read from our own table. */
   async listForTicket(ticketId, workspaceId) {
     const ticket = await this._ticket(ticketId, workspaceId);
-    if (ticket.origin === TICKET_ORIGIN.FRESHSERVICE && ticket.freshserviceTicketId) {
+    // FreshService switch: Off or adopted → the local table is the whole answer.
+    const fsLive = ticket.freshserviceTicketId ? await this._fsLive(ticket) : false;
+    if (!fsLive) {
+      // nothing to pull
+    } else if (ticket.origin === TICKET_ORIGIN.FRESHSERVICE) {
       await this._syncFromFs(ticket).catch((err) => logger.warn(`FS task sync failed for ${ticketDisplayRef(ticket)} (serving cache): ${err.message}`));
-    } else if (ticket.freshserviceTicketId) {
+    } else {
       // TP-born but mirrored to FS: pull back status changes made on the
       // FreshService copy so "mark done in FS" reflects here too (QA 07-17 #7).
       await this._syncMirroredStatusFromFs(ticket).catch((err) => logger.warn(`FS mirror status sync failed for ${ticketDisplayRef(ticket)} (serving cache): ${err.message}`));
@@ -126,9 +154,10 @@ class TicketTaskService {
   }
 
   async create(ticketId, workspaceId, input, actor) {
-    const ticket = await this._ticket(ticketId, workspaceId);
+    let ticket = await this._ticket(ticketId, workspaceId);
     const title = String(input?.title || '').trim();
     if (!title) throw new ValidationError('Task title is required');
+    ticket = await this._adoptIfImported(ticket, actor);
     const status = STATUSES.includes(input?.status) ? input.status : 'open';
     const assignedTechId = input?.assignedTechId !== null && input?.assignedTechId !== undefined ? Number(input.assignedTechId) : null;
     const assignee = await this._resolveAssignee(assignedTechId, workspaceId);
@@ -160,7 +189,7 @@ class TicketTaskService {
       completedAt: status === 'done' ? new Date() : null,
     };
 
-    if (ticket.origin === TICKET_ORIGIN.FRESHSERVICE && ticket.freshserviceTicketId) {
+    if (ticket.origin === TICKET_ORIGIN.FRESHSERVICE && ticket.freshserviceTicketId && await this._fsLive(ticket)) {
       // FS-born: FreshService owns the task (and sends the assignee's email).
       const fsTask = await this._fsCreate(ticket, base, assignee);
       const row = await prisma.ticketTask.create({
@@ -189,7 +218,7 @@ class TicketTaskService {
     // Guard against /tickets/<other>/tasks/<taskId> mutating a task that belongs
     // to a different ticket in the same workspace.
     if (expectedTicketId !== null && task.ticketId !== Number(expectedTicketId)) throw new NotFoundError('Task not found on this ticket');
-    const ticket = await this._ticket(task.ticketId, workspaceId);
+    let ticket = await this._ticket(task.ticketId, workspaceId);
 
     const data = {};
     if (patch.title !== undefined) {
@@ -217,9 +246,11 @@ class TicketTaskService {
       if (assignee && assignee.id !== task.assignedTechId) { reassignedTo = assignee; data.notifiedAt = null; }
     }
     if (Object.keys(data).length === 0) throw new ValidationError('Nothing to update');
+    ticket = await this._adoptIfImported(ticket, actor);
 
-    // FS-born or an FS-mirrored TP task: push the change to FreshService.
-    if (task.fsTaskId && ticket.freshserviceTicketId) {
+    // FS-born or an FS-mirrored TP task: push the change to FreshService
+    // (never for an adopted ticket or an Off workspace — local only then).
+    if (task.fsTaskId && ticket.freshserviceTicketId && await this._fsLive(ticket)) {
       if (ticket.origin === TICKET_ORIGIN.FRESHSERVICE) {
         // FS owns this task. If the write fails, surface it — otherwise the
         // local row updates optimistically and the next _syncFromFs silently
@@ -304,13 +335,13 @@ class TicketTaskService {
     }
   }
 
-  async remove(taskId, workspaceId, _actor = null, expectedTicketId = null) {
+  async remove(taskId, workspaceId, actor = null, expectedTicketId = null) {
     const task = await prisma.ticketTask.findFirst({ where: { id: Number(taskId), workspaceId } });
     if (!task) throw new NotFoundError('Task not found');
     if (expectedTicketId !== null && task.ticketId !== Number(expectedTicketId)) throw new NotFoundError('Task not found on this ticket');
     if (task.fsTaskId) {
-      const ticket = await this._ticket(task.ticketId, workspaceId);
-      if (ticket.freshserviceTicketId) {
+      const ticket = await this._adoptIfImported(await this._ticket(task.ticketId, workspaceId), actor);
+      if (ticket.freshserviceTicketId && await this._fsLive(ticket)) {
         const client = await this._fsClient(workspaceId);
         if (ticket.origin === TICKET_ORIGIN.FRESHSERVICE) {
           // FS owns the task — a swallowed failure lets _syncFromFs resurrect
@@ -385,6 +416,8 @@ class TicketTaskService {
   async _writeBackToFs(ticket, row) {
     if (!ticket.freshserviceTicketId) return;
     if (row.assignedTechId && !row.assignedTech?.freshserviceId) return; // local agent — stays TP-only
+    // FreshService switch: never to an adopted ticket's old FS ticket, nor while Off.
+    if (!(await this._fsLive(ticket))) return;
     const client = await this._fsClient(ticket.workspaceId);
     if (!client) return;
     const fsTask = await client.createTicketTask(
@@ -552,6 +585,15 @@ class TicketTaskService {
   /** TP-born mirrored ticket: pull status-only changes back from the FS copy.
    *  We own title/description/assignee/due here, so this touches status only. */
   async _syncMirroredStatusFromFs(ticket) {
+    // FreshService switch: also reached from the mirror reconcile, whose row
+    // may not carry mirrorState — an adopted ticket or an Off workspace reads nothing.
+    if (ticket?.mirrorState === 'adopted' || await isFreshServiceOff(ticket?.workspaceId)) return;
+    if (ticket?.mirrorState === undefined && ticket?.id) {
+      const row = await Promise.resolve()
+        .then(() => prisma.ticket.findUnique({ where: { id: ticket.id }, select: { mirrorState: true } }))
+        .catch(() => null);
+      if (row?.mirrorState === 'adopted') return;
+    }
     const mirrored = await prisma.ticketTask.findMany({
       where: { ticketId: ticket.id, workspaceId: ticket.workspaceId, fsTaskId: { not: null } },
       select: { id: true, fsTaskId: true, status: true, title: true },

@@ -19,7 +19,10 @@ const truncate = (s, n = 70) => {
  * reject on failure; a rejection whose message is 'cancelled' (the confirm
  * dialog was dismissed) is silent, anything else renders inline.
  */
-export default function EditTicketModal({ ticket, isNative, fsRef = null, onClose, onSubmit }) {
+export default function EditTicketModal({ ticket, isNative, fsRef = null, onClose, onSubmit, fsEnabled = true }) {
+  // FreshService switch (25 Nov 2026): with the workspace's FreshService off
+  // there is no FreshService write-back to describe.
+  const viaFs = !isNative && fsEnabled;
   const original = useMemo(() => ({
     requester: ticket?.requester ? toPickedRequester(ticket.requester) : null,
     subject: ticket?.subject || '',
@@ -111,7 +114,7 @@ export default function EditTicketModal({ ticket, isNative, fsRef = null, onClos
         </div>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 settings-scrollbar">
-          {!isNative && (
+          {viaFs && (
             <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground" data-testid="edit-fs-owned-note">
               <Cloud className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-sky-500" aria-hidden="true" />
               <span>
@@ -181,11 +184,11 @@ export default function EditTicketModal({ ticket, isNative, fsRef = null, onClos
               type="submit"
               disabled={!hasChanges || subjectInvalid || busy || !requester}
               className={`tp-focus-ring flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-semibold text-white disabled:opacity-50 ${
-                isNative ? 'bg-blue-600 hover:bg-blue-700' : 'bg-slate-800 hover:bg-slate-700 dark:bg-slate-600 dark:hover:bg-slate-500'
+                !viaFs ? 'bg-blue-600 hover:bg-blue-700' : 'bg-slate-800 hover:bg-slate-700 dark:bg-slate-600 dark:hover:bg-slate-500'
               }`}
             >
-              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : (isNative ? null : <Cloud className="h-3.5 w-3.5 text-sky-300" aria-hidden="true" />)}
-              {isNative ? 'Save changes' : 'Write to FreshService…'}
+              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : (!viaFs ? null : <Cloud className="h-3.5 w-3.5 text-sky-300" aria-hidden="true" />)}
+              {!viaFs ? 'Save changes' : 'Write to FreshService…'}
             </button>
           </div>
         </div>

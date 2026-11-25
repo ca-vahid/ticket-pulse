@@ -25,6 +25,7 @@ import graphMailClient from '../integrations/graphMailClient.js';
 import availabilityService from '../services/availabilityService.js';
 import settingsRepository from '../services/settingsRepository.js';
 import { createFreshServiceClient } from '../integrations/freshservice.js';
+import { fsGate } from '../services/fsModeService.js';
 import { analyzeTicketActivities } from '../integrations/freshserviceTransformer.js';
 import { convertToTimezone } from '../utils/timezone.js';
 import { DEFAULT_ANTHROPIC_MODEL } from '../utils/anthropicModels.js';
@@ -253,6 +254,27 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
  * changing, and this endpoint is only hit when the admin opens the config tab.
  */
 router.get('/groups', requireAdmin, asyncHandler(async (req, res) => {
+  // FreshService switch: Off → the groups Ticket Pulse already holds (the
+  // exclusion list keys on FreshService group ids, so those with one).
+  if (!(await fsGate(req.workspaceId, 'groups'))) {
+    const ws = await prisma.workspace.findUnique({ where: { id: req.workspaceId }, select: { freshserviceWorkspaceId: true } });
+    // Never connected (FS id 0): no FreshService groups belong here, as before.
+    if (isFreshServiceUnlinked(ws)) return res.json({ success: true, data: [] });
+    const rows = await prisma.group.findMany({
+      where: { workspaceId: req.workspaceId, isActive: true, freshserviceId: { not: null } },
+      select: { freshserviceId: true, name: true, _count: { select: { members: true } } },
+      orderBy: { name: 'asc' },
+    });
+    const data = rows.map((g) => ({
+      id: Number(g.freshserviceId),
+      name: g.name || `Group #${g.freshserviceId}`,
+      agentCount: g._count?.members ?? 0,
+      observerCount: 0,
+      leaderCount: 0,
+      source: 'ticketpulse',
+    }));
+    return res.json({ success: true, data, freshserviceOff: true });
+  }
   const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(req.workspaceId);
   if (!fsConfig?.domain || !fsConfig?.apiKey) {
     return res.status(400).json({ success: false, message: 'FreshService not configured for this workspace' });
@@ -1282,6 +1304,18 @@ router.get('/runs/:id/freshness', requireAdmin, asyncHandler(async (req, res) =>
   const run = await assignmentRepository.getPipelineRun(runId);
   if (run.workspaceId !== req.workspaceId) {
     return res.status(403).json({ success: false, message: 'Run belongs to a different workspace' });
+  }
+
+  // FreshService switch: Off (or an adopted ticket, whose FS id is a
+  // tombstone) → nothing in FreshService to compare with.
+  if (!(await fsGate(req.workspaceId, 'assignment_check'))) {
+    return res.json({ success: true, data: { diffs: [], fresh: true, skipped: 'freshservice_off' } });
+  }
+  if (run.ticketId) {
+    const tk = await prisma.ticket.findUnique({ where: { id: run.ticketId }, select: { mirrorState: true } }).catch(() => null);
+    if (tk?.mirrorState === 'adopted') {
+      return res.json({ success: true, data: { diffs: [], fresh: true, skipped: 'adopted' } });
+    }
   }
 
   const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(req.workspaceId);

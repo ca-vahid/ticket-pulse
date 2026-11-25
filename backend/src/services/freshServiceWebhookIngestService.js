@@ -10,6 +10,7 @@ import workspaceRepository from './workspaceRepository.js';
 import settingsRepository from './settingsRepository.js';
 import workspaceWebhookService from './workspaceWebhookService.js';
 import syncService from './syncService.js';
+import { fsGate } from './fsModeService.js';
 
 export class WebhookIngestError extends Error {
   constructor(code, message, statusCode = 400, details = {}) {
@@ -95,6 +96,23 @@ class FreshServiceWebhookIngestService {
       throw new WebhookIngestError('invalid_secret', 'Webhook secret is invalid', 401, {
         workspaceId: workspace.id,
       });
+    }
+
+    // FreshService switched off for this workspace (FreshService exit A1):
+    // acknowledge (202, so FreshService does not retry) and drop it. Shadow
+    // counts the webhook and ingests as today.
+    if (!(await fsGate(workspace.id, 'webhook'))) {
+      await Promise.resolve(workspaceWebhookService.recordRejected(workspace.id, 'freshservice_off')).catch(() => {});
+      logger.info('FreshService webhook dropped: FreshService is off for this workspace', {
+        workspaceId: workspace.id, freshserviceTicketId: String(freshserviceTicketId),
+      });
+      return {
+        accepted: true,
+        queued: false,
+        dropped: 'freshservice_off',
+        freshserviceTicketId: String(freshserviceTicketId),
+        pending: Promise.resolve({ accepted: true, synced: false, rejected: 'freshservice_off' }),
+      };
     }
 
     // Ack fast (Simorgh 13.1-2, 09-14). FreshService's automator gives a

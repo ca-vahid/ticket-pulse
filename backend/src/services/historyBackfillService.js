@@ -1,6 +1,7 @@
 import logger from '../utils/logger.js';
 import settingsRepository from './settingsRepository.js';
 import { isQuietHours } from '../utils/quietHours.js';
+import { isFreshServiceOff } from './fsModeService.js';
 
 /**
  * Nightly history backfill (Vahid, 24 Sep 2026: "backfill up to 3 years of
@@ -81,6 +82,9 @@ class HistoryBackfillService {
     if (!(await this._enabled())) return { skipped: 'disabled' };
     const state = await this.state();
     if (state.done) return { skipped: 'done' };
+    // FreshService switched off for the plan's workspace: skip quietly (the
+    // window is kept; a rollback to Connected resumes the plan).
+    if (await isFreshServiceOff(state.workspaceId)) return { skipped: 'freshservice_off' };
 
     const { default: syncService } = await import('./syncService.js');
     if (syncService.runningWorkspaces?.has?.(`backfill:${state.workspaceId}`)) return { skipped: 'backfill_busy' };

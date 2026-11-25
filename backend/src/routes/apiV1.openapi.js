@@ -32,6 +32,10 @@ const T = {
         type: 'string', nullable: true, maxLength: 200, example: 'sp-projectrequests-1260',
         description: 'The caller’s stable per-RECORD key (set at creation or once via PATCH). A later POST /tickets carrying the same externalRef UPDATES this ticket (200, resubmitted:true) instead of creating a duplicate. null when the ticket was created without one.',
       },
+      formerRef: {
+        type: 'string', nullable: true, example: '#245123',
+        description: 'Set on tickets adopted from FreshService; the ticket’s previous reference. null on every other ticket. Lifecycle webhook payloads carry it too (`ticket.formerRef`).',
+      },
       origin: { type: 'string', enum: ['ticketpulse', 'freshservice'] },
       subject: { type: 'string' }, status: { type: 'string' }, priority: { type: 'integer', enum: [1, 2, 3, 4] },
       type: { type: 'string', nullable: true },

@@ -10,6 +10,7 @@ import assignmentRepository from './assignmentRepository.js';
 import assignmentDailyReviewService from './assignmentDailyReviewService.js';
 import logger from '../utils/logger.js';
 import { isFreshServiceUnlinked } from '../utils/workspaceFsBinding.js';
+import { isFreshServiceOff, onModeChange } from './fsModeService.js';
 import { AVAILABILITY_VT_IMPORT_CRON, scheduledVtImportEnabled } from './availability/vtImportPolicy.js';
 
 /**
@@ -31,6 +32,10 @@ class ScheduledSyncService {
     this.assignmentFastSyncCronJobs = new Map();
     this.assignmentFastSyncInProgress = new Set();
     this.embeddingBackfillCronJobs = new Map();
+    // FreshService exit A1: the daily review for workspaces with no FreshService
+    // sync (switched off, or never connected). Today it rides the FS sync cron.
+    this.dailyReviewCronJobs = new Map();
+    this._started = false;
   }
 
   /**
@@ -72,6 +77,7 @@ class ScheduledSyncService {
       this.startPersonalKeyExpirySweep();
       this.startAttachmentNamingCatchUp();
 
+      this._started = true;
       logger.info(`Scheduled sync started for ${workspaces.length} workspace(s)`);
       return true;
     } catch (error) {
@@ -89,14 +95,6 @@ class ScheduledSyncService {
 
     this.stopForWorkspace(wsId);
 
-    // QA 11-24 #4: a Ticket Pulse-only workspace (no FreshService link) has
-    // nothing to sync. Scheduling it would pull from the global FreshService
-    // account with no workspace filter.
-    if (isFreshServiceUnlinked(workspace)) {
-      logger.info(`Workspace "${wsName}" (id=${wsId}) has no FreshService link; FreshService sync not scheduled`);
-      return;
-    }
-
     let intervalMinutes = workspace.syncIntervalMinutes || 5;
     if (intervalMinutes < 1 || intervalMinutes > 60) {
       logger.warn(`Invalid sync interval ${intervalMinutes}m for workspace ${wsName}, defaulting to 5m`);
@@ -105,6 +103,18 @@ class ScheduledSyncService {
 
     // Staggered per workspace (22 Sep 2026): see fullSyncCronExpression.
     const cronExpression = fullSyncCronExpression(intervalMinutes, wsId);
+
+    // QA 11-24 #4: a Ticket Pulse-only workspace (no FreshService link) has
+    // nothing to sync. Scheduling it would pull from the global FreshService
+    // account with no workspace filter. FreshService exit A1: the same for a
+    // workspace switched off. Either way its daily review keeps its own
+    // schedule, on the cadence the sync would have had.
+    const unlinked = isFreshServiceUnlinked(workspace);
+    if (unlinked || await isFreshServiceOff(workspace)) {
+      logger.info(`Workspace "${wsName}" (id=${wsId}) ${unlinked ? 'has no FreshService link' : 'has FreshService switched off'}; FreshService sync not scheduled (daily review keeps its own schedule)`);
+      this.startDailyReviewForWorkspace(workspace, cronExpression);
+      return;
+    }
 
     logger.info(`Starting scheduled sync for workspace "${wsName}" (id=${wsId}) every ${intervalMinutes}m (cron "${cronExpression}")`);
 
@@ -178,6 +188,42 @@ class ScheduledSyncService {
         logger.error(`[${wsName}] Initial sync failed:`, error);
       }
     });
+  }
+
+  /**
+   * The daily review for a workspace with no FreshService sync (FreshService
+   * exit A1: switched off or never connected). For a synced workspace the
+   * review rides the sync cron above, so this never runs for one of those —
+   * startForWorkspace only calls it on the no-sync branch, and stopForWorkspace
+   * clears it before either branch starts. Checks on the cadence the sync
+   * would have had, plus once now (the boot catch-up's review check).
+   */
+  startDailyReviewForWorkspace(workspace, cronExpression) {
+    const wsId = workspace.id;
+    const wsName = workspace.name;
+    this.stopDailyReviewForWorkspace(wsId);
+    const check = async (why) => {
+      try {
+        const reviewResult = await assignmentDailyReviewService.maybeRunScheduledReview(workspace);
+        if (reviewResult?.triggered) logger.info(`[${wsName}] Scheduled daily review triggered (${why}, no FreshService sync)`);
+      } catch (error) {
+        logger.error(`[${wsName}] Scheduled daily review check failed:`, error);
+      }
+    };
+    const job = cron.schedule(cronExpression, () => check('schedule'), {
+      scheduled: true,
+      timezone: workspace.defaultTimezone || 'America/Vancouver',
+    });
+    this.dailyReviewCronJobs.set(wsId, { job, workspaceName: wsName });
+    setImmediate(() => { check('start'); });
+  }
+
+  stopDailyReviewForWorkspace(wsId) {
+    const entry = this.dailyReviewCronJobs.get(wsId);
+    if (entry) {
+      entry.job.stop();
+      this.dailyReviewCronJobs.delete(wsId);
+    }
   }
 
   async startVTSyncForWorkspace(workspace) {
@@ -275,7 +321,12 @@ class ScheduledSyncService {
     this.stopAssignmentFastSyncForWorkspace(wsId);
 
     // QA 11-24 #4: the fast lane reads FreshService; nothing to read here.
+    // FreshService exit A1: nor for a workspace switched off.
     if (isFreshServiceUnlinked(workspace)) return;
+    if (await isFreshServiceOff(workspace)) {
+      logger.info(`Workspace "${wsName}" (id=${wsId}) has FreshService switched off; assignment fast sync not scheduled`);
+      return;
+    }
 
     logger.info(`Starting assignment fast sync for workspace "${wsName}" (id=${wsId}) every ${every}m at :${secondOffset.toString().padStart(2, '0')}`);
 
@@ -499,6 +550,7 @@ class ScheduledSyncService {
       entry.job.stop();
       this.cronJobs.delete(wsId);
     }
+    this.stopDailyReviewForWorkspace(wsId);
     this.stopAssignmentFastSyncForWorkspace(wsId);
     this.stopVTSyncForWorkspace(wsId);
     this.stopCalendarLeaveSyncForWorkspace(wsId);
@@ -716,13 +768,34 @@ class ScheduledSyncService {
     for (const [wsId] of this.embeddingBackfillCronJobs) {
       this.stopEmbeddingBackfillForWorkspace(wsId);
     }
+    for (const [wsId] of this.dailyReviewCronJobs) {
+      this.stopDailyReviewForWorkspace(wsId);
+    }
   }
 
   /**
    * Legacy stop() — stops all workspaces (backward compatible).
    */
   stop() {
+    this._started = false;
     this.stopAll();
+  }
+
+  /**
+   * A workspace's FreshService mode changed (FreshService exit A1): restart
+   * its schedules so the FS sync and fast lane stop (Off) or resume
+   * (Connected/Shadow), and the daily review moves to the matching schedule.
+   * Only when the schedulers are running: a dev box with scheduled sync
+   * disabled must not start them because someone flipped a mode.
+   */
+  async onFreshServiceModeChange(workspaceId, mode) {
+    if (!this._started) return;
+    try {
+      await this.restart(workspaceId);
+      logger.info(`Schedules restarted for workspace ${workspaceId} (FreshService ${mode})`);
+    } catch (error) {
+      logger.error(`Schedules for workspace ${workspaceId} could not restart after the FreshService mode change:`, error);
+    }
   }
 
   async restart(workspaceId = null) {
@@ -764,6 +837,10 @@ class ScheduledSyncService {
     if (isFreshServiceUnlinked(ws)) {
       return { status: 'skipped', reason: 'This workspace has no FreshService link, so there is nothing to sync.' };
     }
+    // FreshService exit A1: switched off, "Sync now" is a no-op.
+    if (await isFreshServiceOff(ws || wsId)) {
+      return { status: 'skipped', reason: 'freshservice_off' };
+    }
     try {
       const options = { workspaceId: wsId };
       if (fullSync) {
@@ -778,4 +855,9 @@ class ScheduledSyncService {
   }
 }
 
-export default new ScheduledSyncService();
+const scheduledSyncService = new ScheduledSyncService();
+
+// FreshService exit A1: a mode flip restarts that workspace's schedules.
+onModeChange((workspaceId, mode) => scheduledSyncService.onFreshServiceModeChange(workspaceId, mode));
+
+export default scheduledSyncService;

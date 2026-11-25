@@ -1693,6 +1693,10 @@ export default function Tickets() {
 
   const totalPages = Math.max(1, Math.ceil(total / effectivePageSize));
   const ticketingOn = meta ? meta.nativeTicketingEnabled : true;
+  // FreshService switch (25 Nov 2026): Off means FreshService-born rows are
+  // imported history — no inline FreshService write-back. Default true for an
+  // old cached meta (connected behaviour unchanged).
+  const fsOn = meta?.freshserviceEnabled !== false;
   const isAgent = user?.role === 'agent';
   // Admin-chosen quick filter cards (Phase FC): meta.queueCards resolved
   // against the registry; hardcoded classic six until meta lands (and as the
@@ -1721,7 +1725,7 @@ export default function Tickets() {
     try {
       if (isTpEditable) {
         await ticketsAPI.setStatus(ticket.id, nextStatus);
-      } else if (ticket.freshserviceTicketId) {
+      } else if (ticket.freshserviceTicketId && fsOn) {
         await fsStatusChange(ticket, nextStatus); // resolves after the confirm modal syncs
       } else {
         return;
@@ -1760,7 +1764,7 @@ export default function Tickets() {
     }
     refreshAfterEdit();
     showToast(label, undo);
-  }, [ticketingOn, refreshAfterEdit, showToast, fsStatusChange, statusDefs, statusInScope, segment, statuses, openStatuses, setParams]);
+  }, [ticketingOn, fsOn, refreshAfterEdit, showToast, fsStatusChange, statusDefs, statusInScope, segment, statuses, openStatuses, setParams]);
   const sortLabel = SORT_OPTIONS.find((o) => o.value === sort)?.label || 'Last activity';
 
   // Board "Closed hidden" affordance: does the effective fetch scope exclude
@@ -2506,6 +2510,7 @@ export default function Tickets() {
                       <TicketBoard
                         tickets={tickets}
                         ticketingOn={ticketingOn}
+                        fsEnabled={fsOn}
                         statusDefs={statusDefs}
                         slaCalendarAware={meta?.slaCalendarAware === true}
                         onCardClick={onRowClick}
@@ -2623,7 +2628,8 @@ export default function Tickets() {
                                       : ticket.priority >= 3 ? (PRIORITY_STRIP_COLORS[ticket.priority] || 'bg-transparent') : 'bg-transparent';
                                 const isEditable = ticket.origin === 'ticketpulse' && ticketingOn;
                                 // FS-born rows can be reassigned too, via a confirmed FreshService write-back.
-                                const fsRowEditable = ticket.origin !== 'ticketpulse' && Boolean(ticket.freshserviceTicketId);
+                                // Not while the workspace's FreshService is off (imported history).
+                                const fsRowEditable = ticket.origin !== 'ticketpulse' && Boolean(ticket.freshserviceTicketId) && fsOn;
                                 const resolvedLike = isTerminalStatus(statusDefs, ticket.status);
                                 // Deleted/Spam are removed — no SLA/due date applies.
                                 const removedLike = ['Deleted', 'Spam'].includes(ticket.status);
@@ -2637,7 +2643,7 @@ export default function Tickets() {
                                 const typePill = <TypePill type={ticket.ticketType} />;
                                 const priorityDot = isEditable
                                   ? <InlinePriorityPicker ticket={ticket} onChanged={refreshAfterEdit} />
-                                  : <PriorityDot priority={ticket.priority} title={`Priority: ${PRIORITY_LABELS[ticket.priority] || ticket.priority} — synced from FreshService, read-only here`} />;
+                                  : <PriorityDot priority={ticket.priority} title={`Priority: ${PRIORITY_LABELS[ticket.priority] || ticket.priority} — ${fsOn ? 'synced from FreshService, read-only here' : 'imported from FreshService, read-only'}`} />;
                                 const priorityEl = priorityColumnOn
                                   ? <span className="qx:hidden inline-flex" data-testid="subject-priority-dot">{priorityDot}</span>
                                   : priorityDot;

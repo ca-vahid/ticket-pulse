@@ -1,5 +1,6 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
+import { isFreshServiceOff, onModeChange } from './fsModeService.js';
 
 // "Other teams" people (assignable-only technicians, QA 09-25 item 6) are not
 // in the IT team's FreshService groups, so FreshService refuses them as the
@@ -31,6 +32,8 @@ async function loadGroups(workspaceId, client) {
 
 /** Cached FreshService groups with their member agent ids. Null when unknown. */
 export async function getFsGroups(workspaceId, client, { wait = true } = {}) {
+  // FreshService switch: Off → no FreshService groups (and no stale cache).
+  if (await isFreshServiceOff(workspaceId)) return null;
   const hit = cache.get(workspaceId);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.groups;
   if (!client) return hit?.groups || null;
@@ -86,5 +89,8 @@ export function _resetFsGroupCache() {
   cache.clear();
   inflight.clear();
 }
+
+// A workspace that flips mode starts from a clean group cache.
+onModeChange((ws) => { cache.delete(Number(ws)); inflight.delete(Number(ws)); });
 
 export default { getFsGroups, pickHomeGroup, homeGroupsByTech, _resetFsGroupCache };

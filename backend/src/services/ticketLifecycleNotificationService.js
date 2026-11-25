@@ -541,6 +541,9 @@ export function webhookPayloadFromContext(eventContext) {
       // Simorgh D3/E2: correlation keys and resolution details on every event.
       externalRef: t.externalRef || null,
       externalReferences: Array.isArray(t.externalReferences) ? t.externalReferences : [],
+      // FreshService exit (25 Nov 2026): the old "#<FS number>" of a ticket
+      // adopted from FreshService; null on every other ticket.
+      formerRef: t.formerRef || null,
       // ContinuIT B1: the agreed due date rides every lifecycle event.
       dueBy: t.dueBy ? new Date(t.dueBy).toISOString() : null,
       resolvedAt: t.resolvedAt ? new Date(t.resolvedAt).toISOString() : null,
@@ -708,6 +711,8 @@ export function buildEventContext({ event, ticket, previousAgent, source, status
       externalReferences: ticket.freshserviceTicketId
         ? [{ system: 'FRESHSERVICE', id: String(ticket.freshserviceTicketId) }]
         : [],
+      // FreshService exit (25 Nov 2026): set only on a ticket adopted from FreshService.
+      formerRef: ticket.mirrorState === 'adopted' && ticket.freshserviceTicketId ? `#${String(ticket.freshserviceTicketId)}` : null,
       firstAssignedAt: ticket.firstAssignedAt || null,
       resolutionTimeSeconds: ticket.resolutionTimeSeconds ?? null,
       resolutionReason: ticket.resolutionReason || null,

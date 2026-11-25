@@ -54,12 +54,17 @@ describe('isFreshServiceBound / isFreshServiceUnlinked', () => {
 describe('FreshService schedulers skip an unlinked workspace', () => {
   test('full sync: no cron, no catch-up sync for the unlinked one; the linked one is scheduled', async () => {
     await scheduledSyncService.startForWorkspace(native);
-    expect(cronScheduleMock).not.toHaveBeenCalled();
+    // FreshService exit A1 (25 Nov 2026): the only job is its own daily-review check.
+    expect(scheduledSyncService.cronJobs.has(12)).toBe(false);
+    expect(scheduledSyncService.dailyReviewCronJobs.has(12)).toBe(true);
+    expect(cronScheduleMock).toHaveBeenCalledTimes(1);
     await new Promise((r) => setImmediate(r));
     expect(syncServiceMock.performFullSync).not.toHaveBeenCalled();
 
     await scheduledSyncService.startForWorkspace(linked);
-    expect(cronScheduleMock).toHaveBeenCalledTimes(1);
+    expect(cronScheduleMock).toHaveBeenCalledTimes(2);
+    expect(scheduledSyncService.cronJobs.has(2)).toBe(true);
+    expect(scheduledSyncService.dailyReviewCronJobs.has(2)).toBe(false);
   });
 
   test('fast status lane: not scheduled for the unlinked one', async () => {

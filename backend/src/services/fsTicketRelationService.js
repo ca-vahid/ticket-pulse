@@ -18,6 +18,7 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { ConflictError } from '../utils/errors.js';
+import { fsGate, isFreshServiceOff } from './fsModeService.js';
 
 export const FS_LINK_SOURCE = 'freshservice';
 const REFRESH_TTL_MS = 5 * 60 * 1000;
@@ -79,6 +80,7 @@ async function tpTicketsByFsId(workspaceId, fsIds) {
  * ticket is not FS-born or FreshService could not be asked.
  */
 export async function syncFsRelations(ticketId, workspaceId, { force = false, client = null } = {}) {
+  if (await isFreshServiceOff(workspaceId)) return null;
   const cached = recent.get(ticketId);
   if (!force && cached && Date.now() - cached.at < REFRESH_TTL_MS) {
     return { externalChildren: cached.externalChildren, externalParent: cached.externalParent, fresh: false };
@@ -88,6 +90,9 @@ export async function syncFsRelations(ticketId, workspaceId, { force = false, cl
     select: { id: true, origin: true, freshserviceTicketId: true },
   });
   if (!ticket || ticket.origin === 'ticketpulse' || !ticket.freshserviceTicketId) return null;
+  // FreshService switch: Off → FreshService is not asked (no relations; the
+  // close guard falls back to Ticket Pulse's own links).
+  if (!(await fsGate(workspaceId, 'relations'))) return null;
 
   let fsClient = client;
   if (!fsClient) {

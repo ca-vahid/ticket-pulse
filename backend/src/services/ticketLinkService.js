@@ -5,6 +5,7 @@ import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { actorKindOf } from '../utils/actorKind.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
 import { ticketRef, actorRef } from './relationWebhookPayload.js';
+import { fsGate } from './fsModeService.js';
 
 // User-linkable kinds via the generic link() path. parent_of is deliberately
 // EXCLUDED: it carries invariants (single parent, no cycles, coordinator-only)
@@ -384,6 +385,10 @@ class TicketLinkService {
    *  FS has no native parent/child field to write. Best-effort. */
   async _fsPointerNote(ticket, workspaceId, text) {
     if (!ticket?.freshserviceTicketId) return;
+    // FreshService switch: never on an adopted ticket's old FS ticket (a
+    // tombstone), and nothing at all for an Off workspace.
+    if (ticket.mirrorState === 'adopted') return;
+    if (!(await fsGate(workspaceId, 'relations'))) return;
     try {
       const { default: mirrorService } = await import('./mirrorService.js');
       const client = await mirrorService.getInteractiveClient(workspaceId);

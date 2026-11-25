@@ -10,6 +10,7 @@ import afterHoursUrgentEscalationService from './afterHoursUrgentEscalationServi
 import { formatDateInTimezone } from '../utils/timezone.js';
 import { QUEUE_DRAIN_CONCURRENCY, QUEUE_DRAIN_MAX_PER_TICK } from '../utils/queueDrainLimits.js';
 import { TICKET_ORIGIN } from '../utils/ticketOrigin.js';
+import { fsGate } from './fsModeService.js';
 import { formatInTimeZone } from 'date-fns-tz';
 import { createFreshServiceClient } from '../integrations/freshservice.js';
 import { Prisma } from '@prisma/client';
@@ -743,6 +744,11 @@ class AssignmentPipelineService {
   }
 
   async _validateQueuedRunAgainstFreshService(ticket, options = {}) {
+    // FreshService switch: an adopted ticket's FS id is a tombstone, and an
+    // Off workspace has no live FreshService to check — the run stays eligible
+    // on its local checks alone.
+    if (ticket?.mirrorState === 'adopted') return null;
+    if (!(await fsGate(ticket?.workspaceId, 'assignment_check'))) return null;
     const fsId = Number(ticket.freshserviceTicketId);
     if (!Number.isFinite(fsId)) {
       return { valid: false, reason: 'Ticket is missing a FreshService ticket ID' };
@@ -2793,6 +2799,9 @@ class AssignmentPipelineService {
       workspaceId,
       runIds: orphans.map((r) => r.id),
     });
+    // FreshService switch: execute() itself never writes FreshService for an
+    // Off workspace or an adopted ticket — it applies the decision locally and
+    // records the run 'skipped' (freshservice_off / adopted), which settles it.
     for (const orphan of orphans) {
       try {
         await freshServiceActionService.execute(orphan.id, workspaceId, dryRun);

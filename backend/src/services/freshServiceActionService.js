@@ -21,6 +21,7 @@ import ticketLifecycleNotificationService from './ticketLifecycleNotificationSer
 import { TICKET_ORIGIN, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { sseManager } from '../routes/sse.routes.js';
 import { isGroupExcluded } from './assignmentDecisionRules.js';
+import { fsGate, isFreshServiceOff } from './fsModeService.js';
 
 /**
  * The LLM sometimes returns its briefing HTML already entity-escaped, and we
@@ -522,6 +523,8 @@ class FreshServiceActionService {
           select: {
             id: true,
             freshserviceTicketId: true,
+            origin: true,
+            mirrorState: true,
             priority: true,
             assessedPriority: true,
             assessedPriorityId: true,
@@ -582,6 +585,14 @@ class FreshServiceActionService {
       return { success: true, dryRun: true, preview, actions };
     }
 
+    // FreshService switch / origin: Off, adopted or TP-born → local fields only.
+    const priorityBlock = await this._writebackBlock(run.ticket, workspaceId);
+    if (priorityBlock) {
+      const localUpdated = await this._applyWritebackLocally(run.ticket, workspaceId, actions, 'priority');
+      if (localUpdated) await this._recordAiPriorityHistory(run, runId, actions[0]);
+      return this._markWritebackSkipped(runId, 'priority', priorityBlock, payloadData, preview, actions);
+    }
+
     try {
       const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
       if (!fsConfig?.domain || !fsConfig?.apiKey) {
@@ -613,19 +624,7 @@ class FreshServiceActionService {
       // QA 11-23 item 2: the AI setting the ticket's priority is history too.
       // A same-day repeat raise (item 5, recommendation.repeatReport) is named
       // as such: one 'repeat_report' row, from the ticket's real prior level.
-      if (localUpdated) {
-        const repeat = repeatReportFor(run.recommendation, action.priorityLabel);
-        await recordPriorityChange({
-          ticketId: run.ticketId,
-          from: run.ticket?.priority ?? null,
-          to: action.priorityId,
-          source: repeat ? 'repeat_report' : 'ai_assessment',
-          note: repeat ? repeat.historyNote : (run.ticket?.priorityRationale || null),
-          details: repeat
-            ? { pipelineRunId: runId, relatedTicketId: repeat.relatedTicketId ?? null, relatedRef: repeat.relatedRef ?? null }
-            : { pipelineRunId: runId },
-        });
-      }
+      if (localUpdated) await this._recordAiPriorityHistory(run, runId, action);
 
       await prisma.assignmentPipelineRun.update({
         where: { id: runId },
@@ -675,6 +674,8 @@ class FreshServiceActionService {
           select: {
             id: true,
             freshserviceTicketId: true,
+            origin: true,
+            mirrorState: true,
             ticketType: true,
             assessedTicketType: true,
             ticketTypeRationale: true,
@@ -746,6 +747,13 @@ class FreshServiceActionService {
       });
       logger.info('FreshService ticket type sync dry-run', { runId, preview });
       return { success: true, dryRun: true, preview, actions };
+    }
+
+    // FreshService switch / origin: Off, adopted or TP-born → local fields only.
+    const typeBlock = await this._writebackBlock(run.ticket, workspaceId);
+    if (typeBlock) {
+      await this._applyWritebackLocally(run.ticket, workspaceId, actions, 'ticket type');
+      return this._markWritebackSkipped(runId, 'ticketType', typeBlock, payloadData, preview, actions);
     }
 
     try {
@@ -833,6 +841,7 @@ class FreshServiceActionService {
             id: true,
             freshserviceTicketId: true,
             origin: true,
+            mirrorState: true,
             tpSkill: true,
             tpSubskill: true,
             internalCategory: { select: { name: true } },
@@ -901,6 +910,13 @@ class FreshServiceActionService {
       });
       logger.info('FreshService category sync dry-run', { runId, preview });
       return { success: true, dryRun: true, preview, actions: [action] };
+    }
+
+    // FreshService switch / origin: Off, adopted or TP-born → local fields only.
+    const categoryBlock = await this._writebackBlock(ticket, workspaceId);
+    if (categoryBlock) {
+      await this._applyWritebackLocally(ticket, workspaceId, [action], 'category');
+      return this._markWritebackSkipped(runId, 'category', categoryBlock, payloadData, preview, [action]);
     }
 
     try {
@@ -980,6 +996,8 @@ class FreshServiceActionService {
       select: {
         id: true,
         freshserviceTicketId: true,
+        origin: true,
+        mirrorState: true,
       },
     });
 
@@ -1017,6 +1035,16 @@ class FreshServiceActionService {
 
     if (dryRun) {
       return { success: true, dryRun: true, preview, actions };
+    }
+
+    // FreshService switch / origin: Off, adopted or TP-born → local priority only.
+    const directBlock = await this._writebackBlock(ticket, workspaceId);
+    if (directBlock) {
+      const localUpdated = await this._applyWritebackLocally(ticket, workspaceId, actions, 'direct priority');
+      logger.info('FreshService direct priority sync skipped (applied locally)', {
+        ticketId: ticket.id, priorityId: parsedPriorityId, source, reason: directBlock,
+      });
+      return { success: true, skipped: true, error: directBlock, localOnly: true, localUpdated, preview, actions };
     }
 
     try {
@@ -1122,6 +1150,11 @@ class FreshServiceActionService {
     // own channel. Apply the decision locally with full parity instead.
     if (run.ticket?.origin === TICKET_ORIGIN.TICKETPULSE) {
       return this._executeLocalOnly(run, workspaceId, dryRun, options);
+    }
+    // FreshService switch: an FS-born ticket in an Off workspace (imported
+    // history) takes the decision locally too — nothing reaches FreshService.
+    if (!(await fsGate(workspaceId, 'writeback'))) {
+      return this._executeLocalOnly(run, workspaceId, dryRun, { ...options, fsSkippedReason: 'freshservice_off' });
     }
 
     if (run.decision === 'noise_dismissed' && !force) {
@@ -1631,14 +1664,19 @@ class FreshServiceActionService {
 
     // QA 11-24 #4: a ticket in a workspace with no FreshService link keeps no
     // fallback copy ('none'); never flip it back to 'pending'.
-    const nextMirrorState = ticket.mirrorState === 'none' ? 'none' : 'pending';
+    // FreshService switch: an adopted ticket keeps 'adopted' (never copied), an
+    // FS-born one keeps its own state, and an Off workspace never flips to 'pending'.
+    const adopted = ticket.mirrorState === 'adopted';
+    const tpOwned = ticket.origin === TICKET_ORIGIN.TICKETPULSE && !adopted;
+    const mirrorPatch = await this._localMirrorPatch(ticket, workspaceId);
+    const skippedReason = options.fsSkippedReason || (adopted ? 'adopted' : null);
     try {
       const now = new Date();
       for (const action of actions) {
         if (action.type === 'local_category') {
           await prisma.ticket.update({
             where: { id: ticket.id },
-            data: { tpSkill: action.tpSkill, tpSubskill: action.tpSubskill, mirrorState: nextMirrorState },
+            data: { tpSkill: action.tpSkill, tpSubskill: action.tpSubskill, ...mirrorPatch },
           });
         } else if (action.type === 'local_close') {
           await prisma.ticket.update({
@@ -1647,7 +1685,7 @@ class FreshServiceActionService {
               status: 'Resolved',
               resolvedAt: now,
               resolutionTimeSeconds: Math.max(0, Math.round((now.getTime() - new Date(ticket.createdAt).getTime()) / 1000)),
-              mirrorState: nextMirrorState,
+              ...mirrorPatch,
             },
           });
         } else if (action.type === 'local_assign') {
@@ -1665,7 +1703,7 @@ class FreshServiceActionService {
               firstAssignedAt: ticket.firstAssignedAt || now,
               assignedBy: 'Ticket Pulse',
               isSelfPicked: false,
-              mirrorState: nextMirrorState,
+              ...mirrorPatch,
             },
           });
           await prisma.ticketAssignmentEpisode.create({
@@ -1700,13 +1738,17 @@ class FreshServiceActionService {
 
       await prisma.assignmentPipelineRun.update({
         where: { id: run.id },
-        data: { syncStatus: 'synced', syncedAt: new Date(), syncPayload: payloadData, syncError: null },
+        data: skippedReason
+          // Applied here; FreshService was not (and will not be) written.
+          ? { syncStatus: 'skipped', syncedAt: new Date(), syncPayload: { ...payloadData, skippedReason }, syncError: skippedReason }
+          : { syncStatus: 'synced', syncedAt: new Date(), syncPayload: payloadData, syncError: null },
       });
-      if (actions.length > 0) {
+      // Only a TP-born copy is ever queued (an Off workspace's mirror holds it).
+      if (actions.length > 0 && tpOwned) {
         const { default: mirrorService } = await import('./mirrorService.js');
         await mirrorService.enqueueFieldSync(ticket.workspaceId, ticket.id).catch(() => {});
       }
-      return { success: true, actions, preview };
+      return { success: true, actions, preview, ...(skippedReason ? { skipped: true, reason: skippedReason, localOnly: true } : {}) };
     } catch (err) {
       logger.error('Local-only pipeline execution failed', { runId: run.id, ticketId: ticket.id, error: err.message });
       await prisma.assignmentPipelineRun.update({
@@ -1715,6 +1757,87 @@ class FreshServiceActionService {
       }).catch(() => {});
       return { success: false, error: err.message };
     }
+  }
+
+  /**
+   * Why a write-back must NOT PUT to FreshService directly, or null when it may:
+   *   'adopted'           — adopted from FreshService: its FS id is a tombstone;
+   *   'freshservice_off'  — the workspace's FreshService is Off (or never linked);
+   *   'ticketpulse_owned' — a TP-born ticket: Ticket Pulse is its source of truth
+   *                         and its FreshService copy is written by the mirror only
+   *                         (25 Nov 2026: these four write-backs had no origin check,
+   *                         unlike execute(), and PUT straight to the copy).
+   * Shadow counts the FS-born write ('writeback'); connected FS-born → null.
+   */
+  async _writebackBlock(ticket, workspaceId) {
+    if (ticket?.mirrorState === 'adopted') return 'adopted';
+    if (ticket?.origin === TICKET_ORIGIN.TICKETPULSE) {
+      return (await isFreshServiceOff(workspaceId)) ? 'freshservice_off' : 'ticketpulse_owned';
+    }
+    if (!(await fsGate(workspaceId, 'writeback'))) return 'freshservice_off';
+    return null;
+  }
+
+  /** mirrorState for a local write: TP-born (not adopted, not 'none', not Off) → pending. */
+  async _localMirrorPatch(ticket, workspaceId) {
+    if (!ticket || ticket.origin !== TICKET_ORIGIN.TICKETPULSE) return {};
+    if (ticket.mirrorState === 'adopted') return {};
+    // QA 11-24 #4: a ticket with no FreshService link keeps 'none' (4.4.16).
+    if (ticket.mirrorState === 'none') return { mirrorState: 'none' };
+    if (await isFreshServiceOff(workspaceId ?? ticket.workspaceId)) return {};
+    return { mirrorState: 'pending' };
+  }
+
+  /**
+   * Apply a write-back's local fields only (no FreshService call). A TP-born
+   * copy is queued for the mirror; an adopted or FS-born ticket never is.
+   * Returns true when the row was updated.
+   */
+  async _applyWritebackLocally(ticket, workspaceId, actions, label) {
+    const localFields = Object.assign({}, ...(actions || []).map((a) => a?.localFields || {}));
+    if (!ticket?.id || Object.keys(localFields).length === 0) return false;
+    const mirrorPatch = await this._localMirrorPatch(ticket, workspaceId);
+    const updated = await prisma.ticket.update({
+      where: { id: ticket.id },
+      data: { ...localFields, ...mirrorPatch, updatedAt: new Date() },
+    }).then(() => true).catch((err) => {
+      logger.warn(`Local ${label} write failed for ticket ${ticket.id}: ${err.message}`);
+      return false;
+    });
+    if (updated && ticket.origin === TICKET_ORIGIN.TICKETPULSE && ticket.mirrorState !== 'adopted') {
+      const { default: mirrorService } = await import('./mirrorService.js');
+      await mirrorService.enqueueFieldSync(workspaceId, ticket.id).catch(() => {});
+    }
+    return updated;
+  }
+
+  /** Record a run's write-back as skipped (applied locally) with its reason. */
+  async _markWritebackSkipped(runId, kind, reason, payloadData, preview, actions) {
+    await prisma.assignmentPipelineRun.update({
+      where: { id: runId },
+      data: {
+        [`${kind}WritebackStatus`]: 'skipped',
+        [`${kind}WritebackError`]: reason,
+        [`${kind}WritebackPayload`]: { ...(payloadData || {}), skippedReason: reason, localOnly: true },
+      },
+    });
+    logger.info(`FreshService ${kind} write-back skipped (applied locally)`, { runId, reason });
+    return { success: true, skipped: true, error: reason, localOnly: true, preview, actions };
+  }
+
+  /** QA 11-23 item 2/5: the AI setting the priority is history too. */
+  async _recordAiPriorityHistory(run, runId, action) {
+    const repeat = repeatReportFor(run.recommendation, action.priorityLabel);
+    await recordPriorityChange({
+      ticketId: run.ticketId,
+      from: run.ticket?.priority ?? null,
+      to: action.priorityId,
+      source: repeat ? 'repeat_report' : 'ai_assessment',
+      note: repeat ? repeat.historyNote : (run.ticket?.priorityRationale || null),
+      details: repeat
+        ? { pipelineRunId: runId, relatedTicketId: repeat.relatedTicketId ?? null, relatedRef: repeat.relatedRef ?? null }
+        : { pipelineRunId: runId },
+    });
   }
 
   async _mirrorLocalAssignment(run, action, workspaceId) {

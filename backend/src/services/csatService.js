@@ -1,5 +1,6 @@
 import logger from '../utils/logger.js';
 import { DatabaseError } from '../utils/errors.js';
+import { isFreshServiceOff } from './fsModeService.js';
 
 /**
  * CSAT (Customer Satisfaction) Service
@@ -192,6 +193,10 @@ class CSATService {
    */
   async syncRecentCSAT(freshserviceClient, ticketRepository, daysBack = 30, onProgress = null, workspaceId = null, options = {}) {
     const { limit = 200, shouldCancel = null, minRecheckHours = 24 } = options;
+    // FreshService switched off for this workspace: no survey reads (FreshService exit A1).
+    if (workspaceId && await isFreshServiceOff(workspaceId)) {
+      return { total: 0, csatFound: 0, updated: 0, errors: 0, skipped: 'freshservice_off' };
+    }
     try {
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - daysBack);

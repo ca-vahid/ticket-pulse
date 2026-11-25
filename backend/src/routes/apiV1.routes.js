@@ -181,7 +181,12 @@ async function guardStructure(req, ticketIds, action) {
 
 // ---------------------------------------------------------------- shapers
 
-function ticketShape(t) {
+/** "#<old FS number>" for a ticket adopted from FreshService; null otherwise. Exported for tests. */
+export function formerRefOf(t) {
+  return t?.mirrorState === 'adopted' && t.freshserviceTicketId ? `#${String(t.freshserviceTicketId)}` : null;
+}
+
+export function ticketShape(t) {
   return {
     id: t.id,
     ref: t.displayRef,
@@ -195,6 +200,9 @@ function ticketShape(t) {
     externalReferences: t.freshserviceTicketId
       ? [{ system: 'FRESHSERVICE', id: String(t.freshserviceTicketId) }]
       : [],
+    // FreshService exit (25 Nov 2026): a ticket adopted from FreshService keeps
+    // its old number here ("#245123"); null on every other ticket.
+    formerRef: formerRefOf(t),
     origin: t.origin,
     subject: t.subject,
     status: t.status,

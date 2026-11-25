@@ -25,6 +25,7 @@ import { DEFAULT_MESSAGE_ID_DOMAIN } from './emailThreadingService.js';
 import { ValidationError } from '../utils/errors.js';
 import { wasRecentlySent } from '../utils/recentSentMessageIds.js';
 import { intakeMailboxRecord } from './intakeMailboxService.js';
+import { fsGate, isFreshServiceOff } from './fsModeService.js';
 
 /** createTicket's `intakeMailbox` option for mail on this connection (QA 11-24 item 11). */
 function intakeMailboxOption(connection) {
@@ -77,6 +78,18 @@ export { ticketEndedAt };
 export function endedLongAgo(ticket, now = Date.now()) {
   const ended = ticketEndedAt(ticket);
   return Boolean(ended) && now - new Date(ended).getTime() > OLD_CLOSED_DAYS * 86400000;
+}
+
+/**
+ * "FreshService receives this mail itself, so Ticket Pulse skips it" — never
+ * when the workspace's FreshService is Off (Ticket Pulse is the only system of
+ * record: skipping would lose the mail), and never for an adopted ticket (the
+ * mail is its; FreshService only holds the old ticket).
+ */
+async function fsTakesThisMail(workspaceId, email, ticket = null) {
+  if (ticket?.mirrorState === 'adopted') return false;
+  if (await isFreshServiceOff(workspaceId)) return false;
+  return freshserviceWillIngest(workspaceId, email);
 }
 // Pictures pasted into a mail body. Smaller ones are signature logos and tracking dots.
 const INLINE_MIN_BYTES = 8 * 1024;
@@ -1015,7 +1028,7 @@ class MailboxIngestService {
         logger.info(`Mailbox ingest: body names FreshService #${fsNumber}, closed long ago — new request linked to ticket ${ticket.id} (from ${email.from})`);
         break;
       }
-      if (await freshserviceWillIngest(connection.workspaceId, email)) {
+      if (await fsTakesThisMail(connection.workspaceId, email, ticket)) {
         recordIngestSkip(connection.workspaceId, 'freshservice_ref');
         logger.info(`Mailbox ingest decision: skip (freshservice_ref, body) for "${email.subject}" from ${email.from} — FreshService ticket ${ticket.id} receives this mail itself`);
         return 'skipped';
@@ -1295,7 +1308,13 @@ class MailboxIngestService {
     // mailed on a FreshService ticket (17 Sep 2026); FreshService never saw this mail.
     for (const fsNumber of plusAddressFsTicketNumbers(email, mailboxAddress)) {
       const ticket = await prisma.ticket.findFirst({
-        where: { workspaceId, freshserviceTicketId: BigInt(fsNumber), origin: TICKET_ORIGIN.FRESHSERVICE },
+        // FreshService switch: an adopted ticket keeps its FS number as a
+        // tombstone, and replies to mail sent before adoption still carry it.
+        where: {
+          workspaceId,
+          freshserviceTicketId: BigInt(fsNumber),
+          OR: [{ origin: TICKET_ORIGIN.FRESHSERVICE }, { mirrorState: 'adopted' }],
+        },
       });
       if (ticket) return { ticket, via: 'plus_address_fs' };
     }
@@ -1348,7 +1367,7 @@ class MailboxIngestService {
         }
       }
       if (found.length) {
-        if (await freshserviceWillIngest(workspaceId, email)) return { skip: true, reason: 'freshservice_ref', ticketId: found[0].id };
+        if (await fsTakesThisMail(workspaceId, email, found.length === 1 ? found[0] : null)) return { skip: true, reason: 'freshservice_ref', ticketId: found[0].id };
         if (found.length === 1) return { ticket: found[0], via: 'fs_ref_subject' };
         // Two different tickets named in one subject and no reply header settled it: a person decides.
         return {
@@ -1735,6 +1754,22 @@ class MailboxIngestService {
     const isAgentReply = Boolean(agent && !isForward && !workflowRef);
     // "Requester replied" (and its reopen workflow) is for the requester side only.
     const requesterSide = !isAgentReply && !(workflowRef && agent);
+    // FreshService switch (25 Nov 2026): a reply that threads onto imported
+    // history (an FS-born ticket in an Off workspace) adopts the ticket first;
+    // from here on it is a normal Ticket Pulse reply (and reopens as TP rules
+    // say). Adoption itself reopens nothing. A failed adoption never loses the
+    // reply: it is still stored, and nothing is written to FreshService.
+    if (ticket.origin === TICKET_ORIGIN.FRESHSERVICE && await isFreshServiceOff(ticket.workspaceId ?? connection.workspaceId)) {
+      try {
+        const { default: fsAdoptionService } = await import('./fsAdoptionService.js');
+        ticket = await fsAdoptionService.adoptTicket(ticket.id, ticket.workspaceId ?? connection.workspaceId, {
+          actorEmail: requesterSide ? null : (agent?.email || null),
+          reason: requesterSide ? 'requester_reply' : 'agent',
+        });
+      } catch (err) {
+        logger.warn(`Reply onto imported ticket ${ticket.id}: adoption failed, stored without it (non-fatal): ${err.message}`);
+      }
+    }
     // G2: a requester reply on a ticket that is closed when it lands is written
     // to the FreshService side only AFTER the workflows ran — as a note while
     // the ticket stays closed, as an incoming reply once it reopened — so
@@ -1766,6 +1801,7 @@ class MailboxIngestService {
       ...(keepClosed ? { keepClosed: true } : {}),
     };
     const rawPayload = { ...original.raw, ...basePayload };
+    const noFsCopy = ticket.mirrorState === 'adopted' || await isFreshServiceOff(ticket.workspaceId ?? connection.workspaceId);
     const entryData = {
       ticketId: ticket.id,
       workspaceId: ticket.workspaceId,
@@ -1788,7 +1824,9 @@ class MailboxIngestService {
       emailMessageId: email.internetMessageId,
       // Requester replies belong on the FreshService side too: the TP-born fallback
       // copy via the mirror queue, an FS-born ticket via the direct write-back below.
-      mirrorState: 'pending',
+      // No FreshService side ('none'): an adopted ticket (its FS id is a
+      // tombstone) or an Off workspace — never a stuck "waiting to copy".
+      mirrorState: noFsCopy ? 'none' : 'pending',
       // Who else the sender addressed (QA 08-05 #3) — FS conversation shape.
       ...(Object.keys(rawPayload).length ? { rawPayload } : {}),
     };
@@ -2197,6 +2235,10 @@ class MailboxIngestService {
   }
 
   async _writeReplyCopy(ticket, entry, email, { isAgentReply = false, agent = null, keepClosed = false, ccAdded = false } = {}) {
+    // FreshService switch: an adopted ticket is never copied anywhere, and an
+    // Off workspace has no FreshService side (the entry was stored as 'none').
+    if (ticket?.mirrorState === 'adopted') return;
+    if (await isFreshServiceOff(ticket?.workspaceId)) return;
     try {
       if (ticket.origin === TICKET_ORIGIN.TICKETPULSE) {
         if (keepClosed && entry.rawPayload?.keepClosed !== true) {
@@ -2236,6 +2278,14 @@ class MailboxIngestService {
    */
   async _writeReplyToFreshService(ticket, entry, email, { isAgentReply = false, agent = null, keepClosed = false } = {}) {
     const esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // FreshService switch: never to an adopted ticket's old FS ticket, never while Off.
+    if (ticket?.mirrorState === 'adopted') return null;
+    if (!(await fsGate(ticket.workspaceId, 'reply_or_note'))) {
+      await Promise.resolve()
+        .then(() => prisma.ticketThreadEntry.update({ where: { id: entry.id }, data: { mirrorState: 'none' } }))
+        .catch(() => {});
+      return null;
+    }
     try {
       const client = await mirrorService.getInteractiveClient(ticket.workspaceId);
       if (typeof client?.addNote !== 'function') throw new Error('FreshService is not configured for this workspace');

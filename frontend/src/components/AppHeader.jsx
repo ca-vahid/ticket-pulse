@@ -204,7 +204,10 @@ export default function AppHeader({
     showSyncNotice('ok', 'Sync started');
     try {
       const res = await syncAPI.trigger();
-      if (res?.data?.status === 'skipped') {
+      if (res?.data?.status === 'skipped' && res?.data?.reason === 'freshservice_off') {
+        // FreshService switch (25 Nov 2026): nothing to sync, and that is not an error.
+        showSyncNotice('ok', 'FreshService is off for this workspace');
+      } else if (res?.data?.status === 'skipped') {
         showSyncNotice('warn', 'A sync is already running');
       } else {
         // The trigger endpoint runs the sync to completion before responding.

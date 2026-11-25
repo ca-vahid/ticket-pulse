@@ -15,11 +15,25 @@
  */
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
+import { fsGate } from './fsModeService.js';
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const recent = new Map(); // ticketId → checkedAt (ms)
 
 export function resetFsApprovalRefreshCache() { recent.clear(); }
+
+/**
+ * Adopted from FreshService? Callers select `origin` but not always
+ * `mirrorState`; only a TP-origin row can be adopted, so only those are read.
+ */
+async function isAdopted(ticket) {
+  if (ticket.mirrorState !== undefined) return ticket.mirrorState === 'adopted';
+  if (ticket.origin !== 'ticketpulse') return false;
+  const row = await Promise.resolve()
+    .then(() => prisma.ticket.findUnique({ where: { id: ticket.id }, select: { mirrorState: true } }))
+    .catch(() => null);
+  return row?.mirrorState === 'adopted';
+}
 
 function needsRefresh(ticket, now) {
   if (!ticket?.id || !ticket.freshserviceTicketId) return false;
@@ -35,6 +49,10 @@ function needsRefresh(ticket, now) {
 export async function refreshFsApprovalStatus(ticket, { now = Date.now(), client = null } = {}) {
   const current = { fsApprovalStatus: ticket?.fsApprovalStatus ?? null, fsApprovalStatusName: ticket?.fsApprovalStatusName ?? null };
   if (!needsRefresh(ticket, now)) return current;
+  // FreshService switch: an adopted ticket's FS id is a tombstone, and an Off
+  // workspace asks FreshService nothing — the stored status stands.
+  if (await isAdopted(ticket)) return current;
+  if (!(await fsGate(ticket.workspaceId, 'approval_refresh'))) return current;
   recent.set(ticket.id, now);
   try {
     let fs = client;

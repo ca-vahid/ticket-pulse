@@ -26,6 +26,27 @@ import { latestFsFieldChanges } from '../utils/fsActivityChanges.js';
 import { getStatusString } from '../integrations/freshserviceTransformer.js';
 import { sseManager } from '../routes/sse.routes.js';
 import { reconcileShouldYield, reconcileSlot } from '../utils/fsBackgroundPace.js';
+import { fsGate, getModeRecord, onModeChange } from './fsModeService.js';
+
+// FreshService exit (A1/A3, 25 Nov 2026).
+//  - A workspace switched OFF: nothing is queued, nothing is sent, and the jobs
+//    already queued stay pending (not done) so a rollback to Connected resumes
+//    them; they are parked an hour at a time instead of retried in a hot loop.
+//  - An ADOPTED ticket (mirrorState 'adopted') keeps its old FreshService id as
+//    a tombstone only: no job ever writes to, deletes or reconciles with it.
+export const ADOPTED = 'adopted';
+const OFF_PARK_MS = 60 * 60 * 1000;
+export const OFF_WAIT_NOTE = 'Waiting: FreshService is off for this workspace (resumes if it is switched back on)';
+// Prisma's `not` drops NULL rows, so "not adopted" is spelled out.
+const NOT_ADOPTED = { OR: [{ mirrorState: null }, { mirrorState: { not: ADOPTED } }] };
+
+/** Thrown inside a job for an adopted ticket: the job ends done, nothing sent. */
+class AdoptedSkip extends Error {
+  constructor(ticketId) {
+    super(`Skipped: ticket ${ticketId} was adopted from FreshService (its old FreshService ticket is never written to)`);
+    this.adoptedSkip = true;
+  }
+}
 
 // TP status labels → FreshService status codes (canonical labels only —
 // custom labels resolve through their BASE via _fsStatusCode below).
@@ -357,7 +378,11 @@ class MirrorService {
 
   async _enqueue(workspaceId, ticketId, kind, threadEntryId = null, payload = null) {
     if (!(await this._workspaceActive(workspaceId))) {
-      logger.debug(`Mirror skipped for ticket ${ticketId} (${kind}): workspace ${workspaceId} is inactive (sandbox)`);
+      logger.debug(`Mirror skipped for ticket ${ticketId} (${kind}): workspace ${workspaceId} is inactive (sandbox) or FreshService is off`);
+      return null;
+    }
+    if (await this._isAdopted(ticketId)) {
+      logger.debug(`Mirror skipped for ticket ${ticketId} (${kind}): adopted from FreshService`);
       return null;
     }
     try {
@@ -379,6 +404,7 @@ class MirrorService {
    */
   async drainForTicket(ticketId, workspaceId) {
     if (!this.isEnabled()) return { skipped: true, reason: 'disabled' };
+    if ((await this._workspaceState(workspaceId)).off) return { skipped: true, reason: 'freshservice_off' };
     if (this._inFlightTickets.has(ticketId)) {
       // A drain (previous click, or the background worker) already owns this
       // ticket — report progress instead of racing it.
@@ -456,6 +482,9 @@ class MirrorService {
 
   /** Public accessor — FS-born reply/note writes reuse the mirror's client. */
   async getClient(workspaceId) {
+    // FreshService switched off for this workspace: no client (callers treat
+    // null as "FreshService is not available here").
+    if ((await this._workspaceState(workspaceId)).off) return null;
     return this._getClient(workspaceId);
   }
 
@@ -469,6 +498,7 @@ class MirrorService {
    * into a fast, honest FS_QUEUE_TIMEOUT (nothing sent) instead of a hang.
    */
   async getInteractiveClient(workspaceId) {
+    if ((await this._workspaceState(workspaceId)).off) return null;
     if (this._interactiveClients.has(workspaceId)) return this._interactiveClients.get(workspaceId);
     const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
     if (!fsConfig?.domain || !fsConfig?.apiKey) return null;
@@ -491,8 +521,20 @@ class MirrorService {
    * execution and at reconciliation. Cached for a minute.
    */
   async _workspaceActive(workspaceId) {
+    const state = await this._workspaceState(workspaceId);
+    return state.active && !state.off;
+  }
+
+  /**
+   * { active, off, mode } for a workspace, cached for a minute (cleared on a
+   * mode change). `active` false = sandbox / no FreshService link (jobs end
+   * done, as before). `off` = a linked, active workspace whose FreshService
+   * mode is 'off' (jobs wait). The mode read is fsModeService's cached record,
+   * which falls back to 'connected' on a read error.
+   */
+  async _workspaceState(workspaceId) {
     const hit = this._activeCache.get(workspaceId);
-    if (hit && Date.now() - hit.at < 60_000) return hit.active;
+    if (hit && Date.now() - hit.at < 60_000) return hit;
     let active = true;
     try {
       const ws = await prisma.workspace?.findUnique?.({ where: { id: workspaceId }, select: { isActive: true, freshserviceWorkspaceId: true } });
@@ -501,8 +543,52 @@ class MirrorService {
       // FreshService link (id 0) and no fallback copy — same refusal.
       if (ws && isFreshServiceUnlinked(ws)) active = false;
     } catch { /* treat lookup failure as active — never block a live workspace */ }
-    this._activeCache.set(workspaceId, { at: Date.now(), active });
-    return active;
+    let mode = 'connected';
+    if (active) {
+      try { mode = (await getModeRecord(workspaceId))?.mode || 'connected'; } catch { /* connected */ }
+    }
+    const state = { at: Date.now(), active, off: active && mode === 'off', mode };
+    this._activeCache.set(workspaceId, state);
+    return state;
+  }
+
+  /** May the mirror call FreshService for this workspace now? Shadow: yes, and counted. */
+  async _fsAllowed(workspaceId, purpose) {
+    const state = await this._workspaceState(workspaceId);
+    if (state.off) return false;
+    if (state.mode === 'shadow') return fsGate(workspaceId, purpose);
+    return true;
+  }
+
+  /** True when the ticket was adopted from FreshService. A lookup failure is "no". */
+  async _isAdopted(ticketId) {
+    try {
+      const n = await prisma.ticket?.count?.({ where: { id: Number(ticketId), mirrorState: ADOPTED } });
+      return Number(n) > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * A workspace's FreshService mode changed: forget its clients and cached
+   * state; back on (Connected/Shadow), the jobs parked while it was off are
+   * due again at once.
+   */
+  async _onModeChange(workspaceId, mode) {
+    const ws = Number(workspaceId);
+    this._clients.delete(ws);
+    this._interactiveClients.delete(ws);
+    this._activeCache.delete(ws);
+    if (mode === 'connected' || mode === 'shadow') {
+      await Promise.resolve()
+        .then(() => prisma.mirrorJob.updateMany({
+          where: { workspaceId: ws, status: { in: ['pending', 'failed'] }, lastError: OFF_WAIT_NOTE, nextAttemptAt: { gt: new Date() } },
+          data: { nextAttemptAt: new Date() },
+        }))
+        .then((r) => { if (r?.count) logger.info(`Mirror: ${r.count} copy job(s) for workspace ${ws} resumed (FreshService ${mode})`); })
+        .catch((err) => logger.warn(`Mirror: could not resume parked jobs for workspace ${ws}: ${err.message}`));
+    }
   }
 
   async _getClient(workspaceId) {
@@ -541,13 +627,29 @@ class MirrorService {
 
   async _executeJob(job) {
     try {
-      if (!(await this._workspaceActive(job.workspaceId))) {
+      const wsState = await this._workspaceState(job.workspaceId);
+      if (wsState.off) {
+        // FreshService switched off: the job WAITS (never done, no attempt
+        // used, no ticket error) so a rollback resumes it; parked an hour so
+        // the drain does not pick it up every minute.
+        await prisma.mirrorJob.update({
+          where: { id: job.id },
+          data: {
+            status: job.status === 'processing' ? 'pending' : job.status,
+            lastError: OFF_WAIT_NOTE,
+            nextAttemptAt: new Date(Date.now() + OFF_PARK_MS),
+          },
+        });
+        return false;
+      }
+      if (!wsState.active) {
         await prisma.mirrorJob.update({
           where: { id: job.id },
           data: { status: 'done', lastError: 'Skipped — workspace inactive (sandbox): the mirror never writes to FreshService for it', attempts: job.attempts + 1 },
         });
         return false;
       }
+      if (wsState.mode === 'shadow') await fsGate(job.workspaceId, 'mirror');
       const client = await this._getClient(job.workspaceId);
       if (!client) {
         await this._markFailed(job, 'FreshService is not configured for this workspace');
@@ -569,6 +671,15 @@ class MirrorService {
       });
       return true;
     } catch (err) {
+      if (err?.adoptedSkip) {
+        // Adopted from FreshService: done, nothing sent, no ticket error.
+        logger.info(`Mirror job ${job.id} (${job.kind}, ticket ${job.ticketId}) skipped: the ticket was adopted from FreshService`);
+        await prisma.mirrorJob.update({
+          where: { id: job.id },
+          data: { status: 'done', lastError: 'Skipped: adopted', attempts: job.attempts + 1 },
+        }).catch(() => {});
+        return true;
+      }
       await this._markFailed(job, err.message || String(err), { softRetry: isQueueTimeout(err), terminal: err?.terminal === true });
       return false;
     }
@@ -619,6 +730,9 @@ class MirrorService {
       },
     });
     if (!ticket) throw new Error(`Ticket ${ticketId} not found`);
+    // Before the origin check: an adopted ticket is TP-born now, but its
+    // FreshService id is the OLD FreshService ticket, never a copy to write to.
+    if (ticket.mirrorState === ADOPTED) throw new AdoptedSkip(ticketId);
     if (ticket.origin !== TICKET_ORIGIN.TICKETPULSE) throw new Error('Only TP-born tickets are mirrored');
     return ticket;
   }
@@ -751,6 +865,10 @@ class MirrorService {
     const out = { status: false, agent: false, notes: [] };
     if (!statusDrift && !assigneeDrift) return out;
     if (['Deleted', 'Spam'].includes(ticket.status)) return out;
+    // Adopted from FreshService (A3): never deleted, re-statused or re-assigned
+    // from the old FreshService ticket. Off workspace: FreshService is not read.
+    if (ticket.mirrorState === ADOPTED) return { ...out, status: true, agent: true };
+    if ((await this._workspaceState(ticket.workspaceId)).off) return { ...out, status: true, agent: true };
     // Our own write is still queued: Ticket Pulse is the newer side by definition.
     if (ticket.mirrorState === 'pending') return out;
     if (typeof client.fetchTicketActivities !== 'function') return out;
@@ -1328,6 +1446,7 @@ class MirrorService {
   async _mirrorThreadEntryDelete(job, client) {
     const fsConversationId = job.payload?.fsConversationId;
     if (!fsConversationId) return; // note was never mirrored — nothing to delete
+    if (await this._isAdopted(job.ticketId)) throw new AdoptedSkip(job.ticketId);
     await client.deleteConversation(Number(fsConversationId));
     logger.info(`Mirror: deleted FS conversation ${fsConversationId} for ticket ${job.ticketId}`);
   }
@@ -1365,6 +1484,8 @@ class MirrorService {
    * is disabled (dev).
    */
   async reconcile(workspaceId, { since = null, activeOnly = true, limit = 30, deferWhenBusy = false } = {}) {
+    // FreshService switched off: no copies to read back (Shadow: counted).
+    if (!(await this._fsAllowed(workspaceId, 'reconcile'))) return { skipped: true, reason: 'freshservice_off' };
     const client = await this._getClient(workspaceId);
     if (!client) return { skipped: true, reason: 'freshservice_not_configured' };
 
@@ -1395,6 +1516,7 @@ class MirrorService {
         workspaceId,
         origin: TICKET_ORIGIN.TICKETPULSE,
         freshserviceTicketId: { not: null },
+        AND: [NOT_ADOPTED],
         ...(activeNames ? { status: { in: activeNames } } : {}),
         ...(since ? { mirroredAt: { gte: new Date(since) } } : {}),
       },
@@ -1416,6 +1538,7 @@ class MirrorService {
         workspaceId,
         origin: TICKET_ORIGIN.TICKETPULSE,
         freshserviceTicketId: { not: null },
+        AND: [NOT_ADOPTED],
         status: { in: terminalNames },
         updatedAt: { gte: new Date(Date.now() - RECENTLY_CLOSED_WINDOW_MS) },
       };
@@ -1446,6 +1569,7 @@ class MirrorService {
             workspaceId,
             origin: TICKET_ORIGIN.TICKETPULSE,
             freshserviceTicketId: { not: null },
+            AND: [NOT_ADOPTED],
             status: { in: activeNames },
             id: { notIn: tickets.map((t) => t.id) },
           },
@@ -1518,11 +1642,13 @@ class MirrorService {
 
   /** Reconcile ONE TP-born ticket right now (used when a ticket page opens). */
   async reconcileTicket(ticketId, workspaceId) {
+    if (!(await this._fsAllowed(workspaceId, 'reconcile'))) return { skipped: true, reason: 'freshservice_off' };
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId, origin: TICKET_ORIGIN.TICKETPULSE, freshserviceTicketId: { not: null } },
       include: { assignedTech: { select: { freshserviceId: true, name: true } } },
     });
     if (!ticket) return { skipped: true };
+    if (ticket.mirrorState === ADOPTED) return { skipped: true, reason: 'adopted' };
     const client = await this._getClient(workspaceId);
     if (!client) return { skipped: true, reason: 'freshservice_not_configured' };
     return this._reconcileTicketAgainstFs(ticket, client);
@@ -1533,6 +1659,8 @@ class MirrorService {
     const fsId = Number(ticket.freshserviceTicketId);
     let imported = 0;
     let conflicts = 0;
+    // Adopted from FreshService: the old ticket is never read back (A3).
+    if (ticket.mirrorState === ADOPTED) return { imported, conflicts, skipped: 'adopted' };
 
     const [fsTicket, conversations] = await Promise.all([
       client.fetchTicketSafe ? client.fetchTicketSafe(fsId) : null,
@@ -1678,6 +1806,8 @@ class MirrorService {
         }))
         .catch(() => null);
       if (fresh && fresh.status) ticket = { ...ticket, ...fresh };
+      // Adopted while this pass waited: no drift check, no latest-change-wins.
+      if (ticket.mirrorState === ADOPTED) return { imported, conflicts };
       // Our own change is still on its way to the copy (TP-1547, set Pending
       // 10:12, compared at 10:16): the copy is behind, not edited out-of-band.
       const writePending = ticket.mirrorState === 'pending';
@@ -1834,4 +1964,10 @@ class MirrorService {
   }
 }
 
-export default new MirrorService();
+const mirrorService = new MirrorService();
+
+// A workspace's FreshService mode changed (FreshService exit A1): drop its
+// cached clients and state; jobs parked while it was off resume on the way back.
+onModeChange((workspaceId, mode) => mirrorService._onModeChange(workspaceId, mode));
+
+export default mirrorService;

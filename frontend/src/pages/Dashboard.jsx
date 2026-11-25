@@ -501,6 +501,19 @@ export default function Dashboard() {
       const triggerResult = await syncAPI.trigger();
       const duration = ((Date.now() - startTime) / 1000).toFixed(1);
 
+      // FreshService switch (25 Nov 2026): nothing to sync for an Off workspace — say so, not an error.
+      if (triggerResult.data?.status === 'skipped' && triggerResult.data?.reason === 'freshservice_off') {
+        addSyncLog('FreshService is off for this workspace — nothing to sync', 'info');
+        setSyncStatus('success');
+        setSyncMessage('FreshService is off for this workspace');
+        await refreshCurrentView();
+        setTimeout(() => {
+          setSyncStatus(null);
+          setRefreshing(false);
+        }, 5000);
+        return;
+      }
+
       // Check if sync was skipped because one is already running
       if (triggerResult.data?.status === 'skipped') {
         addSyncLog('⚠ Sync already in progress, waiting for it to complete...', 'warn');

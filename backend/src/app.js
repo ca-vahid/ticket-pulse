@@ -686,24 +686,36 @@ process.on('uncaughtException', (err) => {
   setTimeout(() => process.exit(1), 500).unref();
 });
 
+// FreshService Shadow counts (FreshService exit A1) are flushed every 10
+// minutes; a deploy would lose the last window, so flush them on the way out
+// (bounded: never more than 3 s).
+async function flushFreshServiceShadow() {
+  try {
+    const { flushShadow } = await import('./services/fsModeService.js');
+    await Promise.race([flushShadow(), new Promise((resolve) => { setTimeout(resolve, 3000).unref?.(); })]);
+  } catch { /* best effort */ }
+}
+
 // Graceful shutdown
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
   logger.info('SIGTERM received, shutting down gracefully');
 
   scheduledSyncService.stop();
   notificationWorkflowRunWatchdogService.stop();
   notificationWorkflowWatchService.stop();
+  await flushFreshServiceShadow();
   pgPool.end();
 
   process.exit(0);
 });
 
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   logger.info('SIGINT received, shutting down gracefully');
 
   scheduledSyncService.stop();
   notificationWorkflowRunWatchdogService.stop();
   notificationWorkflowWatchService.stop();
+  await flushFreshServiceShadow();
   pgPool.end();
 
   process.exit(0);

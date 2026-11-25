@@ -13,8 +13,9 @@ import {
 import {
   ExternalChip, MirrorChip, OriginChip, LinkedText, PersonAvatar, PriorityDot, ProvenanceChip, SafeHtml, SlaChip, SlaTargetChip, StateChip, StatusPill,
   TagChip, TypePill, PRIORITY_LABELS, formatDayTime, isConversationEntry, pipelineRunLabel, pipelineTriggerLabel,
-  ticketCategoryLabels, timeAgo,
+  ticketCategoryLabels, timeAgo, freshserviceEnabledFrom,
 } from './ticketUi';
+import FsProvenanceLine from './FsProvenanceLine';
 import AssigneePicker from './AssigneePicker';
 import EscalationNote from './EscalationNote';
 import AiAssignModal from './AiAssignModal';
@@ -168,7 +169,10 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
   const ticketTerminal = ticket ? isTerminalStatus(statusDefs, ticket.status) : false;
   const ticketSlaPaused = ticket ? baseStatusOf(statusDefs, ticket.status) === 'Pending' : false;
   const ticketingOn = meta?.nativeTicketingEnabled !== false;
-  const fsUrl = ticket?.freshserviceTicketId
+  // FreshService switch (25 Nov 2026): Off hides every FreshService affordance
+  // (no FS link, no write-back). Default true for an old cached meta.
+  const fsOn = freshserviceEnabledFrom(meta);
+  const fsUrl = ticket?.freshserviceTicketId && fsOn
     ? `https://${FRESHSERVICE_DOMAIN}/a/tickets/${ticket.freshserviceTicketId}`
     : null;
   const canWrite = isNative && ticketingOn;
@@ -198,7 +202,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
   // FS-born tickets take confirmed write-backs for the assignee (same flow as
   // the full detail page): show the picker, but writes go to FreshService after
   // a confirmation. AssigneePicker hides local agents on FS-born tickets.
-  const fsEditable = !isNative && Boolean(ticket?.freshserviceTicketId);
+  const fsEditable = !isNative && Boolean(ticket?.freshserviceTicketId) && fsOn;
   const [fsConfirm, setFsConfirm] = useState(null); // { changes, payload, resolve, reject }
   const [fsBusy, setFsBusy] = useState(false);
   const [fsError, setFsError] = useState(null);
@@ -323,7 +327,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
             <span className="font-mono text-xs font-bold text-muted-foreground whitespace-nowrap">{ticket?.displayRef || '…'}</span>
             {ticket && <OriginChip origin={ticket.origin} />}
             {ticket?.isExternal && <ExternalChip />}
-            {ticket && <MirrorChip ticket={ticket} />}
+            {ticket && <MirrorChip ticket={ticket} fsEnabled={fsOn} />}
             {ticket && <ProvenanceChip ticket={ticket} />}
           </span>
           <span className="ml-auto flex items-center gap-0.5 flex-shrink-0">
@@ -403,6 +407,8 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
         {ticket && (
           <>
             <h2 className="text-sm font-bold text-foreground leading-snug line-clamp-2">{ticket.subject || '(no subject)'}</h2>
+            {/* FreshService switch: imported / adopted — adopting happens on the full ticket page. */}
+            <FsProvenanceLine ticket={ticket} fsEnabled={fsOn} />
             <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
               <StateChip state={ticket.stateChip} />
               <TypePill type={ticket.ticketType} full />
