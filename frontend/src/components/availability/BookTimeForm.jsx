@@ -113,7 +113,7 @@ export function SiteOfficeField({ offices = [], value = '', location = '', onCha
         <label htmlFor={ids.select} className="text-xs font-medium text-muted-foreground">{required ? 'Which office? (required)' : 'Which office?'}</label>
         <select
           id={ids.select}
-          className={INPUT}
+          className={`${INPUT}${officeInvalid ? ' border-destructive' : ''}`}
           value={value}
           onChange={(e) => onChange?.({ siteOfficeId: e.target.value, ...(e.target.value === OTHER_SITE ? {} : { siteLocation: '' }) })}
           aria-required={required}
@@ -133,7 +133,7 @@ export function SiteOfficeField({ offices = [], value = '', location = '', onCha
           <input
             id={ids.site}
             type="text"
-            className={INPUT}
+            className={`${INPUT}${siteInvalid ? ' border-destructive' : ''}`}
             value={location}
             onChange={(e) => onChange?.({ siteOfficeId: OTHER_SITE, siteLocation: e.target.value })}
             placeholder="Client site, city or address"
