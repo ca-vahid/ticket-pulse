@@ -466,3 +466,12 @@ describe('QA 11-05b #3 — AI confidence in the details, preview runs hidden', (
     expect(isPreviewRun({ executionMode: 'mock' })).toBe(false);
   });
 });
+describe('attachment removed (25 Nov 2026)', () => {
+  test('says who removed which file, as a person, not machine chatter', () => {
+    const [it] = buildHistoryItems({ activities: [{
+      id: 77, activityType: 'attachment_removed', performedBy: 'Vahid Haeri', performedAt: '2026-11-25T17:52:05Z',
+      details: { attachmentId: 76995, fileName: 'teams-picture-1.png', originalName: 'teams-picture-1.png', actorName: 'Vahid Haeri', actorEmail: 'v@x.ca', actorKind: 'human' },
+    }] });
+    expect(it).toMatchObject({ actor: 'Vahid Haeri', verb: 'removed an attachment', detail: 'teams-picture-1.png', machine: false });
+  });
+});
