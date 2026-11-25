@@ -1,6 +1,6 @@
 import { describe, expect, test } from '@jest/globals';
 import {
-  GENERIC_TICKET_WORDS, OUTCOMES, SAME_SYMPTOM_WORDS, categoryNameWords, hasAccessSymptom, isServiceMailbox, machineCreatedReason, mergeNote, normalizeSettings, sharedContentWords, subjectTokens, priorityId, raisedPriority, routingSentence, sameProblem, subjectSimilarity, ticketRef,
+  GENERIC_TICKET_WORDS, OUTCOMES, SAME_SYMPTOM_WORDS, categoryNameWords, hasAccessSymptom, isServiceMailbox, machineCreatedReason, mergeNote, normalizeSettings, notAPersonSentence, senderNotAPerson, sharedContentWords, subjectTokens, priorityId, raisedPriority, routingSentence, sameProblem, subjectSimilarity, ticketRef,
 } from '../src/services/assignmentFollowUp/rules.js';
 
 describe('settings (followup_routing_ws<N>)', () => {
@@ -118,6 +118,56 @@ describe('machine-made tickets and service mailboxes', () => {
       expect(isServiceMailbox(e)).toBe(true);
     }
     for (const e of ['dana.fox@example.com', 'eli.park@example.com', 'sam.okafor@example.com', '']) expect(isServiceMailbox(e)).toBe(false);
+  });
+
+  test('a prefixed no-reply is a service mailbox too (the Azure Monitor alert of 24 Nov)', () => {
+    // The start-only pattern missed these: the raise went through.
+    for (const e of ['azure-noreply@monitor.example.com', 'billing.noreply@vendor.example.com', 'portal-notifications@vendor.example.com']) {
+      expect(isServiceMailbox(e)).toBe(true);
+    }
+    expect(machineCreatedReason({ requester: { email: 'azure-noreply@monitor.example.com' } }, null)).toBe('service_mailbox');
+  });
+});
+
+describe('senderNotAPerson: only a person on staff reports again', () => {
+  const DOMAINS = ['corp.example.com', '@corp2.example.com'];
+  const t = (email, over = {}) => ({ subject: 'Files locked', occurrenceCount: 0, requester: { email, unattended: false }, ...over });
+
+  test('a person on an internal domain (sub-domains too) is a person', () => {
+    expect(senderNotAPerson(t('dana.fox@corp.example.com'), { internalDomains: DOMAINS })).toBeNull();
+    expect(senderNotAPerson(t('Eli.Park@CORP2.example.com'), { internalDomains: DOMAINS })).toBeNull();
+    expect(senderNotAPerson(t('dana.fox@eu.corp.example.com'), { internalDomains: DOMAINS })).toBeNull();
+  });
+
+  test('outside the internal domains: external_sender; no internal domains configured skips the test', () => {
+    expect(senderNotAPerson(t('ar@billing-vendor.example.com'), { internalDomains: DOMAINS }))
+      .toEqual({ reason: 'external_sender', why: 'outside_internal_domains', email: 'ar@billing-vendor.example.com' });
+    expect(senderNotAPerson(t(null), { internalDomains: DOMAINS })).toMatchObject({ reason: 'external_sender', why: 'no_email' });
+    expect(senderNotAPerson(t('ar@billing-vendor.example.com'), { internalDomains: [] })).toBeNull();
+  });
+
+  test('machine signals win, internal domain or not', () => {
+    const opts = { internalDomains: DOMAINS };
+    expect(senderNotAPerson(t('dana.fox@corp.example.com'), { ...opts, createdReason: 'api' })).toMatchObject({ reason: 'machine_sender', why: 'api' });
+    expect(senderNotAPerson(t('backup-box@corp.example.com', { requester: { email: 'backup-box@corp.example.com', unattended: true } }), opts))
+      .toMatchObject({ reason: 'machine_sender', why: 'unattended' });
+    expect(senderNotAPerson(t('dana.fox@corp.example.com', { occurrenceCount: 2 }), opts)).toMatchObject({ why: 'alert' });
+    expect(senderNotAPerson(t('azuremon@corp.example.com'), { ...opts, monitoringSender: true })).toMatchObject({ why: 'monitoring_alert' });
+    expect(senderNotAPerson(t('ops@corp.example.com', { subject: 'Fired:Sev3 Azure Monitor Alert vm availability - vm-app-01 (x)' }), opts))
+      .toMatchObject({ why: 'monitoring_alert' });
+    expect(senderNotAPerson(t('ops@corp.example.com', { subject: 'Resolved: Sev2 something' }), opts)).toMatchObject({ why: 'monitoring_alert' });
+    expect(senderNotAPerson(t('azure-noreply@monitor.example.com'), opts)).toMatchObject({ reason: 'machine_sender', why: 'service_mailbox' });
+    expect(senderNotAPerson(t('scanner@corp.example.com'), { ...opts, machineSenderEntry: 'scanner@corp.example.com' }))
+      .toMatchObject({ why: 'machine_sender_list' });
+    // A person's subject that merely mentions an alert is still a person.
+    expect(senderNotAPerson(t('dana.fox@corp.example.com', { subject: 'FW: Fired:Sev3 alert - is this mine?' }), opts)).toBeNull();
+  });
+
+  test('the run sentence', () => {
+    expect(notAPersonSentence({ reason: 'machine_sender', email: 'azure-noreply@monitor.example.com' }))
+      .toBe('Not raised: azure-noreply@monitor.example.com is a machine sender, not a person reporting again.');
+    expect(notAPersonSentence({ reason: 'external_sender', email: 'ar@billing-vendor.example.com' }))
+      .toBe("Not raised: ar@billing-vendor.example.com is outside the workspace's internal domains; only a person on staff reporting again raises the priority.");
   });
 });
 

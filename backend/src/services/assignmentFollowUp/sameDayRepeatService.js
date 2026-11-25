@@ -3,9 +3,10 @@ import settingsRepository from '../settingsRepository.js';
 import logger from '../../utils/logger.js';
 import { getLocalDateBounds, getTodayRange } from '../../utils/timezone.js';
 import { onShiftAt } from '../assignmentLevelMatch/rules.js';
+import { machineSenderMatch } from '../machineSenderService.js';
 import {
-  MAX_REQUESTER_TICKETS_PER_DAY, MODES, OUTCOMES, applyPatch, categoryNameWords, machineCreatedReason, mergeNote, normalizeSettings, priorityId,
-  raisedPriority, routingSentence, sameProblem, ticketRef, toStored,
+  MAX_REQUESTER_TICKETS_PER_DAY, MODES, OUTCOMES, applyPatch, categoryNameWords, machineCreatedReason, mergeNote, normalizeSettings,
+  notAPersonSentence, priorityId, raisedPriority, routingSentence, sameProblem, senderNotAPerson, ticketRef, toStored,
 } from './rules.js';
 
 /**
@@ -47,7 +48,7 @@ const isPersonChange = (d) => Boolean(d && typeof d === 'object' && d.source !==
 /** What the matcher reads from both tickets. */
 const TICKET_FIELDS = Object.freeze({
   id: true, workspaceId: true, requesterId: true, createdAt: true, subject: true, internalCategoryId: true, internalSubcategoryId: true,
-  triageMode: true, occurrenceCount: true, requester: { select: { email: true } },
+  triageMode: true, occurrenceCount: true, requester: { select: { email: true, unattended: true } },
 });
 
 const positive = (n) => Number.isInteger(n) && n > 0;
@@ -89,6 +90,29 @@ class SameDayRepeatService {
     return row?.defaultTimezone || 'America/Vancouver';
   }
 
+  /**
+   * Is the new ticket's requester a person on staff? null when they are, else
+   * { reason: 'machine_sender'|'external_sender', why, email } (rules.senderNotAPerson).
+   * An unreadable lookup counts as "not that signal".
+   */
+  async _senderNotAPerson(workspaceId, ticket, createdReason = null) {
+    const ws = Number(workspaceId);
+    const email = ticket?.requester?.email || null;
+    const [workspace, machineSenderEntry, monitoringSender] = await Promise.all([
+      soft(() => prisma.workspace.findUnique({ where: { id: ws }, select: { internalDomains: true } })),
+      email ? soft(() => machineSenderMatch(ws, email)) : null,
+      email
+        ? soft(async () => {
+          const { default: alertCorrelationService } = await import('../alertCorrelationService.js');
+          return alertCorrelationService.isMonitoringSender(ws, email);
+        }, false)
+        : false,
+    ]);
+    return senderNotAPerson(ticket, {
+      createdReason, machineSenderEntry, monitoringSender: monitoringSender === true, internalDomains: workspace?.internalDomains || [],
+    });
+  }
+
   /** availabilityService.isBusinessHours — the check after-hours escalation uses. Unknown → false. */
   async _isBusinessHours(workspaceId, now = new Date()) {
     try {
@@ -114,9 +138,13 @@ class SameDayRepeatService {
    * about the same problem as `ticket`, or null.
    * @param {object} ticket  { id, workspaceId, requesterId, createdAt, subject, internalCategoryId, internalSubcategoryId }
    *   — anything missing is read from the database (category from the ticket row).
-   * @returns {Promise<null | { ticketId, ref, subject, createdAt, status, matchedOn, similarity, owner: {techId, techName}|null }>}
+   * @param {object} [opts]
+   * @param {boolean} [opts.keepMachineTicket]  evaluate() only: a machine-made `ticket` still gets its
+   *   related ticket back (with `ownMachineReason`), so the run can say why it was not raised.
+   *   Trusted intake is never a repeat either way.
+   * @returns {Promise<null | { ticketId, ref, subject, createdAt, status, matchedOn, similarity, owner: {techId, techName}|null, ownMachineReason }>}
    */
-  async findSameDayRelatedOpenTicket(ticket, { now = new Date() } = {}) {
+  async findSameDayRelatedOpenTicket(ticket, { now = new Date(), keepMachineTicket = false } = {}) {
     try {
       const ticketId = toId(ticket?.id);
       if (!ticketId) return null;
@@ -170,9 +198,16 @@ class SameDayRepeatService {
         }), []),
       ]);
       const createdBy = new Map((createdRows || []).map((r) => [r.ticketId, r]));
-      if (machineCreatedReason(t, createdBy.get(ticketId))) return null;
+      const ownMachineReason = machineCreatedReason(t, createdBy.get(ticketId));
+      if (ownMachineReason && (!keepMachineTicket || ownMachineReason === 'trusted_intake')) return null;
       const linked = new Set((links || []).flatMap((l) => [l.ticketId, l.relatedTicketId]));
-      const people = rows.filter((r) => !linked.has(r.id) && !machineCreatedReason(r, createdBy.get(r.id)));
+      // A service mailbox is the requester's address, shared by both sides: in
+      // evaluate() it is judged once, on the new ticket, so the run can say so.
+      const machineCandidate = (r) => {
+        const why = machineCreatedReason(r, createdBy.get(r.id));
+        return Boolean(why) && !(keepMachineTicket && why === 'service_mailbox');
+      };
+      const people = rows.filter((r) => !linked.has(r.id) && !machineCandidate(r));
       if (!people.length) return null;
 
       const textSimilarity = await this._textSimilarity(ticketId, people.map((r) => r.id));
@@ -206,6 +241,7 @@ class SameDayRepeatService {
         sharedWords: match.sharedWords || [],
         symptom: match.symptom === true,
         owner: toId(row.assignedTechId) ? { techId: row.assignedTechId, techName: row.assignedTech?.name || null } : null,
+        ownMachineReason: ownMachineReason || null,
       };
     } catch (err) {
       logger.warn('Same-day related ticket lookup failed', { ticketId: ticket?.id, error: err.message });
@@ -236,6 +272,9 @@ class SameDayRepeatService {
    * and raises the AI's priority one level (mutates `recommendation`:
    * assessedPriority, assessedPriorityId, repeatReport). Once per ticket: a
    * ticket an earlier run raised keeps that level and is never raised again.
+   * Only a person on staff raises it: a machine sender or a requester outside
+   * the internal domains records notRaisedReason 'machine_sender' /
+   * 'external_sender' and returns `related: null` (no follow-up routing).
    * @returns {Promise<null | { related, bump: {from, to}|null, record, origin }>}
    */
   async evaluate({
@@ -249,19 +288,27 @@ class SameDayRepeatService {
         where: { id },
         select: {
           id: true, workspaceId: true, requesterId: true, createdAt: true, subject: true, triageMode: true, origin: true,
-          internalCategoryId: true, internalSubcategoryId: true,
+          internalCategoryId: true, internalSubcategoryId: true, occurrenceCount: true,
+          requester: { select: { email: true, unattended: true } },
         },
       }));
       if (!row || !toId(row.requesterId)) return null;
       const { triageMode, origin, ...ticket } = row;
+      const ws = toId(ticket.workspaceId) || toId(workspaceId);
       // The AI's category for this run wins over what the ticket had before it.
+      // A machine-made ticket still finds its related ticket, so the run says why it was not raised.
       const related = await this.findSameDayRelatedOpenTicket({
         ...ticket,
-        workspaceId: ticket.workspaceId || workspaceId,
+        workspaceId: ws,
         internalCategoryId: toId(recommendation.internalCategoryId) || ticket.internalCategoryId || null,
         internalSubcategoryId: toId(recommendation.internalSubcategoryId) || ticket.internalSubcategoryId || null,
-      }, { now });
+      }, { now, keepMachineTicket: true });
       if (!related) return null;
+
+      // Only a PERSON on staff reports again (24 Nov 2026): never a machine
+      // sender or monitoring alert, never a requester outside the workspace's
+      // internal domains (a vendor's second invoice notice is not escalating).
+      const notAPerson = await this._senderNotAPerson(ws, ticket, related.ownMachineReason);
 
       const aiPriority = String(recommendation.assessedPriority || '').trim() || null;
       const from = labelOf(aiPriority);
@@ -271,12 +318,15 @@ class SameDayRepeatService {
       let sentence = null;
       // One raise per ticket, ever (second-look review, 23 Nov): the next run
       // reads the raised level back and must not raise it again.
-      const prior = priorityAssessmentEnabled && triageMode !== 'trusted' && from
+      const prior = priorityAssessmentEnabled && triageMode !== 'trusted' && !notAPerson && from
         ? await this.priorRaise(id, { excludeRunId: runId })
         : null;
       if (!priorityAssessmentEnabled) notRaisedReason = 'priority_assessment_off';
       else if (triageMode === 'trusted') notRaisedReason = 'trusted_intake';
-      else if (!to) notRaisedReason = 'no_ai_priority';
+      else if (notAPerson) {
+        notRaisedReason = notAPerson.reason;
+        sentence = notAPersonSentence(notAPerson);
+      } else if (!to) notRaisedReason = 'no_ai_priority';
       else if (prior?.overridden) {
         // A person changed the priority after the raise: their choice stands.
         notRaisedReason = 'person_changed';
@@ -316,6 +366,8 @@ class SameDayRepeatService {
         // The level an earlier raise holds the ticket at, above the AI's answer this run.
         keptAt,
         notRaisedReason,
+        // Why the requester is not a person (machine_sender / external_sender): the signal that said so.
+        ...(notAPerson ? { notAPerson: { reason: notAPerson.reason, why: notAPerson.why, email: notAPerson.email } } : {}),
         sentence,
         // The history row, when the real priority moves, is written by the
         // priority write-back with source 'repeat_report' (freshServiceActionService).
@@ -324,9 +376,10 @@ class SameDayRepeatService {
       };
       recommendation.repeatReport = record;
       logger.info(`Same-day repeat for ticket ${id}: ${related.ref}${raised ? `, priority ${from} → ${to}` : ''}`, {
-        workspaceId, runId, relatedTicketId: related.ticketId, matchedOn: related.matchedOn, notRaisedReason,
+        workspaceId, runId, relatedTicketId: related.ticketId, matchedOn: related.matchedOn, notRaisedReason, notAPerson: notAPerson?.why || null,
       });
-      return { related, bump: raised ? { from, to } : null, keptAt, record, origin: origin || null };
+      // Not a person: recorded on the run, but no follow-up routing either (`related` is what route() acts on).
+      return { related: notAPerson ? null : related, bump: raised ? { from, to } : null, keptAt, record, origin: origin || null };
     } catch (err) {
       logger.warn('Same-day repeat check failed - nothing changed', { workspaceId, ticketId, runId, error: err.message });
       return null;

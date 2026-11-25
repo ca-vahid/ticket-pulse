@@ -34,8 +34,11 @@ jest.unstable_mockModule('../src/services/assigneeAwayService.js', () => ({ defa
 jest.unstable_mockModule('../src/services/ticketService.js', () => ({ default: { addPrivateNote } }));
 const isBusinessHours = jest.fn();
 jest.unstable_mockModule('../src/services/availabilityService.js', () => ({ default: { isBusinessHours } }));
+const isMonitoringSender = jest.fn();
+jest.unstable_mockModule('../src/services/alertCorrelationService.js', () => ({ default: { isMonitoringSender } }));
 
 const { default: service, settingsKey } = await import('../src/services/assignmentFollowUp/sameDayRepeatService.js');
+const { invalidateMachineSenderCache } = await import('../src/services/machineSenderService.js');
 
 const WS = 1;
 const ELI = 12;
@@ -45,11 +48,11 @@ const NOW = pst('10:16');
 
 const NEW_TICKET = {
   id: 2001, workspaceId: WS, requesterId: 77, createdAt: pst('10:15'), subject: "Still can't sign in to Teams", triageMode: null, origin: 'ticketpulse',
-  occurrenceCount: 0, requester: { email: 'dana.fox@example.com' }, internalCategoryId: null, internalSubcategoryId: null,
+  occurrenceCount: 0, requester: { email: 'dana.fox@corp.example.com', unattended: false }, internalCategoryId: null, internalSubcategoryId: null,
 };
 const FIRST = {
   id: 2000, subject: "Can't sign in to Teams", createdAt: pst('09:47'), status: 'Open', origin: 'ticketpulse', nativeNumber: 1042, freshserviceTicketId: null,
-  triageMode: null, occurrenceCount: 0, requester: { email: 'dana.fox@example.com' },
+  triageMode: null, occurrenceCount: 0, requester: { email: 'dana.fox@corp.example.com', unattended: false },
   internalCategoryId: 10, internalSubcategoryId: 101, assignedTechId: ELI, assignedTech: { id: ELI, name: 'Eli Park' },
 };
 const REC = () => ({
@@ -64,9 +67,11 @@ beforeEach(() => {
   jest.clearAllMocks();
   settingsStore.clear();
   service._reset();
+  invalidateMachineSenderCache();
   createdRows = [];
   priorityRows = [];
-  prismaMock.workspace.findUnique.mockResolvedValue({ defaultTimezone: 'America/Vancouver' });
+  prismaMock.workspace.findUnique.mockResolvedValue({ defaultTimezone: 'America/Vancouver', internalDomains: ['corp.example.com'] });
+  isMonitoringSender.mockResolvedValue(false);
   prismaMock.ticket.findUnique.mockResolvedValue({ ...NEW_TICKET });
   prismaMock.ticket.findMany.mockResolvedValue([FIRST]);
   prismaMock.ticket.count.mockResolvedValue(2);
@@ -265,6 +270,128 @@ describe('evaluate: the repeat raises priority one level (item 5)', () => {
     expect(await service.evaluate({ workspaceId: WS, ticketId: 2001, recommendation: rec })).toBeNull();
     expect(rec.assessedPriority).toBe('Medium');
     expect(rec.repeatReport).toBeUndefined();
+  });
+});
+
+describe('only a person on staff reports again (production, 24 Nov 2026: 6 of 7 raises were wrong)', () => {
+  const ACCOUNTING = 30;
+  const IT_CLOUD = 50;
+  const IT_VMS = 501;
+  const IT_ACCOUNTS = 502;
+  const STORAGE = 40;
+  const FILE_SHARES = 401;
+  /** The new ticket (2001) and the same requester's earlier one (2000), same category / subcategory. */
+  const pair = ({ email, unattended = false, subject, earlier, cat, sub = null }) => {
+    const requester = { email, unattended };
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...NEW_TICKET, subject, requester, internalCategoryId: cat, internalSubcategoryId: sub });
+    prismaMock.ticket.findMany.mockResolvedValue([{ ...FIRST, subject: earlier, requester, internalCategoryId: cat, internalSubcategoryId: sub }]);
+    prismaMock.competencyCategory.findMany.mockResolvedValue([
+      { id: ACCOUNTING, name: 'Accounts Payable' }, { id: IT_CLOUD, name: 'Cloud' }, { id: IT_VMS, name: 'Virtual Machines' },
+      { id: IT_ACCOUNTS, name: 'User Accounts' }, { id: STORAGE, name: 'Storage' }, { id: FILE_SHARES, name: 'File Shares' },
+    ]);
+    return { ...REC(), internalCategoryId: cat, internalSubcategoryId: sub };
+  };
+  const run = (rec) => service.evaluate({ workspaceId: WS, ticketId: 2001, runId: 30, recommendation: rec, now: NOW });
+
+  test.each([
+    ['a duplicate overdue-invoice reminder', 'ar@billing-vendor.example.com', 'Reminder: Invoice 4410023 is overdue'],
+    ['an "invoices are now available online" notice', 'statements@supplier-portal.example.com', 'Invoices for October are now available online!'],
+    ['a "Payment on Account Receipt"', 'receipts@supplier.example.com', 'Payment on Account Receipt'],
+    ['a parcel carrier\'s billing notice', 'billing-online@parcelco.example.com', 'ParcelCo Billing Online - New Invoice(s)'],
+  ])('Accounting, matched on category: %s from a vendor is not raised (external_sender)', async (_label, email, subject) => {
+    const rec = pair({ email, subject, earlier: subject, cat: ACCOUNTING });
+    const out = await run(rec);
+    expect(out).toMatchObject({ bump: null, related: null });
+    expect(rec).toMatchObject({ assessedPriority: 'Medium', assessedPriorityId: 2 });
+    expect(rec.repeatReport).toMatchObject({
+      relatedRef: 'TP-1042', matchedOn: 'category', raised: false, raisedTo: null, keptAt: null, notRaisedReason: 'external_sender',
+      notAPerson: { reason: 'external_sender', why: 'outside_internal_domains', email },
+      sentence: `Not raised: ${email} is outside the workspace's internal domains; only a person on staff reporting again raises the priority.`,
+    });
+    // Not a person: no earlier raise is looked up or held.
+    expect(prismaMock.assignmentPipelineRun.findMany).not.toHaveBeenCalled();
+  });
+
+  test('IT, matched on subcategory: an Azure Monitor "Fired:" alert for another VM is not raised (machine_sender)', async () => {
+    // azure-noreply@ — the start-only service-mailbox pattern missed it, so both tickets counted as a person's.
+    const email = 'azure-noreply@monitor.example.com';
+    const rec = pair({
+      email,
+      subject: 'Fired:Sev3 Azure Monitor Alert vm availability - vm-app-01 (Microsoft.Compute/virtualMachines)',
+      earlier: 'Fired:Sev3 Azure Monitor Alert vm availability - vm-app-02 (Microsoft.Compute/virtualMachines)',
+      cat: IT_CLOUD, sub: IT_VMS,
+    });
+    rec.assessedPriority = 'Medium';
+    const out = await run(rec);
+    expect(out).toMatchObject({ bump: null, related: null });
+    expect(rec.assessedPriority).toBe('Medium');
+    expect(rec.repeatReport).toMatchObject({
+      matchedOn: 'subcategory', raised: false, notRaisedReason: 'machine_sender',
+      notAPerson: { reason: 'machine_sender', why: 'service_mailbox', email },
+      sentence: `Not raised: ${email} is a machine sender, not a person reporting again.`,
+    });
+    // Outside evaluate the alert is no repeat at all (machine tickets on both sides).
+    expect(await service.findSameDayRelatedOpenTicket({ id: 2001, internalCategoryId: IT_CLOUD, internalSubcategoryId: IT_VMS }, { now: NOW })).toBeNull();
+  });
+
+  test('a monitoring alert from an address with no machine word: the alert pair rule\'s sender, or the "Fired:" subject', async () => {
+    const email = 'azuremon@corp.example.com';
+    const subject = 'Fired:Sev3 Azure Monitor Alert vm availability - vm-app-01 (x)';
+    const earlier = 'Fired:Sev3 Azure Monitor Alert vm availability - vm-app-02 (x)';
+    const viaSubject = pair({ email, subject, earlier, cat: IT_CLOUD, sub: IT_VMS });
+    expect((await run(viaSubject)).bump).toBeNull();
+    expect(viaSubject.repeatReport).toMatchObject({ notRaisedReason: 'machine_sender', notAPerson: { why: 'monitoring_alert' } });
+    expect(isMonitoringSender).toHaveBeenCalledWith(WS, email);
+
+    isMonitoringSender.mockResolvedValue(true);
+    const viaRule = pair({ email, subject: 'VM availability dropped on vm-app-01', earlier: 'VM availability dropped on vm-app-02', cat: IT_CLOUD, sub: IT_VMS });
+    expect((await run(viaRule)).bump).toBeNull();
+    expect(viaRule.repeatReport).toMatchObject({ notRaisedReason: 'machine_sender', notAPerson: { why: 'monitoring_alert' } });
+  });
+
+  test('IT, matched on subcategory: an HR system\'s "On Leave Notification" is not raised', async () => {
+    const subject = 'On Leave Notification: Sam Okafor will be going On Leave';
+    const earlier = 'On Leave Notification: Riley Chen will be going On Leave';
+    const external = pair({ email: 'leave-notices@peoplehub.example.com', subject, earlier, cat: IT_CLOUD, sub: IT_ACCOUNTS });
+    expect((await run(external)).bump).toBeNull();
+    expect(external.repeatReport).toMatchObject({ matchedOn: 'subcategory', notRaisedReason: 'external_sender' });
+    // The same notice from an unattended mailbox on the company's own domain.
+    const unattended = pair({ email: 'hr-system@corp.example.com', unattended: true, subject, earlier, cat: IT_CLOUD, sub: IT_ACCOUNTS });
+    expect((await run(unattended)).bump).toBeNull();
+    expect(unattended.repeatReport).toMatchObject({ notRaisedReason: 'machine_sender', notAPerson: { why: 'unattended' } });
+    // ... or one on the workspace's machine-sender list.
+    settingsStore.set('machine_senders_ws1', JSON.stringify({ entries: ['hr-robot@corp.example.com'] }));
+    invalidateMachineSenderCache(WS);
+    const listed = pair({ email: 'hr-robot@corp.example.com', subject, earlier, cat: IT_CLOUD, sub: IT_ACCOUNTS });
+    expect((await run(listed)).bump).toBeNull();
+    expect(listed.repeatReport).toMatchObject({ notRaisedReason: 'machine_sender', notAPerson: { why: 'machine_sender_list' } });
+  });
+
+  test('the right one still raises: a person on staff writes again about the locked file', async () => {
+    const rec = pair({
+      email: 'dana.fox@corp.example.com',
+      subject: 'ProjectsDrive files locked',
+      earlier: 'Access to view ProjectsDrive to find and close a locked file',
+      cat: STORAGE, sub: FILE_SHARES,
+    });
+    const out = await run(rec);
+    expect(out.bump).toEqual({ from: 'Medium', to: 'High' });
+    expect(out.related).toMatchObject({ ticketId: 2000, ref: 'TP-1042', matchedOn: 'subcategory' });
+    expect(rec).toMatchObject({ assessedPriority: 'High', assessedPriorityId: 3 });
+    expect(rec.repeatReport).toMatchObject({ raised: true, raisedTo: 'High', notRaisedReason: null, sentence: 'Raised to High: same problem reported again today (TP-1042).' });
+    expect(rec.repeatReport.notAPerson).toBeUndefined();
+    // Same requester only: the earlier ticket is looked up by this ticket's requester.
+    expect(prismaMock.ticket.findMany.mock.calls[0][0].where).toMatchObject({ requesterId: 77 });
+  });
+
+  test('a workspace with no internal domains skips the domain test (machine checks still apply)', async () => {
+    prismaMock.workspace.findUnique.mockResolvedValue({ defaultTimezone: 'America/Vancouver', internalDomains: [] });
+    const subject = 'Reminder: Invoice 4410023 is overdue';
+    const vendor = pair({ email: 'ar@billing-vendor.example.com', subject, earlier: subject, cat: ACCOUNTING });
+    expect((await run(vendor)).bump).toEqual({ from: 'Medium', to: 'High' });
+    const robot = pair({ email: 'billing.noreply@billing-vendor.example.com', subject, earlier: subject, cat: ACCOUNTING });
+    expect((await run(robot)).bump).toBeNull();
+    expect(robot.repeatReport.notRaisedReason).toBe('machine_sender');
   });
 });
 

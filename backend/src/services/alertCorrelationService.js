@@ -246,6 +246,18 @@ class AlertCorrelationService {
     return rules;
   }
 
+  /** Does an enabled pair rule's sender pattern match this address (a monitoring sender)? Never throws. */
+  async isMonitoringSender(workspaceId, email) {
+    const address = String(email || '').trim().toLowerCase();
+    if (!address) return false;
+    try {
+      const rules = await this._compiledRules(Number(workspaceId));
+      return rules.some((r) => r.sender.test(address));
+    } catch {
+      return false;
+    }
+  }
+
   // ------------------------------------------------------------ evaluation
   /**
    * Evaluate one ticket against the workspace's rules.
