@@ -308,11 +308,13 @@ class AssignmentCorrectionService {
    * freshserviceSyncStatus 'skipped' and the reason.
    */
   async _applyCorrectionLocally({ run, correction, fromTech, targetTech, reason, workspaceId, actorEmail, localOnlyReason }) {
-    const actor = { email: actorEmail || null, name: actorEmail || 'Ticket Pulse' };
+    // An admin's correction (the route is admin-only): a person, never a background writer.
+    const actor = { email: actorEmail || null, name: actorEmail || 'Ticket Pulse admin', role: 'admin' };
     const ticket = await prisma.ticket.findFirst({ where: { id: run.ticketId, workspaceId }, select: { id: true, origin: true } });
     if (ticket?.origin === 'freshservice') {
       const { default: fsAdoptionService } = await import('./fsAdoptionService.js');
-      await fsAdoptionService.adoptForWrite(run.ticketId, workspaceId, actor);
+      const adopted = await fsAdoptionService.adoptForWrite(run.ticketId, workspaceId, actor);
+      if (!adopted) throw new Error('This imported ticket could not be adopted, so the correction was not applied');
     }
     const { default: ticketService } = await import('./ticketService.js');
     await ticketService.assignTicket(run.ticketId, workspaceId, targetTech.id, actor, { allowAssignableOnly: true });

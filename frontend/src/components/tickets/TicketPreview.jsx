@@ -170,8 +170,9 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
   const ticketSlaPaused = ticket ? baseStatusOf(statusDefs, ticket.status) === 'Pending' : false;
   const ticketingOn = meta?.nativeTicketingEnabled !== false;
   // FreshService switch (25 Nov 2026): Off hides every FreshService affordance
-  // (no FS link, no write-back). Default true for an old cached meta.
-  const fsOn = freshserviceEnabledFrom(meta);
+  // (no FS link, no write-back). An old meta without the flag reads as on;
+  // before meta has loaded nothing FreshService-only shows ("hold").
+  const fsOn = Boolean(meta) && freshserviceEnabledFrom(meta);
   const fsUrl = ticket?.freshserviceTicketId && fsOn
     ? `https://${FRESHSERVICE_DOMAIN}/a/tickets/${ticket.freshserviceTicketId}`
     : null;
@@ -408,7 +409,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
           <>
             <h2 className="text-sm font-bold text-foreground leading-snug line-clamp-2">{ticket.subject || '(no subject)'}</h2>
             {/* FreshService switch: imported / adopted — adopting happens on the full ticket page. */}
-            <FsProvenanceLine ticket={ticket} fsEnabled={fsOn} />
+            {(meta || ticket.mirrorState === 'adopted') && <FsProvenanceLine ticket={ticket} fsEnabled={fsOn} />}
             <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
               <StateChip state={ticket.stateChip} />
               <TypePill type={ticket.ticketType} full />

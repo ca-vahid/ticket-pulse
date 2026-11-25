@@ -20,7 +20,7 @@ const refOf = (t) => t?.displayRef
  * tickets can be folded IN as sources — their conversation is copied and the
  * FreshService ticket is closed with a pointer note (QA 07-16 #5).
  */
-export default function MergeTicketsModal({ ticket, onClose, onMerged, statusDefs = null, initialTickets = [] }) {
+export default function MergeTicketsModal({ ticket, onClose, onMerged, statusDefs = null, initialTickets = [], fsEnabled = true }) {
   const [candidates, setCandidates] = useState(null); // [{...ticket, why}]
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
@@ -157,7 +157,7 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged, statusDef
   }, [primaryId, secondaries, notifyRequester, onMerged]);
 
   const fsBadge = (t) => (isFsBorn(t) ? (
-    <span className="inline-flex items-center rounded-full border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-200" title="FreshService-born — can be folded in; it will be closed in FreshService with a pointer note">
+    <span className="inline-flex items-center rounded-full border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-200" title={fsEnabled ? 'FreshService-born — can be folded in; it will be closed in FreshService with a pointer note' : 'Imported from FreshService — can be folded in; it will be closed with a pointer note'}>
       FreshService
     </span>
   ) : null);
@@ -304,7 +304,7 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged, statusDef
                           ? ' · stays open and keeps every conversation'
                           : isTerminal(t)
                             ? ' · already closed — folded in as-is with a pointer note'
-                            : isFsBorn(t)
+                            : isFsBorn(t) && fsEnabled
                               ? ' · will be closed in FreshService with a pointer note'
                               : ' · will be closed with a pointer note'}
                       </span>

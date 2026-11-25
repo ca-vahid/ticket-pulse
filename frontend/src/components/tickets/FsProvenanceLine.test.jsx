@@ -9,12 +9,12 @@ import { canDragTicket } from './TicketBoard';
 // FreshService switch (25 Nov 2026): the imported / adopted line and the
 // helpers every ticket surface gates on.
 
-const FS_BORN = { id: 7, origin: 'freshservice', freshserviceTicketId: '239470', mirrorState: null, status: 'Closed' };
+const FS_BORN = { id: 7, origin: 'freshservice', freshserviceTicketId: '900004', mirrorState: null, status: 'Closed' };
 const ADOPTED = {
-  id: 8, origin: 'ticketpulse', nativeNumber: 1500, freshserviceTicketId: '245123', mirrorState: 'adopted', status: 'Open',
+  id: 8, origin: 'ticketpulse', nativeNumber: 1500, freshserviceTicketId: '900001', mirrorState: 'adopted', status: 'Open',
   activities: [{ activityType: 'adopted_from_freshservice', performedAt: '2026-12-02T18:00:00.000Z' }],
 };
-const MIRRORED = { id: 9, origin: 'ticketpulse', nativeNumber: 1501, freshserviceTicketId: '245200', mirrorState: 'mirrored', status: 'Open' };
+const MIRRORED = { id: 9, origin: 'ticketpulse', nativeNumber: 1501, freshserviceTicketId: '900002', mirrorState: 'mirrored', status: 'Open' };
 
 afterEach(() => cleanup());
 
@@ -33,7 +33,7 @@ describe('helpers', () => {
   });
 
   test('no FreshService link while off; connected unchanged', () => {
-    expect(ticketFsUrl(FS_BORN)).toMatch(/\/a\/tickets\/239470$/);
+    expect(ticketFsUrl(FS_BORN)).toMatch(/\/a\/tickets\/900004$/);
     expect(ticketFsUrl(FS_BORN, { fsEnabled: false })).toBeNull();
   });
 
@@ -69,7 +69,7 @@ describe('FsProvenanceLine', () => {
   test('imported: one quiet line; Adopt to edit asks once, then adopts', async () => {
     const onAdopt = vi.fn(() => Promise.resolve());
     render(<FsProvenanceLine ticket={FS_BORN} fsEnabled={false} canAdopt onAdopt={onAdopt} />);
-    expect(screen.getByTestId('fs-imported-line')).toHaveTextContent('Imported from FreshService #239470 · read-only');
+    expect(screen.getByTestId('fs-imported-line')).toHaveTextContent('Imported from FreshService #900004 · read-only');
     fireEvent.click(screen.getByRole('button', { name: 'Adopt to edit' }));
     expect(screen.getByText(/fully editable here\. FreshService’s copy is no longer updated\./)).toBeInTheDocument();
     expect(onAdopt).not.toHaveBeenCalled();
@@ -84,18 +84,18 @@ describe('FsProvenanceLine', () => {
 
   test('adopted while FreshService exists: a link to the old ticket', () => {
     render(<FsProvenanceLine ticket={ADOPTED} fsEnabled />);
-    const link = screen.getByRole('link', { name: /Adopted from FreshService #245123 on 2 Dec/ });
-    expect(link).toHaveAttribute('href', expect.stringMatching(/\/a\/tickets\/245123$/));
+    const link = screen.getByRole('link', { name: /Adopted from FreshService #900001 on 2 Dec/ });
+    expect(link).toHaveAttribute('href', expect.stringMatching(/\/a\/tickets\/900001$/));
   });
 
   test('adopted while Off: plain text, never a dead link', () => {
     render(<FsProvenanceLine ticket={ADOPTED} fsEnabled={false} />);
-    expect(screen.getByTestId('fs-adopted-line')).toHaveTextContent('Adopted from FreshService #245123 on 2 Dec');
+    expect(screen.getByTestId('fs-adopted-line')).toHaveTextContent('Adopted from FreshService #900001 on 2 Dec');
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
   });
 
   test('adopted with no activity loaded: the line without a date', () => {
     render(<FsProvenanceLine ticket={{ ...ADOPTED, activities: [] }} fsEnabled={false} />);
-    expect(screen.getByTestId('fs-adopted-line')).toHaveTextContent(/^Adopted from FreshService #245123$/);
+    expect(screen.getByTestId('fs-adopted-line')).toHaveTextContent(/^Adopted from FreshService #900001$/);
   });
 });

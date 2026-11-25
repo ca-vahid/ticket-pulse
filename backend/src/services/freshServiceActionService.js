@@ -585,7 +585,7 @@ class FreshServiceActionService {
       return { success: true, dryRun: true, preview, actions };
     }
 
-    // FreshService switch / origin: Off, adopted or TP-born → local fields only.
+    // FreshService switch: Off or adopted → local fields only.
     const priorityBlock = await this._writebackBlock(run.ticket, workspaceId);
     if (priorityBlock) {
       const localUpdated = await this._applyWritebackLocally(run.ticket, workspaceId, actions, 'priority');
@@ -749,7 +749,7 @@ class FreshServiceActionService {
       return { success: true, dryRun: true, preview, actions };
     }
 
-    // FreshService switch / origin: Off, adopted or TP-born → local fields only.
+    // FreshService switch: Off or adopted → local fields only.
     const typeBlock = await this._writebackBlock(run.ticket, workspaceId);
     if (typeBlock) {
       await this._applyWritebackLocally(run.ticket, workspaceId, actions, 'ticket type');
@@ -912,7 +912,7 @@ class FreshServiceActionService {
       return { success: true, dryRun: true, preview, actions: [action] };
     }
 
-    // FreshService switch / origin: Off, adopted or TP-born → local fields only.
+    // FreshService switch: Off or adopted → local fields only.
     const categoryBlock = await this._writebackBlock(ticket, workspaceId);
     if (categoryBlock) {
       await this._applyWritebackLocally(ticket, workspaceId, [action], 'category');
@@ -1037,7 +1037,7 @@ class FreshServiceActionService {
       return { success: true, dryRun: true, preview, actions };
     }
 
-    // FreshService switch / origin: Off, adopted or TP-born → local priority only.
+    // FreshService switch: Off or adopted → local priority only.
     const directBlock = await this._writebackBlock(ticket, workspaceId);
     if (directBlock) {
       const localUpdated = await this._applyWritebackLocally(ticket, workspaceId, actions, 'direct priority');
@@ -1743,8 +1743,9 @@ class FreshServiceActionService {
           ? { syncStatus: 'skipped', syncedAt: new Date(), syncPayload: { ...payloadData, skippedReason }, syncError: skippedReason }
           : { syncStatus: 'synced', syncedAt: new Date(), syncPayload: payloadData, syncError: null },
       });
-      // Only a TP-born copy is ever queued (an Off workspace's mirror holds it).
-      if (actions.length > 0 && tpOwned) {
+      // Only a TP-born copy is ever queued: never for an adopted ticket, and
+      // never while Off (the mirror takes no jobs then).
+      if (actions.length > 0 && tpOwned && !(await isFreshServiceOff(workspaceId))) {
         const { default: mirrorService } = await import('./mirrorService.js');
         await mirrorService.enqueueFieldSync(ticket.workspaceId, ticket.id).catch(() => {});
       }
@@ -1760,20 +1761,15 @@ class FreshServiceActionService {
   }
 
   /**
-   * Why a write-back must NOT PUT to FreshService directly, or null when it may:
-   *   'adopted'           — adopted from FreshService: its FS id is a tombstone;
-   *   'freshservice_off'  — the workspace's FreshService is Off (or never linked);
-   *   'ticketpulse_owned' — a TP-born ticket: Ticket Pulse is its source of truth
-   *                         and its FreshService copy is written by the mirror only
-   *                         (25 Nov 2026: these four write-backs had no origin check,
-   *                         unlike execute(), and PUT straight to the copy).
-   * Shadow counts the FS-born write ('writeback'); connected FS-born → null.
+   * Why a write-back must NOT PUT to FreshService, or null when it may:
+   *   'adopted'          — adopted from FreshService: its FS id is a tombstone;
+   *   'freshservice_off' — the workspace's FreshService is Off (or never linked).
+   * Connected / Shadow → null for both origins: today's behaviour, including
+   * the direct PUT to a TP-born ticket's FreshService copy (the origin
+   * question is out of scope for this release). Shadow counts 'writeback'.
    */
   async _writebackBlock(ticket, workspaceId) {
     if (ticket?.mirrorState === 'adopted') return 'adopted';
-    if (ticket?.origin === TICKET_ORIGIN.TICKETPULSE) {
-      return (await isFreshServiceOff(workspaceId)) ? 'freshservice_off' : 'ticketpulse_owned';
-    }
     if (!(await fsGate(workspaceId, 'writeback'))) return 'freshservice_off';
     return null;
   }
@@ -1789,26 +1785,22 @@ class FreshServiceActionService {
   }
 
   /**
-   * Apply a write-back's local fields only (no FreshService call). A TP-born
-   * copy is queued for the mirror; an adopted or FS-born ticket never is.
+   * Apply a write-back's local fields only (no FreshService call, nothing
+   * queued for the mirror) — only ever for an Off workspace or an adopted
+   * ticket, neither of which has a FreshService copy to write.
    * Returns true when the row was updated.
    */
   async _applyWritebackLocally(ticket, workspaceId, actions, label) {
     const localFields = Object.assign({}, ...(actions || []).map((a) => a?.localFields || {}));
     if (!ticket?.id || Object.keys(localFields).length === 0) return false;
     const mirrorPatch = await this._localMirrorPatch(ticket, workspaceId);
-    const updated = await prisma.ticket.update({
+    return prisma.ticket.update({
       where: { id: ticket.id },
       data: { ...localFields, ...mirrorPatch, updatedAt: new Date() },
     }).then(() => true).catch((err) => {
       logger.warn(`Local ${label} write failed for ticket ${ticket.id}: ${err.message}`);
       return false;
     });
-    if (updated && ticket.origin === TICKET_ORIGIN.TICKETPULSE && ticket.mirrorState !== 'adopted') {
-      const { default: mirrorService } = await import('./mirrorService.js');
-      await mirrorService.enqueueFieldSync(workspaceId, ticket.id).catch(() => {});
-    }
-    return updated;
   }
 
   /** Record a run's write-back as skipped (applied locally) with its reason. */

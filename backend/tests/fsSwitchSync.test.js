@@ -156,6 +156,22 @@ describe('adopted tickets', () => {
   });
 });
 
+describe('the deleted check only marks rows that are still FreshService-born', () => {
+  test('the Deleted write is conditional on origin; a row adopted meanwhile is skipped with no audit row', async () => {
+    const { default: activityRepo } = await import('../src/services/ticketActivityRepository.js');
+    prismaMock.ticket.findMany.mockResolvedValue([{ id: 7, freshserviceTicketId: 77n, subject: 'x', status: 'Open', assignedTechId: null }]);
+    fsClient.fetchTicketSafe.mockResolvedValue(null); // "404": would read as hard-deleted
+    prismaMock.ticket.update.mockRejectedValueOnce(Object.assign(new Error('Record to update not found.'), { code: 'P2025' }));
+    await syncService._reconcileTicketStatuses(LIVE);
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith({
+      where: { id: 7, origin: 'freshservice' },
+      data: expect.objectContaining({ status: 'Deleted' }),
+    });
+    expect(activityRepo.create).not.toHaveBeenCalled();
+    expect(prismaMock.assignmentPipelineRun.updateMany).not.toHaveBeenCalled();
+  });
+});
+
 describe('Shadow runs as today and is counted', () => {
   test('the technician step counts "sync"; the deleted check counts "deleted_check"; reconcile counts "reconcile"', async () => {
     modes.set(LIVE, 'shadow');

@@ -13,11 +13,14 @@ import { ticketsAPI } from '../../services/api';
  * deleted in FreshService in the same call — it goes to FreshService's trash
  * and can be restored there.
  */
-export default function RelatedMergeButton({ source, target, canDeleteFs = false, onMerged }) {
+export default function RelatedMergeButton({ source, target, canDeleteFs: canDeleteFsProp = false, fsEnabled = true, onMerged }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const fsBorn = source?.origin === 'freshservice';
+  // FreshService switch (25 Nov 2026): with FreshService off there is nothing
+  // to delete there — no checkbox, never ticked.
+  const canDeleteFs = canDeleteFsProp && fsEnabled !== false;
   const [deleteFs, setDeleteFs] = useState(fsBorn && canDeleteFs);
   const dialogRef = useRef(null);
 
@@ -85,7 +88,7 @@ export default function RelatedMergeButton({ source, target, canDeleteFs = false
                   ? <li>{source.displayRef} gets a note pointing to {target.displayRef}.</li>
                   : <li>{source.displayRef} is closed with a note pointing to {target.displayRef}.</li>}
               </ul>
-              {fsBorn && (
+              {fsBorn && fsEnabled !== false && (
                 <label className={`flex items-start gap-2 rounded-lg border border-border p-3 ${canDeleteFs ? 'cursor-pointer' : 'opacity-70'}`}>
                   <input
                     type="checkbox"

@@ -47,7 +47,7 @@ jest.unstable_mockModule('../src/services/statusService.js', () => ({
   },
 }));
 
-const { default: fsAdoptionService, adoptionReasonFor, isAdoptedTicket } = await import('../src/services/fsAdoptionService.js');
+const { default: fsAdoptionService, adoptionReasonFor, isAdoptedTicket, isBackgroundWriter } = await import('../src/services/fsAdoptionService.js');
 const { NotFoundError, ValidationError } = await import('../src/utils/errors.js');
 
 const fsBorn = (over = {}) => ({
@@ -222,5 +222,36 @@ describe('adoptionReasonFor', () => {
     expect(adoptionReasonFor({ role: 'integration', name: 'Some integration' })).toBe('api_write');
     expect(adoptionReasonFor({ role: 'agent', email: 'ada@example.com' })).toBe('agent');
     expect(adoptionReasonFor(null)).toBe('agent');
+  });
+});
+
+describe('background writers never adopt (isBackgroundWriter / adoptForWrite)', () => {
+  test.each([
+    [{ email: 'autoclose@ticketpulse.internal', name: 'Ticket Pulse (closed after resolving)', role: 'system' }, true],
+    [{ name: 'Notification workflow', email: null }, true],
+    [{ name: 'Ticket Pulse (owner away)', email: null, role: 'automation' }, true],
+    [{ name: 'Ticket Pulse (urgent response)', role: 'automation', actorKind: 'system' }, true],
+    [{ name: 'Ticket Pulse alert correlation', email: 'alerts@ticketpulse.internal', role: 'system' }, true],
+    [null, true],
+    [{ email: 'ada@example.com', name: 'Ada Agent', role: 'agent' }, false],
+    [{ email: 'apikey:tpk_abc', name: 'Integration', role: 'api' }, false],
+    [{ email: 'ada@example.com', name: 'Ada Agent', via: { kind: 'personal_key', keyId: 3 } }, false],
+    [{ name: 'Some integration', role: 'integration' }, false],
+  ])('%o → background %s', (actor, expected) => {
+    expect(isBackgroundWriter(actor)).toBe(expected);
+  });
+
+  test('adoptForWrite: a system actor skips (null, nothing written); an agent adopts', async () => {
+    const out = await fsAdoptionService.adoptForWrite(77, 1, { name: 'Ticket Pulse', role: 'system' });
+    expect(out).toBeNull();
+    expect(prismaMock.ticket.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.ticket.updateMany).not.toHaveBeenCalled();
+
+    prismaMock.ticket.findFirst.mockResolvedValueOnce(fsBorn());
+    prismaMock.ticket.updateMany.mockResolvedValueOnce({ count: 1 });
+    prismaMock.ticket.findUnique.mockResolvedValueOnce(fsBorn({ origin: 'ticketpulse', nativeNumber: 2001, mirrorState: 'adopted' }));
+    const adopted = await fsAdoptionService.adoptForWrite(77, 1, { email: 'ada@example.com', name: 'Ada Agent', role: 'agent' });
+    expect(adopted.adopted).toBe(true);
+    expect(prismaMock.ticketActivity.create.mock.calls[0][0].data.details).toEqual(expect.objectContaining({ reason: 'agent', adoptedBy: 'ada@example.com' }));
   });
 });

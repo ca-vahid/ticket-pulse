@@ -21,10 +21,10 @@ const BASE = {
   toEmails: [], ccEmails: [], replyCcEmails: [], fwdEmails: [], tags: [], activities: [], approvals: [], attachments: [],
   mergedInto: null, stateChip: null, thread: [],
 };
-const FS_BORN = { ...BASE, origin: 'freshservice', freshserviceTicketId: '239470', displayRef: '#239470', mirrorState: null };
+const FS_BORN = { ...BASE, origin: 'freshservice', freshserviceTicketId: '900004', displayRef: '#900004', mirrorState: null };
 const ADOPTED = {
-  ...BASE, status: 'Open', origin: 'ticketpulse', nativeNumber: 1500, displayRef: 'TP-1500', freshserviceTicketId: '239470', mirrorState: 'adopted',
-  activities: [{ id: 1, activityType: 'adopted_from_freshservice', performedBy: 'Agent', performedAt: '2026-12-02T18:00:00Z', details: { fsTicketId: '239470' } }],
+  ...BASE, status: 'Open', origin: 'ticketpulse', nativeNumber: 1500, displayRef: 'TP-1500', freshserviceTicketId: '900004', mirrorState: 'adopted',
+  activities: [{ id: 1, activityType: 'adopted_from_freshservice', performedBy: 'Agent', performedAt: '2026-12-02T18:00:00Z', details: { fsTicketId: '900004' } }],
 };
 
 const META = {
@@ -114,6 +114,25 @@ describe('connected (unchanged)', () => {
   });
 });
 
+describe('before meta loads ("hold")', () => {
+  test('an FS-born ticket shows no FreshService-only affordance until meta says connected, then looks as before', async () => {
+    let landMeta;
+    apiOverrides.get = vi.fn(() => Promise.resolve({ data: { ...FS_BORN, status: 'Open' } }));
+    apiOverrides.meta = vi.fn(() => new Promise((r) => { landMeta = () => r({ data: META }); }));
+    await ready();
+    expect(screen.queryByTestId('fs-owner-strip')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Open in FreshService/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^edit$/i })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('fs-imported-line')).not.toBeInTheDocument();
+
+    landMeta();
+    expect(await screen.findByTestId('fs-owner-strip')).toHaveTextContent('FreshService owns this ticket');
+    expect(screen.getByRole('link', { name: /Open in FreshService/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^edit$/i })).toBeInTheDocument();
+    expect(screen.queryByTestId('fs-imported-line')).not.toBeInTheDocument();
+  });
+});
+
 describe('FreshService off', () => {
   test('an FS-born ticket is imported history: no FS strip, link or Edit; Adopt to edit adopts and reloads', async () => {
     setup(FS_BORN, META_OFF);
@@ -123,7 +142,7 @@ describe('FreshService off', () => {
     });
     await ready();
     const line = await screen.findByTestId('fs-imported-line');
-    expect(line).toHaveTextContent('Imported from FreshService #239470 · read-only');
+    expect(line).toHaveTextContent('Imported from FreshService #900004 · read-only');
     expect(screen.queryByTestId('fs-owner-strip')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /Open in FreshService/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^edit$/i })).not.toBeInTheDocument();
@@ -132,7 +151,7 @@ describe('FreshService off', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Adopt to edit' }));
     fireEvent.click(screen.getByRole('button', { name: 'Adopt' }));
     await waitFor(() => expect(apiOverrides.adopt).toHaveBeenCalledWith(501));
-    expect(await screen.findByTestId('fs-adopted-line')).toHaveTextContent('Adopted from FreshService #239470 on 2 Dec');
+    expect(await screen.findByTestId('fs-adopted-line')).toHaveTextContent('Adopted from FreshService #900004 on 2 Dec');
     expect(screen.getByText(/Adopted — now TP-1500/)).toBeInTheDocument();
   });
 
@@ -140,7 +159,7 @@ describe('FreshService off', () => {
     setup(ADOPTED, META_OFF);
     await ready();
     const line = await screen.findByTestId('fs-adopted-line');
-    expect(line).toHaveTextContent('Adopted from FreshService #239470 on 2 Dec');
+    expect(line).toHaveTextContent('Adopted from FreshService #900004 on 2 Dec');
     expect(line.querySelector('a')).toBeNull();
     expect(screen.getByRole('button', { name: /^edit$/i })).toBeInTheDocument();
     expect(screen.queryByTestId('mirror-badge')).not.toBeInTheDocument();
@@ -154,7 +173,7 @@ describe('adopted while connected', () => {
     await ready();
     const line = await screen.findByTestId('fs-adopted-line');
     await waitFor(() => expect(line.querySelector('a')).not.toBeNull());
-    expect(line.querySelector('a')).toHaveAttribute('href', expect.stringMatching(/\/a\/tickets\/239470$/));
+    expect(line.querySelector('a')).toHaveAttribute('href', expect.stringMatching(/\/a\/tickets\/900004$/));
     expect(screen.queryByTestId('mirror-badge')).not.toBeInTheDocument();
   });
 });

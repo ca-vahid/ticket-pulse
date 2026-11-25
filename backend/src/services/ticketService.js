@@ -1037,11 +1037,14 @@ class TicketService {
    * ticket through the normal Ticket Pulse path — never a refusal, never a
    * FreshService call (QA 25 Nov: an integration's routine notes on old
    * FS-born tickets). Adoption alone does not reopen anything. Returns the
-   * re-read ticket (TICKET_INCLUDE).
+   * re-read ticket (TICKET_INCLUDE), or null for a background writer.
    */
   async _adoptForWrite(ticket, workspaceId, actor) {
     const { default: fsAdoptionService } = await import('./fsAdoptionService.js');
-    await fsAdoptionService.adoptForWrite(ticket.id, workspaceId, actor);
+    const adopted = await fsAdoptionService.adoptForWrite(ticket.id, workspaceId, actor);
+    // A background writer (workflow, automation, Ticket Pulse itself) never
+    // adopts imported history: null → the caller leaves the ticket as it is.
+    if (!adopted) return null;
     return prisma.ticket.findFirst({ where: { id: ticket.id, workspaceId }, include: TICKET_INCLUDE });
   }
 
@@ -1051,7 +1054,15 @@ class TicketService {
    * (assignTicket), then the status (changeStatus) — so a resolve lands after
    * the fields it may depend on. Nothing here calls FreshService.
    */
-  async _applyFsEditNatively(ticket, workspaceId, input = {}, actor, { allowAssignableOnly = false } = {}) {
+  /** A background write that reached imported history: the ticket, unchanged. */
+  _importedLeftAsIs(ticket) {
+    logger.debug?.(`Imported ticket ${ticket.id} left as it is (FreshService off; background write)`);
+    return {
+      ...ticket, displayRef: ticketDisplayRef(ticket), synced: [], noChanges: true, skipped: 'freshservice_off_imported',
+    };
+  }
+
+  async _applyFsEditNatively(ticket, workspaceId, input = {}, actor, { allowAssignableOnly = false, notifyLifecycle = true } = {}) {
     const numOrNull = (v) => (v === null || v === '' ? null : Number(v));
     const fields = {};
     if (input.priority !== undefined) fields.priority = Number(input.priority);
@@ -1073,18 +1084,34 @@ class TicketService {
 
     const applied = [];
     let changed = false;
+    // No transaction: each step is its own Ticket Pulse write. A later step
+    // that fails says what the earlier ones already applied (and the ticket
+    // stays adopted).
+    const step = async (keys, fn) => {
+      try {
+        const r = await fn();
+        if (r?.changed !== false) { changed = true; applied.push(...keys); }
+      } catch (err) {
+        if (applied.length) {
+          err.message = `${err.message} (already applied in Ticket Pulse: ${applied.join(', ')})`;
+          err.applied = [...applied];
+          err.partial = true;
+          if (err instanceof ValidationError) err.details = { ...(err.details || {}), applied: [...applied] };
+        }
+        throw err;
+      }
+    };
     if (Object.keys(fields).length) {
-      const r = await this.updateTicketFields(ticket.id, workspaceId, fields, actor);
-      if (r?.changed !== false) { changed = true; applied.push(...Object.keys(fields)); }
+      await step(Object.keys(fields), () => this.updateTicketFields(ticket.id, workspaceId, fields, actor));
     }
     if (input.assignedTechId !== undefined) {
       const techId = input.assignedTechId === null || input.assignedTechId === '' ? null : Number(input.assignedTechId);
-      const r = await this.assignTicket(ticket.id, workspaceId, techId, actor, { handBack: input.handBack ?? null, allowAssignableOnly });
-      if (r?.changed !== false) { changed = true; applied.push('assignedTechId'); }
+      await step(['assignedTechId'], () => this.assignTicket(ticket.id, workspaceId, techId, actor, {
+        handBack: input.handBack ?? null, allowAssignableOnly, notifyLifecycle,
+      }));
     }
     if (input.status !== undefined) {
-      const r = await this.changeStatus(ticket.id, workspaceId, input.status, actor);
-      if (r?.changed !== false) { changed = true; applied.push('status'); }
+      await step(['status'], () => this.changeStatus(ticket.id, workspaceId, input.status, actor, { notifyLifecycle }));
     }
     const fresh = await prisma.ticket.findFirst({ where: { id: ticket.id, workspaceId }, include: TICKET_INCLUDE });
     return {
@@ -1370,6 +1397,11 @@ class TicketService {
     // FreshService switch: Off (imported history) → a local-only delete; the
     // FreshService ticket is never touched (and its id is kept).
     const fsOn = await this._fsBornWritable(ticket, workspaceId, 'writeback');
+    if (!fsOn) {
+      // A background job never deletes imported history (people and API keys do).
+      const { isBackgroundWriter } = await import('./fsAdoptionService.js');
+      if (isBackgroundWriter(actor)) return this._importedLeftAsIs(ticket);
+    }
     let fsResult = null;
     if (fsOn) {
       const client = await mirrorService.getInteractiveClient(workspaceId);
@@ -4851,7 +4883,8 @@ class TicketService {
     // same edit through the Ticket Pulse path (no FreshService call).
     if (!(await this._fsBornWritable(ticket, workspaceId, 'writeback'))) {
       const adopted = await this._adoptForWrite(ticket, workspaceId, actor);
-      return this._applyFsEditNatively(adopted, workspaceId, input, actor, { allowAssignableOnly });
+      if (!adopted) return this._importedLeftAsIs(ticket);
+      return this._applyFsEditNatively(adopted, workspaceId, input, actor, { allowAssignableOnly, notifyLifecycle, auditDetails });
     }
 
     const workspace = await this._getWorkspace(workspaceId);
@@ -5604,7 +5637,7 @@ class TicketService {
    *   wins, 23 Sep 2026): not written back, and no resolution reason demanded
    *   (the person closed it in FreshService, where there is no such field).
    */
-  async changeStatus(ticketId, workspaceId, status, actor, { resolutionReason = null, resolutionNote = null, fromFreshService = false } = {}) {
+  async changeStatus(ticketId, workspaceId, status, actor, { resolutionReason = null, resolutionNote = null, fromFreshService = false, notifyLifecycle = true } = {}) {
     // Per-workspace registry validation (Phase 8a) — replaces the hardcoded
     // NATIVE_TICKET_STATUSES allowlist. Returns the canonical-cased label.
     status = await statusService.assertValidStatus(workspaceId, status);
@@ -5717,7 +5750,16 @@ class TicketService {
     // e-mail with the AI, which held the person's click for ~5 s. The status is
     // saved and the FreshService copy is queued before this; the workflows run
     // on in the background and log their own failures (_notifyLifecycle never throws).
-    this._notifyLifecycle(ticket, updated, { actorKind: resolvedByKindFromActor(actor), actor });
+    // notifyLifecycle:false — a workflow's write (carried from updateFsTicket on
+    // a just-adopted ticket): no status_changed, exactly as on the FS path; a
+    // close still ends the ticket's open approvals.
+    if (notifyLifecycle) {
+      this._notifyLifecycle(ticket, updated, { actorKind: resolvedByKindFromActor(actor), actor });
+    } else if (isTerminal && !wasTerminal) {
+      await import('./approvalTicketCloseService.js')
+        .then(({ closeApprovalsAfterStatusChange }) => closeApprovalsAfterStatusChange(ticket, updated, { source: 'workflow' }))
+        .catch((err) => logger.warn(`Approval close after status change skipped for ticket ${ticket.id}: ${err.message}`));
+    }
     this._broadcast(workspaceId, 'status', updated, { oldStatus: ticket.status });
     // Parked (plans/PARKED_BUILD_PLAN.md): a status change that is not the
     // park's own ends the park — a person, the API, bulk, or a change adopted
@@ -5736,7 +5778,7 @@ class TicketService {
     return { ...updated, displayRef: ticketDisplayRef(updated), changed: true };
   }
 
-  async assignTicket(ticketId, workspaceId, technicianId, actor, { fromFreshService = false, handBack: handBackInput = null, allowAssignableOnly = false } = {}) {
+  async assignTicket(ticketId, workspaceId, technicianId, actor, { fromFreshService = false, handBack: handBackInput = null, allowAssignableOnly = false, notifyLifecycle = true } = {}) {
     const ticket = await this._requireNativeTicket(ticketId, workspaceId);
     const targetId = technicianId === null || technicianId === undefined ? null : Number(technicianId);
     // QA 10-16 item 1: a change from one person to another may carry the same
@@ -5824,8 +5866,12 @@ class TicketService {
       ...(handBackEvent ? { handBack: handBackEvent } : {}),
     });
     // The actor rides along so a review this settles names who assigned it (MEGA 11-14 Part B).
-    if (actor) await this._notifyLifecycle(ticket, updated, { actor });
-    else await this._notifyLifecycle(ticket, updated);
+    // notifyLifecycle:false (a workflow's write, carried from updateFsTicket on
+    // a just-adopted ticket) tells no lifecycle listener, as on the FS path.
+    if (notifyLifecycle) {
+      if (actor) await this._notifyLifecycle(ticket, updated, { actor });
+      else await this._notifyLifecycle(ticket, updated);
+    }
     this._broadcast(workspaceId, 'assignment', updated, { fromTechId: ticket.assignedTechId });
     if (!fromFreshService) await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
     // The new owner inherits the ticket's unassigned open tasks (Simorgh B7).
@@ -6277,7 +6323,10 @@ class TicketService {
     // FreshService switch: a note or reply on imported history (FS-born, Off)
     // adopts the ticket, then goes out as a Ticket Pulse note/reply.
     if (!isNative && !(await this._fsBornWritable(ticket, workspaceId, 'reply_or_note'))) {
-      await this._adoptForWrite(ticket, workspaceId, actor);
+      // A background writer (workflow, automation) leaves imported history as it is.
+      if (!(await this._adoptForWrite(ticket, workspaceId, actor))) {
+        return { entry: null, email: { sent: false }, attachments: [], skipped: 'freshservice_off_imported' };
+      }
       return this._addThreadEntry(ticketId, workspaceId, input, actor, { isPrivate, files: uploadedFiles, systemNote, replyOptions });
     }
 
@@ -6737,7 +6786,8 @@ class TicketService {
     let fsEditWanted = Boolean(fsConversationId) && !isAdopted(ticket);
     if (fsEditWanted && ticket.origin !== TICKET_ORIGIN.TICKETPULSE
       && !(await this._fsBornWritable(ticket, workspaceId, 'reply_or_note'))) {
-      await this._adoptForWrite(ticket, workspaceId, actor);
+      // A background writer leaves imported history as it is.
+      if (!(await this._adoptForWrite(ticket, workspaceId, actor))) return { entry, skipped: 'freshservice_off_imported' };
       fsEditWanted = false;
     } else if (fsEditWanted && ticket.origin === TICKET_ORIGIN.TICKETPULSE && await isFreshServiceOff(workspaceId)) {
       fsEditWanted = false;

@@ -201,7 +201,7 @@ export function ticketShape(t) {
       ? [{ system: 'FRESHSERVICE', id: String(t.freshserviceTicketId) }]
       : [],
     // FreshService exit (25 Nov 2026): a ticket adopted from FreshService keeps
-    // its old number here ("#245123"); null on every other ticket.
+    // its old number here ("#900001"); null on every other ticket.
     formerRef: formerRefOf(t),
     origin: t.origin,
     subject: t.subject,

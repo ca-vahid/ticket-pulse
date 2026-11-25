@@ -75,7 +75,7 @@ import {
   BrandArt, ExternalChip, SolutionMark, MirrorBadge, OriginChip, LinkedText, PersonAvatar, PriorityBadge, ProvenanceChip, SafeHtml, SlaTargetChip, StateChip, StatusBadge, StatusPill, TypeBadge,
   PRIORITY_LABELS, PRIORITY_STRIP_COLORS, SOURCE_OPTIONS, formatBytes, formatDayTime, formatPhone, isConversationEntry, phoneCopyValue,
   ticketCategoryLabels, ticketSourceLabel, timeAgo,
-  freshserviceEnabledFrom, isImportedTicket,
+  freshserviceEnabledFrom, isAdoptedTicket, isImportedTicket,
 } from '../components/tickets/ticketUi';
 import FsProvenanceLine from '../components/tickets/FsProvenanceLine';
 import ParkDialog, { ParkLine, ParkSuggestion, formatParkDate, formatWakeTime } from '../components/tickets/ParkControls';
@@ -1661,9 +1661,13 @@ export default function TicketDetail() {
   const isNative = ticket?.origin === 'ticketpulse';
   // FreshService switch (25 Nov 2026): Off (or never connected) hides every
   // FreshService affordance. An FS-born ticket is then imported history —
-  // read-only until someone adopts it. Default true for an old cached meta.
-  const fsOn = freshserviceEnabledFrom(meta);
-  const isImported = isImportedTicket(ticket, fsOn);
+  // read-only until someone adopts it. An old meta without the flag reads as
+  // on; before meta has loaded the answer is "hold": no FreshService-only
+  // affordance (strip, Edit, Open in FreshService, inline write-backs) shows
+  // until it is known, and nothing reads as imported either.
+  const metaLoaded = Boolean(meta);
+  const fsOn = metaLoaded && freshserviceEnabledFrom(meta);
+  const isImported = metaLoaded && isImportedTicket(ticket, freshserviceEnabledFrom(meta));
   // QA 10-28 #4: closed into another ticket by grouping (kept out of totals with is_noise).
   const isGroupedCopy = isGroupedCopyOf(ticket);
   const ticketingOn = meta?.nativeTicketingEnabled !== false;
@@ -2521,7 +2525,7 @@ export default function TicketDetail() {
     if (fsDelete && !fsDelete.deleted) {
       showToast('red', `${source.displayRef} was merged, but FreshService did not delete it: ${fsDelete.error || 'unknown reason'}`, { duration: 7000 });
     } else {
-      showToast('emerald', `${source.displayRef} merged into ${ticket.displayRef}${fsDelete?.deleted ? ' and deleted in FreshService' : ''}`);
+      showToast('emerald', `${source.displayRef} merged into ${ticket.displayRef}${fsDelete?.deleted && fsOn ? ' and deleted in FreshService' : ''}`);
     }
   };
   const dismissDupes = () => {
@@ -3113,14 +3117,14 @@ export default function TicketDetail() {
                       )}
                       {/* FreshService switch: "Imported from FreshService" (Off) or
                           "Adopted from FreshService #n on <date>" — one quiet line. */}
-                      <FsProvenanceLine
+                      {(metaLoaded || isAdoptedTicket(ticket)) && <FsProvenanceLine
                         ticket={ticket}
                         fsEnabled={fsOn}
                         canAdopt={canAdopt && ticket.status !== 'Deleted'}
                         onAdopt={adoptTicket}
                         adopting={adopting}
                         error={adoptError}
-                      />
+                      />}
                       {ticket.urgentClock && <UrgentClockLine clock={ticket.urgentClock} />}
                       {ticket.parkedUntil ? (
                         <ParkLine
@@ -4823,7 +4827,7 @@ export default function TicketDetail() {
                                       <span className="min-w-0 flex-1 text-xs text-foreground/85 truncate">{r.subject || '(no subject)'}</span>
                                       <StatusPill status={r.status} className="!text-[9px] !px-1.5" />
                                     </Link>
-                                    {mergeableHere(r) && <RelatedMergeButton source={r} target={ticket} canDeleteFs={canReview} onMerged={afterRelatedMerge} />}
+                                    {mergeableHere(r) && <RelatedMergeButton source={r} target={ticket} canDeleteFs={canReview && fsOn} fsEnabled={fsOn} onMerged={afterRelatedMerge} />}
                                   </li>
                                 ))}
                               </ul>
@@ -4855,7 +4859,7 @@ export default function TicketDetail() {
                                       <span className="min-w-0 flex-1 text-xs text-foreground/85 truncate">{r.subject || '(no subject)'}</span>
                                       <span className="text-[10px] text-muted-foreground/75 whitespace-nowrap">{timeAgo(r.createdAt)}</span>
                                     </Link>
-                                    {mergeableHere(r) && <RelatedMergeButton source={r} target={ticket} canDeleteFs={canReview} onMerged={afterRelatedMerge} />}
+                                    {mergeableHere(r) && <RelatedMergeButton source={r} target={ticket} canDeleteFs={canReview && fsOn} fsEnabled={fsOn} onMerged={afterRelatedMerge} />}
                                   </li>
                                 ))}
                               </ul>
@@ -4886,7 +4890,7 @@ export default function TicketDetail() {
                                         {Math.round((r.similarity || 0) * 100)}%
                                       </span>
                                     </Link>
-                                    {mergeableHere(r) && <RelatedMergeButton source={r} target={ticket} canDeleteFs={canReview} onMerged={afterRelatedMerge} />}
+                                    {mergeableHere(r) && <RelatedMergeButton source={r} target={ticket} canDeleteFs={canReview && fsOn} fsEnabled={fsOn} onMerged={afterRelatedMerge} />}
                                   </li>
                                 ))}
                               </ul>
@@ -5848,6 +5852,7 @@ export default function TicketDetail() {
         <MergeTicketsModal
           ticket={ticket}
           statusDefs={statusDefs}
+          fsEnabled={fsOn}
           onClose={() => setMergeOpen(false)}
           onMerged={(result) => {
             setMergeOpen(false);

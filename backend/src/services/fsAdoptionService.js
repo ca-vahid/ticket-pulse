@@ -47,6 +47,23 @@ export function adoptionReasonFor(actor) {
   return actorKindOf(actor) === 'api' ? 'api_write' : 'agent';
 }
 
+const BACKGROUND_ROLES = new Set(['automation', 'workflow', 'system']);
+const BACKGROUND_KINDS = new Set(['system', 'workflow', 'ai', 'auto_help', 'reconcile', 'mirror', 'freshservice_sync']);
+
+/**
+ * A background writer: Ticket Pulse itself, a workflow or an automation
+ * (auto-close, grouping, park wake, alert correlation, noise close, owner-away
+ * reroute …). Such writes never adopt imported history: they skip it. People,
+ * API keys, personal keys and integrations are not background writers.
+ */
+export function isBackgroundWriter(actor) {
+  if (!actor || typeof actor !== 'object') return true;
+  if (adoptionReasonFor(actor) === 'api_write') return false;
+  if (BACKGROUND_ROLES.has(String(actor.role || '').toLowerCase())) return true;
+  if (BACKGROUND_ROLES.has(String(actor.kind || '').toLowerCase())) return true;
+  return BACKGROUND_KINDS.has(actorKindOf(actor));
+}
+
 /** True for a ticket adopted from FreshService (its FS id is a tombstone). */
 export function isAdoptedTicket(ticket) {
   return ticket?.mirrorState === ADOPTED_MIRROR_STATE;
@@ -179,8 +196,14 @@ class FsAdoptionService {
   /**
    * A write reached imported history (an FS-born ticket in an Off workspace):
    * adopt it for that write. The reason follows the actor (adoptionReasonFor).
+   * A background writer (isBackgroundWriter) never adopts: returns null and
+   * the caller leaves the imported ticket as it is.
    */
   async adoptForWrite(ticketId, workspaceId, actor) {
+    if (isBackgroundWriter(actor)) {
+      logger.debug?.(`Imported ticket ${ticketId} (workspace ${workspaceId}) left as it is: a background write (${actor?.name || actor?.role || 'system'}) never adopts it`);
+      return null;
+    }
     return this.adoptTicket(ticketId, workspaceId, { actorEmail: actor?.email || null, reason: adoptionReasonFor(actor) });
   }
 

@@ -1872,7 +1872,9 @@ class MailboxIngestService {
         // The FS fallback copy carries ccEmails as cc_emails — same mirror
         // churn the manual "Also for" editor triggers.
         // A workspace with no FreshService link keeps 'none' (QA 11-24 #4).
-        ...(ccAdded ? { ccEmails: ccMerge.next, mirrorState: ticket.mirrorState === 'none' ? 'none' : 'pending' } : {}),
+        // FreshService switch: an adopted ticket keeps 'adopted' and an Off
+        // workspace never flips to 'pending' (noFsCopy) — the state is left as it is.
+        ...(ccAdded ? { ccEmails: ccMerge.next, ...(noFsCopy ? {} : { mirrorState: ticket.mirrorState === 'none' ? 'none' : 'pending' }) } : {}),
       },
     });
     // QA 11-12 #2: workflows can ask "does this reply answer a workflow e-mail?"
@@ -2767,7 +2769,8 @@ class MailboxIngestService {
           bodyText: noteText,
           content: noteText,
           occurredAt: email.receivedAt || new Date(),
-          mirrorState: 'pending',
+          // FreshService switch: no copy in an Off workspace ('none', never a stuck 'pending').
+          mirrorState: (await isFreshServiceOff(connection.workspaceId)) ? 'none' : 'pending',
           title: 'Forwarding note',
           rawPayload: { forwarded, agentIntake: { kind: 'forward_note', technicianId: agent.id } },
         },
@@ -2912,7 +2915,8 @@ class MailboxIngestService {
         content: agentText,
         occurredAt: email.receivedAt || now,
         ...(email.internetMessageId ? { emailMessageId: email.internetMessageId } : {}),
-        mirrorState: 'pending',
+        // FreshService switch: no copy in an Off workspace ('none', never a stuck 'pending').
+        mirrorState: (await isFreshServiceOff(connection.workspaceId)) ? 'none' : 'pending',
         rawPayload: {
           ...(recipients || {}),
           deliveryState: 'external',

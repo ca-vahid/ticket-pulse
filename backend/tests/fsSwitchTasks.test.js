@@ -22,7 +22,8 @@ jest.unstable_mockModule('../src/services/fsModeService.js', () => ({
   shadowSettingKey: (ws) => `freshservice_shadow_ws${ws}`,
   _resetFsModeCache: jest.fn(),
 }));
-const adoptionMock = { adoptForWrite: jest.fn(async () => ({ adopted: true })) };
+// Mirrors the real rule (tested in fsAdoptionService.test.js): background writers never adopt.
+const adoptionMock = { adoptForWrite: jest.fn(async (_id, _ws, a) => (!a || ['system', 'workflow', 'automation'].includes(a.role) ? null : { adopted: true })) };
 jest.unstable_mockModule('../src/services/fsAdoptionService.js', () => ({ default: adoptionMock }));
 
 const prismaMock = {
@@ -141,5 +142,16 @@ describe('mirror reconcile entry point', () => {
     fsMode.mode = 'off';
     await ticketTaskService._syncMirroredStatusFromFs({ id: 4, workspaceId: 1, freshserviceTicketId: 233399n, mirrorState: 'mirrored' });
     expect(fsClient.listTicketTasks).not.toHaveBeenCalled();
+  });
+});
+
+describe('background writers skip imported history', () => {
+  test('a system task create on imported history is skipped: no adoption, no task, no FreshService call', async () => {
+    fsMode.mode = 'off';
+    prismaMock.ticket.findFirst.mockResolvedValueOnce(FS);
+    const out = await ticketTaskService.create(3, 1, { title: 'Auto task' }, { name: 'Ticket Pulse', role: 'system' });
+    expect(out).toEqual({ skipped: 'freshservice_off_imported', ticketId: 3 });
+    expect(prismaMock.ticketTask.create).not.toHaveBeenCalled();
+    expect(fsClient.createTicketTask).not.toHaveBeenCalled();
   });
 });

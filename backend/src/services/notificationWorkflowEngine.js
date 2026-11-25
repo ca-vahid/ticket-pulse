@@ -4264,30 +4264,20 @@ export async function applyFsBornStatusWriteback({ node, ticket, setStatus, stat
   const label = String(setStatus).toLowerCase();
   const what = label === 'open' ? 'reopen' : `status "${setStatus}"`;
   const attemptsSoFar = Number(state?.__fsWritebackAttempts?.[node.id]) || 0;
-  // FreshService switch (25 Nov 2026): Off → imported history. FreshService is
-  // not asked; ticketService.updateFsTicket adopts the ticket and sets the
-  // status in Ticket Pulse. Any failure fails the step once — never a retry
-  // loop against a FreshService that is not there.
+  // FreshService switch (25 Nov 2026): Off → imported history. A workflow is a
+  // background writer: it never adopts imported history and never asks
+  // FreshService — the step is a clean skip (no retry loop). A workflow that
+  // runs because a reply already adopted the ticket never reaches here: the
+  // ticket is a Ticket Pulse ticket by then.
   const { isFreshServiceOff } = await import('./fsModeService.js');
   if (await isFreshServiceOff(ticket.workspaceId)) {
-    try {
-      const { default: ticketService } = await import('./ticketService.js');
-      await ticketService.updateFsTicket(ticket.id, ticket.workspaceId, { status: setStatus }, actor?.name
-        ? { name: who.name, email: null, role: 'automation' }
-        : FS_WRITEBACK_ACTOR, { notifyLifecycle: false });
-      return {
-        applied: true,
-        adopted: true,
-        via: 'adopted_freshservice_off',
-        status: { from: ticket.status, to: setStatus },
-        note: 'FreshService is off for this workspace: the ticket was adopted and its status set in Ticket Pulse',
-      };
-    } catch (error) {
-      logger.warn('Workflow status write on an imported ticket failed (FreshService off)', {
-        ticketId: ticket.id, workspaceId: ticket.workspaceId, nodeId: node.id, error: error.message,
-      });
-      throw new Error(`FreshService is off for this workspace: ${what} was not applied (${error.message})`);
-    }
+    logger.debug?.(`Workflow ${what} skipped on imported ticket ${ticket.id}: FreshService is off for workspace ${ticket.workspaceId}`);
+    return {
+      skipped: true,
+      reason: 'FreshService is off for this workspace: the imported ticket was left as it is',
+      via: 'freshservice_off',
+      status: { from: ticket.status, to: setStatus },
+    };
   }
   try {
     const { default: mirrorService } = await import('./mirrorService.js');
@@ -4584,7 +4574,10 @@ export async function executeUpdateTicketNode(node, eventContext, { dryRun = fal
     } else {
       try {
         const applied = await applyWorkflowAssignment(ticket, target.techId);
-        assignment = { assigned: true, techId: target.techId, techName: target.techName, mode: target.mode, via: applied.via };
+        // Imported history in an Off workspace: nothing was assigned.
+        assignment = applied?.skipped
+          ? { skipped: true, reason: applied.reason, techId: target.techId, via: applied.via }
+          : { assigned: true, techId: target.techId, techName: target.techName, mode: target.mode, via: applied.via };
       } catch (error) {
         assignment = { skipped: true, reason: `Assignment failed: ${error.message}` };
       }
@@ -4847,7 +4840,13 @@ export async function executeUpdateTicketNode(node, eventContext, { dryRun = fal
     }
     return { skipped: true, reason: 'No effective changes', ...(categoryError ? { categoryError } : {}) };
   }
-  patch.mirrorState = 'pending';
+  // FreshService switch: the same rule as ticketService._mirrorStatePatch — an
+  // adopted ticket keeps 'adopted' (losing it would make every guard treat its
+  // OLD FreshService ticket as a live copy), 'none' stays 'none', and an Off
+  // workspace never flips to 'pending'.
+  const { isFreshServiceOff } = await import('./fsModeService.js');
+  const fsCopyLive = ticket.mirrorState !== 'adopted' && !(await isFreshServiceOff(ticket.workspaceId));
+  if (fsCopyLive && ticket.mirrorState !== 'none') patch.mirrorState = 'pending';
   await prisma.ticket.update({ where: { id: ticket.id }, data: patch });
 
   // FR 09-11 #4 (review): this node writes status straight to the database,
@@ -4927,8 +4926,11 @@ export async function executeUpdateTicketNode(node, eventContext, { dryRun = fal
       });
   } catch { /* non-fatal */ }
   try {
-    const { default: mirrorService } = await import('./mirrorService.js');
-    await mirrorService.enqueueFieldSync(ticket.workspaceId, ticket.id);
+    // Never for an adopted ticket or an Off workspace (no FreshService copy).
+    if (fsCopyLive) {
+      const { default: mirrorService } = await import('./mirrorService.js');
+      await mirrorService.enqueueFieldSync(ticket.workspaceId, ticket.id);
+    }
   } catch { /* non-fatal */ }
   try {
     const { sseManager } = await import('../routes/sse.routes.js');

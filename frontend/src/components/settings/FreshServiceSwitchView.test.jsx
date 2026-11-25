@@ -76,6 +76,8 @@ describe('words', () => {
       .toBe('root set FreshService to Shadow (was Connected)');
     expect(describeAccessEvent({ action: 'freshservice_tickets_adopted', actorEmail: 'root@example.com', newValue: '55' }))
       .toBe('root adopted 55 open FreshService tickets while switching FreshService off');
+    expect(describeAccessEvent({ action: 'freshservice_tickets_adopted', actorEmail: 'root@example.com', newValue: '3', details: { adopted: 3, failed: 1, switchedOff: false } }))
+      .toBe('root adopted 3 open FreshService tickets while switching FreshService off; 1 could not be adopted (FreshService stayed on)');
   });
 });
 
@@ -131,7 +133,7 @@ describe('panel states', () => {
   test('off: says adopted tickets stay Ticket Pulse tickets; no preflight', () => {
     renderView({ data: data({ mode: 'off', preflight: null, record: { mode: 'off', changedBy: 'root@example.com', changedAt: '2026-11-25T18:00:00.000Z', adoptedCount: 1, history: [] }, job: { state: 'done', step: 'done', total: 1, adopted: 1, failed: [] } }) });
     expect(screen.getByRole('radio', { name: /^off/i })).toBeChecked();
-    expect(screen.getByTestId('fs-off-note')).toHaveTextContent('adopted tickets stay Ticket Pulse tickets');
+    expect(screen.getByTestId('fs-off-note')).toHaveTextContent('Adopted tickets stay Ticket Pulse tickets.');
     expect(screen.queryByTestId('fs-preflight')).not.toBeInTheDocument();
     expect(screen.getByTestId('fs-off-outcome')).toHaveTextContent('FreshService is off for Project Accounting. 1 ticket was adopted and is a Ticket Pulse ticket now.');
   });
@@ -187,10 +189,57 @@ describe('Off flow', () => {
     expect(screen.getByRole('radio', { name: /shadow/i })).toBeDisabled();
   });
 
-  test('failed: the outcome says nothing was switched off, and offers to try again', () => {
-    renderView({ data: data({ job: { state: 'failed', step: 'adopt', total: 2, adopted: 1, failed: [{ id: 77, error: 'store refused' }], error: '1 ticket could not be adopted. Nothing was switched off; try again.' } }) });
-    expect(screen.getByTestId('fs-off-outcome')).toHaveTextContent('Nothing was switched off; try again.');
-    expect(screen.getByText('Ticket 77: store refused')).toBeInTheDocument();
+  test('failed after adopting some: says what happened, with references, and offers to try again', () => {
+    const error = '1 ticket could not be adopted (#900077). 1 ticket was adopted; FreshService is still on. Try again to finish.';
+    renderView({ data: data({ job: { state: 'failed', step: 'adopt', total: 2, adopted: 1, failedCount: 1, failed: [{ ref: '#900077' }], error } }) });
+    expect(screen.getByTestId('fs-off-outcome')).toHaveTextContent(error);
+    expect(screen.queryByText(/store refused|Ticket 77/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try again: turn FreshService off for Project Accounting' })).toBeInTheDocument();
+  });
+
+  test('failed with no stored sentence still says how many were adopted', () => {
+    renderView({ data: data({ job: { state: 'failed', step: 'adopt', total: 4, adopted: 3, failed: [] } }) });
+    expect(screen.getByTestId('fs-off-outcome')).toHaveTextContent('The switch did not finish. 3 tickets were adopted; FreshService is still on. Try again to finish.');
+  });
+
+  test('done with late tickets that could not be adopted: the outcome and a note naming them', () => {
+    renderView({ data: data({ mode: 'off', preflight: null, record: { mode: 'off', history: [] }, job: { state: 'done', step: 'done', total: 3, adopted: 2, failed: [], note: '1 ticket that arrived during the switch could not be adopted (#900008); open it and choose Adopt to edit.' } }) });
+    expect(screen.getByTestId('fs-off-outcome')).toHaveTextContent('2 tickets were adopted');
+    expect(screen.getByTestId('fs-off-note-late')).toHaveTextContent('#900008');
+  });
+
+  test('the Off button uses the destructive token; the copy names who can adopt', () => {
+    openOff(data());
+    expect(screen.getByRole('button', { name: /Turn FreshService off/ })).toHaveClass('bg-destructive');
+    expect(screen.getByTestId('fs-off-flow')).toHaveTextContent('Agents and admins can adopt one to edit it.');
+    expect(screen.getByTestId('fs-off-flow')).toHaveTextContent('won’t be copied to it, and edits made while off aren’t sent back');
+  });
+});
+
+describe('Back on from Off', () => {
+  const OFF = () => data({ mode: 'off', preflight: null, record: { mode: 'off', history: [] } });
+
+  test('asks once, says what it will not do, then sets the mode', () => {
+    const { onSetMode } = renderView({ data: OFF() });
+    fireEvent.click(screen.getByRole('radio', { name: /connected/i }));
+    expect(onSetMode).not.toHaveBeenCalled();
+    const confirm = screen.getByTestId('fs-back-on-confirm');
+    expect(confirm).toHaveTextContent('Turn FreshService back on for Project Accounting? Sync and waiting copies restart. Tickets and messages created while FreshService was off won’t be copied to it, and edits made while off aren’t sent back. Adopted tickets stay Ticket Pulse tickets.');
+    fireEvent.click(screen.getByRole('button', { name: 'Turn it back on (Connected)' }));
+    expect(onSetMode).toHaveBeenCalledWith('connected');
+  });
+
+  test('Cancel keeps it off', () => {
+    const { onSetMode } = renderView({ data: OFF() });
+    fireEvent.click(screen.getByRole('radio', { name: /shadow/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(onSetMode).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('fs-back-on-confirm')).not.toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /^off/i })).toBeChecked();
+  });
+
+  test('the Off panel says what switching back on does not do', () => {
+    renderView({ data: OFF() });
+    expect(screen.getByTestId('fs-off-note')).toHaveTextContent('Tickets and messages created while FreshService was off won’t be copied to it');
   });
 });

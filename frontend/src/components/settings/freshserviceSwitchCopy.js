@@ -149,6 +149,18 @@ export function outcomeSentence(job, workspaceName) {
   if (job.state === 'done') {
     return `FreshService is off for ${workspaceName}. ${n === 0 ? 'There were no open FreshService tickets to adopt.' : `${n.toLocaleString('en-US')} ticket${n === 1 ? ' was' : 's were'} adopted and ${n === 1 ? 'is a Ticket Pulse ticket' : 'are Ticket Pulse tickets'} now.`}`;
   }
-  if (job.state === 'failed') return job.error || 'The switch did not finish. Nothing was switched off; try again.';
+  if (job.state === 'failed') {
+    if (job.error) return job.error;
+    return n > 0
+      ? `The switch did not finish. ${n.toLocaleString('en-US')} ticket${n === 1 ? ' was' : 's were'} adopted; FreshService is still on. Try again to finish.`
+      : 'The switch did not finish. Nothing was switched off; try again.';
+  }
   return null;
+}
+
+/** What switching back on does, and plainly what it does NOT do. */
+export const BACK_ON_LIMITS = 'Tickets and messages created while FreshService was off won’t be copied to it, and edits made while off aren’t sent back. Adopted tickets stay Ticket Pulse tickets.';
+
+export function backOnQuestion(workspaceName) {
+  return `Turn FreshService back on for ${workspaceName}? Sync and waiting copies restart. ${BACK_ON_LIMITS}`;
 }

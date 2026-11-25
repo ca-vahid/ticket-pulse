@@ -59,25 +59,55 @@ async function workspaceUnlinked(ws) {
     linkCache.set(ws, { unlinked, at: Date.now() });
     return unlinked;
   } catch (err) {
+    // Data-safety review (25 Nov): the last answer we had, even expired, beats
+    // a guess; "linked" only when nothing was ever read.
+    if (hit) {
+      logger.warn(`fsMode: workspace ${ws} link read failed (kept the last answer: ${hit.unlinked ? 'not linked' : 'linked'}): ${err.message}`);
+      linkCache.set(ws, { unlinked: hit.unlinked, at: Date.now() });
+      return hit.unlinked;
+    }
     logger.warn(`fsMode: workspace ${ws} link read failed (treated as linked): ${err.message}`);
     return false;
   }
 }
 
-/** The stored record for a workspace ({ mode, changedBy, changedAt, ... }); default connected. */
+/**
+ * The stored record for a workspace ({ mode, changedBy, changedAt, ... }); default connected.
+ * A read error, or a stored value that cannot be read, keeps the LAST record
+ * read (even past its 30 s), so a database hiccup after the switch-off never
+ * turns the gates back to "call FreshService"; 'connected' only when nothing
+ * was ever read. The kept record is re-used for another 30 s before retrying.
+ */
 export async function getModeRecord(workspaceId) {
   const ws = Number(workspaceId);
   if (!Number.isInteger(ws) || ws <= 0) return { mode: 'connected' };
   const hit = modeCache.get(ws);
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.value;
+  const keepLast = (why) => {
+    if (hit) {
+      logger.warn(`fsMode: ${why} for workspace ${ws}; kept the last mode read ('${hit.value?.mode}')`);
+      modeCache.set(ws, { value: hit.value, at: Date.now() });
+      return hit.value;
+    }
+    logger.warn(`fsMode: ${why} for workspace ${ws}; nothing read before, treated as connected`);
+    return { mode: 'connected' };
+  };
+  let raw;
   try {
-    const value = parse(await settingsRepository.get(modeSettingKey(ws))) || { mode: 'connected' };
+    raw = await settingsRepository.get(modeSettingKey(ws));
+  } catch (err) {
+    return keepLast(`mode read failed (${err.message})`);
+  }
+  // No setting at all: never switched, so connected (the default), cached.
+  if (raw === null || raw === undefined || raw === '') {
+    const value = { mode: 'connected' };
     modeCache.set(ws, { value, at: Date.now() });
     return value;
-  } catch (err) {
-    logger.warn(`fsMode: mode read failed for workspace ${ws} (treated as connected): ${err.message}`);
-    return { mode: 'connected' };
   }
+  const value = parse(raw);
+  if (!value) return keepLast('stored mode could not be read');
+  modeCache.set(ws, { value, at: Date.now() });
+  return value;
 }
 
 /** 'never_connected' | 'connected' | 'shadow' | 'off'. */

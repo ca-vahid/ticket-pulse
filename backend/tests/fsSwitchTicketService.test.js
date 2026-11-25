@@ -21,8 +21,14 @@ jest.unstable_mockModule('../src/services/fsModeService.js', () => ({
   shadowSettingKey: (ws) => `freshservice_shadow_ws${ws}`,
   _resetFsModeCache: jest.fn(),
 }));
-const adoptionMock = { adoptForWrite: jest.fn(async () => ({ adopted: true })), adoptTicket: jest.fn() };
-jest.unstable_mockModule('../src/services/fsAdoptionService.js', () => ({ default: adoptionMock }));
+// Mirrors the real rule (fsAdoptionService.isBackgroundWriter, tested there):
+// background writers never adopt.
+const isBackgroundWriter = (a) => !a || ['system', 'workflow', 'automation'].includes(String(a.role || ''));
+const adoptionMock = {
+  adoptForWrite: jest.fn(async (_id, _ws, a) => (isBackgroundWriter(a) ? null : { adopted: true })),
+  adoptTicket: jest.fn(),
+};
+jest.unstable_mockModule('../src/services/fsAdoptionService.js', () => ({ default: adoptionMock, isBackgroundWriter }));
 
 const prismaMock = {
   workspace: { findUnique: jest.fn() },
@@ -95,8 +101,8 @@ describe('updateFsTicket', () => {
 
     expect(adoptionMock.adoptForWrite).toHaveBeenCalledWith(77, 1, actor);
     expect(fields).toHaveBeenCalledWith(77, 1, { priority: 3 }, actor);
-    expect(assign).toHaveBeenCalledWith(77, 1, 9, actor, { handBack: null, allowAssignableOnly: true });
-    expect(status).toHaveBeenCalledWith(77, 1, 'Resolved', actor);
+    expect(assign).toHaveBeenCalledWith(77, 1, 9, actor, { handBack: null, allowAssignableOnly: true, notifyLifecycle: true });
+    expect(status).toHaveBeenCalledWith(77, 1, 'Resolved', actor, { notifyLifecycle: true });
     expect(fsClient.updateTicketFields).not.toHaveBeenCalled();
     expect(mirrorServiceMock.getInteractiveClient).not.toHaveBeenCalled();
     expect(out).toEqual(expect.objectContaining({ adopted: true, skipped: 'freshservice_off', displayRef: 'TP-2001' }));
@@ -331,4 +337,90 @@ test('FreshServiceOffError is a 409 with code freshservice_off (kept for actions
   const err = new FreshServiceOffError();
   expect(err.statusCode).toBe(409);
   expect(err.code).toBe('freshservice_off');
+});
+
+describe('Off: background writers never adopt imported history', () => {
+  const systemActor = { email: 'autoclose@ticketpulse.internal', name: 'Ticket Pulse (closed after resolving)', role: 'system' };
+
+  test('a system status write leaves the imported ticket unchanged; an agent adopts', async () => {
+    fsMode.mode = 'off';
+    prismaMock.ticket.findFirst.mockResolvedValueOnce(fsBorn());
+    const status = jest.spyOn(ticketService, 'changeStatus').mockResolvedValue({ changed: true });
+    const out = await ticketService.updateFsTicket(77, 1, { status: 'Closed' }, systemActor);
+    expect(out).toEqual(expect.objectContaining({ id: 77, noChanges: true, skipped: 'freshservice_off_imported', displayRef: '#245001' }));
+    expect(status).not.toHaveBeenCalled();
+    expect(fsClient.updateTicketFields).not.toHaveBeenCalled();
+    expect(adoptionMock.adoptTicket).not.toHaveBeenCalled();
+
+    prismaMock.ticket.findFirst.mockResolvedValueOnce(fsBorn()).mockResolvedValueOnce(adopted()).mockResolvedValueOnce(adopted({ status: 'Closed' }));
+    await ticketService.updateFsTicket(77, 1, { status: 'Closed' }, actor);
+    expect(status).toHaveBeenCalledWith(77, 1, 'Closed', actor, { notifyLifecycle: true });
+    status.mockRestore();
+  });
+
+  test('a workflow note on imported history is skipped (no entry, no FreshService call)', async () => {
+    fsMode.mode = 'off';
+    prismaMock.ticket.findFirst.mockResolvedValueOnce(fsBorn());
+    prismaMock.ticketThreadEntry.create = jest.fn();
+    const out = await ticketService.addPrivateNote(77, 1, { bodyText: 'Auto-note' }, { name: 'Notification workflow', role: 'workflow' });
+    expect(out).toEqual(expect.objectContaining({ entry: null, skipped: 'freshservice_off_imported' }));
+    expect(prismaMock.ticketThreadEntry.create).not.toHaveBeenCalled();
+    expect(fsClient.addNote).not.toHaveBeenCalled();
+  });
+
+  test('a background delete of imported history is skipped', async () => {
+    fsMode.mode = 'off';
+    prismaMock.ticket.findFirst.mockResolvedValueOnce(fsBorn());
+    prismaMock.ticket.update.mockClear();
+    const out = await ticketService.deleteFsTicketInFreshService(77, 1, { name: 'Ticket Pulse burst grouping', role: 'system' });
+    expect(out.skipped).toBe('freshservice_off_imported');
+    expect(prismaMock.ticket.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('Off: notifyLifecycle:false is honoured on the adopted path', () => {
+  test('carried into assignTicket and changeStatus', async () => {
+    fsMode.mode = 'off';
+    const hrActor = { email: 'hr-coordinator@example.com', name: 'Hana HR', role: 'agent' };
+    prismaMock.ticket.findFirst.mockResolvedValueOnce(fsBorn()).mockResolvedValueOnce(adopted()).mockResolvedValueOnce(adopted());
+    const assign = jest.spyOn(ticketService, 'assignTicket').mockResolvedValue({ changed: true });
+    const status = jest.spyOn(ticketService, 'changeStatus').mockResolvedValue({ changed: true });
+    await ticketService.updateFsTicket(77, 1, { assignedTechId: 9, status: 'Open' }, hrActor, { notifyLifecycle: false });
+    expect(assign).toHaveBeenCalledWith(77, 1, 9, hrActor, expect.objectContaining({ notifyLifecycle: false }));
+    expect(status).toHaveBeenCalledWith(77, 1, 'Open', hrActor, { notifyLifecycle: false });
+    assign.mockRestore(); status.mockRestore();
+  });
+
+  test('changeStatus with notifyLifecycle:false runs no lifecycle notification', async () => {
+    const lifecycle = jest.spyOn(ticketService, '_notifyLifecycle').mockResolvedValue(undefined);
+    const tp = adopted({ status: 'Closed', createdAt: new Date('2026-11-01T10:00:00Z') });
+    prismaMock.ticket.findFirst.mockResolvedValueOnce(tp);
+    prismaMock.ticket.update.mockImplementation(async ({ data }) => ({ ...tp, ...data }));
+    const out = await ticketService.changeStatus(77, 1, 'Open', { email: 'ada@example.com', name: 'Ada', role: 'agent' }, { notifyLifecycle: false });
+    expect(out.changed).toBe(true);
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'Open' }) }));
+    expect(lifecycle).not.toHaveBeenCalled();
+    // and with the default, it does notify
+    prismaMock.ticket.findFirst.mockResolvedValueOnce(tp);
+    await ticketService.changeStatus(77, 1, 'Open', { email: 'ada@example.com', name: 'Ada', role: 'agent' });
+    expect(lifecycle).toHaveBeenCalledTimes(1);
+    lifecycle.mockRestore();
+  });
+});
+
+describe('Off: a partial edit says what was already applied', () => {
+  test('fields applied, then the status fails → the error names the applied fields', async () => {
+    fsMode.mode = 'off';
+    prismaMock.ticket.findFirst.mockResolvedValueOnce(fsBorn()).mockResolvedValueOnce(adopted());
+    const fields = jest.spyOn(ticketService, 'updateTicketFields').mockResolvedValue({ changed: true });
+    const { ValidationError } = await import('../src/utils/errors.js');
+    const status = jest.spyOn(ticketService, 'changeStatus').mockRejectedValue(new ValidationError('A resolution reason is required'));
+    const err = await ticketService.updateFsTicket(77, 1, { priority: 3, status: 'Resolved' }, actor).catch((e) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('A resolution reason is required (already applied in Ticket Pulse: priority)');
+    expect(err.partial).toBe(true);
+    expect(err.applied).toEqual(['priority']);
+    expect(err.details).toEqual({ applied: ['priority'] });
+    fields.mockRestore(); status.mockRestore();
+  });
 });

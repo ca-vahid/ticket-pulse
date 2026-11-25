@@ -40,6 +40,27 @@ describe('SyncHealthCard', () => {
     expect(screen.getByText('never')).toBeInTheDocument();
   });
 
+  test('FreshService switch: an Off workspace reads calm and muted, with its label, never red, amber or "Syncing"', async () => {
+    syncAPI.getHealth.mockResolvedValue({
+      success: true,
+      data: {
+        overall: 'ok',
+        workspaces: [
+          { workspaceId: 1, name: 'IT', intervalMinutes: 5, lastSyncAt: new Date().toISOString(), ageMs: 120000, status: 'ok' },
+          { workspaceId: 5, name: 'Project Accounting', intervalMinutes: 5, lastSyncAt: new Date(Date.now() - 2 * 86400000).toISOString(), ageMs: 2 * 86400000, status: 'freshservice_off', statusLabel: 'FreshService off', syncRunning: true },
+        ],
+      },
+    });
+    const { container } = render(<SyncHealthCard />);
+    await waitFor(() => expect(screen.getByText('Project Accounting')).toBeInTheDocument());
+    const row = container.querySelector('tr[data-status="freshservice_off"]');
+    expect(row).toHaveTextContent('FreshService off');
+    expect(row).toHaveTextContent('No FreshService sync');
+    expect(row).not.toHaveTextContent(/Stale|Late|No syncs yet|Syncing now/);
+    expect(row.innerHTML).not.toMatch(/red-|amber-/);
+    expect(row.querySelector('.rounded-full .rounded-full, span > span.rounded-full')).toHaveClass('bg-muted-foreground/40');
+  });
+
   test('surfaces a load error (e.g. 403 for non-admins) instead of a broken table', async () => {
     syncAPI.getHealth.mockRejectedValue(new Error('Request failed with status code 403'));
     render(<SyncHealthCard />);

@@ -4938,10 +4938,21 @@ class SyncService {
             reason = 'Ticket was marked as spam in FreshService (spam=true)';
           }
 
-          await prisma.ticket.update({
-            where: { id: ticket.id },
-            data: { status: newStatus, lastReconciledAt: new Date() },
-          });
+          // Only while the row is still FS-born (data-safety review, 25 Nov): a
+          // ticket adopted while this batch waited (origin now 'ticketpulse')
+          // is never marked Deleted by a late check. No match = skip quietly.
+          try {
+            await prisma.ticket.update({
+              where: { id: ticket.id, origin: TICKET_ORIGIN.FRESHSERVICE },
+              data: { status: newStatus, lastReconciledAt: new Date() },
+            });
+          } catch (err) {
+            if (err?.code === 'P2025') {
+              logger.info(`Reconciliation: ticket ${ticket.id} is no longer FreshService-born (adopted); not marked ${newStatus}`);
+              continue;
+            }
+            throw err;
+          }
           // TU-3d: skip the audit row when the previous sweep already logged
           // exactly this transition (the 956-identical-rows case).
           if (!(await this._recentDuplicateStatusChange(ticket.id, newStatus, reason))) {

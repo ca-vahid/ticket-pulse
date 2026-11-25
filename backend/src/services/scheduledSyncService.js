@@ -93,6 +93,17 @@ class ScheduledSyncService {
     const wsId = workspace.id;
     const wsName = workspace.name;
 
+    // QA 11-24 #4: a Ticket Pulse-only workspace (no FreshService link) has
+    // nothing to sync. Scheduling it would pull from the global FreshService
+    // account with no workspace filter. FreshService exit A1: the same for a
+    // workspace switched off. Either way its daily review keeps its own
+    // schedule, on the cadence the sync would have had.
+    // Every await happens BEFORE the stop below (data-safety review, 25 Nov):
+    // from stop to set the code is synchronous, so two overlapping restarts
+    // can never both stop, then both schedule, and orphan a cron.
+    const unlinked = isFreshServiceUnlinked(workspace);
+    const noSync = unlinked || await isFreshServiceOff(workspace);
+
     this.stopForWorkspace(wsId);
 
     let intervalMinutes = workspace.syncIntervalMinutes || 5;
@@ -104,13 +115,7 @@ class ScheduledSyncService {
     // Staggered per workspace (22 Sep 2026): see fullSyncCronExpression.
     const cronExpression = fullSyncCronExpression(intervalMinutes, wsId);
 
-    // QA 11-24 #4: a Ticket Pulse-only workspace (no FreshService link) has
-    // nothing to sync. Scheduling it would pull from the global FreshService
-    // account with no workspace filter. FreshService exit A1: the same for a
-    // workspace switched off. Either way its daily review keeps its own
-    // schedule, on the cadence the sync would have had.
-    const unlinked = isFreshServiceUnlinked(workspace);
-    if (unlinked || await isFreshServiceOff(workspace)) {
+    if (noSync) {
       logger.info(`Workspace "${wsName}" (id=${wsId}) ${unlinked ? 'has no FreshService link' : 'has FreshService switched off'}; FreshService sync not scheduled (daily review keeps its own schedule)`);
       this.startDailyReviewForWorkspace(workspace, cronExpression);
       return;
@@ -230,9 +235,9 @@ class ScheduledSyncService {
     const wsId = workspace.id;
     const wsName = workspace.name;
 
-    this.stopVTSyncForWorkspace(wsId);
-
+    // Read before the stop: stop → schedule stays synchronous (no orphaned job).
     const config = await vtRepo.getConfig(wsId);
+    this.stopVTSyncForWorkspace(wsId);
     if (!config?.apiKey || !config?.syncEnabled) {
       return;
     }
@@ -318,12 +323,16 @@ class ScheduledSyncService {
     // (the historical behaviour); N = every N minutes, N in 1..30.
     const every = clampFastSyncInterval(workspace.fastSyncIntervalMinutes);
 
+    // QA 11-24 #4: the fast lane reads FreshService; nothing to read here.
+    // FreshService exit A1: nor for a workspace switched off. The mode is read
+    // BEFORE the stop, so stop → schedule has no await in between.
+    const unlinked = isFreshServiceUnlinked(workspace);
+    const off = !unlinked && await isFreshServiceOff(workspace);
+
     this.stopAssignmentFastSyncForWorkspace(wsId);
 
-    // QA 11-24 #4: the fast lane reads FreshService; nothing to read here.
-    // FreshService exit A1: nor for a workspace switched off.
-    if (isFreshServiceUnlinked(workspace)) return;
-    if (await isFreshServiceOff(workspace)) {
+    if (unlinked) return;
+    if (off) {
       logger.info(`Workspace "${wsName}" (id=${wsId}) has FreshService switched off; assignment fast sync not scheduled`);
       return;
     }
@@ -394,9 +403,9 @@ class ScheduledSyncService {
     const wsId = workspace.id;
     const wsName = workspace.name;
 
-    this.stopCalendarLeaveSyncForWorkspace(wsId);
-
+    // Read before the stop: stop → schedule stays synchronous (no orphaned job).
     const config = await calendarLeaveService.getConfig(wsId);
+    this.stopCalendarLeaveSyncForWorkspace(wsId);
     if (!config?.syncEnabled || !config?.graphGroupId) {
       return;
     }
@@ -800,16 +809,31 @@ class ScheduledSyncService {
 
   async restart(workspaceId = null) {
     if (workspaceId) {
-      const ws = await workspaceRepository.getById(workspaceId);
-      this.stopForWorkspace(workspaceId);
-      await this.startForWorkspace(ws);
-      await this.startAssignmentFastSyncForWorkspace(ws);
-      await this.startVTSyncForWorkspace(ws);
-      await this.startCalendarLeaveSyncForWorkspace(ws);
-      this.startEmbeddingBackfillForWorkspace(ws);
-    } else {
-      return await this.start();
+      // One restart per workspace at a time (data-safety review, 25 Nov): a
+      // mode flip and a settings save landing together run one after the other.
+      return this._serialized(workspaceId, async () => {
+        const ws = await workspaceRepository.getById(workspaceId);
+        this.stopForWorkspace(workspaceId);
+        await this.startForWorkspace(ws);
+        await this.startAssignmentFastSyncForWorkspace(ws);
+        await this.startVTSyncForWorkspace(ws);
+        await this.startCalendarLeaveSyncForWorkspace(ws);
+        this.startEmbeddingBackfillForWorkspace(ws);
+      });
     }
+    return await this.start();
+  }
+
+  /** Run `fn` after any earlier one for the same workspace has settled. */
+  _serialized(workspaceId, fn) {
+    if (!this._wsChains) this._wsChains = new Map();
+    const key = Number(workspaceId);
+    const prev = this._wsChains.get(key) || Promise.resolve();
+    const run = prev.catch(() => {}).then(fn);
+    const tail = run.catch(() => {});
+    this._wsChains.set(key, tail);
+    tail.then(() => { if (this._wsChains.get(key) === tail) this._wsChains.delete(key); });
+    return run;
   }
 
   getStatus() {

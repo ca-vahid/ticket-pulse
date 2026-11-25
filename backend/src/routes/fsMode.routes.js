@@ -34,9 +34,16 @@ export const jobSettingKey = (ws) => `freshservice_switch_job_ws${Number(ws) || 
 const RECENT_DAYS = 7;
 const EMAIL_SOURCE = 1;
 const PROGRESS_WRITE_MS = 1000;
+// The stored job is also the lock across processes (a deploy overlaps two
+// containers): a "running" record whose heartbeat is younger than this blocks
+// a second start. The job refreshes its heartbeat while it runs.
+export const HEARTBEAT_FRESH_MS = 2 * 60 * 1000;
+const HEARTBEAT_EVERY_MS = 30 * 1000;
 
-// Workspaces with an Off job running in THIS process (one job at a time).
-const runningJobs = new Map(); // ws -> Promise
+// Workspaces with an Off job claimed in THIS process: ws -> { token, promise }.
+// The slot is claimed synchronously before the request's first await.
+const runningJobs = new Map();
+let tokenSeq = 0;
 
 const adoption = () => import('../services/fsAdoptionService.js').then((m) => m.default || m);
 
@@ -72,22 +79,72 @@ function parseJob(raw) {
   } catch { return null; }
 }
 
-/** The stored job, with a "running" job that no process owns any more read as interrupted. */
+const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * The honest end of a run that did not switch FreshService off: what did
+ * happen (N adopted) and that FreshService is still on. Exported for tests.
+ */
+export function failureSentence(lead, adopted) {
+  const n = Number(adopted) || 0;
+  return n > 0
+    ? `${lead} ${plural(n, 'ticket')} ${n === 1 ? 'was' : 'were'} adopted; FreshService is still on. Try again to finish.`
+    : `${lead} Nothing was switched off; try again.`;
+}
+
+const heartbeatFresh = (job, now = Date.now()) => {
+  const at = Date.parse(job?.heartbeatAt || job?.startedAt || '');
+  return Number.isFinite(at) && now - at < HEARTBEAT_FRESH_MS;
+};
+
+async function readStoredJob(ws) {
+  return parseJob(await settingsRepository.get(jobSettingKey(ws)).catch(() => null));
+}
+
+/** A job running here, or in another process with a fresh heartbeat. */
+async function jobRunningAnywhere(ws) {
+  if (runningJobs.has(Number(ws))) return true;
+  const stored = await readStoredJob(ws);
+  return stored?.state === 'running' && heartbeatFresh(stored);
+}
+
+/**
+ * The stored job as people should read it:
+ *  - the mode is Off → done, never failed (the switch happened);
+ *  - "running" with no live owner (no slot here, stale heartbeat) → interrupted.
+ */
 export async function readJob(ws) {
-  const job = parseJob(await settingsRepository.get(jobSettingKey(ws)).catch(() => null));
-  if (job?.state === 'running' && !runningJobs.has(Number(ws))) {
-    return { ...job, state: 'failed', error: job.error || 'The switch was interrupted (the server restarted). Nothing was switched off; try again.' };
+  const job = await readStoredJob(ws);
+  if (!job) return null;
+  const mode = await getMode(ws).catch(() => null);
+  if (mode === 'off' && job.state !== 'done') {
+    return { ...job, state: 'done', step: 'done', error: undefined };
+  }
+  if (job.state === 'running' && !runningJobs.has(Number(ws)) && !heartbeatFresh(job)) {
+    return { ...job, state: 'failed', error: failureSentence('The switch was interrupted (the server restarted).', job.adopted) };
   }
   return job;
 }
 
 async function writeJob(ws, job) {
-  await settingsRepository.set(jobSettingKey(ws), JSON.stringify(job)).catch((err) => {
+  const stamped = job.state === 'running' ? { ...job, heartbeatAt: new Date().toISOString() } : job;
+  await settingsRepository.set(jobSettingKey(ws), JSON.stringify(stamped)).catch((err) => {
     logger.warn(`FreshService switch: could not save progress for workspace ${ws}: ${err.message}`);
   });
 }
 
-const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+/** "TP-1500" / "#900001" for the tickets a run could not adopt (never row ids). */
+async function refsFor(ids) {
+  const list = ids.filter((id) => Number.isInteger(Number(id))).map(Number);
+  if (!list.length) return new Map();
+  const rows = await prisma.ticket.findMany({
+    where: { id: { in: list } },
+    select: { id: true, origin: true, nativeNumber: true, freshserviceTicketId: true },
+  }).catch(() => []);
+  return new Map((rows || []).map((t) => [t.id, t.origin === 'ticketpulse' && t.nativeNumber !== null && t.nativeNumber !== undefined
+    ? `TP-${t.nativeNumber}`
+    : t.freshserviceTicketId ? `#${String(t.freshserviceTicketId)}` : 'a ticket']));
+}
 
 /**
  * What Off needs, as facts plus one plain sentence per item.
@@ -128,6 +185,15 @@ export async function buildPreflight(ws) {
     });
   } else {
     items.push({ key: 'mail_intake', state: 'warn', text: `No mailbox is connected to Ticket Pulse. No e-mail came through FreshService in the last ${RECENT_DAYS} days, so nothing is lost, but new mail will need a mailbox.`, link: 'ticket-mailboxes' });
+  }
+
+  // FreshService's own mail forwarding: if it keeps receiving the team's mail,
+  // the same e-mails become tickets in both places after a switch back on.
+  if (recentFsBornMail > 0) {
+    items.push({
+      key: 'fs_mail_forwarding', state: 'warn',
+      text: 'FreshService is still receiving mail for this team. Turn off its mail forwarding before switching off, or the same e-mails will become tickets in both places if you ever switch back.',
+    });
   }
 
   // Tickets still born in FreshService.
@@ -201,7 +267,16 @@ function publicRecord(record) {
 export async function runOffJob(ws, { actorEmail, workspaceName }) {
   const startedAt = new Date().toISOString();
   let job = { state: 'running', step: 'adopt', total: 0, done: 0, adopted: 0, failedCount: 0, failed: [], startedAt, finishedAt: null, actorEmail: actorEmail || null };
-  let pendingWrite = Promise.resolve(); // throttled progress writes, in order
+  let pendingWrite = Promise.resolve(); // progress + heartbeat writes, in order
+  let finished = false;
+  // Heartbeat: the stored record is the cross-process lock, so it must look alive.
+  const heartbeat = setInterval(() => {
+    if (finished) return;
+    const snapshot = { ...job };
+    pendingWrite = pendingWrite.then(() => (finished ? null : writeJob(ws, snapshot)));
+  }, HEARTBEAT_EVERY_MS);
+  heartbeat.unref?.();
+  const stop = async () => { finished = true; clearInterval(heartbeat); await pendingWrite; };
   try {
     const svc = await adoption();
     const preview = await svc.previewWorkspace(ws).catch(() => null);
@@ -227,24 +302,29 @@ export async function runOffJob(ws, { actorEmail, workspaceName }) {
     };
     const result = await svc.adoptWorkspace(ws, { actorEmail, onProgress });
     await pendingWrite; // a late progress write must never land over the final state
-    const adoptedList = result?.adopted;
-    job.adopted = Array.isArray(adoptedList) ? adoptedList.length : (Number(adoptedList) || 0);
-    job.failed = Array.isArray(result?.failed) ? result.failed.map((f) => ({ id: f?.id ?? null, error: String(f?.error || 'failed').slice(0, 300) })) : [];
+    const countOf = (v) => (Array.isArray(v) ? v.length : (Number(v) || 0));
+    // People read references, never row ids or raw error text (that goes to the log).
+    const failedRefs = async (raw) => {
+      const refs = await refsFor(raw.map((f) => f?.id));
+      for (const f of raw) logger.warn(`FreshService switch: ticket ${f?.id} (workspace ${ws}) not adopted: ${f?.error || 'unknown error'}`);
+      return raw.map((f) => ({ ref: refs.get(Number(f?.id)) || 'a ticket' }));
+    };
+    job.adopted = countOf(result?.adopted);
+    job.failed = await failedRefs(Array.isArray(result?.failed) ? result.failed : []);
     job.failedCount = job.failed.length;
     job.total = Math.max(job.total, Number(result?.total) || 0, job.adopted + job.failed.length);
     job.done = job.total;
 
-    if (job.adopted > 0 || job.failed.length > 0) {
+    if (job.failed.length > 0) {
       await recordAccessEvent({
         workspaceId: ws, actorEmail, action: ACTIONS.FRESHSERVICE_TICKETS_ADOPTED,
         targetLabel: workspaceName || null, newValue: String(job.adopted),
-        details: { adopted: job.adopted, failed: job.failed.length, reason: 'switch_off' },
+        details: { adopted: job.adopted, failed: job.failed.length, reason: 'switch_off', switchedOff: false },
       });
-    }
-
-    if (job.failed.length > 0) {
-      job = { ...job, state: 'failed', step: 'adopt', finishedAt: new Date().toISOString(),
-        error: `${plural(job.failed.length, 'ticket')} could not be adopted. Nothing was switched off; try again.` };
+      const shown = job.failed.slice(0, 5).map((f) => f.ref).join(', ');
+      const lead = `${plural(job.failed.length, 'ticket')} could not be adopted (${shown}${job.failed.length > 5 ? ', …' : ''}).`;
+      await stop();
+      job = { ...job, state: 'failed', step: 'adopt', finishedAt: new Date().toISOString(), error: failureSentence(lead, job.adopted) };
       await writeJob(ws, job);
       logger.warn(`FreshService switch: workspace ${ws} not switched off, ${job.failed.length} adoption(s) failed`);
       return job;
@@ -259,13 +339,47 @@ export async function runOffJob(ws, { actorEmail, workspaceName }) {
       targetLabel: workspaceName || null, oldValue: before?.mode || 'connected', newValue: 'off',
       details: { adoptedCount: job.adopted },
     });
-    job = { ...job, state: 'done', step: 'done', finishedAt: new Date().toISOString() };
+
+    // Second pass: tickets that arrived from FreshService while the first pass
+    // ran (it can take minutes, still connected). Sync has stopped now, so this
+    // list is final. A failure here leaves those few as imported history that
+    // an agent can adopt; FreshService stays off.
+    job.adoptedBeforeOff = job.adopted;
+    job.adoptedAfterOff = 0;
+    job.lateFailed = [];
+    try {
+      const late = await svc.adoptWorkspace(ws, { actorEmail });
+      job.adoptedAfterOff = countOf(late?.adopted);
+      job.lateFailed = await failedRefs(Array.isArray(late?.failed) ? late.failed : []);
+    } catch (err) {
+      logger.warn(`FreshService switch: workspace ${ws} second adoption pass failed: ${err.message}`);
+      job.lateError = true;
+    }
+    job.adopted += job.adoptedAfterOff;
+    job.total += job.adoptedAfterOff + job.lateFailed.length;
+    job.done = job.total;
+    const failedTotal = job.lateFailed.length;
+    if (job.adopted > 0 || failedTotal > 0) {
+      await recordAccessEvent({
+        workspaceId: ws, actorEmail, action: ACTIONS.FRESHSERVICE_TICKETS_ADOPTED,
+        targetLabel: workspaceName || null, newValue: String(job.adopted),
+        details: {
+          adopted: job.adopted, failed: failedTotal, reason: 'switch_off', switchedOff: true,
+          adoptedBeforeOff: job.adoptedBeforeOff, adoptedAfterOff: job.adoptedAfterOff,
+        },
+      });
+    }
+    await stop();
+    const lateNote = failedTotal > 0
+      ? `${plural(failedTotal, 'ticket')} that arrived during the switch could not be adopted (${job.lateFailed.slice(0, 5).map((f) => f.ref).join(', ')}); open ${failedTotal === 1 ? 'it' : 'them'} and choose Adopt to edit.`
+      : job.lateError ? 'Tickets that arrived during the switch could not be checked; open any FreshService ticket and choose Adopt to edit.' : null;
+    job = { ...job, state: 'done', step: 'done', finishedAt: new Date().toISOString(), ...(lateNote ? { note: lateNote } : {}) };
     await writeJob(ws, job);
-    logger.info(`FreshService switch: workspace ${ws} is Off (${job.adopted} adopted) by ${actorEmail || 'unknown'}`);
+    logger.info(`FreshService switch: workspace ${ws} is Off (${job.adopted} adopted, ${job.adoptedAfterOff} after Off) by ${actorEmail || 'unknown'}`);
     return job;
   } catch (err) {
-    await pendingWrite;
-    job = { ...job, state: 'failed', finishedAt: new Date().toISOString(), error: `${err.message || 'The switch failed'}. Nothing was switched off; try again.` };
+    await stop();
+    job = { ...job, state: 'failed', finishedAt: new Date().toISOString(), error: failureSentence('The switch stopped before it finished.', job.adopted) };
     await writeJob(ws, job);
     logger.warn(`FreshService switch: workspace ${ws} Off job failed: ${err.message}`);
     return job;
@@ -273,7 +387,7 @@ export async function runOffJob(ws, { actorEmail, workspaceName }) {
 }
 
 /** For tests: wait for a workspace's running job. */
-export function _jobPromise(ws) { return runningJobs.get(Number(ws)) || null; }
+export function _jobPromise(ws) { return runningJobs.get(Number(ws))?.promise || null; }
 
 // ------------------------------------------------------------------ routes
 
@@ -316,7 +430,7 @@ router.put('/:id/freshservice', requireAuth, scopeToTarget, requireGlobalAdmin, 
   if (before === 'never_connected') {
     return res.status(409).json({ success: false, message: 'This workspace was never connected to FreshService; there is nothing to switch.', code: 'never_connected' });
   }
-  if (runningJobs.has(ws.id)) {
+  if (await jobRunningAnywhere(ws.id)) {
     return res.status(409).json({ success: false, message: 'FreshService is being switched off for this workspace; wait for it to finish.', code: 'switch_running' });
   }
   const actorEmail = sessionUser(req)?.email || null;
@@ -334,35 +448,52 @@ router.get('/:id/freshservice/off', requireAuth, scopeToTarget, requireAdmin, as
   res.json({ success: true, data: await readJob(req.workspaceId) });
 }));
 
+const SWITCH_RUNNING = { success: false, message: 'FreshService is already being switched off for this workspace.', code: 'switch_running' };
+
 router.post('/:id/freshservice/off', requireAuth, scopeToTarget, requireGlobalAdmin, asyncHandler(async (req, res) => {
-  const ws = await loadWorkspace(req.workspaceId);
-  if (!ws) return res.status(404).json({ success: false, message: 'Workspace not found' });
-  const mode = await getMode(ws.id);
-  if (mode === 'never_connected') {
-    return res.status(409).json({ success: false, message: 'This workspace was never connected to FreshService; there is nothing to switch off.', code: 'never_connected' });
+  const wsId = req.workspaceId;
+  // Claim this workspace's slot BEFORE the first await, so two requests in the
+  // same process can never both pass; every refusal below releases it.
+  if (runningJobs.has(wsId)) return res.status(409).json(SWITCH_RUNNING);
+  tokenSeq += 1;
+  const token = `${process.pid}-${Date.now()}-${tokenSeq}`;
+  const slot = { token, promise: null };
+  runningJobs.set(wsId, slot);
+  const release = () => { if (runningJobs.get(wsId) === slot) runningJobs.delete(wsId); };
+  let started = false;
+  try {
+    const ws = await loadWorkspace(wsId);
+    if (!ws) return res.status(404).json({ success: false, message: 'Workspace not found' });
+    const mode = await getMode(ws.id);
+    if (mode === 'never_connected') {
+      return res.status(409).json({ success: false, message: 'This workspace was never connected to FreshService; there is nothing to switch off.', code: 'never_connected' });
+    }
+    if (mode === 'off') {
+      return res.status(409).json({ success: false, message: 'FreshService is already off for this workspace.', code: 'already_off' });
+    }
+    const typed = String(req.body?.confirmName ?? '').trim().toLowerCase();
+    if (!typed || typed !== String(ws.name).trim().toLowerCase()) {
+      return res.status(400).json({ success: false, message: `Type the workspace name, "${ws.name}", to confirm.`, code: 'confirm_name_mismatch' });
+    }
+    // Another process (a deploy overlap) may own a run: the stored record is the lock.
+    const stored = await readStoredJob(ws.id);
+    if (stored?.state === 'running' && heartbeatFresh(stored)) {
+      return res.status(409).json({ ...SWITCH_RUNNING, data: stored });
+    }
+    const preflight = await buildPreflight(ws.id);
+    if (preflight.blockers.length) {
+      return res.status(409).json({ success: false, message: preflight.blockers[0], code: 'preflight_blocked', data: { blockers: preflight.blockers } });
+    }
+    const actorEmail = sessionUser(req)?.email || null;
+    const initial = { state: 'running', step: 'check', total: preflight.openFsBorn, done: 0, adopted: 0, failedCount: 0, failed: [], startedAt: new Date().toISOString(), finishedAt: null, actorEmail, token };
+    await writeJob(ws.id, initial);
+    slot.promise = runOffJob(ws.id, { actorEmail, workspaceName: ws.name }).finally(release);
+    started = true;
+    logger.info(`FreshService switch: ${actorEmail || 'unknown'} started turning FreshService off for workspace ${ws.id} (${preflight.openFsBorn} to adopt)`);
+    return res.status(202).json({ success: true, data: initial });
+  } finally {
+    if (!started) release();
   }
-  if (mode === 'off') {
-    return res.status(409).json({ success: false, message: 'FreshService is already off for this workspace.', code: 'already_off' });
-  }
-  const typed = String(req.body?.confirmName ?? '').trim().toLowerCase();
-  if (!typed || typed !== String(ws.name).trim().toLowerCase()) {
-    return res.status(400).json({ success: false, message: `Type the workspace name, "${ws.name}", to confirm.`, code: 'confirm_name_mismatch' });
-  }
-  if (runningJobs.has(ws.id)) {
-    return res.status(409).json({ success: false, message: 'FreshService is already being switched off for this workspace.', code: 'switch_running', data: await readJob(ws.id) });
-  }
-  const preflight = await buildPreflight(ws.id);
-  if (preflight.blockers.length) {
-    return res.status(409).json({ success: false, message: preflight.blockers[0], code: 'preflight_blocked', data: { blockers: preflight.blockers } });
-  }
-  const actorEmail = sessionUser(req)?.email || null;
-  const initial = { state: 'running', step: 'check', total: preflight.openFsBorn, done: 0, adopted: 0, failedCount: 0, failed: [], startedAt: new Date().toISOString(), finishedAt: null, actorEmail };
-  await writeJob(ws.id, initial);
-  const promise = runOffJob(ws.id, { actorEmail, workspaceName: ws.name })
-    .finally(() => { runningJobs.delete(ws.id); });
-  runningJobs.set(ws.id, promise);
-  logger.info(`FreshService switch: ${actorEmail || 'unknown'} started turning FreshService off for workspace ${ws.id} (${preflight.openFsBorn} to adopt)`);
-  res.status(202).json({ success: true, data: initial });
 }));
 
 export default router;

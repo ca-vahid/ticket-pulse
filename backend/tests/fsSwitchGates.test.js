@@ -207,32 +207,86 @@ describe('attachments', () => {
 describe('countUnstoredFsAttachments (the Off preflight number)', () => {
   async function* names(list) { for (const name of list) yield { name }; }
 
-  test('counts the FS-hosted rows with no stored blob: one row query, one listing per prefix, no FreshService call', async () => {
-    prismaMock.ticketAttachment.findMany.mockResolvedValue([
-      { blobName: 'fs/ws-5/att-1-a.pdf' }, // stored
-      { blobName: 'fs/ws-5/att-2-b.png' }, // not stored
-      { blobName: 'fs/ws-5/att-3-c.txt' }, // not stored
-      { blobName: 'fs/ws-2/att-4-d.pdf' }, // ticket moved from workspace 2; stored under its old prefix
+  beforeEach(() => {
+    attachmentService._unstoredCache?.clear();
+    attachmentService._unstoredInflight?.clear();
+  });
+
+  test('counts the FS-hosted rows with no stored blob: one listing per folder, no FreshService call', async () => {
+    prismaMock.ticketAttachment.findMany.mockResolvedValueOnce([
+      { id: 1, blobName: 'fs/ws-5/att-1-a.pdf' }, // stored
+      { id: 2, blobName: 'fs/ws-5/att-2-b.png' }, // not stored
+      { id: 3, blobName: 'fs/ws-5/att-3-c.txt' }, // not stored
+      { id: 4, blobName: 'fs/ws-2/att-4-d.pdf' }, // ticket moved from workspace 2; stored under its old folder
     ]);
     listBlobsFlat.mockImplementation(({ prefix }) => names(prefix === 'fs/ws-5/' ? ['fs/ws-5/att-1-a.pdf', 'fs/ws-5/att-9-other.pdf'] : ['fs/ws-2/att-4-d.pdf']));
 
-    await expect(countUnstoredFsAttachments(OFF)).resolves.toBe(2);
-    expect(prismaMock.ticketAttachment.findMany).toHaveBeenCalledTimes(1);
-    expect(prismaMock.ticketAttachment.findMany).toHaveBeenCalledWith({ where: { workspaceId: OFF, source: 'freshservice' }, select: { blobName: true } });
+    await expect(countUnstoredFsAttachments(OFF, { fresh: true })).resolves.toBe(2);
+    expect(prismaMock.ticketAttachment.findMany).toHaveBeenCalledTimes(1); // a short page ends the walk
+    expect(prismaMock.ticketAttachment.findMany).toHaveBeenCalledWith({
+      where: { workspaceId: OFF, source: 'freshservice', id: { gt: 0 } },
+      select: { id: true, blobName: true },
+      orderBy: { id: 'asc' },
+      take: 5000,
+    });
     expect(listBlobsFlat.mock.calls.map(([o]) => o.prefix).sort()).toEqual(['fs/ws-2/', 'fs/ws-5/']);
     expect(blob.exists).not.toHaveBeenCalled();
     expect(mirrorMock.getInteractiveClient).not.toHaveBeenCalled();
     expect(fsClient.getTicket).not.toHaveBeenCalled();
   });
 
+  test('rows are read a page at a time (id cursor), each folder listed once', async () => {
+    const page1 = Array.from({ length: 5000 }, (_, i) => ({ id: i + 1, blobName: `fs/ws-5/att-${i + 1}-f.pdf` }));
+    prismaMock.ticketAttachment.findMany
+      .mockResolvedValueOnce(page1)
+      .mockResolvedValueOnce([{ id: 5001, blobName: 'fs/ws-5/att-5001-f.pdf' }]);
+    listBlobsFlat.mockImplementation(() => names(['fs/ws-5/att-1-f.pdf']));
+    await expect(countUnstoredFsAttachments(OFF, { fresh: true })).resolves.toBe(5000);
+    expect(prismaMock.ticketAttachment.findMany.mock.calls[1][0].where.id).toEqual({ gt: 5000 });
+    expect(listBlobsFlat).toHaveBeenCalledTimes(1);
+  });
+
+  test('cached for 10 minutes per workspace; { fresh: true } recounts; storing files forgets the count', async () => {
+    prismaMock.ticketAttachment.findMany.mockResolvedValue([{ id: 1, blobName: 'fs/ws-5/att-1-a.pdf' }]);
+    listBlobsFlat.mockImplementation(() => names([]));
+    await expect(countUnstoredFsAttachments(OFF)).resolves.toBe(1);
+    await expect(countUnstoredFsAttachments(OFF)).resolves.toBe(1);
+    expect(prismaMock.ticketAttachment.findMany).toHaveBeenCalledTimes(1);
+
+    listBlobsFlat.mockImplementation(() => names(['fs/ws-5/att-1-a.pdf']));
+    await expect(countUnstoredFsAttachments(OFF, { fresh: true })).resolves.toBe(0);
+    expect(prismaMock.ticketAttachment.findMany).toHaveBeenCalledTimes(2);
+    await expect(countUnstoredFsAttachments(OFF)).resolves.toBe(0); // the fresh count refreshed the cache
+
+    const realNow = Date.now;
+    const spy = jest.spyOn(Date, 'now').mockImplementation(() => realNow() + 11 * 60 * 1000);
+    try {
+      await countUnstoredFsAttachments(OFF);
+      expect(prismaMock.ticketAttachment.findMany).toHaveBeenCalledTimes(3);
+    } finally {
+      spy.mockRestore();
+    }
+
+    attachmentService._forgetUnstoredCount(OFF);
+    await countUnstoredFsAttachments(OFF);
+    expect(prismaMock.ticketAttachment.findMany).toHaveBeenCalledTimes(4);
+  });
+
+  test('concurrent panel loads share one count', async () => {
+    prismaMock.ticketAttachment.findMany.mockResolvedValue([{ id: 1, blobName: 'fs/ws-5/att-1-a.pdf' }]);
+    listBlobsFlat.mockImplementation(() => names([]));
+    await Promise.all([countUnstoredFsAttachments(OFF), countUnstoredFsAttachments(OFF), countUnstoredFsAttachments(OFF)]);
+    expect(prismaMock.ticketAttachment.findMany).toHaveBeenCalledTimes(1);
+  });
+
   test('no FS files: 0 without touching storage; no storage configured: every row counts', async () => {
-    prismaMock.ticketAttachment.findMany.mockResolvedValue([]);
-    await expect(countUnstoredFsAttachments(OFF)).resolves.toBe(0);
+    prismaMock.ticketAttachment.findMany.mockResolvedValueOnce([]);
+    await expect(countUnstoredFsAttachments(OFF, { fresh: true })).resolves.toBe(0);
     expect(listBlobsFlat).not.toHaveBeenCalled();
 
     delete process.env.AZURE_STORAGE_CONNECTION_STRING;
-    prismaMock.ticketAttachment.findMany.mockResolvedValue([{ blobName: 'fs/ws-5/att-1-a.pdf' }, { blobName: 'fs/ws-5/att-2-b.png' }]);
-    await expect(countUnstoredFsAttachments(OFF)).resolves.toBe(2);
+    prismaMock.ticketAttachment.findMany.mockResolvedValueOnce([{ id: 1, blobName: 'fs/ws-5/att-1-a.pdf' }, { id: 2, blobName: 'fs/ws-5/att-2-b.png' }]);
+    await expect(countUnstoredFsAttachments(OFF, { fresh: true })).resolves.toBe(2);
     expect(listBlobsFlat).not.toHaveBeenCalled();
   });
 });

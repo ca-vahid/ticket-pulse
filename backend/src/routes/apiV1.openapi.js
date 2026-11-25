@@ -33,7 +33,7 @@ const T = {
         description: 'The caller’s stable per-RECORD key (set at creation or once via PATCH). A later POST /tickets carrying the same externalRef UPDATES this ticket (200, resubmitted:true) instead of creating a duplicate. null when the ticket was created without one.',
       },
       formerRef: {
-        type: 'string', nullable: true, example: '#245123',
+        type: 'string', nullable: true, example: '#900001',
         description: 'Set on tickets adopted from FreshService; the ticket’s previous reference. null on every other ticket. Lifecycle webhook payloads carry it too (`ticket.formerRef`).',
       },
       origin: { type: 'string', enum: ['ticketpulse', 'freshservice'] },

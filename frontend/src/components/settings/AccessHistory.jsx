@@ -31,7 +31,10 @@ export function describeAccessEvent(e) {
   case 'freshservice_mode_changed': return `${actor} set FreshService to ${FS_MODE_WORD[e.newValue] || e.newValue || 'a new mode'}${e.oldValue ? ` (was ${FS_MODE_WORD[e.oldValue] || e.oldValue})` : ''}`;
   case 'freshservice_tickets_adopted': {
     const n = Number(e.newValue ?? e.details?.adopted) || 0;
-    return `${actor} adopted ${n} open FreshService ticket${n === 1 ? '' : 's'} while switching FreshService off`;
+    const failed = Number(e.details?.failed) || 0;
+    const tail = failed > 0 ? `; ${failed} could not be adopted` : '';
+    const stillOn = e.details?.switchedOff === false ? ' (FreshService stayed on)' : '';
+    return `${actor} adopted ${n} open FreshService ticket${n === 1 ? '' : 's'} while switching FreshService off${tail}${stillOn}`;
   }
   case 'dashboard_view_changed': return `${actor} turned Dashboard view ${e.newValue === 'on' ? 'on' : 'off'} for ${target}`;
   case 'admin_list_changed': {

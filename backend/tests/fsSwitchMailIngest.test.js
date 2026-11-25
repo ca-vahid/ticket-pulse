@@ -232,3 +232,30 @@ describe('inbound replies on Ticket Pulse tickets: no stuck "waiting to copy"', 
     expect(mirrorServiceMock.enqueueThreadEntry).toHaveBeenCalledWith(1, 46466, 9001);
   });
 });
+describe('a Cc added on a reply never un-adopts the ticket', () => {
+  const ccMail = (id) => ({ ...baseEmail, cc: ['boss@example.com'], internetMessageId: `<${id}@example.com>` });
+  const ticketWrite = () => prismaMock.ticket.update.mock.calls.map(([q]) => q.data).find((d) => d.ccEmails);
+  const TP = { id: 46466, workspaceId: 1, origin: 'ticketpulse', nativeNumber: 1500, freshserviceTicketId: 246100n, ccEmails: [], status: 'Open' };
+
+  test("adopted (connected): Cc merged, mirrorState left 'adopted'", async () => {
+    await mailboxIngestService.ingestReply(connection, { ...TP, mirrorState: 'adopted' }, ccMail('cc-ad'), 'tp_ref');
+    expect(ticketWrite().ccEmails).toEqual(['boss@example.com']);
+    expect(ticketWrite()).not.toHaveProperty('mirrorState');
+  });
+
+  test("Off workspace: Cc merged, no 'pending' flip", async () => {
+    fsMode.mode = 'off';
+    await mailboxIngestService.ingestReply(connection, { ...TP, mirrorState: 'mirrored' }, ccMail('cc-off'), 'tp_ref');
+    expect(ticketWrite()).not.toHaveProperty('mirrorState');
+  });
+
+  test("Connected TP-born: 'pending' as before ('none' stays 'none')", async () => {
+    await mailboxIngestService.ingestReply(connection, { ...TP, mirrorState: 'mirrored' }, ccMail('cc-on'), 'tp_ref');
+    expect(ticketWrite().mirrorState).toBe('pending');
+    jest.clearAllMocks();
+    prismaMock.ticketThreadEntry.create.mockImplementation(({ data }) => Promise.resolve({ id: 9001, ...data }));
+    prismaMock.ticket.update.mockResolvedValue({});
+    await mailboxIngestService.ingestReply(connection, { ...TP, mirrorState: 'none' }, ccMail('cc-none'), 'tp_ref');
+    expect(ticketWrite().mirrorState).toBe('none');
+  });
+});

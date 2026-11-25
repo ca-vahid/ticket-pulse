@@ -3253,6 +3253,7 @@ export default function Tickets() {
           ticket={bulkMerge.primary}
           initialTickets={bulkMerge.others}
           statusDefs={statusDefs}
+          fsEnabled={fsOn}
           onClose={() => setBulkMerge(null)}
           onMerged={(data) => {
             setBulkMerge(null);

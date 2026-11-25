@@ -20,6 +20,8 @@ export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024; // 100 MB per file
 // silently dropping the files, so 20 would have blocked any file on those tickets.
 export const MAX_ATTACHMENTS_PER_TICKET = 100;
 // A FreshService-only file asked for after the workspace was switched off (FreshService exit A1).
+// The Off preflight's "files not stored" count is cached this long per workspace.
+const UNSTORED_CACHE_MS = 10 * 60 * 1000;
 export const FS_OFF_FILE_MESSAGE = 'This file was never copied from FreshService, and FreshService is off for this workspace.';
 
 // Executables and scripts are refused outright — everything else is stored
@@ -356,6 +358,7 @@ class AttachmentService {
         logger.warn(`FS attachment pre-store failed for "${row.fileName}" (id ${row.id}): ${err.message}`);
       }
     }
+    if (out.stored > 0) this._forgetUnstoredCount(missing[0].workspaceId);
     logger.info(`FS attachments pre-stored for ticket ${ticketId}: ${out.stored} stored, ${out.alreadyStored} already stored, ${out.failed} failed`);
     return out;
   }
@@ -369,24 +372,64 @@ class AttachmentService {
    * No FreshService call. Without blob storage nothing can be stored, so every
    * row counts.
    */
-  async countUnstoredFsAttachments(workspaceId) {
-    const rows = await prisma.ticketAttachment.findMany({
-      where: { workspaceId: Number(workspaceId), source: 'freshservice' },
-      select: { blobName: true },
-    });
-    if (rows.length === 0) return 0;
-    if (!this.isConfigured()) return rows.length;
-    const prefixes = new Set();
-    for (const r of rows) {
-      const m = String(r.blobName || '').match(/^(fs\/ws-[^/]+\/)/);
-      prefixes.add(m ? m[1] : 'fs/');
-    }
+  async countUnstoredFsAttachments(workspaceId, { fresh = false } = {}) {
+    const ws = Number(workspaceId);
+    // Cached per workspace for 10 minutes (the settings panel asks on every
+    // load; IT holds tens of thousands of FS files). `fresh: true` (the Off
+    // job's final check) always recounts. Concurrent askers share one count.
+    if (!this._unstoredCache) this._unstoredCache = new Map();
+    if (!this._unstoredInflight) this._unstoredInflight = new Map();
+    const hit = this._unstoredCache.get(ws);
+    if (!fresh && hit && Date.now() - hit.at < UNSTORED_CACHE_MS) return hit.value;
+    if (!fresh && this._unstoredInflight.has(ws)) return this._unstoredInflight.get(ws);
+    const run = this._countUnstoredFsAttachments(ws)
+      .then((value) => { this._unstoredCache.set(ws, { value, at: Date.now() }); return value; })
+      .finally(() => { if (this._unstoredInflight.get(ws) === run) this._unstoredInflight.delete(ws); });
+    this._unstoredInflight.set(ws, run);
+    return run;
+  }
+
+  /**
+   * The count itself. Rows are read a page at a time (blob names only, by id
+   * cursor); each `fs/ws-<n>/` folder is listed once, when its first row is
+   * met, into a set of the stored names. Memory: one page of rows plus the
+   * stored names of the folders this workspace's files use.
+   */
+  async _countUnstoredFsAttachments(ws) {
+    const PAGE = 5000;
+    const configured = this.isConfigured();
+    const container = configured ? this._container() : null;
+    const listed = new Set();
     const stored = new Set();
-    const container = this._container();
-    for (const prefix of prefixes) {
-      for await (const item of container.listBlobsFlat({ prefix })) stored.add(item.name);
+    let unstored = 0;
+    let cursor = 0;
+    for (;;) {
+      const rows = await prisma.ticketAttachment.findMany({
+        where: { workspaceId: ws, source: 'freshservice', id: { gt: cursor } },
+        select: { id: true, blobName: true },
+        orderBy: { id: 'asc' },
+        take: PAGE,
+      });
+      if (rows.length === 0) break;
+      cursor = rows[rows.length - 1].id;
+      for (const r of rows) {
+        if (!configured) { unstored += 1; continue; }
+        const m = String(r.blobName || '').match(/^(fs\/ws-[^/]+\/)/);
+        const prefix = m ? m[1] : 'fs/';
+        if (!listed.has(prefix)) {
+          listed.add(prefix);
+          for await (const item of container.listBlobsFlat({ prefix })) stored.add(item.name);
+        }
+        if (!stored.has(r.blobName)) unstored += 1;
+      }
+      if (rows.length < PAGE) break;
     }
-    return rows.filter((r) => !stored.has(r.blobName)).length;
+    return unstored;
+  }
+
+  /** Forget a workspace's cached count (files were just stored). */
+  _forgetUnstoredCount(workspaceId) {
+    this._unstoredCache?.delete(Number(workspaceId));
   }
 
   /** fsAttachmentId -> fresh signed URL, for every file on the FS ticket (and its conversations). */
@@ -656,8 +699,8 @@ export function storeFsAttachmentsForTicket(ticketId) {
 }
 
 /** FreshService exit preflight: FS-hosted files in the workspace with no stored copy. */
-export function countUnstoredFsAttachments(workspaceId) {
-  return attachmentService.countUnstoredFsAttachments(workspaceId);
+export function countUnstoredFsAttachments(workspaceId, options = {}) {
+  return attachmentService.countUnstoredFsAttachments(workspaceId, options);
 }
 
 export default attachmentService;

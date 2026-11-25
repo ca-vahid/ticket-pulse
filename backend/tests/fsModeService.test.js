@@ -214,6 +214,57 @@ describe('read errors fall back to connected', () => {
     await expect(getMode(LINKED)).resolves.toBe('off');
   });
 
+  test('after a mode WAS read, a read error keeps it, even past the 30 s cache (logged)', async () => {
+    const realNow = Date.now;
+    let now = realNow();
+    const spy = jest.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      store.set(modeSettingKey(LINKED), JSON.stringify({ mode: 'off' }));
+      await expect(getMode(LINKED)).resolves.toBe('off');
+      now += 5 * 60 * 1000; // cache long expired
+      settingsMock.get.mockRejectedValueOnce(new Error('pool timeout'));
+      await expect(getMode(LINKED)).resolves.toBe('off');
+      await expect(fsGate(LINKED, 'sync')).resolves.toBe(false);
+      expect(loggerMock.warn).toHaveBeenCalledWith(expect.stringContaining("kept the last mode read ('off')"));
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test('a stored value that cannot be read keeps the last mode too', async () => {
+    const realNow = Date.now;
+    let now = realNow();
+    const spy = jest.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      store.set(modeSettingKey(LINKED), JSON.stringify({ mode: 'off' }));
+      await getMode(LINKED);
+      now += 60 * 1000;
+      store.set(modeSettingKey(LINKED), '{half-written');
+      await expect(getMode(LINKED)).resolves.toBe('off');
+      expect(loggerMock.warn).toHaveBeenCalledWith(expect.stringContaining('could not be read'));
+      // Once readable again (after the kept value's 30 s), the new value wins.
+      now += 60 * 1000;
+      store.set(modeSettingKey(LINKED), JSON.stringify({ mode: 'connected' }));
+      await expect(getMode(LINKED)).resolves.toBe('connected');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test('a workspace-link read error keeps the last link answer (never connected stays off)', async () => {
+    const realNow = Date.now;
+    let now = realNow();
+    const spy = jest.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      await expect(getMode(NATIVE)).resolves.toBe('never_connected');
+      now += 5 * 60 * 1000;
+      prismaMock.workspace.findUnique.mockRejectedValueOnce(new Error('pool timeout'));
+      await expect(isFreshServiceOff(NATIVE)).resolves.toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   test('a workspace lookup error means linked (never "never connected")', async () => {
     prismaMock.workspace.findUnique.mockRejectedValue(new Error('pool timeout'));
     await expect(getMode(NATIVE)).resolves.toBe('connected');

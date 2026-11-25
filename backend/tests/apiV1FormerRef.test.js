@@ -16,14 +16,14 @@ const { webhookPayloadFromContext, buildEventContext } = await import('../src/se
 
 const adopted = {
   id: 900, displayRef: 'TP-1500', origin: 'ticketpulse', nativeNumber: 1500, mirrorState: 'adopted',
-  freshserviceTicketId: 245123n, subject: 'Invoice question', status: 'Open', priority: 2, workspaceId: 5,
+  freshserviceTicketId: 900001n, subject: 'Invoice question', status: 'Open', priority: 2, workspaceId: 5,
 };
-const tpBorn = { ...adopted, id: 901, nativeNumber: 1501, displayRef: 'TP-1501', mirrorState: 'mirrored', freshserviceTicketId: 245200n };
-const fsBorn = { ...adopted, id: 902, origin: 'freshservice', nativeNumber: null, displayRef: '#245300', mirrorState: null, freshserviceTicketId: 245300n };
+const tpBorn = { ...adopted, id: 901, nativeNumber: 1501, displayRef: 'TP-1501', mirrorState: 'mirrored', freshserviceTicketId: 900002n };
+const fsBorn = { ...adopted, id: 902, origin: 'freshservice', nativeNumber: null, displayRef: '#900003', mirrorState: null, freshserviceTicketId: 900003n };
 
 describe('v1 ticket shape', () => {
   test('an adopted ticket carries its old FreshService reference', () => {
-    expect(ticketShape(adopted).formerRef).toBe('#245123');
+    expect(ticketShape(adopted).formerRef).toBe('#900001');
     expect(ticketShape(adopted).ref).toBe('TP-1500');
   });
 
@@ -37,8 +37,8 @@ describe('v1 ticket shape', () => {
 describe('lifecycle webhook payload', () => {
   test('formerRef rides the event context into the payload for an adopted ticket only', () => {
     const ctx = buildEventContext({ event: { type: 'ticket.status_changed', occurredAt: new Date().toISOString() }, ticket: adopted, source: 'ticketpulse' });
-    expect(ctx.ticket.formerRef).toBe('#245123');
-    expect(webhookPayloadFromContext(ctx).ticket.formerRef).toBe('#245123');
+    expect(ctx.ticket.formerRef).toBe('#900001');
+    expect(webhookPayloadFromContext(ctx).ticket.formerRef).toBe('#900001');
 
     const other = buildEventContext({ event: { type: 'ticket.status_changed', occurredAt: new Date().toISOString() }, ticket: tpBorn, source: 'ticketpulse' });
     expect(other.ticket.formerRef).toBeNull();

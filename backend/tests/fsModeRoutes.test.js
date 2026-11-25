@@ -14,7 +14,7 @@ import request from 'supertest';
 const prismaMock = {
   workspace: { findUnique: jest.fn(), findMany: jest.fn() },
   mailboxConnection: { count: jest.fn() },
-  ticket: { count: jest.fn() },
+  ticket: { count: jest.fn(), findMany: jest.fn() },
   notificationWorkflow: { findFirst: jest.fn() },
 };
 const settings = new Map();
@@ -57,7 +57,7 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
 }));
 
 const routes = await import('../src/routes/fsMode.routes.js');
-const { default: fsModeRoutes, _jobPromise, jobSettingKey } = routes;
+const { default: fsModeRoutes, _jobPromise, jobSettingKey, failureSentence } = routes;
 const { errorHandler } = await import('../src/middleware/errorHandler.js');
 
 function makeApp(user) {
@@ -82,13 +82,14 @@ function wire({ mode = 'connected', mailboxes = 1, recentMail = 0, openFsBorn = 
   prismaMock.workspace.findMany.mockResolvedValue([{ id: 5 }, { id: 10 }]);
   prismaMock.mailboxConnection.count.mockResolvedValue(mailboxes);
   prismaMock.ticket.count.mockImplementation(async ({ where }) => (where.source === 1 ? recentMail : recentMail + 2));
+  prismaMock.ticket.findMany.mockImplementation(async ({ where }) => (where.id.in || []).map((id) => ({ id, origin: 'freshservice', nativeNumber: null, freshserviceTicketId: BigInt(900000 + id) })));
   prismaMock.notificationWorkflow.findFirst.mockImplementation(async ({ where }) => (
     where.triggerType === 'ticket.created' ? { id: 31, name: 'Ticket arrived', mockModeEnabled: false } : null));
   fsMode.getMode.mockImplementation(async (ws) => (Number(ws) === 10 ? 'never_connected' : mode));
   fsMode.getModeRecord.mockResolvedValue({ mode, changedBy: null, changedAt: null, history: [] });
   fsMode.getShadowReport.mockResolvedValue({ since: '2026-11-24T17:12:00.000Z', counts: { sync: { n: 180, first: 'a', last: 'b' } }, total: 180 });
   fsMode.setMode.mockImplementation(async (ws, m) => ({ mode: m, changedBy: 'root@example.com', changedAt: '2026-11-25T18:00:00.000Z', history: [] }));
-  adoption.previewWorkspace.mockResolvedValue({ openFsBorn, uncachedAttachments: 3, sample: [{ id: 1, ref: '#245001', subject: 'Invoice', status: 'Open' }] });
+  adoption.previewWorkspace.mockResolvedValue({ openFsBorn, uncachedAttachments: 3, sample: [{ id: 1, ref: '#900101', subject: 'Invoice', status: 'Open' }] });
   adoption.adoptWorkspace.mockResolvedValue({ adopted: openFsBorn, failed: [] });
   accessRole.mockImplementation(async (email, ws) => (email === 'lead@example.com' && Number(ws) === 5 ? 'admin' : email === 'someone@example.com' ? 'viewer' : null));
 }
@@ -183,6 +184,18 @@ describe('preflight', () => {
     expect(adoption.adoptWorkspace).not.toHaveBeenCalled();
   });
 
+  test('FreshService still receiving the team\'s mail is a warning about its forwarding', async () => {
+    wire({ mailboxes: 1, recentMail: 2 });
+    let res = await request(makeApp(superAdmin)).get('/api/workspaces/5/freshservice');
+    const item = res.body.data.preflight.items.find((i) => i.key === 'fs_mail_forwarding');
+    expect(item).toMatchObject({ state: 'warn' });
+    expect(item.text).toMatch(/^FreshService is still receiving mail for this team\. Turn off its mail forwarding/);
+    expect(res.body.data.preflight.blockers).toEqual([]);
+    wire({ mailboxes: 1, recentMail: 0 });
+    res = await request(makeApp(superAdmin)).get('/api/workspaces/5/freshservice');
+    expect(res.body.data.preflight.items.find((i) => i.key === 'fs_mail_forwarding')).toBeUndefined();
+  });
+
   test('no mailbox and no FreshService mail is only a warning', async () => {
     wire({ mailboxes: 0, recentMail: 0 });
     const res = await request(makeApp(superAdmin)).get('/api/workspaces/5/freshservice');
@@ -200,11 +213,11 @@ describe('Off job', () => {
   });
 
   test('adopts, then switches off, records both, and the progress reads done', async () => {
-    adoption.adoptWorkspace.mockImplementation(async (ws, { onProgress }) => {
+    adoption.adoptWorkspace.mockImplementationOnce(async (ws, { onProgress }) => {
       await onProgress({ done: 1, total: 2, adopted: 1, failed: 0, ticketId: 41 });
       await onProgress({ done: 2, total: 2, adopted: 2, failed: 0, ticketId: 42 });
       return { adopted: 2, failed: [], total: 2 };
-    });
+    }).mockResolvedValueOnce({ adopted: 0, failed: [], total: 0 }); // nothing arrived during the run
     const res = await request(makeApp(superAdmin)).post('/api/workspaces/5/freshservice/off').send({ confirmName: '  project accounting ' });
     expect(res.status).toBe(202);
     expect(res.body.data).toMatchObject({ state: 'running', step: 'check', total: 1 });
@@ -222,27 +235,129 @@ describe('Off job', () => {
     expect(progress.body.data.finishedAt).toBeTruthy();
   });
 
-  test('a failed adoption leaves FreshService on and says so', async () => {
+  test('a failed adoption leaves FreshService on and says so in plain words, with references', async () => {
     adoption.adoptWorkspace.mockResolvedValue({ adopted: 0, failed: [{ id: 77, error: 'attachment store refused' }] });
     await request(makeApp(superAdmin)).post('/api/workspaces/5/freshservice/off').send({ confirmName: 'Project Accounting' });
     await _jobPromise(5);
     expect(fsMode.setMode).not.toHaveBeenCalled();
     const job = JSON.parse(settings.get(jobSettingKey(5)));
-    expect(job).toMatchObject({ state: 'failed', failed: [{ id: 77, error: 'attachment store refused' }] });
-    expect(job.error).toMatch(/Nothing was switched off/);
+    expect(job).toMatchObject({ state: 'failed', failedCount: 1, failed: [{ ref: '#900077' }] });
+    expect(job.error).toBe('1 ticket could not be adopted (#900077). Nothing was switched off; try again.');
+    expect(JSON.stringify(job)).not.toMatch(/attachment store refused|"id":77/);
+    expect(recordAccessEvent).toHaveBeenCalledWith(expect.objectContaining({ action: 'freshservice_tickets_adopted', details: expect.objectContaining({ adopted: 0, failed: 1 }) }));
   });
 
-  test('an adoption that throws is a failed job, not a crash', async () => {
+  test('a second pass after Off adopts tickets that arrived during the run; counts land in the job and Access history', async () => {
+    adoption.adoptWorkspace
+      .mockResolvedValueOnce({ adopted: 2, failed: [], total: 2 })
+      .mockResolvedValueOnce({ adopted: 1, failed: [], total: 1 });
+    await request(makeApp(superAdmin)).post('/api/workspaces/5/freshservice/off').send({ confirmName: 'Project Accounting' });
+    await _jobPromise(5);
+    expect(adoption.adoptWorkspace).toHaveBeenCalledTimes(2);
+    // The second pass runs only once the mode is Off (sync has stopped, the list is final).
+    expect(fsMode.setMode.mock.invocationCallOrder[0]).toBeLessThan(adoption.adoptWorkspace.mock.invocationCallOrder[1]);
+    const job = JSON.parse(settings.get(jobSettingKey(5)));
+    expect(job).toMatchObject({ state: 'done', adopted: 3, adoptedBeforeOff: 2, adoptedAfterOff: 1, total: 3 });
+    expect(recordAccessEvent).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'freshservice_tickets_adopted', newValue: '3',
+      details: expect.objectContaining({ adopted: 3, failed: 0, adoptedBeforeOff: 2, adoptedAfterOff: 1 }),
+    }));
+  });
+
+  test('a late ticket that cannot be adopted leaves FreshService off, with a note naming it', async () => {
+    adoption.adoptWorkspace
+      .mockResolvedValueOnce({ adopted: 1, failed: [], total: 1 })
+      .mockResolvedValueOnce({ adopted: 0, failed: [{ id: 8, error: 'x' }], total: 1 });
+    await request(makeApp(superAdmin)).post('/api/workspaces/5/freshservice/off').send({ confirmName: 'Project Accounting' });
+    await _jobPromise(5);
+    const job = JSON.parse(settings.get(jobSettingKey(5)));
+    expect(job.state).toBe('done');
+    expect(job.note).toBe('1 ticket that arrived during the switch could not be adopted (#900008); open it and choose Adopt to edit.');
+    expect(recordAccessEvent).toHaveBeenCalledWith(expect.objectContaining({ action: 'freshservice_tickets_adopted', details: expect.objectContaining({ failed: 1 }) }));
+  });
+
+  test('a partial run says what it did: N adopted, FreshService still on', async () => {
+    adoption.adoptWorkspace.mockResolvedValue({ adopted: 3, failed: [{ id: 5, error: 'x' }], total: 4 });
+    await request(makeApp(superAdmin)).post('/api/workspaces/5/freshservice/off').send({ confirmName: 'Project Accounting' });
+    await _jobPromise(5);
+    const res = await request(makeApp(superAdmin)).get('/api/workspaces/5/freshservice/off');
+    expect(res.body.data.state).toBe('failed');
+    expect(res.body.data.error).toBe('1 ticket could not be adopted (#900005). 3 tickets were adopted; FreshService is still on. Try again to finish.');
+    expect(failureSentence('Lead.', 1)).toBe('Lead. 1 ticket was adopted; FreshService is still on. Try again to finish.');
+  });
+
+  test('an adoption that throws is a failed job with a plain sentence, not a crash', async () => {
     adoption.adoptWorkspace.mockRejectedValue(new Error('database went away'));
     await request(makeApp(superAdmin)).post('/api/workspaces/5/freshservice/off').send({ confirmName: 'Project Accounting' });
     await _jobPromise(5);
     expect(fsMode.setMode).not.toHaveBeenCalled();
-    expect(JSON.parse(settings.get(jobSettingKey(5))).state).toBe('failed');
+    const job = JSON.parse(settings.get(jobSettingKey(5)));
+    expect(job.state).toBe('failed');
+    expect(job.error).toBe('The switch stopped before it finished. Nothing was switched off; try again.');
+  });
+
+  test('two starts at the same moment: exactly one runs', async () => {
+    let release;
+    adoption.adoptWorkspace.mockImplementationOnce(() => new Promise((r) => { release = () => r({ adopted: 1, failed: [] }); }));
+    const app = makeApp(superAdmin);
+    const [a, b] = await Promise.all([
+      request(app).post('/api/workspaces/5/freshservice/off').send({ confirmName: 'Project Accounting' }),
+      request(app).post('/api/workspaces/5/freshservice/off').send({ confirmName: 'Project Accounting' }),
+    ]);
+    expect([a.status, b.status].sort()).toEqual([202, 409]);
+    await new Promise((r) => setTimeout(r, 10));
+    release();
+    await _jobPromise(5);
+    expect(adoption.adoptWorkspace).toHaveBeenCalledTimes(2); // one job: its pass before Off and its pass after
+  });
+
+  test('a refused start releases the slot (a later start works)', async () => {
+    const bad = await request(makeApp(superAdmin)).post('/api/workspaces/5/freshservice/off').send({ confirmName: 'nope' });
+    expect(bad.status).toBe(400);
+    const ok = await request(makeApp(superAdmin)).post('/api/workspaces/5/freshservice/off').send({ confirmName: 'Project Accounting' });
+    expect(ok.status).toBe(202);
+    await _jobPromise(5);
+  });
+
+  test('another process\'s run (fresh heartbeat) blocks a start and a mode change; a stale one does not', async () => {
+    settings.set(jobSettingKey(5), JSON.stringify({ state: 'running', step: 'adopt', total: 3, adopted: 1, failed: [], heartbeatAt: new Date().toISOString() }));
+    let res = await request(makeApp(superAdmin)).post('/api/workspaces/5/freshservice/off').send({ confirmName: 'Project Accounting' });
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('switch_running');
+    res = await request(makeApp(superAdmin)).put('/api/workspaces/5/freshservice').send({ mode: 'shadow' });
+    expect(res.status).toBe(409);
+    res = await request(makeApp(superAdmin)).get('/api/workspaces/5/freshservice/off');
+    expect(res.body.data.state).toBe('running');
+
+    settings.set(jobSettingKey(5), JSON.stringify({ state: 'running', step: 'adopt', total: 3, adopted: 1, failed: [], heartbeatAt: new Date(Date.now() - 5 * 60 * 1000).toISOString() }));
+    res = await request(makeApp(superAdmin)).post('/api/workspaces/5/freshservice/off').send({ confirmName: 'Project Accounting' });
+    expect(res.status).toBe(202);
+    await _jobPromise(5);
+  });
+
+  test('a running job writes a heartbeat', async () => {
+    let release;
+    adoption.adoptWorkspace.mockImplementationOnce(() => new Promise((r) => { release = () => r({ adopted: 1, failed: [] }); }));
+    await request(makeApp(superAdmin)).post('/api/workspaces/5/freshservice/off').send({ confirmName: 'Project Accounting' });
+    await new Promise((r) => setTimeout(r, 10));
+    const stored = JSON.parse(settings.get(jobSettingKey(5)));
+    expect(stored.state).toBe('running');
+    expect(Date.now() - Date.parse(stored.heartbeatAt)).toBeLessThan(5000);
+    release();
+    await _jobPromise(5);
+  });
+
+  test('once the mode is Off, the job reads done, never failed', async () => {
+    wire({ mode: 'off' });
+    settings.set(jobSettingKey(5), JSON.stringify({ state: 'failed', step: 'switch', total: 2, adopted: 2, failed: [], error: 'The switch stopped before it finished.' }));
+    const res = await request(makeApp(superAdmin)).get('/api/workspaces/5/freshservice/off');
+    expect(res.body.data).toMatchObject({ state: 'done', step: 'done', adopted: 2 });
+    expect(res.body.data.error).toBeUndefined();
   });
 
   test('one job at a time per workspace', async () => {
     let release;
-    adoption.adoptWorkspace.mockImplementation(() => new Promise((r) => { release = () => r({ adopted: 1, failed: [] }); }));
+    adoption.adoptWorkspace.mockImplementationOnce(() => new Promise((r) => { release = () => r({ adopted: 1, failed: [] }); }));
     const first = await request(makeApp(superAdmin)).post('/api/workspaces/5/freshservice/off').send({ confirmName: 'Project Accounting' });
     expect(first.status).toBe(202);
     const second = await request(makeApp(superAdmin)).post('/api/workspaces/5/freshservice/off').send({ confirmName: 'Project Accounting' });
@@ -253,14 +368,14 @@ describe('Off job', () => {
     await new Promise((r) => setTimeout(r, 10));
     release();
     await _jobPromise(5);
-    expect(adoption.adoptWorkspace).toHaveBeenCalledTimes(1);
+    expect(adoption.adoptWorkspace).toHaveBeenCalledTimes(2); // one job: its pass before Off and its pass after
   });
 
-  test('a running job no process owns reads as interrupted', async () => {
-    settings.set(jobSettingKey(5), JSON.stringify({ state: 'running', step: 'adopt', total: 3, adopted: 1, failed: [] }));
+  test('a running job no process owns (stale heartbeat) reads as interrupted, with what it did', async () => {
+    settings.set(jobSettingKey(5), JSON.stringify({ state: 'running', step: 'adopt', total: 3, adopted: 1, failed: [], heartbeatAt: '2026-11-25T08:00:00.000Z' }));
     const res = await request(makeApp(superAdmin)).get('/api/workspaces/5/freshservice/off');
     expect(res.body.data.state).toBe('failed');
-    expect(res.body.data.error).toMatch(/interrupted/);
+    expect(res.body.data.error).toBe('The switch was interrupted (the server restarted). 1 ticket was adopted; FreshService is still on. Try again to finish.');
   });
 
   test('already off is refused', async () => {

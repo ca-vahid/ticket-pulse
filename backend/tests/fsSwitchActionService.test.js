@@ -93,25 +93,61 @@ describe('priority write-back', () => {
   });
 
   test.each([
-    ['off', ticketOf(), 'freshservice_off', false],
-    ['connected', ticketOf({ origin: 'ticketpulse', nativeNumber: 2001, mirrorState: 'adopted' }), 'adopted', false],
-    ['connected', ticketOf({ origin: 'ticketpulse', nativeNumber: 1500, mirrorState: 'mirrored' }), 'ticketpulse_owned', true],
-  ])('%s %#: local priority only, recorded skipped (%s)', async (mode, ticket, reason, queuesMirror) => {
+    ['off', ticketOf(), 'freshservice_off'],
+    ['off', ticketOf({ origin: 'ticketpulse', nativeNumber: 1500, mirrorState: 'mirrored' }), 'freshservice_off'],
+    ['connected', ticketOf({ origin: 'ticketpulse', nativeNumber: 2001, mirrorState: 'adopted' }), 'adopted'],
+  ])('%s %#: local priority only, recorded skipped (%s), nothing queued', async (mode, ticket, reason) => {
     fsMode.mode = mode;
     prismaMock.assignmentPipelineRun.findUnique.mockResolvedValueOnce(runOf(ticket));
     const out = await svc.executePriorityWriteback(900, 1, false);
     expect(fsClient.updateTicketPriority).not.toHaveBeenCalled();
     expect(createFreshServiceClient).not.toHaveBeenCalled();
     expect(prismaMock.ticket.update).toHaveBeenCalledWith({ where: { id: 77 }, data: expect.objectContaining({ priority: 3 }) });
-    // An adopted ticket keeps 'adopted'; an FS-born one is never flagged pending.
-    const data = prismaMock.ticket.update.mock.calls[0][0].data;
-    expect(data.mirrorState).toBe(queuesMirror ? 'pending' : undefined);
-    expect(mirrorServiceMock.enqueueFieldSync).toHaveBeenCalledTimes(queuesMirror ? 1 : 0);
+    // An adopted ticket keeps 'adopted'; nothing is ever flagged pending here.
+    expect(prismaMock.ticket.update.mock.calls[0][0].data.mirrorState).toBeUndefined();
+    expect(mirrorServiceMock.enqueueFieldSync).not.toHaveBeenCalled();
     expect(lastRunUpdate()).toEqual(expect.objectContaining({ priorityWritebackStatus: 'skipped', priorityWritebackError: reason }));
     expect(out).toEqual(expect.objectContaining({ success: true, skipped: true, error: reason, localOnly: true }));
   });
 });
 
+// Connected TP-born: exactly main's behaviour — the four AI write-backs PUT
+// straight to the ticket's FreshService copy and record 'synced'.
+describe('Connected TP-born write-backs: unchanged from main', () => {
+  const tpMirrored = () => ticketOf({ origin: 'ticketpulse', nativeNumber: 1500, mirrorState: 'mirrored', freshserviceTicketId: 246100n });
+
+  test('priority → PUT to the copy, synced', async () => {
+    prismaMock.assignmentPipelineRun.findUnique.mockResolvedValueOnce(runOf(tpMirrored()));
+    await svc.executePriorityWriteback(900, 1, false);
+    expect(fsClient.updateTicketPriority).toHaveBeenCalledWith(246100, 3);
+    expect(lastRunUpdate()).toEqual(expect.objectContaining({ priorityWritebackStatus: 'synced', priorityWritebackError: null }));
+    expect(mirrorServiceMock.enqueueFieldSync).not.toHaveBeenCalled();
+  });
+
+  test('type → PUT to the copy (the mirror never carries type), synced', async () => {
+    prismaMock.assignmentPipelineRun.findUnique.mockResolvedValueOnce({ ...runOf(tpMirrored()), recommendation: { ticketType: 'Incident' } });
+    await svc.executeTicketTypeWriteback(900, 1, false);
+    expect(fsClient.updateTicketType).toHaveBeenCalledWith(246100, 'Incident');
+    expect(lastRunUpdate()).toEqual(expect.objectContaining({ ticketTypeWritebackStatus: 'synced', ticketTypeWritebackError: null }));
+  });
+
+  test('category → PUT to the copy, synced', async () => {
+    const lookups = jest.spyOn(svc, '_resolveTicketPulseLookupFields').mockResolvedValue({ lf_ticket_pulse_category: 11 });
+    prismaMock.assignmentPipelineRun.findUnique.mockResolvedValueOnce(runOf(tpMirrored()));
+    await svc.executeCategoryWriteback(900, 1, false);
+    expect(fsClient.updateTicketCustomFields).toHaveBeenCalledWith(246100, { lf_ticket_pulse_category: 11 });
+    expect(lastRunUpdate()).toEqual(expect.objectContaining({ categoryWritebackStatus: 'synced' }));
+    lookups.mockRestore();
+  });
+
+  test('direct priority → PUT to the copy', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValueOnce({ id: 77, freshserviceTicketId: 246100n, origin: 'ticketpulse', mirrorState: 'mirrored' });
+    const out = await svc.executeDirectPriorityWriteback({ workspaceId: 1, ticketId: 77, priorityId: 4 });
+    expect(fsClient.updateTicketPriority).toHaveBeenCalledWith(246100, 4);
+    expect(out).toEqual(expect.objectContaining({ success: true }));
+    expect(out.skipped).toBeUndefined();
+  });
+});
 describe('ticket type write-back', () => {
   test('Off: local type only, skipped freshservice_off', async () => {
     fsMode.mode = 'off';

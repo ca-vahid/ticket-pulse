@@ -126,7 +126,8 @@ class TicketTaskService {
     if (ticket.origin !== TICKET_ORIGIN.FRESHSERVICE || !ticket.freshserviceTicketId) return ticket;
     if (!(await isFreshServiceOff(ticket.workspaceId))) return ticket;
     const { default: fsAdoptionService } = await import('./fsAdoptionService.js');
-    await fsAdoptionService.adoptForWrite(ticket.id, ticket.workspaceId, actor);
+    // A background writer (workflow, automation) never adopts: null → skip.
+    if (!(await fsAdoptionService.adoptForWrite(ticket.id, ticket.workspaceId, actor))) return null;
     return this._ticket(ticket.id, ticket.workspaceId);
   }
 
@@ -158,6 +159,7 @@ class TicketTaskService {
     const title = String(input?.title || '').trim();
     if (!title) throw new ValidationError('Task title is required');
     ticket = await this._adoptIfImported(ticket, actor);
+    if (!ticket) return { skipped: 'freshservice_off_imported', ticketId: Number(ticketId) };
     const status = STATUSES.includes(input?.status) ? input.status : 'open';
     const assignedTechId = input?.assignedTechId !== null && input?.assignedTechId !== undefined ? Number(input.assignedTechId) : null;
     const assignee = await this._resolveAssignee(assignedTechId, workspaceId);
@@ -247,6 +249,7 @@ class TicketTaskService {
     }
     if (Object.keys(data).length === 0) throw new ValidationError('Nothing to update');
     ticket = await this._adoptIfImported(ticket, actor);
+    if (!ticket) return { ...shape(task), skipped: 'freshservice_off_imported' };
 
     // FS-born or an FS-mirrored TP task: push the change to FreshService
     // (never for an adopted ticket or an Off workspace — local only then).
@@ -341,6 +344,7 @@ class TicketTaskService {
     if (expectedTicketId !== null && task.ticketId !== Number(expectedTicketId)) throw new NotFoundError('Task not found on this ticket');
     if (task.fsTaskId) {
       const ticket = await this._adoptIfImported(await this._ticket(task.ticketId, workspaceId), actor);
+      if (!ticket) return { deleted: false, skipped: 'freshservice_off_imported' };
       if (ticket.freshserviceTicketId && await this._fsLive(ticket)) {
         const client = await this._fsClient(workspaceId);
         if (ticket.origin === TICKET_ORIGIN.FRESHSERVICE) {

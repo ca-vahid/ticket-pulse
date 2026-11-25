@@ -4,8 +4,8 @@ import {
   Activity, Check, CircleCheck, History, OctagonX, Power, TriangleAlert, Unplug,
 } from 'lucide-react';
 import {
-  FS_MODE_META, OFF_STEPS, PREFLIGHT_LINKS, PREFLIGHT_STATE, adoptCount, modeMeta, outcomeSentence,
-  pacificWhen, shadowRows, shadowSentence, stepStates,
+  BACK_ON_LIMITS, FS_MODE_META, OFF_STEPS, PREFLIGHT_LINKS, PREFLIGHT_STATE, adoptCount, backOnQuestion, modeMeta,
+  outcomeSentence, pacificWhen, shadowRows, shadowSentence, stepStates,
 } from './freshserviceSwitchCopy';
 
 /**
@@ -105,10 +105,14 @@ function OffProgress({ job, workspaceName }) {
       {outcome && (
         <p className={`text-sm ${job.state === 'failed' ? 'text-red-700 dark:text-red-300' : 'text-foreground'}`} data-testid="fs-off-outcome">{outcome}</p>
       )}
-      {job?.state === 'failed' && Array.isArray(job.failed) && job.failed.length > 0 && (
-        <ul className="list-disc pl-5 text-xs text-muted-foreground">
-          {job.failed.slice(0, 5).map((f) => <li key={f.id}>Ticket {f.id}: {f.error}</li>)}
-        </ul>
+      {job?.state === 'done' && job.note && (
+        <p className="text-sm text-amber-700 dark:text-amber-300" data-testid="fs-off-note-late">{job.note}</p>
+      )}
+      {job?.state === 'failed' && Array.isArray(job.failed) && job.failed.length > 5 && (
+        <details className="text-xs text-muted-foreground">
+          <summary className="tp-focus-ring cursor-pointer rounded">All {job.failed.length} tickets that could not be adopted</summary>
+          <p className="mt-1 break-words">{job.failed.map((f) => f.ref).filter(Boolean).join(', ')}</p>
+        </details>
       )}
     </div>
   );
@@ -117,6 +121,7 @@ function OffProgress({ job, workspaceName }) {
 export default function FreshServiceSwitchView({ data, busy = false, error = null, onSetMode, onStartOff, now = new Date() }) {
   const [offOpen, setOffOpen] = useState(false);
   const [typed, setTyped] = useState('');
+  const [backOn, setBackOn] = useState(null); // 'connected' | 'shadow' while asking "turn it back on?"
   if (!data) return null;
   const { workspace = {}, mode, record, shadow, preflight, job, canWrite } = data;
   const name = workspace.name || 'this workspace';
@@ -144,12 +149,15 @@ export default function FreshServiceSwitchView({ data, busy = false, error = nul
   // Off never flips straight away: it opens the guided flow below.
   const pick = (next) => {
     if (radioDisabled) return;
-    if (next === 'off') { if (mode !== 'off') setOffOpen(true); return; }
+    if (next === 'off') { setBackOn(null); if (mode !== 'off') setOffOpen(true); return; }
     setOffOpen(false);
     setTyped('');
-    if (next !== mode) onSetMode?.(next);
+    if (next === mode) return;
+    // Back on from Off asks once, and says what it will not do.
+    if (mode === 'off') { setBackOn(next); return; }
+    onSetMode?.(next);
   };
-  const selected = offOpen && mode !== 'off' ? 'off' : mode;
+  const selected = backOn || (offOpen && mode !== 'off' ? 'off' : mode);
 
   return (
     <section className="space-y-5" aria-label={`FreshService for ${name}`} data-testid="fs-switch" data-mode={mode}>
@@ -162,7 +170,7 @@ export default function FreshServiceSwitchView({ data, busy = false, error = nul
         {mode === 'off' && (
           <p className="text-xs text-muted-foreground" data-testid="fs-off-note">
             {record?.adoptedCount != null ? `${Number(record.adoptedCount).toLocaleString('en-US')} open ticket${Number(record.adoptedCount) === 1 ? ' was' : 's were'} adopted. ` : ''}
-            Imported FreshService history is read-only. Switching back on resumes sync and copies; adopted tickets stay Ticket Pulse tickets.
+            Imported FreshService history is read-only. Switching back on restarts sync and waiting copies. {BACK_ON_LIMITS}
           </p>
         )}
       </div>
@@ -195,6 +203,26 @@ export default function FreshServiceSwitchView({ data, busy = false, error = nul
         </div>
         {!canWrite && <p id="fs-picker-note" className="text-xs text-muted-foreground">Only super admins change this.</p>}
       </fieldset>
+
+      {backOn && mode === 'off' && (
+        <div className="space-y-2 border-l-2 border-primary/60 pl-4" role="group" aria-label="Turn FreshService back on" data-testid="fs-back-on-confirm">
+          <p className="text-sm text-foreground">{backOnQuestion(name)}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => { const next = backOn; setBackOn(null); onSetMode?.(next); }}
+              className="tp-focus-ring inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              <Power className="h-4 w-4" aria-hidden="true" />
+              Turn it back on ({modeMeta(backOn).label})
+            </button>
+            <button type="button" onClick={() => setBackOn(null)} className="tp-focus-ring rounded-lg px-3 py-2 text-sm text-muted-foreground hover:text-foreground">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
 
@@ -241,8 +269,8 @@ export default function FreshServiceSwitchView({ data, busy = false, error = nul
                 ? `${openFsBorn.toLocaleString('en-US')} open FreshService ticket${openFsBorn === 1 ? ' is' : 's are'} adopted first: each becomes a Ticket Pulse ticket with a TP number, fully editable here.`
                 : 'There are no open FreshService tickets to adopt.'}
             </li>
-            <li>Closed FreshService tickets stay as imported history, read-only. Anyone can adopt one to edit it.</li>
-            <li>You can switch FreshService back on while the account lasts. Adopted tickets stay Ticket Pulse tickets.</li>
+            <li>Closed FreshService tickets stay as imported history, read-only. Agents and admins can adopt one to edit it.</li>
+            <li>You can switch FreshService back on while the account lasts. {BACK_ON_LIMITS}</li>
           </ul>
           {blockers.length > 0 && (
             <p className="flex items-start gap-2 text-sm text-red-700 dark:text-red-300" data-testid="fs-off-blocked">
@@ -269,7 +297,7 @@ export default function FreshServiceSwitchView({ data, busy = false, error = nul
               <button
                 type="submit"
                 disabled={!nameMatches || blockers.length > 0 || busy}
-                className="tp-focus-ring inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                className="tp-focus-ring inline-flex items-center gap-1.5 rounded-lg bg-destructive px-3 py-2 text-sm font-semibold text-destructive-foreground hover:bg-destructive/90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Power className="h-4 w-4" aria-hidden="true" />
                 {job?.state === 'failed' ? `Try again: turn FreshService off for ${name}` : `Turn FreshService off for ${name}`}

@@ -115,6 +115,42 @@ describe('a connected workspace', () => {
   });
 });
 
+describe('overlapping restarts never orphan a job (data-safety review)', () => {
+  const live = (pred) => cronJobs.filter((j) => pred(j) && j.stop.mock.calls.length === 0);
+
+  test('two startForWorkspace / fast-lane starts at once leave exactly one live job of each', async () => {
+    const { isFreshServiceOff } = await import('../src/services/fsModeService.js');
+    // Make the mode read slow, so both calls are inside it together.
+    isFreshServiceOff.mockImplementation(async () => { await new Promise((r) => setTimeout(r, 5)); return false; });
+    try {
+      await Promise.all([scheduledSyncService.startForWorkspace(it), scheduledSyncService.startForWorkspace(it)]);
+      await Promise.all([scheduledSyncService.startAssignmentFastSyncForWorkspace(it), scheduledSyncService.startAssignmentFastSyncForWorkspace(it)]);
+      const syncJob = scheduledSyncService.cronJobs.get(1).job;
+      const fastJob = scheduledSyncService.assignmentFastSyncCronJobs.get(1).job;
+      // Every job ever created is either the one in the map or stopped.
+      expect(live(() => true).sort()).toEqual([syncJob, fastJob].sort());
+    } finally {
+      isFreshServiceOff.mockImplementation(async (wsOrRow) => modeOf(typeof wsOrRow === 'object' ? wsOrRow?.id : wsOrRow) === 'off');
+    }
+  });
+
+  test('two restarts at once (mode flip + settings save) run one after the other; one job of each kind', async () => {
+    workspaceRepositoryMock.getAllActive.mockResolvedValue([pa]);
+    workspaceRepositoryMock.getById.mockResolvedValue(pa);
+    await scheduledSyncService.start();
+    modes.set(5, 'connected');
+    await Promise.all([scheduledSyncService.restart(5), scheduledSyncService.restart(5), modeListener(5, 'connected', 'off')]);
+    const inMaps = [
+      scheduledSyncService.cronJobs.get(5)?.job,
+      scheduledSyncService.assignmentFastSyncCronJobs.get(5)?.job,
+      scheduledSyncService.embeddingBackfillCronJobs.get(5)?.job,
+    ].filter(Boolean);
+    expect(scheduledSyncService.dailyReviewCronJobs.has(5)).toBe(false);
+    const perWorkspaceLive = live((j) => !['0 4 1 1 *', '*/30 * * * *', '0 8 * * *', '5 8 * * 1,2,3,4,5', '10 8 * * 1', '0 9 * * *', '40 3 * * *'].includes(j.expr));
+    expect(perWorkspaceLive.sort()).toEqual(inMaps.sort());
+  });
+});
+
 describe('a mode flip restarts the workspace', () => {
   test('connected -> off -> connected moves the jobs; nothing double-runs', async () => {
     workspaceRepositoryMock.getAllActive.mockResolvedValue([it]);

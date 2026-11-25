@@ -808,13 +808,26 @@ function requireTicketingStaff(req, _res, next) {
  * Pulse ticket (TP-number, fully editable here). FreshService-born only; an
  * already adopted ticket answers 200 with itself (adoption is idempotent).
  */
-router.post('/:id/adopt', requireTicketingStaff, asyncHandler(async (req, res) => {
+router.post('/:id/adopt', requireTicketingStaff, requireNativeTicketing, asyncHandler(async (req, res) => {
   const id = parseTicketId(req);
+  // Only once FreshService is off (or was never connected): while it is on,
+  // the FreshService copy is live and adopting would fork the ticket.
+  const { isFreshServiceOff } = await import('../services/fsModeService.js');
+  if (!(await isFreshServiceOff(req.workspaceId))) {
+    return res.status(409).json({
+      success: false,
+      code: 'freshservice_on',
+      message: 'Adopt is only available once FreshService is off for this workspace.',
+    });
+  }
   const ticket = await prisma.ticket.findFirst({
     where: { id, workspaceId: req.workspaceId },
-    select: { id: true, origin: true, mirrorState: true, freshserviceTicketId: true },
+    select: { id: true, origin: true, status: true, nativeNumber: true, mirrorState: true, freshserviceTicketId: true },
   });
   if (!ticket) throw new NotFoundError('Ticket not found');
+  if (ticket.status === 'Deleted') {
+    throw new ValidationError('This ticket is deleted; restore it before adopting it.');
+  }
   const alreadyAdopted = ticket.mirrorState === 'adopted';
   if (ticket.origin === 'ticketpulse' && !alreadyAdopted) {
     throw new ValidationError('This ticket was created in Ticket Pulse; there is nothing to adopt.');

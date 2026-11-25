@@ -64,10 +64,12 @@ const viewer = { email: 'viewer@example.com', name: 'Viewer', role: 'viewer' };
 beforeEach(() => {
   jest.clearAllMocks();
   getMode.mockResolvedValue('connected');
+  fsModeMock.isFreshServiceOff.mockResolvedValue(true); // adopt tests run in an Off workspace unless they say otherwise
+  prismaMock.workspace.findUnique.mockResolvedValue({ nativeTicketingEnabled: true });
   accessRole.mockImplementation(async (email) => (email === 'viewer@example.com' ? 'viewer' : null));
   prismaMock.technician.findFirst.mockImplementation(async ({ where }) => (
     String(where.email?.equals || '').toLowerCase() === 'agent@example.com' ? { id: 12, name: 'Agent' } : null));
-  prismaMock.ticket.findFirst.mockResolvedValue({ id: 900, origin: 'freshservice', mirrorState: null, freshserviceTicketId: 245123n });
+  prismaMock.ticket.findFirst.mockResolvedValue({ id: 900, origin: 'freshservice', status: 'Closed', nativeNumber: null, mirrorState: null, freshserviceTicketId: 900001n });
   adoptTicket.mockResolvedValue({ id: 900, nativeNumber: 1500, displayRef: 'TP-1500', origin: 'ticketpulse', mirrorState: 'adopted' });
 });
 
@@ -107,17 +109,40 @@ describe('POST /tickets/:id/adopt', () => {
   });
 
   test('a Ticket Pulse-born ticket has nothing to adopt', async () => {
-    prismaMock.ticket.findFirst.mockResolvedValue({ id: 901, origin: 'ticketpulse', mirrorState: 'mirrored', freshserviceTicketId: 245200n });
+    prismaMock.ticket.findFirst.mockResolvedValue({ id: 901, origin: 'ticketpulse', status: 'Open', nativeNumber: 1501, mirrorState: 'mirrored', freshserviceTicketId: 900002n });
     const res = await request(buildApp(admin)).post('/api/tickets/901/adopt');
     expect(res.status).toBe(400);
     expect(adoptTicket).not.toHaveBeenCalled();
   });
 
-  test('an adopted ticket answers 200 without adopting again', async () => {
-    prismaMock.ticket.findFirst.mockResolvedValue({ id: 900, origin: 'ticketpulse', mirrorState: 'adopted', freshserviceTicketId: 245123n });
+  test('an adopted ticket answers 200 with its own TP reference, without adopting again', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ id: 900, origin: 'ticketpulse', status: 'Open', nativeNumber: 1500, mirrorState: 'adopted', freshserviceTicketId: 900001n });
     const res = await request(buildApp(admin)).post('/api/tickets/900/adopt');
     expect(res.status).toBe(200);
-    expect(res.body.data.alreadyAdopted).toBe(true);
+    expect(res.body.data).toMatchObject({ alreadyAdopted: true, nativeNumber: 1500, displayRef: 'TP-1500' });
+    expect(adoptTicket).not.toHaveBeenCalled();
+  });
+
+  test.each(['connected', 'shadow'])('refused while FreshService is %s (409 freshservice_on)', async () => {
+    fsModeMock.isFreshServiceOff.mockResolvedValue(false);
+    const res = await request(buildApp(admin)).post('/api/tickets/900/adopt');
+    expect(res.status).toBe(409);
+    expect(res.body).toMatchObject({ code: 'freshservice_on', message: 'Adopt is only available once FreshService is off for this workspace.' });
+    expect(fsModeMock.isFreshServiceOff).toHaveBeenCalledWith(5);
+    expect(adoptTicket).not.toHaveBeenCalled();
+  });
+
+  test('a deleted ticket is refused', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ id: 900, origin: 'freshservice', status: 'Deleted', nativeNumber: null, mirrorState: null, freshserviceTicketId: 900001n });
+    const res = await request(buildApp(admin)).post('/api/tickets/900/adopt');
+    expect(res.status).toBe(400);
+    expect(adoptTicket).not.toHaveBeenCalled();
+  });
+
+  test('native ticketing must be on, as for every ticket write', async () => {
+    prismaMock.workspace.findUnique.mockResolvedValue({ nativeTicketingEnabled: false });
+    const res = await request(buildApp(admin)).post('/api/tickets/900/adopt');
+    expect(res.status).toBe(400);
     expect(adoptTicket).not.toHaveBeenCalled();
   });
 
