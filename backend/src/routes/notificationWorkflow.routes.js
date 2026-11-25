@@ -1508,6 +1508,12 @@ const DYNAMIC_VALUE_LOOKUPS = {
   'agent-emails': (workspaceId) => prisma.technician.findMany({
     where: { workspaceId, isActive: true }, select: { email: true }, orderBy: { email: 'asc' }, take: CONDITION_VALUE_LIMIT,
   }).then((rows) => uniqueNames(rows, 'email')),
+  // QA 11-24 item 11: "Intake mailbox" picks one of this workspace's mailbox
+  // connections (disabled ones too: older tickets came in through them). The
+  // value is the address; the label adds the display name.
+  mailboxes: (workspaceId) => prisma.mailboxConnection.findMany({
+    where: { workspaceId }, select: { address: true, displayName: true, isEnabled: true }, orderBy: [{ isPrimary: 'desc' }, { address: 'asc' }], take: CONDITION_VALUE_LIMIT,
+  }).then(async (rows) => (await import('../services/intakeMailboxService.js')).mailboxConditionOptions(rows)),
 };
 
 function conditionValueLookup(kind, workspaceId, cache) {

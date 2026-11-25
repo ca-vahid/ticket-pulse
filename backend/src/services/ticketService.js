@@ -4006,7 +4006,15 @@ class TicketService {
     // ticket.created workflows in memory, like createdVia, so "Everyone on the
     // original e-mail" can reach them. Internal: never read from the request body.
     mailRecipients = null,
+    // Mail intake only (QA 11-24 item 11): the connected mailbox the e-mail came
+    // in through, { connectionId, address }. Kept on the `created` audit row and
+    // handed to the ticket.created workflows ("Intake mailbox" condition).
+    // Internal: never read from the request body.
+    intakeMailbox = null,
   } = {}) {
+    const intakeMailboxAddress = String(intakeMailbox?.address || '').trim().toLowerCase() || null;
+    const intakeMailboxId = Number.isInteger(Number(intakeMailbox?.connectionId)) && Number(intakeMailbox?.connectionId) > 0
+      ? Number(intakeMailbox.connectionId) : null;
     const workspace = await this._getWorkspace(workspaceId);
     if (!workspace.nativeTicketingEnabled) {
       throw new ValidationError('Native ticketing is not enabled for this workspace');
@@ -4252,6 +4260,7 @@ class TicketService {
       ...(data.notifyRequester === false ? { requesterEmailSuppressed: true } : {}),
       ...(suppressRequesterAck ? { requesterAckSuppressed: true } : {}),
       ...(intakeRunId ? { intakeRunId } : {}),
+      ...(intakeMailboxAddress ? { intakeMailbox: { connectionId: intakeMailboxId, address: intakeMailboxAddress } } : {}),
       // Intake bookkeeping (FR 08-05 #1): which keys were auto-provisioned
       // and which were rejected (with reasons) — the audit trail an admin
       // reads when a sender asks "where did my field go?".
@@ -4286,6 +4295,9 @@ class TicketService {
     if (suppressRequesterAck) ticket.suppressRequesterAck = true;
     const originalEmailRecipients = cleanMailRecipients(mailRecipients);
     if (originalEmailRecipients) ticket.originalEmailRecipients = originalEmailRecipients;
+    // QA 11-24 item 11: null for anything that did not come by e-mail, so the
+    // "Intake mailbox" condition needs no lookup on "Ticket arrived".
+    ticket.intakeMailbox = intakeMailboxAddress;
     await this._notifyLifecycle(null, ticket, {
       allow: data.notifyRequester,
       suppressRequesterAck: suppressRequesterAck === true,
@@ -4293,6 +4305,7 @@ class TicketService {
     });
     // In memory for the ticket.created workflows only: never broadcast or returned.
     delete ticket.originalEmailRecipients;
+    delete ticket.intakeMailbox;
     // Category/group watchers + custom agent alerts (both fire-and-forget;
     // creation never blocks on them).
     watcherNotificationService.notify('created', ticket.id).catch(() => {});
@@ -4603,7 +4616,11 @@ class TicketService {
       });
     }
     this._broadcast(workspaceId, 'updated', updated, { changes: Object.keys(changes) });
-    if (!dueOnly) await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
+    // QA 11-24 item 10: a source change is sent to the FreshService copy too.
+    if (!dueOnly) {
+      if (changes.source) await mirrorService.enqueueFieldSync(workspaceId, ticket.id, { syncSource: true });
+      else await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
+    }
     // Subject/description changed → the content embedding is stale (P5.2).
     if (changes.subject || changes.description) this._refreshEmbedding(ticket.id, workspaceId);
     // A manual (non-AI) category change should fire the same agent-alert trigger

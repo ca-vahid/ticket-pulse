@@ -50,6 +50,8 @@ async function deliveryTicket(delivery) {
       where: { id: ticketId },
       select: {
         id: true, workspaceId: true, origin: true, nativeNumber: true, freshserviceTicketId: true, ccEmails: true,
+        // QA 11-24 item 9: the alert e-mail names the ticket by its subject.
+        subject: true,
         // 22 Nov 2026: the team mailbox pick (group → internal group → primary).
         groupId: true, internalGroupId: true,
         requester: { select: { email: true } },
@@ -76,6 +78,64 @@ function requesterFacing(ticket, toRecipients, ccRecipients) {
  */
 function isWorkflowEmail(delivery) {
   return Boolean(delivery.workflowRunId) || delivery.notificationType === 'notification_workflow_test_email';
+}
+
+/**
+ * An alert to an agent about ONE ticket (QA 11-24 item 9): a priority,
+ * assignment or after-hours alert. These carry only the one-line message the
+ * SMS uses (payload.message), no body of their own, and are not workflow mail.
+ */
+function isTicketAlertEmail(delivery, hasOwnBody) {
+  if (delivery.channel !== 'email' || hasOwnBody || isWorkflowEmail(delivery)) return false;
+  const ticketId = Number(delivery.ticketId);
+  return Number.isInteger(ticketId) && ticketId > 0;
+}
+
+const PLAIN_FALLBACK = 'so it went as a plain one-line message';
+
+/**
+ * The branded alert e-mail for a ticket alert, or the plain-text fallback with
+ * the reason it was used (payload.fallbackReason). Never throws.
+ * @returns {Promise<{ html: string|null, text: string|null, payloadPatch: object }>}
+ */
+async function ticketAlertEmail(delivery, ticket, message) {
+  if (!ticket) {
+    return {
+      html: null,
+      text: null,
+      payloadPatch: { emailLayout: 'plain', fallbackReason: `The ticket could not be read when the alert was sent, ${PLAIN_FALLBACK}.` },
+    };
+  }
+  try {
+    const [{ renderTicketAlertEmail, alertKindOf }, { notificationTicketLink, notificationTicketRef }] = await Promise.all([
+      import('./alertEmailTemplate.js'),
+      import('../utils/ticketNotificationLink.js'),
+    ]);
+    let workspaceName = null;
+    try {
+      const ws = await prisma.workspace?.findUnique?.({ where: { id: Number(ticket.workspaceId) }, select: { name: true } });
+      workspaceName = ws?.name || null;
+    } catch { /* the band says "Service desk" */ }
+    const payload = delivery.payload && typeof delivery.payload === 'object' ? delivery.payload : {};
+    const rendered = renderTicketAlertEmail({
+      workspaceName,
+      kind: alertKindOf(delivery.notificationType || payload.notificationType),
+      ref: payload.ticketRef || notificationTicketRef(ticket),
+      priority: delivery.assessedPriority || null,
+      subject: ticket.subject || null,
+      message,
+      reason: payload.reason || null,
+      link: payload.ticketLink || notificationTicketLink(ticket),
+    });
+    return { html: rendered.html, text: rendered.text, payloadPatch: { emailLayout: 'ticket_alert' } };
+  } catch (err) {
+    logger.warn(`Delivery ${delivery.id}: alert layout not built, sending plain text (${err.message})`);
+    return {
+      html: null,
+      text: null,
+      payloadPatch: { emailLayout: 'plain', fallbackReason: `The alert layout could not be built (${err.message}), ${PLAIN_FALLBACK}.` },
+    };
+  }
 }
 
 /** The ticket's team-mailbox keys for the transport, or null (no ticket / another workspace). */
@@ -217,6 +277,9 @@ async function sendDelivery(delivery) {
     // telemetry records on both lanes inside the transport.
     // A machine sender taken off means To no longer equals delivery.recipient: send the list.
     const rich = hasWorkflowBody || toRecipients.length > 1 || ccRecipients.length > 0 || bccRecipients.length > 0 || machineRemoved.length > 0 || ownRemoved.length > 0;
+    // QA 11-24 item 9: an alert about a ticket gets the branded alert layout;
+    // when it cannot, the plain line goes out and the delivery says why.
+    const alertMail = isTicketAlertEmail(delivery, hasWorkflowBody) ? await ticketAlertEmail(delivery, deliveryTicketRow, message) : null;
     const result = await deliverTransactionalEmail({
       workspaceId: delivery.workspaceId ?? null,
       to: rich ? toRecipients : [delivery.recipient],
@@ -225,8 +288,10 @@ async function sendDelivery(delivery) {
       from: rich ? (delivery.fromAddress || payloadValue(delivery.payload, 'fromAddress')) : null,
       fromName,
       subject: buildEmailSubject(delivery),
-      html: rich ? (delivery.htmlBody || payloadValue(delivery.payload, 'htmlBody') || payloadValue(delivery.payload, 'html')) : null,
-      text: message,
+      html: rich
+        ? (delivery.htmlBody || payloadValue(delivery.payload, 'htmlBody') || payloadValue(delivery.payload, 'html'))
+        : (alertMail?.html || null),
+      text: alertMail?.text || message,
       label: rich ? 'workflow' : 'assignment',
       customArgs: rich ? {
         delivery_id: String(delivery.id),
@@ -241,7 +306,16 @@ async function sendDelivery(delivery) {
     });
     const machineFromBcc = machineRemoved.some((r) => r.field === 'bcc');
     const ownFromBcc = ownRemoved.some((r) => r.field === 'bcc');
+    // The layout used, and every fallback with its reason: the plain alert line
+    // (above) and the SendGrid lane after a failed mailbox send.
+    const payloadPatch = { ...(alertMail?.payloadPatch || {}) };
+    if (result.graphFallbackReason) {
+      const lane = `Sent through SendGrid because the mailbox send failed (${result.graphFallbackReason}).`;
+      payloadPatch.laneFallbackReason = result.graphFallbackReason;
+      payloadPatch.fallbackReason = payloadPatch.fallbackReason ? `${payloadPatch.fallbackReason} ${lane}` : lane;
+    }
     return {
+      ...(Object.keys(payloadPatch).length ? { payloadPatch } : {}),
       provider: result.provider,
       providerMessageId: result.providerMessageId,
       via: result.via,
@@ -319,6 +393,7 @@ export async function processDelivery(delivery) {
     // the mail never used. The address really used goes in the payload then.
     const sentFromDiffers = Boolean(result.from && delivery.fromAddress
       && String(result.from).toLowerCase() !== String(delivery.fromAddress).toLowerCase());
+    const payloadPatch = result?.payloadPatch && typeof result.payloadPatch === 'object' ? result.payloadPatch : null;
     await prisma.notificationDelivery.update({
       where: { id: delivery.id },
       data: {
@@ -339,9 +414,10 @@ export async function processDelivery(delivery) {
         ...(Array.isArray(result.bccRecipients) ? { bccRecipients: result.bccRecipients } : {}),
         // Who actually got it: machine senders taken off are recorded, not silently lost.
         ...(result.machineRemoved?.length || result.ownRemoved?.length ? { toRecipients: result.toRecipients, ccRecipients: result.ccRecipients } : {}),
-        ...(result.observerBcc?.length || result.machineRemoved?.length || result.ownRemoved?.length || sentFromDiffers ? {
+        ...(result.observerBcc?.length || result.machineRemoved?.length || result.ownRemoved?.length || sentFromDiffers || payloadPatch ? {
           payload: {
             ...priorPayload,
+            ...(payloadPatch || {}),
             ...(result.observerBcc?.length ? { observerBcc: result.observerBcc } : {}),
             ...(result.machineRemoved?.length ? { machineRemoved: result.machineRemoved } : {}),
             ...(result.ownRemoved?.length ? { ownMailboxRemoved: result.ownRemoved } : {}),

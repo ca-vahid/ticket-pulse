@@ -273,6 +273,82 @@ describe('notificationDeliveryService', () => {
     expect(deliverTransactionalEmailMock).toHaveBeenCalledTimes(2);
   });
 
+  describe('QA 11-24 item 9: the alert e-mail layout and why a fallback was used', () => {
+    const alertDelivery = (over = {}) => ({
+      id: 70, workspaceId: 5, ticketId: 501, channel: 'email', recipient: 'jordan.lee@example.com',
+      toRecipients: [], ccRecipients: [], bccRecipients: [], assessedPriority: 'Urgent',
+      notificationType: 'ticketpulse_priority_change', provider: 'sendgrid',
+      payload: {
+        message: 'TP-1042 is now Urgent priority and assigned to you. Open: https://tp.example.com/it/TP-1042',
+        ticketRef: 'TP-1042', ticketLink: 'https://tp.example.com/it/TP-1042', notificationType: 'ticketpulse_priority_change',
+        reason: 'You got this because you are the assignee and your alert setting covers Urgent tickets.',
+      },
+      ...over,
+    });
+
+    test('a priority alert goes in the branded alert layout, not the bare line', async () => {
+      prismaMock.ticket.findUnique.mockResolvedValue({ ...tpTicket, subject: 'VPN down for the site office' });
+      deliverTransactionalEmailMock.mockResolvedValue({ via: 'msgraph', provider: 'msgraph', providerMessageId: '<a@x>', messageId: '<a@x>', from: 'it@example.com', replyTo: null });
+
+      const result = await processDelivery(alertDelivery());
+
+      expect(result.success).toBe(true);
+      const call = deliverTransactionalEmailMock.mock.calls[0][0];
+      expect(call.subject).toBe('Ticket Pulse: Urgent priority ticket TP-1042');
+      expect(call.html).toContain('TP-1042 is now Urgent priority');
+      expect(call.html).toContain('VPN down for the site office');
+      expect(call.html).toContain('href="https://tp.example.com/it/TP-1042"');
+      expect(call.html).toContain('Open TP-1042');
+      expect(call.html).toContain('your alert setting covers Urgent tickets');
+      expect(call.html).not.toMatch(/FreshService/);
+      expect(call.text).toContain('TP-1042 is now Urgent priority');
+      // Still agent-facing: no ticket threading, the usual label.
+      expect(call).toEqual(expect.objectContaining({ ticket: null, label: 'assignment', to: ['jordan.lee@example.com'] }));
+      const data = prismaMock.notificationDelivery.update.mock.calls[0][0].data;
+      expect(data.payload).toEqual(expect.objectContaining({ emailLayout: 'ticket_alert' }));
+      expect(data.payload).not.toHaveProperty('fallbackReason');
+    });
+
+    test('the ticket cannot be read: the plain line goes, and the delivery says why', async () => {
+      prismaMock.ticket.findUnique.mockResolvedValue(null);
+      deliverTransactionalEmailMock.mockResolvedValue({ via: 'sendgrid', provider: 'sendgrid', providerMessageId: null, messageId: null, from: null, replyTo: null });
+
+      await processDelivery(alertDelivery({ id: 71 }));
+
+      const call = deliverTransactionalEmailMock.mock.calls[0][0];
+      expect(call.html).toBeNull();
+      expect(call.text).toBe('TP-1042 is now Urgent priority and assigned to you. Open: https://tp.example.com/it/TP-1042');
+      const data = prismaMock.notificationDelivery.update.mock.calls[0][0].data;
+      expect(data.payload.emailLayout).toBe('plain');
+      expect(data.payload.fallbackReason).toMatch(/ticket could not be read.*plain one-line message/);
+    });
+
+    test('a SendGrid send after a failed mailbox send records the lane fallback reason', async () => {
+      prismaMock.ticket.findUnique.mockResolvedValue({ ...tpTicket, subject: 'Printer jam' });
+      deliverTransactionalEmailMock.mockResolvedValue({
+        via: 'sendgrid', provider: 'sendgrid', providerMessageId: 'sg-1', messageId: null, from: null, replyTo: null,
+        graphFallbackReason: 'Graph 503 Service Unavailable',
+      });
+
+      await processDelivery(alertDelivery({ id: 72 }));
+
+      const data = prismaMock.notificationDelivery.update.mock.calls[0][0].data;
+      expect(data.payload.emailLayout).toBe('ticket_alert');
+      expect(data.payload.laneFallbackReason).toBe('Graph 503 Service Unavailable');
+      expect(data.payload.fallbackReason).toBe('Sent through SendGrid because the mailbox send failed (Graph 503 Service Unavailable).');
+    });
+
+    test('workflow e-mails keep their own body (no alert layout)', async () => {
+      prismaMock.ticket.findUnique.mockResolvedValue(tpTicket);
+      deliverTransactionalEmailMock.mockResolvedValue({ via: 'sendgrid', provider: 'sendgrid', providerMessageId: null, messageId: null, from: null, replyTo: null });
+      await processDelivery({
+        id: 73, workspaceId: 5, ticketId: 501, workflowRunId: 4, channel: 'email', recipient: 'agent@example.com',
+        toRecipients: ['agent@example.com'], ccRecipients: [], bccRecipients: [], subject: 'S', htmlBody: '<p>Own body</p>', payload: {},
+      });
+      expect(deliverTransactionalEmailMock.mock.calls[0][0].html).toBe('<p>Own body</p>');
+    });
+  });
+
   test('scopes queued delivery processing to the provided dedupe keys', async () => {
     prismaMock.notificationDelivery.findMany.mockResolvedValue([
       { id: 5, channel: 'email', recipient: 'fresh@example.com', subject: 'Fresh', textBody: 'Fresh', payload: {} },

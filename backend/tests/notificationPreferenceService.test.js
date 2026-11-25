@@ -592,11 +592,14 @@ describe('notificationPreferenceService', () => {
           priorityEventId: 44,
           assessedPriority: 'High',
           dedupeKey: 'priority-change:44:501:17:email',
+          // QA 11-24 item 9: a Ticket Pulse ticket's change is not a "FreshService priority change".
+          notificationType: 'ticketpulse_priority_change',
           payload: expect.objectContaining({
             message: 'TP-1042 is now High priority and assigned to you. Open: https://tp.example.com/it/TP-1042',
             voiceMessage: 'Ticket Pulse priority alert. Ticket T P 1042 is now High priority and assigned to you.',
             ticketRef: 'TP-1042',
-            notificationType: 'freshservice_priority_change',
+            notificationType: 'ticketpulse_priority_change',
+            reason: 'You got this because you are the assignee and your alert setting covers High and Urgent tickets.',
             priorityChange: expect.objectContaining({
               fromPriorityLabel: 'Medium',
               toPriorityLabel: 'High',
@@ -748,10 +751,11 @@ describe('notificationPreferenceService', () => {
       const [delivery] = prismaMock.notificationDelivery.createMany.mock.calls.at(-1)[0].data;
       expect(delivery.payload.message).toBe('TP-1042 is now Urgent priority and assigned to you. Open: https://tp.example.com/it/TP-1042');
       expect(delivery.payload.ticketRef).toBe('TP-1042');
-      expect(delivery.payload.whatsappVariables).toEqual(expect.objectContaining({ ticketId: '250001', ticketRef: 'TP-1042', link: 'https://tp.example.com/it/TP-1042' }));
+      // QA 11-24 item 9: never the FreshService copy's number for a Ticket Pulse ticket.
+      expect(delivery.payload.whatsappVariables).toEqual(expect.objectContaining({ ticketId: 'TP-1042', ticketRef: 'TP-1042', link: 'https://tp.example.com/it/TP-1042' }));
     });
 
-    test('WhatsApp {{ticketId}} stays the bare FreshService number; empty for a ticket without one', async () => {
+    test('WhatsApp {{ticketId}}: a Ticket Pulse ticket is its own reference, with or without a FreshService copy', async () => {
       prismaMock.technicianNotificationPreference.findUnique.mockResolvedValue({
         id: 1, workspaceId: 1, technicianId: 17, threshold: 'high_urgent',
         emailEnabled: true, smsEnabled: false, whatsappEnabled: false, phoneCallEnabled: false,
@@ -766,8 +770,58 @@ describe('notificationPreferenceService', () => {
       });
 
       const [delivery] = prismaMock.notificationDelivery.createMany.mock.calls.at(-1)[0].data;
-      expect(delivery.payload.whatsappVariables).toEqual(expect.objectContaining({ ticketId: '', ticketRef: 'TP-1043' }));
+      expect(delivery.payload.whatsappVariables).toEqual(expect.objectContaining({ ticketId: 'TP-1043', ticketRef: 'TP-1043' }));
       expect(delivery.payload.freshserviceTicketId).toBeNull();
+    });
+  });
+
+  describe('QA 11-24 item 9: a Ticket Pulse ticket\'s priority alert never reads as FreshService', () => {
+    const preference = {
+      id: 1, workspaceId: 1, technicianId: 17, threshold: 'urgent_only',
+      emailEnabled: true, smsEnabled: true, whatsappEnabled: true, phoneCallEnabled: true,
+      phoneVerifiedAt: new Date('2026-11-01T16:00:00.000Z'), phoneOverride: '+16045550101',
+      technician: { email: 'jordan.lee@example.com', name: 'Jordan Lee' },
+    };
+    const twilio = {
+      accountSid: 'AC123', authToken: 'secret', fromNumber: '+16045550100', voiceFromNumber: '+16045550100',
+      whatsappSender: 'whatsapp:+16045550100', whatsappMessagingServiceSid: null, whatsappContentSid: 'HX1', whatsappContentVariables: '{"1":"{{message}}"}',
+    };
+
+    test('e-mail, SMS, voice and WhatsApp: TP ref, Ticket Pulse link, no FreshService words or number', async () => {
+      prismaMock.technicianNotificationPreference.findUnique.mockResolvedValue(preference);
+      settingsRepositoryMock.getSendGridConfig.mockResolvedValue({ apiKey: 'SG.test', fromEmail: 'ticketpulse@example.com' });
+      settingsRepositoryMock.getTwilioConfig.mockResolvedValue(twilio);
+      prismaMock.notificationDelivery.createMany.mockResolvedValue({ count: 4 });
+
+      await notificationPreferenceService.queueNotificationsForPriorityChange({
+        id: 60, workspaceId: 1, fromPriorityId: 1, fromPriorityLabel: 'Low', toPriorityId: 4, toPriorityLabel: 'Urgent',
+        ticket: { id: 9010, workspaceId: 1, origin: 'ticketpulse', nativeNumber: 1050, freshserviceTicketId: 250050, assignedTechId: 17 },
+      });
+
+      const { data } = prismaMock.notificationDelivery.createMany.mock.calls.at(-1)[0];
+      expect(data.map((d) => d.channel).sort()).toEqual(['email', 'phone_call', 'sms', 'whatsapp']);
+      for (const delivery of data) {
+        expect(delivery.notificationType).toBe('ticketpulse_priority_change');
+        const words = JSON.stringify([delivery.payload.message, delivery.payload.voiceMessage, delivery.payload.whatsappVariables, delivery.payload.reason]);
+        expect(words).not.toMatch(/FreshService|freshservice\.com|250050/);
+        expect(delivery.payload.message).toBe('TP-1050 is now Urgent priority and assigned to you. Open: https://tp.example.com/it/TP-1050');
+        expect(delivery.payload.reason).toBe('You got this because you are the assignee and your alert setting covers Urgent tickets.');
+      }
+    });
+
+    test('a FreshService ticket keeps the freshservice_priority_change type and its number', async () => {
+      prismaMock.technicianNotificationPreference.findUnique.mockResolvedValue({ ...preference, smsEnabled: false, whatsappEnabled: false, phoneCallEnabled: false });
+      settingsRepositoryMock.getSendGridConfig.mockResolvedValue({ apiKey: 'SG.test', fromEmail: 'ticketpulse@example.com' });
+      prismaMock.notificationDelivery.createMany.mockResolvedValue({ count: 1 });
+
+      await notificationPreferenceService.queueNotificationsForPriorityChange({
+        id: 61, workspaceId: 1, toPriorityId: 4, toPriorityLabel: 'Urgent',
+        ticket: { id: 9011, workspaceId: 1, origin: 'freshservice', nativeNumber: null, freshserviceTicketId: 250051, assignedTechId: 17 },
+      });
+
+      const [delivery] = prismaMock.notificationDelivery.createMany.mock.calls.at(-1)[0].data;
+      expect(delivery.notificationType).toBe('freshservice_priority_change');
+      expect(delivery.payload.whatsappVariables).toEqual(expect.objectContaining({ ticketId: '250051', ticketRef: '#250051' }));
     });
   });
 });

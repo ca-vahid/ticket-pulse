@@ -30,6 +30,7 @@ const {
   deriveTicketLifecycleEvents,
   diffTrackedFields,
   emitTicketLifecycleNotifications,
+  emitTicketEvent,
 } = await import('../src/services/ticketLifecycleNotificationService.js');
 
 const hydratedTicket = {
@@ -224,5 +225,64 @@ describe('ticket.created with suppressRequesterAck', () => {
     });
     const [ctx] = contexts('ticket.created');
     expect(ctx.event.extra.suppressRequesterAck).toBeUndefined();
+  });
+
+  test('QA 11-24 item 11: a mail-in ticket carries its intake mailbox; an app ticket carries none', async () => {
+    await emitTicketLifecycleNotifications({
+      existingTicket: null,
+      upsertedTicket: { ...existing, origin: 'ticketpulse', createdAt: new Date('2026-07-06T09:00:00.000Z'), intakeMailbox: 'ar@example.com' },
+      source: 'ticketpulse_native',
+      allowNotificationWorkflows: true,
+    });
+    await emitTicketLifecycleNotifications({
+      existingTicket: null,
+      upsertedTicket: { ...existing, id: 502, origin: 'ticketpulse', createdAt: new Date('2026-07-06T09:00:00.000Z'), intakeMailbox: null },
+      source: 'ticketpulse_native',
+      allowNotificationWorkflows: true,
+    });
+    const [mail, app] = contexts('ticket.created');
+    expect(mail.ticket.intakeMailbox).toBe('ar@example.com');
+    expect(app.ticket.intakeMailbox).toBeNull();
+  });
+});
+
+/**
+ * QA 11-24 item 9: an agent raised a Ticket Pulse ticket Low → Urgent in the
+ * app. The change reaches the "Priority changed" workflows once, with the
+ * Priority field at Urgent; the FreshService copy showing the same move later
+ * is never a second event.
+ */
+describe('a Ticket Pulse ticket\'s in-app priority change', () => {
+  const tpHydrated = { ...hydratedTicket, origin: 'ticketpulse', nativeNumber: 1042, priority: 4, assessedPriority: 'Low' };
+  const flush = async () => { for (let i = 0; i < 5; i += 1) await new Promise((r) => setImmediate(r)); };
+
+  test('ticket.fields_updated from the app also fires ticket.priority_changed, Priority = Urgent', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...tpHydrated });
+    await emitTicketEvent('ticket.fields_updated', 501, {
+      source: 'ticketpulse_native',
+      dedupeStamp: 'fields:501:7001',
+      extra: { actorKind: 'human', actorName: 'Jordan Lee', source: 'app', changedFields: ['priority'], changedCount: 1, changes: { priority: { from: 1, to: 4 } } },
+    });
+    await flush();
+    const [ctx] = contexts('ticket.priority_changed');
+    expect(ctx).toBeTruthy();
+    expect(ctx.event.extra).toEqual(expect.objectContaining({ from: 1, to: 4, toLabel: 'Urgent', raised: true, actorKind: 'human' }));
+    expect(ctx.ticket.priorityLabel).toBe('Urgent');
+    expect(ctx.ticket.origin).toBe('ticketpulse');
+    expect(contexts('ticket.priority_changed')).toHaveLength(1);
+  });
+
+  test('the FreshService copy\'s sync showing the same change derives no second field event', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...tpHydrated });
+    const result = await emitTicketLifecycleNotifications({
+      existingTicket: { ...existing, origin: 'ticketpulse', priority: 1 },
+      upsertedTicket: { ...existing, origin: 'ticketpulse', priority: 4, freshserviceUpdatedAt: upsertedAt },
+      source: 'freshservice_sync',
+      allowNotificationWorkflows: true,
+    });
+    await flush();
+    expect(result.status).toBe('skipped');
+    expect(contexts()).toHaveLength(0);
+    expect(contexts('ticket.priority_changed')).toHaveLength(0);
   });
 });

@@ -14,6 +14,7 @@ import attachmentService from './attachmentService.js';
 const FS_THREAD_ATTACHMENT_CAP_BYTES = 15 * 1024 * 1024;
 import { createFreshServiceClient } from '../integrations/freshservice.js';
 import { TICKET_ORIGIN, ticketDisplayRef } from '../utils/ticketOrigin.js';
+import { FS_SOURCE, fsSourceFor } from '../utils/fsSourceMap.js';
 import { cleanDisplayName } from '../utils/textEncoding.js';
 import { fsConversationEntryId, fsConversationEntryIdCandidates } from '../utils/fsEntryId.js';
 import { fsSystemConversationKind } from '../utils/fsSystemConversation.js';
@@ -166,6 +167,15 @@ function isCcEmailsRejection(err) {
   return /cc_emails/i.test(String(err?.message || ''));
 }
 
+// A source FreshService will not take on this ticket (QA 11-24 item 10): the
+// copy is still made (as Portal) or synced (without the source).
+function isSourceRejection(err) {
+  const detail = err?.freshserviceDetail;
+  const fieldErrors = Array.isArray(detail?.errors) ? detail.errors : [];
+  if (fieldErrors.some((fe) => String(fe.field || '').toLowerCase() === 'source')) return true;
+  return /\bsource\b.*\b(invalid|not|must|should)\b|\b(invalid|unknown)\b.*\bsource\b/i.test(String(err?.message || ''));
+}
+
 // A support address id FreshService does not know or will not take (a typo in
 // fs_email_config_by_group_ws<N>, a retired mailbox): the copy is still made or
 // synced, with FreshService's default address (6 Nov 2026).
@@ -265,13 +275,24 @@ class MirrorService {
   }
 
   /** Idempotent snapshot push — one pending update job per ticket is enough. */
-  async enqueueFieldSync(workspaceId, ticketId) {
+  /**
+   * `syncSource` (QA 11-24 item 10): the ticket's source changed, so this sync
+   * also sends the FreshService source. A pending job absorbs the flag.
+   */
+  async enqueueFieldSync(workspaceId, ticketId, { syncSource = false } = {}) {
     const existing = await prisma.mirrorJob.findFirst({
       where: { ticketId, kind: 'update_fields', status: 'pending' },
-      select: { id: true },
+      select: { id: true, payload: true },
     });
-    if (existing) return existing;
-    return this._enqueue(workspaceId, ticketId, 'update_fields');
+    if (existing) {
+      if (syncSource && existing.payload?.syncSource !== true) {
+        const payload = existing.payload && typeof existing.payload === 'object' ? existing.payload : {};
+        await prisma.mirrorJob.update({ where: { id: existing.id }, data: { payload: { ...payload, syncSource: true } } })
+          .catch((err) => logger.warn(`Mirror: source flag not added to pending sync for ticket ${ticketId}: ${err.message}`));
+      }
+      return existing;
+    }
+    return this._enqueue(workspaceId, ticketId, 'update_fields', null, syncSource ? { syncSource: true } : null);
   }
 
   async enqueueThreadEntry(workspaceId, ticketId, threadEntryId) {
@@ -827,8 +848,10 @@ class MirrorService {
       priority: ticket.priority || 2,
       // Mail that arrived on the team's front-door mailbox is copied as Email, so FreshService
       // workflows that branch on "source is Email" (IT's 'Received' e-mail, priority, after-hours)
-      // run for it as they do for mail FreshService received itself. Everything else stays Portal.
-      source: (await this._isFrontDoorMail(ticket)) ? 1 : 2,
+      // run for it as they do for mail FreshService received itself; mail on a side mailbox stays
+      // Portal. Every other source goes to the closest FreshService source (QA 11-24 item 10,
+      // utils/fsSourceMap.js): Phone as Phone, Walk-up as Walkup, Teams as Chat.
+      source: await this._fsSourceFor(ticket),
       // Marks the copy for FreshService rules and for a person looking at it (12 Oct 2026).
       tags: ['tp-copy', `tp-${ticket.nativeNumber || ticket.id}`],
       workspace_id: ticket.workspace?.freshserviceWorkspaceId ? Number(ticket.workspace.freshserviceWorkspaceId) : undefined,
@@ -863,10 +886,16 @@ class MirrorService {
       try {
         fsTicket = await client.createTicket({ ...basePayload });
       } catch (err) {
-        // A support address FreshService refuses must not cost the copy: make it with the default.
-        if (basePayload.email_config_id === undefined || !isEmailConfigRejection(err)) throw err;
-        logger.warn(`Mirror: FreshService refused support address ${basePayload.email_config_id} for ${ref} (${err.message}) — creating the copy with its default address`);
-        fsTicket = await client.createTicket({ ...basePayload, email_config_id: undefined });
+        if (isSourceRejection(err) && basePayload.source !== FS_SOURCE.PORTAL) {
+          // A source this FreshService will not take must not cost the copy: make it as Portal.
+          logger.warn(`Mirror: FreshService refused source ${basePayload.source} for ${ref} (${err.message}) — creating the copy as Portal`);
+          fsTicket = await client.createTicket({ ...basePayload, source: FS_SOURCE.PORTAL });
+        } else {
+          // A support address FreshService refuses must not cost the copy: make it with the default.
+          if (basePayload.email_config_id === undefined || !isEmailConfigRejection(err)) throw err;
+          logger.warn(`Mirror: FreshService refused support address ${basePayload.email_config_id} for ${ref} (${err.message}) — creating the copy with its default address`);
+          fsTicket = await client.createTicket({ ...basePayload, email_config_id: undefined });
+        }
       }
       if (!fsTicket?.id) throw new Error('FreshService did not return a ticket id');
     } catch (err) {
@@ -965,6 +994,9 @@ class MirrorService {
       email_config_id: await import('../utils/fsEmailConfig.js')
         .then(({ fsEmailConfigIdFor }) => fsEmailConfigIdFor(ticket.workspaceId, ticket.groupId))
         .catch(() => undefined),
+      // QA 11-24 item 10: the source follows when it changes in Ticket Pulse
+      // (the job is marked syncSource by enqueueFieldSync); otherwise left alone.
+      source: job?.payload?.syncSource === true ? await this._fsSourceFor(ticket) : undefined,
     };
     let assigneeNote = null;
     // Already refused for this same assignee: don't ask again on every sync
@@ -981,7 +1013,10 @@ class MirrorService {
     try {
       await client.updateTicket(Number(ticket.freshserviceTicketId), payload);
     } catch (err) {
-      if (payload.email_config_id !== undefined && isEmailConfigRejection(err)) {
+      if (payload.source !== undefined && isSourceRejection(err)) {
+        logger.warn(`Mirror: FreshService rejected source ${payload.source} on update for #${ticket.freshserviceTicketId} (${err.message}) — re-sending the field sync without it`);
+        await client.updateTicket(Number(ticket.freshserviceTicketId), { ...payload, source: undefined });
+      } else if (payload.email_config_id !== undefined && isEmailConfigRejection(err)) {
         logger.warn(`Mirror: FreshService rejected support address ${payload.email_config_id} on update for #${ticket.freshserviceTicketId} (${err.message}) — re-sending the field sync without it`);
         await client.updateTicket(Number(ticket.freshserviceTicketId), { ...payload, email_config_id: undefined });
       } else if (payload.due_by !== undefined && isDueByRejection(err)) {
@@ -1055,6 +1090,12 @@ class MirrorService {
       logger.warn(`Mirror: could not move #${ticket.freshserviceTicketId} to the assignee's own group (${err.message})`);
       return false;
     }
+  }
+
+  /** The FreshService source for this ticket's copy (utils/fsSourceMap.js). Never throws. */
+  async _fsSourceFor(ticket) {
+    const frontDoorMail = Number(ticket?.source) === 1 ? await this._isFrontDoorMail(ticket) : false;
+    return fsSourceFor(ticket?.source, { frontDoorMail });
   }
 
   /** Did this ticket arrive by mail on a mailbox marked as the team's front door? Never throws. */

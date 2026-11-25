@@ -1,6 +1,6 @@
 import { useId, useMemo, useState } from 'react';
 import {
-  Activity, AlertTriangle, ArrowDown, ArrowLeftRight, ArrowRight, ArrowUp, BadgeCheck, BookOpen, Bot, Building2,
+  Activity, AlertTriangle, ArrowDown, ArrowLeftRight, ArrowRight, ArrowUp, BadgeCheck, BellRing, BookOpen, Bot, Building2,
   CalendarClock, Check, CheckSquare, ChevronDown, EyeOff, Forward, GitMerge, Hand, History, Inbox, Lock, Mail,
   MessageSquare, Pencil, Play, Plug, Plus, RefreshCw, RotateCcw, Siren, SkipForward, Sparkles, Tag, VolumeX, Wand2, Workflow,
 } from 'lucide-react';
@@ -69,6 +69,8 @@ const EVENT_STYLE = {
   ai: { icon: Sparkles, tone: TONE.indigo, label: 'AI' },
   autohelp: { icon: BookOpen, tone: TONE.blue, label: 'Auto-help' },
   urgent: { icon: Siren, tone: TONE.red, label: 'Urgent response' },
+  // QA 11-24 item 9: an alert went to an agent about this ticket.
+  alert: { icon: BellRing, tone: TONE.orange, label: 'Alert sent' },
   intake: { icon: Inbox, tone: TONE.violet, label: 'Intake' },
   // The workflow mark is the actor's picture; the event column says what it did.
   workflow: { icon: Pencil, tone: TONE.amber, label: 'Workflow change' },
