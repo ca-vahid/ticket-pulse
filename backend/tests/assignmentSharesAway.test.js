@@ -36,7 +36,7 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: loggerMock 
 jest.unstable_mockModule('../src/services/businessCalendarService.js', () => ({ default: calendarMock }));
 
 const { default: shares, settingsKey } = await import('../src/services/assignmentShares/sharesService.js');
-const { awayDays, awayWindows } = await import('../src/services/assignmentShares/rules.js');
+const { awayDays, awayWindows, onLeaveAt } = await import('../src/services/assignmentShares/rules.js');
 
 const WS = 5;
 const NOW = new Date('2026-11-09T19:00:00Z'); // Monday 11:00 Pacific
@@ -147,5 +147,19 @@ describe('the pure helpers', () => {
       leave(S, '2026-12-01'),
     ], ['2026-11-02', '2026-11-03', '2026-11-04']);
     expect(out).toEqual({ days: 1, dates: [{ date: '2026-11-04', half: false }] });
+  });
+
+  test('a site visit is not away, in the report or for the pick; physio still is (25 Nov 2026)', () => {
+    const site = leave(S, '2026-11-09', { category: 'OTHER', leaveTypeName: 'Site visit' });
+    const physio = leave(J, '2026-11-09', { category: 'OTHER', leaveTypeName: 'Physio' });
+    expect(awayDays([site], ['2026-11-09'])).toEqual({ days: 0, dates: [] });
+    expect(awayDays([physio], ['2026-11-09']).days).toBe(1);
+    expect(onLeaveAt([site], NOW, 'America/Vancouver')).toBe(false);
+    expect(onLeaveAt([physio], NOW, 'America/Vancouver')).toBe(true);
+  });
+
+  test('both leave reads select the type name the site-visit check needs', async () => {
+    await shares.results(WS, { days: 14, now: NOW });
+    expect(prismaMock.technicianLeave.findMany.mock.calls[0][0].select).toMatchObject({ category: true, leaveTypeName: true });
   });
 });

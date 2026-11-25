@@ -3,6 +3,7 @@ import settingsRepository from '../settingsRepository.js';
 import logger from '../../utils/logger.js';
 import { getLocalDateBounds } from '../../utils/timezone.js';
 import { countAssignedToday } from '../assignmentTodayCount.js';
+import { isAwayLeave } from '../../utils/leaveKinds.js';
 import {
   MODES, OUTCOMES, applyPatch, decide, normalizeLevel, normalizeSettings, onShiftAt, skillFor, toStored,
 } from './rules.js';
@@ -26,7 +27,6 @@ import {
 export const settingsKey = (workspaceId) => `assignment_level_match_ws${Number(workspaceId)}`;
 const SANDBOX_WORKSPACES = [6, 7, 8, 9];
 const SETTINGS_CACHE_MS = 15 * 1000;
-const NOT_AWAY = ['WFH', 'IGNORED'];
 
 const positive = (n) => Number.isInteger(n) && n > 0;
 const toId = (v) => { const n = Number(v); return positive(n) ? n : null; };
@@ -118,7 +118,7 @@ class LevelMatchService {
       }),
       prisma.technicianLeave.findMany({
         where: { workspaceId: ws, technicianId: { in: ids }, leaveDate: { gte: dayStart, lte: dayEnd }, status: 'APPROVED' },
-        select: { technicianId: true, category: true },
+        select: { technicianId: true, category: true, leaveTypeName: true },
       }),
       thisTicket
         ? prisma.ticketAssignmentEpisode.findMany({ where: { ticketId: thisTicket, endMethod: 'rejected' }, select: { technicianId: true } })
@@ -145,7 +145,8 @@ class LevelMatchService {
       const name = nameOf.get(skill.priority === 2 ? subcategoryId : categoryId) || null;
       return name ? { ...skill, name } : skill;
     };
-    const away = new Set(leaves.filter((l) => !NOT_AWAY.includes(l.category)).map((l) => l.technicianId));
+    // WFH, IGNORED and site visits (work at another site) are not away.
+    const away = new Set(leaves.filter((l) => isAwayLeave(l)).map((l) => l.technicianId));
     const rejected = new Set(rejections.map((r) => r.technicianId));
 
     return unique

@@ -173,6 +173,13 @@ describe('rules before a card is sent', () => {
     prismaMock.technicianLeave.findFirst.mockResolvedValue(null);
     for (const v of svc.pending.values()) clearTimeout(v.timer);
   });
+  test('_awayReason: a site visit is not on_leave; physio is (25 Nov 2026)', async () => {
+    const tech = { id: 7, timezone: 'America/Vancouver' }; // no hours set: shift check skipped
+    prismaMock.technicianLeave.findFirst.mockResolvedValueOnce({ category: 'OTHER', leaveTypeName: 'Site visit', isFullDay: true });
+    expect(await svc._awayReason(tech, 1)).toBeNull();
+    prismaMock.technicianLeave.findFirst.mockResolvedValueOnce({ category: 'OTHER', leaveTypeName: 'Physio', isFullDay: true });
+    expect(await svc._awayReason(tech, 1)).toBe('on_leave');
+  });
   test('workspace switch off = nothing', async () => {
     prismaMock.notificationWorkspaceSetting.findUnique.mockResolvedValue({ workspaceId: 1, teamsEnabled: false });
     await svc._onTicketEvent(ctx('ticket.assigned', {}));

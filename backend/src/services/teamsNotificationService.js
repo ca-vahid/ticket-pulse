@@ -16,6 +16,7 @@
  * Nothing here ever throws into the ticket pipeline.
  */
 import { requesterTitle } from '../utils/requesterTitle.js';
+import { isAwayLeave } from '../utils/leaveKinds.js';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import bot from '../integrations/teamsBotClient.js';
@@ -751,7 +752,8 @@ class TeamsNotificationService {
     const leave = await prisma.technicianLeave.findFirst({
       where: { workspaceId, technicianId: tech.id, leaveDate: new Date(`${day}T00:00:00Z`) },
     }).catch(() => null);
-    if (leave && leave.category !== 'WFH') {
+    // WFH, IGNORED and site visits (work at another site) are not on_leave.
+    if (leave && isAwayLeave(leave)) {
       if (leave.isFullDay !== false) return 'on_leave';
       const [h, m] = localHHMM(tz).split(':').map(Number);
       const minute = h * 60 + m;

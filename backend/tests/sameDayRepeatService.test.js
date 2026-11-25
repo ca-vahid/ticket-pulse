@@ -531,6 +531,16 @@ describe('route: follow-up routing (item 4)', () => {
     expect(out.applied).toBe(true);
   });
 
+  test('a site visit is not "away today"; a physio appointment still is (25 Nov 2026)', async () => {
+    settingsStore.set(settingsKey(WS), 'live');
+    prismaMock.technicianLeave.findMany.mockResolvedValueOnce([{ category: 'OTHER', leaveTypeName: 'Site visit' }]);
+    const out = await go();
+    expect(out.applied).toBe(true);
+    expect(out.record.unavailableReason ?? null).toBeNull();
+    prismaMock.technicianLeave.findMany.mockResolvedValueOnce([{ category: 'OTHER', leaveTypeName: 'Physio' }]);
+    expect((await go()).record.unavailableReason).toBe('away today');
+  });
+
   test('a local person cannot take a FreshService-born ticket', async () => {
     settingsStore.set(settingsKey(WS), 'live');
     prismaMock.technician.findFirst.mockResolvedValueOnce({ id: ELI, isActive: true, timezone: 'America/Vancouver', freshserviceId: null });

@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.4.16-preview';
+export const APP_VERSION = '4.4.17-preview';
 
 export const changelog = [
+  {
+    version: '4.4.17-preview',
+    date: 'November 25, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>A site visit is work, not time off</strong> &mdash; people booked on a site visit in Vacation Pulse were treated as off by assignment, shares, urgent response and Teams notifications. They now count as working and can be assigned tickets; physio, training and leaving early still count as away.' }
+    ],
+  },
   {
     version: '4.4.16-preview',
     date: 'November 24, 2026',

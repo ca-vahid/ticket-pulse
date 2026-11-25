@@ -15,6 +15,7 @@ import statusService from './statusService.js';
 import { countsForAgentMetrics, withAgentMetricTickets } from '../utils/autoHelpMetrics.js';
 import { requesterTitle } from '../utils/requesterTitle.js';
 import { countAssignedToday } from './assignmentTodayCount.js';
+import { isSiteVisitLeave } from '../utils/leaveKinds.js';
 
 // Workload scans historically match legacy row variants too (lowercase labels
 // and raw FS status ints from very old syncs). Phase 8b: the canonical pair is
@@ -746,6 +747,7 @@ async function getAgentAvailability(workspaceId) {
     leavesByTech[l.technicianId].push({
       leaveType: l.leaveTypeName,
       category: l.category,
+      siteVisit: isSiteVisitLeave(l),
       isFullDay: l.isFullDay !== false,
       halfDayPart: l.halfDayPart || null,
       startMinute: l.startMinute ?? null,
@@ -792,7 +794,10 @@ async function getAgentAvailability(workspaceId) {
     if (fullDayLeaves.length > 0) {
       const offLeave = fullDayLeaves.find(l => l.category === 'OFF');
       const wfhLeave = fullDayLeaves.find(l => l.category === 'WFH');
-      const otherLeave = fullDayLeaves.find(l => l.category !== 'OFF' && l.category !== 'WFH' && l.category !== 'IGNORED');
+      // A site visit (Vacation Pulse ONSITE, stored as OTHER) is work at another
+      // site, never an absence — it never lands in `off`.
+      const otherLeave = fullDayLeaves.find(l => l.category !== 'OFF' && l.category !== 'WFH' && l.category !== 'IGNORED' && !l.siteVisit);
+      const siteVisitLeave = fullDayLeaves.find(l => l.siteVisit);
       const ignored = fullDayLeaves.every(l => l.category === 'IGNORED');
 
       if (offLeave) {
@@ -801,6 +806,13 @@ async function getAgentAvailability(workspaceId) {
         wfh.push({ ...agentInfo, leaveType: wfhLeave.leaveType, note: 'Working from home all day — available for remote tasks only, NOT for physical presence tasks.' });
       } else if (otherLeave) {
         off.push({ ...agentInfo, leaveType: otherLeave.leaveType, note: `Leave type: ${otherLeave.category} — treat as unavailable.` });
+      } else if (siteVisitLeave) {
+        inOffice.push({
+          ...agentInfo,
+          siteVisit: true,
+          leaveType: siteVisitLeave.leaveType,
+          note: 'On a site visit today — working, available for assignment (may be at another office)',
+        });
       } else if (ignored) {
         inOffice.push(agentInfo);
       }
@@ -809,8 +821,20 @@ async function getAgentAvailability(workspaceId) {
 
     // Only half-day leaves remain.
     for (const leave of partialLeaves) {
-      const note = buildHalfDayAvailabilityNote(leave.category, leave, shift.nowMinutes);
       const window = `${formatMinutes(leave.startMinute)}-${formatMinutes(leave.endMinute)}`;
+      if (leave.siteVisit) {
+        // A site-visit half day is not a half day off: working, available.
+        inOffice.push({
+          ...agentInfo,
+          siteVisit: true,
+          leaveType: leave.leaveType,
+          halfDayPart: leave.halfDayPart,
+          leaveWindow: window,
+          note: `On a site visit ${window} — working, available`,
+        });
+        continue;
+      }
+      const note = buildHalfDayAvailabilityNote(leave.category, leave, shift.nowMinutes);
       const enriched = {
         ...agentInfo,
         leaveType: leave.leaveType,
@@ -1876,6 +1900,8 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
 
   const leaveMap = {};
   for (const l of leaves) {
+    // A site visit is work at another site, not leave: the person stays a candidate.
+    if (isSiteVisitLeave(l)) continue;
     leaveMap[l.technicianId] = l.category;
   }
 
