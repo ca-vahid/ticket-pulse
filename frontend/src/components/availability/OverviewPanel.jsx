@@ -243,7 +243,16 @@ function WeekBoard({ week, today, byEmail, holidays, holidayNames, teamSize }) {
             const inCount = Math.max(0, teamSize - out);
             const thin = teamSize > 0 && out / teamSize >= 0.2;
             const remotePeople = [...new Map(cell.remote.filter((r) => r.entry.status === 'approved').map((r) => [r.entry.email, r.entry])).values()];
-            const allHome = remotePeople.every((e) => e.availability === 'WFH');
+            // At home and on a site visit are different places (25 Nov 2026): say which, never lump a
+            // visit to another office in with "working remotely".
+            const homeCount = remotePeople.filter((e) => e.availability === 'WFH').length;
+            const siteCount = remotePeople.filter((e) => e.availability === 'ONSITE').length;
+            const otherCount = remotePeople.length - homeCount - siteCount;
+            const remoteWords = [
+              homeCount ? `${homeCount} at home` : null,
+              siteCount ? `${siteCount} on a site visit` : null,
+              otherCount ? `${otherCount} working remotely` : null,
+            ].filter(Boolean).join(' · ');
             const laneOnly = cell.away.filter((a) => a.inLane);
             const ownAway = cell.away.filter((a) => !a.inLane);
             const nothing = !ownAway.length && !cell.part.length;
@@ -277,7 +286,7 @@ function WeekBoard({ week, today, byEmail, holidays, holidayNames, teamSize }) {
                         <span key={e.email} className="rounded-full ring-2 ring-card"><TeamAvatar email={e.email} name={personName(e.email, byEmail)} byEmail={byEmail} size="h-5 w-5" textSize="text-[8px]" /></span>
                       ))}
                     </span>
-                    <span>{remotePeople.length} {allHome ? 'at home' : 'working remotely'}</span>
+                    <span>{remoteWords}</span>
                     <span className="sr-only">: {remotePeople.map((e) => personName(e.email, byEmail)).join(', ')}</span>
                   </p>
                 )}
