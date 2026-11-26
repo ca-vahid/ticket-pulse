@@ -53,7 +53,9 @@ router.get('/me', asyncHandler(async (req, res) => {
   const person = await availabilityService.ensurePerson(user);
   const [settings, types, offices, balances, isAdmin, pending] = await Promise.all([
     availabilityService.getSettings(),
-    availabilityService.listLeaveTypes(),
+    // 26 Nov 2026: each type says whether this person can book it (bookable),
+    // after the per-workspace switches; the form offers only those.
+    availabilityService.leaveTypesFor(user),
     availabilityService.listOffices(),
     availabilityService.balances(person.email),
     availabilityService.isAdmin(user),
@@ -146,7 +148,7 @@ router.get('/admin/config', asyncHandler(async (req, res) => {
   // QA 10-05 #2: every person still comes back (approver pickers and names
   // need the whole company), each marked inWorkspace so the People and
   // Balances lists show only the workspace the admin is in.
-  const [settings, types, offices, groups, rules, people, roster, vtRetired] = await Promise.all([
+  const [settings, types, offices, groups, rules, people, roster, vtRetired, typeAccess] = await Promise.all([
     availabilityService.getSettings(),
     availabilityService.listLeaveTypes({ includeInactive: true }),
     availabilityService.listOffices(),
@@ -155,11 +157,14 @@ router.get('/admin/config', asyncHandler(async (req, res) => {
     availabilityService.listPeople(),
     availabilityService.rosterFor(user, wsOf(req)),
     isVacationTrackerRetired(),
+    availabilityService.leaveTypeAccess(user),
   ]);
   ok(res, {
     // 26 Nov 2026: once retired, the write-back switch and the import hide.
     settings: { ...settings, vtRetired },
     leaveTypes: types,
+    // 26 Nov 2026: who may change the shared list, and the per-workspace switches this person owns.
+    typeAccess,
     offices,
     groups,
     rules,
@@ -170,6 +175,12 @@ router.get('/admin/config', asyncHandler(async (req, res) => {
 router.patch('/admin/settings', asyncHandler(async (req, res) => ok(res, await availabilityService.updateSettings(req.body || {}, me(req)))));
 router.post('/admin/offices', asyncHandler(async (req, res) => ok(res, await availabilityService.saveOffice(req.body || {}, me(req)))));
 router.post('/admin/leave-types', asyncHandler(async (req, res) => ok(res, await availabilityService.saveLeaveType(req.body || {}, me(req)))));
+// 26 Nov 2026: one shared type on or off for one workspace (super admins, or that workspace's admins).
+router.put('/admin/leave-types/:id/workspaces/:workspaceId', asyncHandler(async (req, res) => ok(res, await availabilityService.setLeaveTypeWorkspace(me(req), {
+  leaveTypeId: req.params.id, workspaceId: req.params.workspaceId, enabled: req.body?.enabled,
+}))));
+// 26 Nov 2026: who changed which Vacation Pulse setting, and when (50 a page).
+router.get('/admin/changes', asyncHandler(async (req, res) => ok(res, await availabilityService.listSettingsChanges(me(req), { page: req.query.page ? Number(req.query.page) : 1 }))));
 router.post('/admin/groups', asyncHandler(async (req, res) => ok(res, await availabilityService.saveGroup(req.body || {}, me(req)))));
 router.delete('/admin/groups/:id', asyncHandler(async (req, res) => ok(res, await availabilityService.deleteGroup(req.params.id, me(req)))));
 router.post('/admin/rules', asyncHandler(async (req, res) => ok(res, await availabilityService.saveRule(req.body || {}, me(req)))));

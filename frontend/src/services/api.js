@@ -2486,6 +2486,9 @@ export const availabilityAPI = {
   updateSettings: (data) => api.patch('/availability/admin/settings', data),
   saveOffice: (data) => api.post('/availability/admin/offices', data),
   saveLeaveType: (data) => api.post('/availability/admin/leave-types', data),
+  // 26 Nov 2026: one shared type on or off for one workspace; and who changed which setting.
+  setLeaveTypeWorkspace: (leaveTypeId, workspaceId, enabled) => api.put(`/availability/admin/leave-types/${leaveTypeId}/workspaces/${workspaceId}`, { enabled }),
+  settingsChanges: (params = {}) => api.get('/availability/admin/changes', { params }),
   saveGroup: (data) => api.post('/availability/admin/groups', data),
   deleteGroup: (id) => api.delete(`/availability/admin/groups/${id}`),
   saveRule: (data) => api.post('/availability/admin/rules', data),

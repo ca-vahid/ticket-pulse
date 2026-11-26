@@ -344,7 +344,7 @@ export default function OverviewPanel({ me, base = '/availability', onBook = nul
     .sort((a, b) => a.startDate.localeCompare(b.startDate))[0] || null, [mine, today]);
   const firstName = String(me.person?.name || '').trim().split(/\s+/)[0] || null;
   const quickTypes = useMemo(() => [...(me.leaveTypes || [])]
-    .filter((t) => t.isActive !== false)
+    .filter((t) => t.isActive !== false && t.bookable !== false)
     .sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999))
     .slice(0, 4), [me.leaveTypes]);
 

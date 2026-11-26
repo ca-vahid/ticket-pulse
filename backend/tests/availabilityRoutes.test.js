@@ -11,6 +11,10 @@ const svc = {
   ensurePerson: jest.fn().mockResolvedValue({ id: 1, email: 'ana@bgc.ca', name: 'Ana', dailyHours: '8' }),
   getSettings: jest.fn().mockResolvedValue({ yearStartMonth: 1, outlookEventsEnabled: false, autoRepliesEnabled: false, purposeNotice: null }),
   listLeaveTypes: jest.fn().mockResolvedValue([{ id: 3, name: 'WFH' }]),
+  leaveTypesFor: jest.fn().mockResolvedValue([{ id: 3, name: 'WFH', bookable: true }]),
+  leaveTypeAccess: jest.fn().mockResolvedValue({ canEditTypes: false, workspaces: [], toggles: [] }),
+  setLeaveTypeWorkspace: jest.fn(),
+  listSettingsChanges: jest.fn(),
   listOffices: jest.fn().mockResolvedValue([]),
   balances: jest.fn().mockResolvedValue([]),
   isAdmin: jest.fn().mockResolvedValue(false),
@@ -95,6 +99,37 @@ test('admin config marks who is in the current workspace; balances ask for that 
   expect(svc.balanceReport).toHaveBeenCalledWith(expect.anything(), { year: 2026, workspaceId: 5 });
   // 26 Nov 2026: the General and Import sections hide their Vacation Tracker parts once retired.
   expect(res.body.data.settings.vtRetired).toBe(false);
+});
+
+// 26 Nov 2026: leave types per workspace, and the settings history.
+describe('leave types per workspace and recent changes', () => {
+  test('GET /me gives the booking form the person\'s types (with bookable)', async () => {
+    const res = await request(app()).get('/api/availability/me').expect(200);
+    expect(svc.leaveTypesFor).toHaveBeenCalledWith(expect.objectContaining({ email: 'ana@bgc.ca' }));
+    expect(res.body.data.leaveTypes).toEqual([{ id: 3, name: 'WFH', bookable: true }]);
+  });
+
+  test('admin config carries the type access', async () => {
+    svc.leaveTypeAccess.mockResolvedValueOnce({ canEditTypes: false, workspaces: [{ id: 5, name: 'Team Five' }], toggles: [{ leaveTypeId: 3, workspaceId: 5, enabled: false }] });
+    const res = await request(app({ email: 'lead@example.com', role: 'viewer' })).get('/api/availability/admin/config').expect(200);
+    expect(res.body.data.typeAccess).toMatchObject({ canEditTypes: false, workspaces: [{ id: 5, name: 'Team Five' }] });
+  });
+
+  test('PUT a workspace switch passes the ids and the flag; a refusal is a 403', async () => {
+    svc.setLeaveTypeWorkspace.mockResolvedValueOnce({ leaveTypeId: 3, workspaceId: 5, enabled: false });
+    const res = await request(app()).put('/api/availability/admin/leave-types/3/workspaces/5').send({ enabled: false }).expect(200);
+    expect(svc.setLeaveTypeWorkspace).toHaveBeenCalledWith(expect.objectContaining({ email: 'ana@bgc.ca' }), { leaveTypeId: '3', workspaceId: '5', enabled: false });
+    expect(res.body.data).toEqual({ leaveTypeId: 3, workspaceId: 5, enabled: false });
+    svc.setLeaveTypeWorkspace.mockRejectedValueOnce(new AuthorizationError('You can switch leave types on or off for the workspaces you administer', 'availability_not_your_workspace'));
+    expect((await request(app()).put('/api/availability/admin/leave-types/3/workspaces/9').send({ enabled: false })).status).toBe(403);
+  });
+
+  test('GET recent changes asks for the page', async () => {
+    svc.listSettingsChanges.mockResolvedValueOnce({ changes: [], page: 2, pageSize: 50, hasMore: false });
+    const res = await request(app()).get('/api/availability/admin/changes?page=2').expect(200);
+    expect(svc.listSettingsChanges).toHaveBeenCalledWith(expect.objectContaining({ email: 'ana@bgc.ca' }), { page: 2 });
+    expect(res.body.data.page).toBe(2);
+  });
 });
 
 // 26 Nov 2026: retire Vacation Tracker — super admins only (checked in the service).

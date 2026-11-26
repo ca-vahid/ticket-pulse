@@ -9,6 +9,7 @@ import BalancesSection from './admin/BalancesSection';
 import ImportSection from './admin/ImportSection';
 import GeneralSection from './admin/GeneralSection';
 import VacationTrackerSection from './admin/VacationTrackerSection';
+import RecentChangesSection from './admin/RecentChangesSection';
 
 /**
  * Vacation Pulse → Settings (Vacation Pulse admins only). A quiet section list on
@@ -27,6 +28,8 @@ const SECTIONS = [
   { id: 'general', label: 'General', C: GeneralSection },
   // 26 Nov 2026: retire Vacation Tracker (the switch is for super admins).
   { id: 'vacation-tracker', label: 'Vacation Tracker', C: VacationTrackerSection },
+  // 26 Nov 2026: who changed which setting, and when.
+  { id: 'changes', label: 'Recent changes', C: RecentChangesSection },
 ];
 
 export default function AdminSettingsPanel({ config, error, reload, toast }) {

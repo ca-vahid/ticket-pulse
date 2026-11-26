@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.4.26-preview';
+export const APP_VERSION = '4.4.27-preview';
 
 export const changelog = [
+  {
+    version: '4.4.27-preview',
+    date: 'November 26, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Leave types per workspace</strong> &mdash; each team&rsquo;s admin can switch a type off for their own team without hiding it for everyone. Vacation Pulse settings changes are now recorded with who and when.' },
+    ],
+  },
   {
     version: '4.4.26-preview',
     date: 'November 26, 2026',
