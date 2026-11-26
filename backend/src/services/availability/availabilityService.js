@@ -1362,8 +1362,10 @@ class AvailabilityService {
     const site = projectionSiteFields(request, type, office);
     const siteData = site.siteLocation ? site : {};
     let written = 0;
+    const keys = [];
     for (const t of targets) {
       const key = `av:${request.id}:w${t.workspaceId}`;
+      keys.push(key);
       // One transaction per workspace: a failure part-way never leaves the
       // person with their old rows gone and the new ones half written.
       written += await prisma.$transaction(async (tx) => {
@@ -1392,7 +1394,7 @@ class AvailabilityService {
         return n;
       }, { timeout: 20000 });
     }
-    return { written };
+    return { written, keys };
   }
 
   async unproject(request) {
@@ -1407,8 +1409,14 @@ class AvailabilityService {
     const rows = await prisma.avRequest.findMany({ where: { status: 'approved', endDate: { gte: since } }, take: 20000 });
     let written = 0;
     for (const r of rows) {
-      await this.unproject(r);
-      written += (await this.project(r)).written;
+      // Write first (project() replaces each workspace's rows in its own transaction), then
+      // remove only rows for workspaces the person no longer belongs to. Never delete before
+      // the new rows exist: a failure here must not leave someone looking available.
+      const res = await this.project(r);
+      written += res.written || 0;
+      if (Array.isArray(res.keys)) {
+        await prisma.technicianLeave.deleteMany({ where: { vtLeaveId: { startsWith: `av:${r.id}:`, notIn: res.keys } } });
+      }
     }
     return { requests: rows.length, written };
   }
