@@ -170,11 +170,12 @@ export default function Availability() {
         <LightTabBar tabs={tabs} activeId={tab} onSelect={(id) => navigate(`${base}/${id}`)} ariaLabel={`${SECTION_NAME} sections`} idPrefix="availability" className="max-sm:[&>div:nth-child(2)]:hidden">
           <span className="hidden items-center gap-3 sm:inline-flex">
             {me?.person?.name && <span className="text-xs text-muted-foreground">{me.person.name}</span>}
-            <BookTimeButton onClick={() => bookTime()} />
+            {/* 26 Nov 2026: My time is the booking form itself; the button would only repeat it. */}
+            {tab !== 'my-time' && <BookTimeButton onClick={() => bookTime()} />}
           </span>
         </LightTabBar>
         {/* Phones: the tab bar hides its right side, so the button gets its own row. */}
-        <BookTimeButton onClick={() => bookTime()} className="mb-4 w-full sm:hidden" />
+        {tab !== 'my-time' && <BookTimeButton onClick={() => bookTime()} className="mb-4 w-full sm:hidden" />}
         {me && error && <div className="mb-4"><ErrorNote>{error}</ErrorNote></div>}
         {body}
       </main>

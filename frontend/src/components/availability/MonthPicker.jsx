@@ -233,8 +233,8 @@ export default function MonthPicker({
         <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-muted-foreground/70" aria-hidden="true" />Booked</span>
         <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full border-[1.5px] border-muted-foreground/70" aria-hidden="true" />Waiting for approval</span>
         <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded-sm ring-1 ring-inset ring-primary" aria-hidden="true" />Today</span>
-        <span className="inline-flex items-center gap-1"><span className={`h-3 w-3 rounded-sm ${WEEKEND_BG}`} aria-hidden="true" />Weekend</span>
-        <span className="inline-flex items-center gap-1"><span className={`h-3 w-3 rounded-sm ${HOLIDAY_BG}`} aria-hidden="true" />Holiday</span>
+        <span className="inline-flex items-center gap-1"><span className={`h-3 w-3 rounded-sm ring-1 ring-inset ring-border ${WEEKEND_BG}`} aria-hidden="true" />Weekend</span>
+        <span className="inline-flex items-center gap-1"><span className={`h-3 w-3 rounded-sm ring-1 ring-inset ring-rose-200 dark:ring-rose-500/30 ${HOLIDAY_BG}`} aria-hidden="true" />Holiday</span>
         <span>Grey numbers: past days</span>
       </p>
     </div>

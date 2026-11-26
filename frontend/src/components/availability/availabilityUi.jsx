@@ -125,8 +125,10 @@ export const COLOR_BAR_PENDING = {
 /** Half days and hours: light diagonal hatching over the bar's own fill. */
 export const HATCH = { backgroundImage: 'repeating-linear-gradient(135deg, rgba(255,255,255,.55) 0 3px, transparent 3px 7px)' };
 // Weekend and holiday columns, the same way across Overview, Wallchart and Calendar.
-export const WEEKEND_BG = 'bg-muted/60';
-export const HOLIDAY_BG = 'bg-rose-50/80 dark:bg-rose-500/10';
+// 26 Nov 2026: the light shading was all but invisible (~1.03:1 on a white card). A tint of the
+// muted text colour and a fuller rose read as shading in light; dark keeps its look.
+export const WEEKEND_BG = 'bg-muted-foreground/[0.13] dark:bg-muted/60';
+export const HOLIDAY_BG = 'bg-rose-100 dark:bg-rose-500/10';
 export const HOLIDAY_DOT = 'bg-rose-400 dark:bg-rose-300';
 // Today's column (5 Oct 2026, Vahid: the old faint tint read like a weekend):
 // a clear blue tint with thin primary edges, header to last row.

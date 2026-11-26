@@ -5,6 +5,9 @@ import {
 } from './availabilityUi';
 import { backDay, pastRequests, rangeWords, upcomingRequests } from './bookingModel';
 
+/** Spaces inside a name or a date become no-break spaces, so it never splits across lines. */
+const keepTogether = (v) => (v == null ? v : String(v).replace(/ /g, '\u00A0'));
+
 /**
  * "Coming up" on My time (QA 11-25 #1): the person's approved and waiting
  * requests that are not over, soonest first. Cancelled and denied requests
@@ -58,15 +61,17 @@ export function ComingUpRow({ r, type, today, offices = [], holidaySet = new Set
   const cancellable = !readOnly && Boolean(onCancel) && (imported ? r.status === 'approved' : live) && r.endDate >= today;
   const editable = !readOnly && Boolean(onEdit) && !imported && r.status === 'pending' && r.editable !== false;
   const stillInVt = fromVt && r.status === 'cancelled' && r.stillInVacationTracker === true;
-  const waitingOn = r.status === 'pending' ? (r.waitingOn || []).map((p) => p.name || p.email).filter(Boolean) : [];
+  // A name or a date stays on one line ("Robin Vale", "Mon 4 Jan"); lines may break between them.
+  const waitingOn = r.status === 'pending' ? (r.waitingOn || []).map((p) => keepTogether(p.name || p.email)).filter(Boolean) : [];
   const dates = rangeWords(r.startDate, r.endDate, { today });
+  const datesShown = dates.split(' – ').map(keepTogether).join(' – ');
   // "(today)" on a day that is today; "(now)" on a range that has started.
   const nowWord = r.startDate === today && r.endDate === today ? 'today' : r.startDate <= today && r.endDate >= today ? 'now' : null;
   const label = leaveLabel(type?.name, sitePlace(r, offices));
   const part = partWords(r);
   const away = !part && (!type?.availability || type.availability === 'OFF') && r.status !== 'denied' && r.status !== 'cancelled';
   const source = sourceWords(r);
-  const tail = [waitingOn.length > 0 ? waitingOn.join(' or ') : null, away && !readOnly ? `back ${backDay(r.endDate, holidaySet)}` : null].filter(Boolean);
+  const tail = [waitingOn.length > 0 ? waitingOn.join(' or ') : null, away && !readOnly ? keepTogether(`back ${backDay(r.endDate, holidaySet)}`) : null].filter(Boolean);
   // Details, as the old list had them: the note, why it waits (or was decided so), the rules' words, the approver's note, the amount.
   const [open, setOpen] = useState(false);
   const reason = r.decision?.reason || null;
@@ -84,7 +89,7 @@ export function ComingUpRow({ r, type, today, offices = [], holidaySet = new Set
         <TypeGlyph type={type} className="mt-0.5 h-6 w-6" />
         <div className="min-w-0 flex-1 leading-tight">
           <p className="text-sm font-semibold text-foreground">
-            {dates}{nowWord && !readOnly && <span className="whitespace-nowrap font-normal text-muted-foreground"> ({nowWord})</span>}
+            {datesShown}{nowWord && !readOnly && <span className="whitespace-nowrap font-normal text-muted-foreground"> ({nowWord})</span>}
           </p>
           <p className="mt-0.5 text-xs text-muted-foreground" data-testid={`coming-up-${r.id}-what`}>
             <span className="text-foreground/85">{label}</span>
@@ -117,7 +122,7 @@ export function ComingUpRow({ r, type, today, offices = [], holidaySet = new Set
               </button>
             )}
             {cancellable && (
-              <button type="button" className={`${BTN_QUIET} h-9 w-9 px-0`} onClick={() => setConfirming(true)} aria-label={`Cancel ${label}, ${dates}`} title="Cancel">
+              <button type="button" className={`${BTN_QUIET} h-9 w-9 px-0`} onClick={() => setConfirming(true)} aria-label={`Cancel ${label}, ${dates}`} title="Cancel this request">
                 <X className="h-4 w-4" aria-hidden="true" />
               </button>
             )}
