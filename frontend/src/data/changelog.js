@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.4.22-preview';
+export const APP_VERSION = '4.4.23-preview';
 
 export const changelog = [
+  {
+    version: '4.4.23-preview',
+    date: 'November 26, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>A new address: ticketpulse.bgcsi.com</strong> &mdash; Ticket Pulse&rsquo;s address is now ticketpulse.bgcsi.com; old links still work and forward you there. You&rsquo;ll be asked to sign in once. Settings saved in your browser (theme, filters) start fresh on the new address.' },
+    ],
+  },
   {
     version: '4.4.22-preview',
     date: 'November 26, 2026',
