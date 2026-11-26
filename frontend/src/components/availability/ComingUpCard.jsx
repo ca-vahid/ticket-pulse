@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { ArrowRight, Loader2, Pencil, X } from 'lucide-react';
+import { ArrowRight, ChevronDown, Loader2, Pencil, X } from 'lucide-react';
 import {
-  BTN_QUIET, CARD, Pictogram, REQUEST_STATUS, StatusDot, fmtMinute, leaveLabel, pictogramFor, sitePlace, todayKey,
+  BTN_QUIET, CARD, REQUEST_STATUS, StatusDot, TypeGlyph, fmtAmount, fmtMinute, leaveLabel, sitePlace, todayKey,
 } from './availabilityUi';
 import { backDay, pastRequests, rangeWords, upcomingRequests } from './bookingModel';
 
@@ -18,7 +18,9 @@ import { backDay, pastRequests, rangeWords, upcomingRequests } from './bookingMo
  * shared-calendar note, as before).
  *
  * Past and cancelled requests: admins go to the History tab (`onOpenHistory`);
- * everyone else can open them here, folded away by default.
+ * everyone else can open them here, folded away by default. A cancelled
+ * Vacation Tracker leave that is still there stays in view. Every row opens
+ * to its details (amount, note, why, the rules' words, the approver's note).
  * Props in, nothing fetched, so it renders on its own in a harness.
  */
 
@@ -27,11 +29,15 @@ const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const LINK = 'tp-focus-ring inline-flex items-center gap-1 rounded-md text-xs font-medium text-primary hover:underline';
 
 function partWords(r) {
-  if (r.dayPart === 'am') return 'morning';
-  if (r.dayPart === 'pm') return 'afternoon';
+  const many = r.startDate !== r.endDate;
+  if (r.dayPart === 'am') return many ? 'mornings' : 'morning';
+  if (r.dayPart === 'pm') return many ? 'afternoons' : 'afternoon';
   if (r.dayPart === 'hours' && r.startMinute != null) return `${fmtMinute(r.startMinute)}–${fmtMinute(r.endMinute)}`;
   return null;
 }
+
+/** "· text" that never leaves its "·" alone at the start of a wrapped line. */
+const Sep = ({ children, className = '' }) => <span className={`whitespace-nowrap ${className}`}>{' · '}{children}</span>;
 
 function sourceWords(r) {
   if (r.source === 'vacation_tracker') return 'from Vacation Tracker';
@@ -59,7 +65,11 @@ export function ComingUpRow({ r, type, today, offices = [], holidaySet = new Set
   const part = partWords(r);
   const away = !part && (!type?.availability || type.availability === 'OFF') && r.status !== 'denied' && r.status !== 'cancelled';
   const source = sourceWords(r);
-  const reason = r.status === 'denied' ? (r.decisionNote || r.decision?.reason || null) : null;
+  // Details, as the old list had them: the note, why it waits (or was decided so), the rules' words, the approver's note, the amount.
+  const [open, setOpen] = useState(false);
+  const reason = r.decision?.reason || null;
+  const fired = (r.decision?.fired || []).filter((f) => f.message && f.message !== reason);
+  const detailsId = `coming-up-${r.id}-details`;
 
   const doCancel = async () => {
     setBusy(true);
@@ -69,27 +79,37 @@ export function ComingUpRow({ r, type, today, offices = [], holidaySet = new Set
   return (
     <li className={`py-2.5 ${isEditing ? '-mx-2 rounded-md bg-primary/5 px-2 dark:bg-primary/10' : ''}`} data-testid={`coming-up-${r.id}`}>
       <div className="flex items-start gap-2.5">
-        <Pictogram name={pictogramFor(type)} className="mt-0.5 h-6 w-6" />
+        <TypeGlyph type={type} className="mt-0.5 h-6 w-6" />
         <div className="min-w-0 flex-1 leading-tight">
           <p className="text-sm font-semibold text-foreground">
-            {dates}{nowWord && !readOnly && <span className="font-normal text-muted-foreground"> ({nowWord})</span>}
+            {dates}{nowWord && !readOnly && <span className="whitespace-nowrap font-normal text-muted-foreground"> ({nowWord})</span>}
           </p>
           <p className="mt-0.5 text-xs text-muted-foreground">
             <span className="text-foreground/85">{label}</span>
-            {part && ` · ${part}`}
-            {source && ` · ${source}`}
+            {part && <Sep>{part}</Sep>}
+            {source && <Sep>{source}</Sep>}
           </p>
-          <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
+          <p className="mt-1 text-xs text-muted-foreground">
             <StatusDot tone={status.tone} label={status.label} />
-            {waitingOn.length > 0 && <span>· {waitingOn.join(' or ')}</span>}
-            {away && !readOnly && <span>· back {backDay(r.endDate, holidaySet)}</span>}
+            {waitingOn.length > 0 && <Sep>{waitingOn.join(' or ')}</Sep>}
+            {away && !readOnly && <Sep>back {backDay(r.endDate, holidaySet)}</Sep>}
           </p>
-          {reason && <p className="mt-0.5 text-xs text-muted-foreground">Why: {reason}</p>}
           {stillInVt && <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-300" data-testid={`still-in-vt-${r.id}`}>Cancelled in Ticket Pulse. Cancel it in Vacation Tracker too.</p>}
           {isEditing && <p className="mt-0.5 text-xs font-medium text-primary">Changing…</p>}
         </div>
-        {!confirming && (editable || cancellable) && (
+        {!confirming && (
           <span className="-mr-1.5 flex shrink-0 items-center">
+            <button
+              type="button"
+              className={`${BTN_QUIET} h-9 w-9 px-0`}
+              onClick={() => setOpen((v) => !v)}
+              aria-expanded={open}
+              aria-controls={open ? detailsId : undefined}
+              aria-label={`Details for ${label}, ${dates}`}
+              title="Details"
+            >
+              <ChevronDown className={`h-4 w-4 ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
+            </button>
             {editable && !isEditing && (
               <button type="button" className={`${BTN_QUIET} h-9 w-9 px-0`} onClick={() => onEdit(r)} aria-label={`Change ${label}, ${dates}`} title="Change">
                 <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
@@ -103,6 +123,15 @@ export function ComingUpRow({ r, type, today, offices = [], holidaySet = new Set
           </span>
         )}
       </div>
+      {open && (
+        <div id={detailsId} className="mt-2 ml-[2.125rem] space-y-1 border-l-2 border-border pl-3 text-xs text-muted-foreground animate-fadeIn" data-testid={`coming-up-${r.id}-details`}>
+          <p><span className="text-foreground/85">Amount:</span> {fmtAmount(r, type?.unit)}</p>
+          {r.note && <p><span className="text-foreground/85">Your note:</span> {r.note}</p>}
+          {reason && <p><span className="text-foreground/85">{r.status === 'pending' ? 'Why it is waiting:' : 'Why:'}</span> {reason}</p>}
+          {fired.map((f) => <p key={`${f.ruleId}-${f.name}`}>{f.message}</p>)}
+          {r.decisionNote && <p><span className="text-foreground/85">Approver:</span> {r.decisionNote}</p>}
+        </div>
+      )}
       {confirming && (
         <div role="group" aria-label="Confirm cancel" className="mt-2 space-y-2 pl-[2.125rem] text-sm animate-fadeIn">
           <p className="text-foreground/85">
@@ -144,7 +173,11 @@ export default function ComingUpCard({
   const [showPast, setShowPast] = useState(false);
   const loading = requests === null || requests === undefined;
   const upcoming = loading ? [] : upcomingRequests(requests, today);
-  const past = loading ? [] : pastRequests(requests, today);
+  const allPast = loading ? [] : pastRequests(requests, today);
+  // A Vacation Tracker leave cancelled here that is still there, and not over:
+  // something left for the person to do, so it stays in view (not folded away).
+  const stillInVt = allPast.filter((r) => r.source === 'vacation_tracker' && r.status === 'cancelled' && r.stillInVacationTracker === true && r.endDate >= today);
+  const past = allPast.filter((r) => !stillInVt.includes(r));
   const shown = showAll ? upcoming : upcoming.slice(0, SHOW);
   const row = (r, readOnly = false) => (
     <ComingUpRow
@@ -181,12 +214,25 @@ export default function ComingUpCard({
           {showAll ? 'Show fewer' : `Show ${upcoming.length - SHOW} more`}
         </button>
       )}
+      {stillInVt.length > 0 && (
+        <div className="mt-2 border-t border-border/70 pt-2" data-testid="coming-up-still-in-vt">
+          <h3 className="text-xs font-medium text-amber-700 dark:text-amber-300">Still in Vacation Tracker</h3>
+          <ul className="divide-y divide-border/70" aria-label="Still in Vacation Tracker">
+            {stillInVt.map((r) => row(r, true))}
+          </ul>
+        </div>
+      )}
       <div className="mt-2 border-t border-border/70 pt-2.5">
         {onOpenHistory ? (
           <a
             href={historyHref || '#'}
             className={LINK}
-            onClick={(e) => { e.preventDefault(); onOpenHistory(); }}
+            onClick={(e) => {
+              // A new tab or window (Ctrl/Cmd/Shift-click, middle click) follows the link as usual.
+              if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+              e.preventDefault();
+              onOpenHistory();
+            }}
             data-testid="coming-up-history"
           >
             Past and cancelled requests are in History <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />

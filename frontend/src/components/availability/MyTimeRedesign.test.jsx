@@ -95,7 +95,11 @@ describe('the month picker on its own (props in)', () => {
     expect(screen.getByRole('grid', { name: 'December 2026' })).toBeInTheDocument();
     expect(day(25, 'December')).toHaveAccessibleName('Friday 25 December, holiday: Christmas Day');
     expect(day(2, 'December')).toHaveAccessibleName(/Vacation waiting for approval/);
-    expect(screen.getByTestId('month-picker-legend')).toHaveTextContent(/Booked.*Waiting for approval.*Today.*weekends and holidays/);
+    // Waiting is a hollow ring, booked a filled dot; the legend says which is which.
+    expect(day(2, 'December').querySelector('[data-dot]')).toHaveAttribute('data-dot', 'waiting');
+    expect(day(2, 'December').querySelector('[data-dot]').className).toMatch(/border-current/);
+    expect(screen.getByTestId('month-picker-legend')).toHaveTextContent(/Booked.*Waiting for approval.*Today.*weekends, holidays and the past/);
+    expect(screen.getByRole('grid')).toHaveAttribute('aria-multiselectable', 'true');
   });
 
   test('arrow keys move the focus a day or a week; Enter picks; a disabled day is not picked', () => {
@@ -113,7 +117,11 @@ describe('the month picker on its own (props in)', () => {
     fireEvent.keyDown(document.activeElement, { key: 'PageUp' });
     expect(document.activeElement).toBe(day(3));
     fireEvent.keyDown(document.activeElement, { key: ' ' });
-    expect(onPick).toHaveBeenCalledTimes(1); // 3 Nov is in the past
+    expect(onPick).toHaveBeenCalledTimes(1); // 3 Nov is before minKey here
+    // Like the disabled Previous button, the keyboard stops at minKey's month.
+    expect(screen.getByRole('button', { name: 'Previous month' })).toBeDisabled();
+    fireEvent.keyDown(document.activeElement, { key: 'PageUp' });
+    expect(document.activeElement).toBe(day(3));
   });
 });
 
@@ -121,18 +129,43 @@ describe('Book time away', () => {
   test('1. What: the four most-used types, "More types" opens the rest in place, a pick takes the 4th tile', async () => {
     render(<BookTimeForm me={ME} today={TODAY} requests={[]} />);
     const tiles = screen.getByTestId('type-tiles');
-    expect(within(tiles).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['Vacation', 'Working from home', 'Sick', 'Site visit']);
+    const names = () => within(tiles).getAllByRole('radio').map((r) => r.getAttribute('aria-label'));
+    expect(names()).toEqual(['Vacation', 'Working from home', 'Sick', 'Site visit']);
     expect(screen.getByRole('radio', { name: 'Vacation' })).toBeChecked();
     const more = screen.getByRole('button', { name: 'More types (3)' });
     expect(more).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(more);
+    // The extra types are toggle buttons of their own (each a Tab stop), not radios of the four's group.
     const group = screen.getByRole('group', { name: 'More types' });
-    expect(within(group).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['Training', 'Bereavement', 'Appointment']);
-    expect(within(group).getByRole('radio', { name: 'Training' })).toHaveAccessibleDescription('Courses and conferences');
-    fireEvent.click(within(group).getByRole('radio', { name: 'Training' }));
+    const extra = within(group).getAllByRole('button');
+    expect(extra.map((b) => b.getAttribute('aria-label'))).toEqual(['Training', 'Bereavement', 'Appointment']);
+    expect(within(group).queryAllByRole('radio')).toHaveLength(0);
+    for (const b of extra) {
+      expect(b).toHaveAttribute('aria-pressed', 'false');
+      expect(b).not.toHaveAttribute('tabindex', '-1');
+    }
+    expect(within(group).getByRole('button', { name: 'Training' })).toHaveAccessibleDescription('Courses and conferences');
+    fireEvent.click(within(group).getByRole('button', { name: 'Training' }));
+    // More stays open, the four tiles stay put, and Training shows as pressed.
+    expect(screen.getByRole('group', { name: 'More types' })).toBeInTheDocument();
+    expect(within(group).getByRole('button', { name: 'Training' })).toHaveAttribute('aria-pressed', 'true');
+    expect(names()).toEqual(['Vacation', 'Working from home', 'Sick', 'Site visit']);
+    expect(screen.getByRole('radio', { name: 'Vacation' })).not.toBeChecked();
+    // Once More closes, the picked type takes the fourth tile.
+    fireEvent.click(screen.getByRole('button', { name: 'Fewer types' }));
     expect(screen.queryByRole('group', { name: 'More types' })).toBeNull();
-    expect(within(tiles).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['Vacation', 'Working from home', 'Sick', 'Training']);
+    expect(names()).toEqual(['Vacation', 'Working from home', 'Sick', 'Training']);
     expect(screen.getByRole('radio', { name: 'Training' })).toBeChecked();
+    // Training has its own glyph, not the Vacation picture.
+    expect(screen.getByRole('radio', { name: 'Training' }).closest('label').querySelector('[data-glyph]')).not.toBeNull();
+    expect(screen.getByRole('radio', { name: 'Vacation' }).closest('label').querySelector('img')).toHaveAttribute('src', '/brand/vacation-pulse/vacation.webp');
+  });
+
+  test('the default type stops following the most-used one once the person has done anything', () => {
+    const { rerender } = render(<BookTimeForm me={ME} today={TODAY} requests={[]} />);
+    fireEvent.click(day(26));
+    rerender(<BookTimeForm me={ME} today={TODAY} requests={[{ id: 1, leaveTypeId: 2, status: 'approved', startDate: '2026-11-18', endDate: '2026-11-18' }]} />);
+    expect(screen.getByRole('radio', { name: 'Vacation' })).toBeChecked();
   });
 
   test('the first tile follows the person\'s most-used type once their requests arrive', () => {
@@ -150,10 +183,8 @@ describe('Book time away', () => {
 
     fireEvent.click(day(30));
     expect(screen.getByTestId('pick-summary')).toHaveTextContent('Mon 30 Nov · 1 working day · tap another day for a range');
-    // One day offers the part of the day; a range does not.
     expect(screen.getByRole('radiogroup', { name: 'Part of the day' })).toBeInTheDocument();
     fireEvent.click(day(26)); // before the first: the ends swap
-    expect(screen.queryByRole('radiogroup', { name: 'Part of the day' })).toBeNull();
     expect(screen.getAllByRole('gridcell', { selected: true }).map((c) => c.dataset.day)).toEqual(['2026-11-26', '2026-11-27', '2026-11-28', '2026-11-29', '2026-11-30']);
     expect(screen.getByTestId('pick-summary')).toHaveTextContent('Thu 26 – Mon 30 Nov · 3 working days');
     expect(screen.getByTestId('pick-spoken')).toHaveTextContent('Thu 26 to Mon 30 Nov, 3 working days');
@@ -199,15 +230,67 @@ describe('Book time away', () => {
     expect(screen.getByTestId('pick-summary')).toHaveTextContent('Mon 30 Nov – Fri 4 Dec · 5 working days');
   });
 
-  test('past days: disabled, unless the type can be booked after the fact', () => {
+  test('half days on a range: Morning stays offered and is sent for every day', async () => {
     render(<BookTimeForm me={ME} today={TODAY} requests={[]} />);
-    expect(day(20)).toHaveAttribute('aria-disabled', 'true');
-    fireEvent.click(day(20));
-    expect(screen.queryAllByRole('gridcell', { selected: true })).toHaveLength(0);
-    fireEvent.click(screen.getByRole('radio', { name: 'Sick' }));
+    fireEvent.click(day(26));
+    fireEvent.click(day(30));
+    const parts = screen.getByRole('radiogroup', { name: 'Part of the day' });
+    fireEvent.click(within(parts).getByRole('radio', { name: 'Morning' }));
+    expect(screen.getByTestId('pick-summary')).toHaveTextContent('Thu 26 – Mon 30 Nov · 1.5 working days · mornings');
+    fireEvent.click(day(27)); // a new pick keeps the part of the day
+    fireEvent.click(day(30));
+    expect(within(screen.getByRole('radiogroup', { name: 'Part of the day' })).getByRole('radio', { name: 'Morning' })).toBeChecked();
+    await flushPreview();
+    expect(api.preview).toHaveBeenLastCalledWith(expect.objectContaining({ startDate: '2026-11-27', endDate: '2026-11-30', dayPart: 'am' }));
+    fireEvent.click(send());
+    await waitFor(() => expect(api.createRequest).toHaveBeenCalledWith(expect.objectContaining({ startDate: '2026-11-27', endDate: '2026-11-30', dayPart: 'am' })));
+  });
+
+  test('the count comes from the server\'s check once it is back (a four-day week, say)', async () => {
+    api.preview.mockResolvedValue({ data: { outcome: 'pending', days: 4, dates: [] } });
+    render(<BookTimeForm me={ME} today={TODAY} requests={[]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Next week' }));
+    expect(screen.getByTestId('pick-summary')).toHaveTextContent('Mon 30 Nov – Fri 4 Dec · 5 working days');
+    await flushPreview();
+    await waitFor(() => expect(screen.getByTestId('pick-summary')).toHaveTextContent('Mon 30 Nov – Fri 4 Dec · 4 working days'));
+    expect(screen.getByTestId('request-check-amount')).toHaveTextContent('4 working days · Vacation ·');
+    // One polite live region for the card, saying the pick and the check.
+    expect(screen.getByTestId('booking-live')).toHaveTextContent('Mon 30 Nov to Fri 4 Dec, 4 working days. 4 working days · Vacation · Goes to your approvers');
+    expect(document.querySelectorAll('[aria-live]')).toHaveLength(1);
+  });
+
+  test('past days can be picked for any type; when the type is not "after the fact" an approver confirms it, and the summary says so', () => {
+    render(<BookTimeForm me={ME} today={TODAY} requests={[]} />);
     expect(day(20)).not.toHaveAttribute('aria-disabled');
+    expect(day(20)).toHaveAccessibleName('Friday 20 November, past');
+    expect(screen.getByRole('button', { name: 'Previous month' })).toBeEnabled();
     fireEvent.click(day(20));
     expect(screen.getAllByRole('gridcell', { selected: true }).map((c) => c.dataset.day)).toEqual(['2026-11-20']);
+    expect(screen.getByTestId('pick-past')).toHaveTextContent('It starts in the past, so an approver has to confirm it.');
+    expect(send()).toBeEnabled();
+    // Sick can be booked after the fact: no sentence.
+    fireEvent.click(screen.getByRole('radio', { name: 'Sick' }));
+    expect(screen.queryByTestId('pick-past')).toBeNull();
+    expect(screen.getAllByRole('gridcell', { selected: true }).map((c) => c.dataset.day)).toEqual(['2026-11-20']);
+  });
+
+  test('changing a waiting request that has already started: opens on its range, and the end can be moved', async () => {
+    api.updateRequest.mockResolvedValue({ data: { id: 77, status: 'pending' } });
+    // Vacation Mon 23 – Fri 27 Nov, still waiting; today is Wed 25.
+    const started = { id: 77, leaveTypeId: 1, startDate: '2026-11-23', endDate: '2026-11-27', dayPart: 'full', status: 'pending', source: 'app', editable: true, waitingOn: [{ email: 'robin@example.com', name: 'Robin Vale' }] };
+    render(<BookTimeForm me={ME} today={TODAY} requests={[started]} editing={started} onStopEditing={vi.fn()} onBooked={vi.fn()} toast={vi.fn()} />);
+    expect(screen.getAllByRole('gridcell', { selected: true }).map((c) => c.dataset.day)).toEqual(['2026-11-23', '2026-11-24', '2026-11-25', '2026-11-26', '2026-11-27']);
+    expect(screen.getByText(/Now: Vacation, Mon 23 – Fri 27 Nov · waiting for Robin Vale/)).toBeInTheDocument();
+    expect(day(23)).not.toHaveAttribute('aria-disabled');
+    // Monday, then Thursday: the same request, ending a day earlier.
+    fireEvent.click(day(23));
+    fireEvent.click(day(26));
+    expect(screen.getAllByRole('gridcell', { selected: true }).map((c) => c.dataset.day)).toEqual(['2026-11-23', '2026-11-24', '2026-11-25', '2026-11-26']);
+    expect(screen.getByTestId('pick-past')).toHaveTextContent('It starts in the past, so an approver has to confirm it.');
+    await flushPreview();
+    expect(api.preview).toHaveBeenLastCalledWith(expect.objectContaining({ requestId: 77, startDate: '2026-11-23', endDate: '2026-11-26' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send changes for approval' }));
+    await waitFor(() => expect(api.updateRequest).toHaveBeenCalledWith(77, expect.objectContaining({ startDate: '2026-11-23', endDate: '2026-11-26', dayPart: 'full' })));
   });
 
   test('booked days carry a dot with words, from the person\'s approved and waiting requests', () => {
@@ -237,7 +320,7 @@ describe('Book time away', () => {
   test('a required note is labelled so, and an empty one stops the send with an error under it', async () => {
     render(<BookTimeForm me={ME} today={TODAY} requests={[]} />);
     fireEvent.click(screen.getByRole('button', { name: /More types/ }));
-    fireEvent.click(screen.getByRole('radio', { name: 'Bereavement' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Bereavement' }));
     const note = screen.getByLabelText(/3\. Note/);
     expect(note.labels[0]).toHaveTextContent('3. Note (required)');
     fireEvent.click(day(26));
@@ -256,7 +339,8 @@ describe('Book time away', () => {
   test('an hours type picks one day and asks for the times', async () => {
     render(<BookTimeForm me={ME} today={TODAY} requests={[]} />);
     fireEvent.click(screen.getByRole('button', { name: /More types/ }));
-    fireEvent.click(screen.getByRole('radio', { name: 'Appointment' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Appointment' }));
+    expect(screen.getByRole('grid')).not.toHaveAttribute('aria-multiselectable');
     expect(screen.queryByRole('button', { name: 'Next week' })).toBeNull();
     fireEvent.click(day(26));
     fireEvent.click(day(27));
@@ -325,6 +409,10 @@ describe('Coming up', () => {
     render(<ComingUpCard requests={ROWS} typeById={typeById} today={TODAY} onOpenHistory={onOpenHistory} historyHref="/availability/history" />);
     const link = screen.getByRole('link', { name: 'Past and cancelled requests are in History' });
     expect(link).toHaveAttribute('href', '/availability/history');
+    // Ctrl/Cmd-click opens a new tab as usual: the page does not take it over.
+    fireEvent.click(link, { ctrlKey: true });
+    fireEvent.click(link, { metaKey: true });
+    expect(onOpenHistory).not.toHaveBeenCalled();
     fireEvent.click(link);
     expect(onOpenHistory).toHaveBeenCalledTimes(1);
   });
@@ -336,8 +424,49 @@ describe('Coming up', () => {
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     const past = screen.getByRole('list', { name: 'Past and cancelled requests' });
-    expect(within(past).getByTestId('coming-up-3')).toHaveTextContent('Why: Team is short');
     expect(within(past).queryByRole('button', { name: /^Cancel/ })).toBeNull();
+    fireEvent.click(within(past).getByRole('button', { name: 'Details for Vacation, Thu 10 Dec' }));
+    expect(within(past).getByTestId('coming-up-3-details')).toHaveTextContent('Approver: Team is short');
+  });
+
+  test('each row opens to its details: amount, the note, why it waits, the rules\' words, the approver\'s note', () => {
+    const rows = [
+      { id: 21, leaveTypeId: 1, status: 'pending', startDate: '2026-12-07', endDate: '2026-12-09', dayPart: 'full', days: 3, hours: 24, source: 'app', note: 'Family visit', decision: { reason: 'Vacation needs approval.', fired: [{ ruleId: 4, name: 'Busy week', message: 'Two others are away that week.' }] } },
+      { id: 22, leaveTypeId: 7, status: 'approved', startDate: '2026-12-01', endDate: '2026-12-01', dayPart: 'hours', startMinute: 540, endMinute: 660, days: 0.25, hours: 2, source: 'app', decisionNote: 'Fine by me', decision: { reason: 'Approved by Robin Vale' } },
+    ];
+    render(<ComingUpCard requests={rows} typeById={typeById} today={TODAY} onCancel={vi.fn()} />);
+    const waiting = screen.getByTestId('coming-up-21');
+    const toggle = within(waiting).getByRole('button', { name: 'Details for Vacation, Mon 7 – Wed 9 Dec' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    const d1 = screen.getByTestId('coming-up-21-details');
+    expect(d1).toHaveTextContent('Amount: 3 days');
+    expect(d1).toHaveTextContent('Your note: Family visit');
+    expect(d1).toHaveTextContent('Why it is waiting: Vacation needs approval.');
+    expect(d1).toHaveTextContent('Two others are away that week.');
+    fireEvent.click(within(screen.getByTestId('coming-up-22')).getByRole('button', { name: /^Details for Appointment/ }));
+    const d2 = screen.getByTestId('coming-up-22-details');
+    expect(d2).toHaveTextContent('Amount: 2 hours');
+    expect(d2).toHaveTextContent('Why: Approved by Robin Vale');
+    expect(d2).toHaveTextContent('Approver: Fine by me');
+  });
+
+  test('a "·" never starts a wrapped line: each separator stays with the words after it', () => {
+    render(<ComingUpCard requests={ROWS} typeById={typeById} offices={OFFICES} today={TODAY} onCancel={vi.fn()} />);
+    const back = within(screen.getByTestId('coming-up-6')).getByText(/· back Fri/);
+    expect(back).toHaveClass('whitespace-nowrap');
+    expect(back.textContent.trim()).toBe('· back Fri');
+    const source = within(screen.getByTestId('coming-up-1')).getByText(/· synced to Vacation Tracker/);
+    expect(source).toHaveClass('whitespace-nowrap');
+  });
+
+  test('a cancelled Vacation Tracker leave still there stays in view, saying what to do', () => {
+    const rows = [...ROWS, { id: 8, leaveTypeId: 1, status: 'cancelled', startDate: '2026-12-14', endDate: '2026-12-15', dayPart: 'full', source: 'vacation_tracker', stillInVacationTracker: true }];
+    render(<ComingUpCard requests={rows} typeById={typeById} today={TODAY} onOpenHistory={vi.fn()} historyHref="/availability/history" />);
+    const box = screen.getByTestId('coming-up-still-in-vt');
+    expect(within(box).getByTestId('still-in-vt-8')).toHaveTextContent('Cancelled in Ticket Pulse. Cancel it in Vacation Tracker too.');
+    expect(screen.getByTestId('coming-up-count')).toHaveTextContent('3 requests');
   });
 
   test('empty, and at most five before "Show N more"', () => {

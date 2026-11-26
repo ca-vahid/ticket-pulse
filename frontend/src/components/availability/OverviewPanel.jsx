@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, ChevronLeft, ChevronRight } from 'lucide-react';
 import { availabilityAPI } from '../../services/api';
 import {
-  CARD, COLOR_DOT, ErrorNote, Pictogram, REQUEST_STATUS, addDaysKey, fmtDay, fmtMinute, fmtRange, leaveLabel, parseDay, pictogramFor, sitePlace, todayKey, trimNum,
+  CARD, COLOR_DOT, ErrorNote, Pictogram, REQUEST_STATUS, TypeGlyph, addDaysKey, fmtDay, fmtMinute, fmtRange, leaveLabel, parseDay, pictogramFor, sitePlace, todayKey, trimNum,
 } from './availabilityUi';
 import {
   WEEKDAY_SHORT, collapseDuplicateEntries, daysUntil, isWeekend, nextWorkingDayKey, rangeDays, weekStartKey,
@@ -399,7 +399,7 @@ export default function OverviewPanel({ me, base = '/availability', onBook = nul
               <div className="mt-4 flex flex-wrap gap-2" aria-label="Book time away">
                 {quickTypes.map((t) => {
                   const cls = 'tp-focus-ring inline-flex items-center gap-2 rounded-lg border border-border bg-card py-1.5 pl-2 pr-3 text-xs font-medium text-foreground/85 hover:border-blue-300 hover:text-blue-700 dark:hover:border-blue-500/40 dark:hover:text-blue-200';
-                  const inner = <><Pictogram name={pictogramFor(t)} />{t.name}</>;
+                  const inner = <><TypeGlyph type={t} className="h-5 w-5" />{t.name}</>;
                   return onBook
                     ? <button key={t.id} type="button" className={cls} onClick={() => onBook(t.id)} title={`Book ${t.name}`}>{inner}</button>
                     : <Link key={t.id} to={`${base}/my-time`} state={{ bookType: t.id }} className={cls} title={`Book ${t.name}`}>{inner}</Link>;

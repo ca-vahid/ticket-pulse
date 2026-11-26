@@ -2,27 +2,30 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronDown, Clock3, Info, Loader2, Pencil, XCircle } from 'lucide-react';
 import { availabilityAPI } from '../../services/api';
 import {
-  BTN_LINK, BTN_PRIMARY, BTN_QUIET, COLOR_FILL, ColorSwatch, ErrorNote, Field, INPUT, Pictogram, TEXTAREA, Toggle,
-  addDaysKey, fmtDay, fmtMinute, fmtRange, isSiteVisitType, leaveLabel, minuteToTime, parseDay, pictogramFor, sitePlace, timeToMinute, todayKey, trimNum,
+  BTN_LINK, BTN_PRIMARY, BTN_QUIET, COLOR_FILL, ColorSwatch, ErrorNote, Field, INPUT, TEXTAREA, Toggle, TypeGlyph,
+  addDaysKey, fmtDay, fmtMinute, isSiteVisitType, leaveLabel, minuteToTime, parseDay, sitePlace, timeToMinute, todayKey, trimNum,
 } from './availabilityUi';
 import MonthPicker from './MonthPicker';
 import {
-  bookedByDay, countWorkingDays, mostUsedTypes, nextWeekRange, pickDay, rangeWords, tomorrowKey,
+  PAST_SENTENCE, bookedByDay, countWorkingDays, mostUsedTypes, nextWeekRange, pickDay, rangeWords, requestWords, tomorrowKey,
 } from './bookingModel';
 
 /**
  * "Book time away" — and, since Nov 2026, "Change your request" for one that
- * is still waiting (Vahid: Gaby booked Thu + Fri, then wanted only Fri, and
- * had to cancel and book again).
+ * is still waiting (someone booked Thu + Fri, then wanted only Fri, and had
+ * to cancel and book again).
  *
  * Redesigned for QA 11-25 #1 (the QA mockup, refined) as three numbered steps:
  *   1. What   the person's four most-used types as quiet tiles (pictogram and
  *             colour as on the Overview); "More types (N)" opens the rest in
- *             place. A site visit asks "Which office?" (4.4.18).
+ *             place as their own toggle buttons (the picked one takes the 4th
+ *             tile once More is closed). A site visit asks "Which office?".
  *   2. When   an inline month calendar: tap a day, tap a second day for a
  *             range, tap again to start over. Today / Tomorrow / Next week.
- *             A single day offers Full day / Morning / Afternoon (or the hours
- *             for an hours type). A plain summary of the pick.
+ *             Past days can be picked for any type (an approver confirms
+ *             them, as the server says). Full day / Morning / Afternoon where
+ *             the type allows half days, ranges too (or the hours for an hours
+ *             type). A plain summary of the pick.
  *   3. Note   optional, or required where the type says so.
  * Footer: the server's dry run in one line ("5 working days · Vacation · Goes
  * to your approvers"), rule messages and warnings, and Send request. It stays
@@ -321,6 +324,8 @@ export default function BookTimeForm({
   // Until the person picks a type, the first tile follows their most-used type (their requests load after the form).
   const typeTouched = useRef(Boolean(original || preset));
   const [moreOpen, setMoreOpen] = useState(false);
+  // While More is open the four tiles keep their places (ids); a pick there moves in when it closes.
+  const [frozenTiles, setFrozenTiles] = useState(null);
   const [preview, setPreview] = useState(null);
   const [previewing, setPreviewing] = useState(false);
   const [previewError, setPreviewError] = useState(null);
@@ -339,14 +344,16 @@ export default function BookTimeForm({
 
   const type = types.find((t) => String(t.id) === form.leaveTypeId) || null;
   const isHours = type?.unit === 'hour';
-  const minKey = type?.allowPastDated ? null : today;
-  const set = (patch) => { setForm((f) => ({ ...f, ...patch })); setSubmitError(null); setSiteError(null); setNoteError(null); setSent(null); };
+  // Any change by the person stops the default type following their most-used one.
+  const set = (patch) => { typeTouched.current = true; setForm((f) => ({ ...f, ...patch })); setSubmitError(null); setSiteError(null); setNoteError(null); setSent(null); };
 
   const picked = Boolean(form.startDate);
   const single = picked && (isHours || form.startDate === form.endDate);
-  // A waiting request that has already started keeps its dates while other things change.
-  const pastOk = !minKey || !form.startDate || form.startDate >= minKey || Boolean(original && original.startDate === form.startDate);
-  const valid = Boolean(type && picked && pastOk && (isHours || (form.endDate && form.endDate >= form.startDate))
+  // Any type can be booked in the past (as before the redesign); one that is
+  // not "booked after the fact" then goes to an approver, and the summary says so.
+  const startsInPast = picked && form.startDate < today;
+  const pastNeedsApprover = startsInPast && !type?.allowPastDated;
+  const valid = Boolean(type && picked && (isHours || (form.endDate && form.endDate >= form.startDate))
     && (!isHours || (form.startTime && form.endTime && form.endTime > form.startTime)));
   // "Which office?" (25 Nov 2026): required for a site visit when booking, and
   // when a change touches the type or the dates (an older booking without one
@@ -377,7 +384,8 @@ export default function BookTimeForm({
     setPreviewing(true);
     const t = setTimeout(() => {
       availabilityAPI.preview({ ...JSON.parse(previewKey), ...(editing ? { requestId: editing.id } : {}) })
-        .then((res) => { if (mine === seq.current) { setPreview(res?.data || null); setPreviewError(null); } })
+        // Each answer remembers the pick it is for, so an older one is never shown for a newer pick.
+        .then((res) => { if (mine === seq.current) { setPreview(res?.data ? { ...res.data, forKey: previewKey } : null); setPreviewError(null); } })
         .catch((err) => { if (mine === seq.current) { setPreview(null); setPreviewError(err?.message || 'Could not check this request'); } })
         .finally(() => { if (mine === seq.current) setPreviewing(false); });
     }, 350);
@@ -388,92 +396,121 @@ export default function BookTimeForm({
     () => bookedByDay(requests, typeById, { excludeId: editing?.id ?? null, holidaySet }),
     [requests, typeById, editing, holidaySet],
   );
+  const fresh = valid && preview?.forKey === previewKey ? preview : null;
 
   if (!types.length) {
     return <p className="text-sm text-muted-foreground">No leave types are set up yet — ask a Vacation Pulse admin.</p>;
   }
 
   // ---- 1. What
-  const visible = !type || ranked.some((t) => t.id === type.id) ? ranked : [...ranked.slice(0, VISIBLE_TYPES - 1), type];
+  const byId = new Map(types.map((t) => [t.id, t]));
+  const openVisible = !type || ranked.some((t) => t.id === type.id) ? ranked : [...ranked.slice(0, VISIBLE_TYPES - 1), type];
+  const visible = frozenTiles ? frozenTiles.map((id) => byId.get(id)).filter(Boolean) : openVisible;
   const rest = types.filter((t) => !visible.some((v) => v.id === t.id));
-  const chooseType = (t, { fromMore = false } = {}) => {
+  const toggleMore = () => {
+    if (moreOpen) { setMoreOpen(false); setFrozenTiles(null); return; }
+    setFrozenTiles(openVisible.map((t) => t.id));
+    setMoreOpen(true);
+  };
+  const chooseType = (t) => {
     typeTouched.current = true;
-    const hours = t.unit === 'hour';
     const patch = { leaveTypeId: String(t.id) };
-    // A pick the new type cannot take is reset: hours are one day, and past days need a type that allows them.
-    if (form.startDate && !t.allowPastDated && form.startDate < today) Object.assign(patch, { startDate: '', endDate: '', open: false });
-    else if (hours && form.startDate && form.endDate !== form.startDate) Object.assign(patch, { endDate: form.startDate, open: false });
+    // An hours type is one day: a range keeps its first day.
+    if (t.unit === 'hour' && form.startDate && form.endDate !== form.startDate) Object.assign(patch, { endDate: form.startDate, open: false });
     if (!t.allowHalfDays) patch.dayPart = 'full';
     set(patch);
-    if (fromMore) {
-      setMoreOpen(false);
-      // The picked type now sits in the fourth tile: keep the focus on it.
-      setTimeout(() => formRef.current?.querySelector(`input[name="${ids.radio}"][value="${t.id}"]`)?.focus(), 0);
-    }
   };
 
-  const tile = (t, fromMore = false) => {
+  const tileInner = (t, on, hintId) => (
+    <>
+      <TypeGlyph type={t} className="h-6 w-6" />
+      <span className="min-w-0 flex-1 leading-tight">
+        <span className={on ? 'font-medium' : ''}>{t.name}</span>
+        {t.description && <span id={hintId} className="mt-0.5 block text-xs text-muted-foreground">{t.description}</span>}
+      </span>
+      <ColorSwatch color={t.color} />
+    </>
+  );
+  const tileClass = (on) => `flex min-h-[2.75rem] min-w-0 cursor-pointer items-center gap-2.5 rounded-md border px-2.5 py-2 text-left text-sm ${on
+    ? 'border-primary bg-primary/5 text-foreground dark:bg-primary/15'
+    : 'border-border text-foreground/85 hover:bg-muted'}`;
+
+  // The four tiles: one radio group (arrow keys move within it).
+  const tile = (t) => {
     const on = String(t.id) === form.leaveTypeId;
     const hintId = t.description ? `bt-${uid}-type-${t.id}-hint` : undefined;
     return (
-      <label
-        key={t.id}
-        className={`flex min-h-[2.75rem] min-w-0 cursor-pointer items-center gap-2.5 rounded-md border px-2.5 py-2 text-sm has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring ${on
-          ? 'border-primary bg-primary/5 text-foreground dark:bg-primary/15'
-          : 'border-border text-foreground/85 hover:bg-muted'}`}
-      >
+      <label key={t.id} className={`${tileClass(on)} has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring`}>
         <input
           type="radio"
           name={ids.radio}
           value={String(t.id)}
           checked={on}
-          onChange={() => chooseType(t, { fromMore })}
+          onChange={() => chooseType(t)}
           aria-label={t.name}
           aria-describedby={hintId}
           className="sr-only"
         />
-        <Pictogram name={pictogramFor(t)} className="h-6 w-6" />
-        <span className="min-w-0 flex-1 leading-tight">
-          <span className={on ? 'font-medium' : ''}>{t.name}</span>
-          {t.description && <span id={hintId} className="mt-0.5 block text-xs text-muted-foreground">{t.description}</span>}
-        </span>
-        <ColorSwatch color={t.color} />
+        {tileInner(t, on, hintId)}
       </label>
+    );
+  };
+  // More types: toggle buttons of their own, each reached with Tab; the group stays open after a pick.
+  const moreTile = (t) => {
+    const on = String(t.id) === form.leaveTypeId;
+    const hintId = t.description ? `bt-${uid}-more-${t.id}-hint` : undefined;
+    return (
+      <button key={t.id} type="button" className={`tp-focus-ring ${tileClass(on)}`} aria-pressed={on} aria-label={t.name} aria-describedby={hintId} onClick={() => chooseType(t)}>
+        {tileInner(t, on, hintId)}
+      </button>
     );
   };
 
   // ---- 2. When
   const sel = { start: form.startDate || null, end: form.endDate || null, open: form.open };
-  const applyPick = (p) => set({ startDate: p.start, endDate: p.end, open: p.open, ...(p.start !== p.end ? { dayPart: 'full' } : {}) });
+  // A range keeps its part of the day: half days on a range are allowed (each day a morning, say).
+  const applyPick = (p) => set({ startDate: p.start, endDate: p.end, open: p.open });
   const onPick = (key) => applyPick(pickDay(sel, key, { single: isHours }));
   const quick = [
     { label: 'Today', run: () => applyPick({ start: today, end: today, open: !isHours }) },
     { label: 'Tomorrow', run: () => { const k = tomorrowKey(today, holidaySet); applyPick({ start: k, end: k, open: !isHours }); } },
     ...(isHours ? [] : [{ label: 'Next week', run: () => { const r = nextWeekRange(today); applyPick({ start: r.start, end: r.end, open: false }); } }]),
   ];
-  const showDayPart = picked && !isHours && type?.allowHalfDays && (single || form.dayPart !== 'full');
-  const workingDays = picked && !isHours ? countWorkingDays(form.startDate, form.endDate, holidaySet) : 0;
+  const showDayPart = picked && !isHours && Boolean(type?.allowHalfDays);
+  const half = type?.allowHalfDays && (form.dayPart === 'am' || form.dayPart === 'pm') ? form.dayPart : null;
+  // The count: the server's once its check for this pick is back (it knows the
+  // person's own working week), else weekends and holidays skipped here.
+  const localDays = picked && !isHours ? countWorkingDays(form.startDate, form.endDate, holidaySet) * (half ? 0.5 : 1) : 0;
+  const dayCount = fresh && !isHours && fresh.days != null ? Number(fresh.days) : localDays;
+  const countWords = dayCount === 0 ? 'no working days' : `${trimNum(dayCount)} working ${dayCount === 1 ? 'day' : 'days'}`;
+  const halfWords = half ? (single ? (half === 'am' ? 'morning' : 'afternoon') : (half === 'am' ? 'mornings' : 'afternoons')) : null;
   const amountWords = !picked ? '' : isHours
     ? (form.startTime && form.endTime && form.endTime > form.startTime ? `${fmtMinute(timeToMinute(form.startTime))}–${fmtMinute(timeToMinute(form.endTime))}` : 'pick the hours')
-    : single && form.dayPart === 'am' ? 'morning'
-      : single && form.dayPart === 'pm' ? 'afternoon'
-        : workingDays === 0 ? 'no working days' : `${workingDays} working ${workingDays === 1 ? 'day' : 'days'}`;
+    : single && halfWords ? halfWords
+      : [countWords, halfWords].filter(Boolean).join(' · ');
   const extendHint = picked && form.open && single && !isHours ? 'tap another day for a range' : null;
-  const summary = picked ? [rangeWords(form.startDate, isHours ? form.startDate : form.endDate, { today }), amountWords, extendHint].filter(Boolean).join(' · ') : '';
-  const spoken = picked ? [rangeWords(form.startDate, isHours ? form.startDate : form.endDate, { today, joiner: ' to ' }), amountWords, extendHint].filter(Boolean).join(', ') : '';
+  const dates = picked ? rangeWords(form.startDate, isHours ? form.startDate : form.endDate, { today }) : '';
+  const summary = picked ? [dates, amountWords, extendHint].filter(Boolean).join(' · ') : '';
+  const spoken = picked ? [rangeWords(form.startDate, isHours ? form.startDate : form.endDate, { today, joiner: ' to ' }), amountWords.replace(' · ', ', '), extendHint, pastNeedsApprover ? PAST_SENTENCE : null].filter(Boolean).join(', ') : '';
 
   // ---- Footer
-  const refused = preview?.outcome === 'refused';
+  const refused = fresh?.outcome === 'refused';
   const stays = type?.availability === 'WFH' || type?.availability === 'ONSITE';
   const submitLabel = editing
-    ? (preview?.outcome === 'approved' ? 'Save changes' : 'Send changes for approval')
+    ? (fresh?.outcome === 'approved' ? 'Save changes' : 'Send changes for approval')
     : 'Send request';
   const waitingOn = (editing?.waitingOn || []).map((p) => p.name || p.email).filter(Boolean);
 
   const submit = async (e) => {
     e.preventDefault();
     if (!valid || saving || unchanged) return;
-    if (!siteOk) { setSiteError(form.siteOfficeId === OTHER_SITE ? 'Say which site you are visiting' : 'Pick which office the site visit is at'); return; }
+    if (!siteOk) {
+      const other = form.siteOfficeId === OTHER_SITE;
+      setSiteError(other ? 'Say which site you are visiting' : 'Pick which office the site visit is at');
+      // Focus the control the error is about, as for the note.
+      formRef.current?.querySelector(`[data-testid="site-office-field"] ${other ? 'input' : 'select'}`)?.focus?.();
+      return;
+    }
     if (type?.requiresNote && !form.note.trim()) {
       setNoteError(`${type.name} needs a note`);
       document.getElementById(ids.note)?.focus?.();
@@ -506,23 +543,31 @@ export default function BookTimeForm({
     }
   };
 
+  const typeName = leaveLabel(type?.name, onSite ? sitePlace(siteBody(form, type), me.offices) : null);
   let status;
-  if (editing && unchanged) status = <span className="text-sm text-muted-foreground">Change the type, dates, place or note to save.</span>;
+  let statusWords = '';
+  if (editing && unchanged) { statusWords = 'Change the type, dates, place or note to save.'; status = <span className="text-sm text-muted-foreground">{statusWords}</span>; }
   else if (!picked) {
+    statusWords = sent ? sent.text : '';
     status = sent
-      ? <span role="status" className="flex items-start gap-1.5 text-sm text-foreground" data-testid="booking-sent"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-300" aria-hidden="true" />{sent.text}</span>
+      ? <span className="flex items-start gap-1.5 text-sm text-foreground" data-testid="booking-sent"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-300" aria-hidden="true" />{sent.text}</span>
       : <span className="text-sm text-muted-foreground" data-testid="booking-pick-first">Pick a day to continue</span>;
-  } else if (!valid && isHours) status = <span className="text-sm text-muted-foreground">Pick a start and an end time</span>;
-  else if (!valid) status = <span className="text-sm text-muted-foreground">Pick a day you can book</span>;
-  else if (previewing && !preview) status = <span className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Checking…</span>;
-  else if (preview) status = <RequestCheck preview={preview} unit={type?.unit} typeName={leaveLabel(type?.name, onSite ? sitePlace(siteBody(form, type), me.offices) : null)} editing={Boolean(editing)} />;
+  } else if (!valid) { statusWords = 'Pick a start and an end time'; status = <span className="text-sm text-muted-foreground">{statusWords}</span>; }
+  else if (fresh) {
+    const look = verdictLook(fresh, Boolean(editing));
+    statusWords = fresh.outcome === 'refused' ? look.text : `${verdictAmount(fresh, type?.unit)} · ${typeName} · ${look.text}`;
+    status = <RequestCheck preview={fresh} unit={type?.unit} typeName={typeName} editing={Boolean(editing)} />;
+  } else if (previewing) status = <span className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Checking…</span>;
+  // One polite live region for the whole card: the pick, then what the check says (or the confirmation).
+  const live = [spoken, statusWords].filter(Boolean).join('. ');
 
   return (
     <form
       ref={formRef}
       onSubmit={submit}
       noValidate
-      className="space-y-5"
+      // The sticky footer never covers the field in focus.
+      className="space-y-5 [&_input]:scroll-mb-28 [&_select]:scroll-mb-28 [&_textarea]:scroll-mb-28 [&_td]:scroll-mb-28 [&_button]:scroll-mb-28"
       aria-label={editing ? 'Change your request' : 'Book time away'}
       data-booking-form="true"
       data-editing={editing ? 'true' : undefined}
@@ -533,7 +578,7 @@ export default function BookTimeForm({
             <Pencil className="h-4 w-4 text-primary" aria-hidden="true" />Change your request
           </h2>
           <p className="text-xs text-muted-foreground">
-            Now: {leaveLabel(types.find((t) => t.id === editing.leaveTypeId)?.name, sitePlace(editing, me.offices))}, {fmtRange(editing)}
+            Now: {leaveLabel(types.find((t) => t.id === editing.leaveTypeId)?.name, sitePlace(editing, me.offices))}, {requestWords(editing, { today })}
             {waitingOn.length > 0 && ` · waiting for ${waitingOn.join(' or ')}`}.
             {' '}It stays the same request; the rules check it again and your approvers see what changed.
           </p>
@@ -552,7 +597,7 @@ export default function BookTimeForm({
           <button
             type="button"
             className={`${BTN_LINK} -ml-2 text-xs`}
-            onClick={() => setMoreOpen((v) => !v)}
+            onClick={toggleMore}
             aria-expanded={moreOpen}
             aria-controls={moreOpen ? ids.more : undefined}
           >
@@ -562,7 +607,7 @@ export default function BookTimeForm({
         )}
         {moreOpen && rest.length > 0 && (
           <div id={ids.more} role="group" aria-label="More types" className="grid grid-cols-2 gap-2 animate-fadeIn" data-testid="more-types">
-            {rest.map((t) => tile(t, true))}
+            {rest.map((t) => moreTile(t))}
           </div>
         )}
         {stays && <p className="text-xs text-muted-foreground">Shows on the team calendar; you stay available.</p>}
@@ -600,10 +645,10 @@ export default function BookTimeForm({
             end={isHours ? sel.start : sel.end}
             onPick={onPick}
             today={today}
-            minKey={minKey}
             holidays={holidays || {}}
             booked={booked}
             labelledBy={ids.when}
+            single={isHours}
           />
         </div>
 
@@ -633,11 +678,16 @@ export default function BookTimeForm({
         )}
 
         {picked && (
-          <>
-            <p className="text-sm font-medium text-foreground" aria-hidden="true" data-testid="pick-summary">{summary}</p>
-            <p className="sr-only" aria-live="polite" data-testid="pick-spoken">{spoken}</p>
-          </>
+          <div className="space-y-0.5" aria-hidden="true">
+            <p className="text-sm font-medium text-foreground" data-testid="pick-summary">{summary}</p>
+            {pastNeedsApprover && (
+              <p className="flex items-start gap-1.5 text-xs text-muted-foreground" data-testid="pick-past">
+                <Clock3 className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />{PAST_SENTENCE}
+              </p>
+            )}
+          </div>
         )}
+        <p className="sr-only" data-testid="pick-spoken">{spoken}</p>
       </fieldset>
 
       {/* 3. Note */}
@@ -679,12 +729,15 @@ export default function BookTimeForm({
       {previewError && <p className="text-xs text-red-700 dark:text-red-300">{previewError}</p>}
       <ErrorNote>{submitError}</ErrorNote>
 
-      {/* The footer stays reachable on a phone: sticky above the tab bar and the safe area. */}
+      <p className="sr-only" aria-live="polite" data-testid="booking-live">{live}</p>
+
+      {/* The footer stays reachable on a phone: sticky above the tab bar and the safe area.
+          `!-mb-4`: the form's space-y would zero the bottom margin, leaving a gap under the footer. */}
       <div
-        className="sticky bottom-[calc(3.25rem_+_env(safe-area-inset-bottom))] z-10 -mx-4 -mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-b-xl border-t border-border bg-card px-4 py-3 md:bottom-0"
+        className="sticky bottom-[calc(3.25rem_+_env(safe-area-inset-bottom))] z-10 -mx-4 !-mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-b-xl border-t border-border bg-card px-4 py-3 md:bottom-0"
         data-testid="booking-footer"
       >
-        <div className="min-w-0 flex-1 basis-56" aria-live="polite">{status}</div>
+        <div className="min-w-0 flex-1 basis-56">{status}</div>
         <div className="ml-auto flex shrink-0 items-center gap-2">
           {editing && (
             <button type="button" className={BTN_QUIET} onClick={() => onStopEditing?.()} disabled={saving}>Keep it as it was</button>

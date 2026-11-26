@@ -1,4 +1,4 @@
-import { MONTHS, addDaysKey, parseDay } from './availabilityUi';
+import { MONTHS, addDaysKey, fmtMinute, parseDay } from './availabilityUi';
 import { isWeekend, monthWeeks, nextWorkingDayKey } from './calendarModel';
 
 /**
@@ -14,6 +14,23 @@ const MONTH_SHORT = MONTHS.map((m) => m.slice(0, 3));
 
 /** What Coming up lists, and what can still be cancelled: approved or waiting. */
 export const LIVE_STATUSES = ['approved', 'pending'];
+
+/**
+ * The server's words for a booking that starts before today on a type that is
+ * not "booked after the fact" (any type may still be booked in the past; it
+ * goes to an approver).
+ */
+export const PAST_SENTENCE = 'It starts in the past, so an approver has to confirm it.';
+
+/** "Mon 30 Nov – Fri 4 Dec · mornings": a request's dates and part of the day, in the form's one format. */
+export function requestWords(r, { today = null } = {}) {
+  const base = rangeWords(r.startDate, r.endDate, { today });
+  const single = r.startDate === r.endDate;
+  if (r.dayPart === 'am') return `${base} · ${single ? 'morning' : 'mornings'}`;
+  if (r.dayPart === 'pm') return `${base} · ${single ? 'afternoon' : 'afternoons'}`;
+  if (r.dayPart === 'hours' && r.startMinute != null) return `${base} · ${fmtMinute(r.startMinute)}–${fmtMinute(r.endMinute)}`;
+  return base;
+}
 
 /** "Wed 25 Nov" (with the year when asked). */
 export function shortDay(key, { year = false } = {}) {
@@ -35,6 +52,7 @@ export function dayLabel(key, { today, holiday, booked = [], disabled, inRange }
   const d = parseDay(key);
   const parts = [longDay(key)];
   if (key === today) parts.push('today');
+  else if (today && key < today) parts.push('past');
   if (holiday) parts.push(`holiday: ${holiday}`);
   else if (isWeekend(d.getDay())) parts.push('weekend');
   for (const b of booked) parts.push(`${b.name} ${b.status === 'pending' ? 'waiting for approval' : 'booked'}`);

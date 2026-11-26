@@ -20,10 +20,10 @@ const ME = {
   ],
   settings: {},
 };
-// Gaby: Thu 12 + Fri 13 Nov, waiting for Vahid.
+// Thu 12 + Fri 13 Nov, waiting for an approver (invented names).
 const THU_FRI = {
   id: 210, leaveTypeId: 1, startDate: '2099-11-12', endDate: '2099-11-13', dayPart: 'full', days: 2, status: 'pending',
-  note: null, source: 'app', editable: true, waitingOn: [{ email: 'vahid@bgc.ca', name: 'Vahid Haeri' }],
+  note: null, source: 'app', editable: true, waitingOn: [{ email: 'robin.vale@example.com', name: 'Robin Vale' }],
 };
 
 beforeEach(() => {
@@ -41,7 +41,7 @@ describe('changing a waiting request', () => {
     const toast = vi.fn();
     render(<BookTimeForm me={ME} editing={THU_FRI} onBooked={onBooked} toast={toast} onStopEditing={vi.fn()} />);
     expect(screen.getByRole('form', { name: 'Change your request' })).toBeInTheDocument();
-    expect(screen.getByText(/waiting for Vahid Haeri/)).toBeInTheDocument();
+    expect(screen.getByText(/waiting for Robin Vale/)).toBeInTheDocument();
     // The calendar opens on the request's month with its two days picked.
     expect(screen.getAllByRole('gridcell', { selected: true }).map((c) => c.dataset.day)).toEqual(['2099-11-12', '2099-11-13']);
     expect(screen.getByRole('radio', { name: 'Vacation' })).toBeChecked();
@@ -209,7 +209,7 @@ describe('my requests (the old list, kept for other callers)', () => {
     const onEdit = vi.fn();
     const approved = { ...THU_FRI, id: 211, status: 'approved', waitingOn: undefined, editable: undefined };
     render(<MyRequestsList requests={[THU_FRI, approved]} typeById={typeById} onCancel={vi.fn()} onEdit={onEdit} />);
-    expect(screen.getAllByText('Waiting for Vahid Haeri')).toHaveLength(1);
+    expect(screen.getAllByText('Waiting for Robin Vale')).toHaveLength(1);
     const change = screen.getAllByRole('button', { name: /^Change Vacation/ });
     expect(change).toHaveLength(1);
     fireEvent.click(change[0]);

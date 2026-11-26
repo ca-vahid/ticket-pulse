@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { COLOR_DOT, MONTHS, addDaysKey, parseDay, todayKey } from './availabilityUi';
+import { COLOR_DOT, COLOR_TEXT, MONTHS, addDaysKey, parseDay, todayKey } from './availabilityUi';
 import { isWeekend } from './calendarModel';
 import { WEEKDAY_LONG, dayLabel, monthCells } from './bookingModel';
 
@@ -11,16 +11,22 @@ import { WEEKDAY_LONG, dayLabel, monthCells } from './bookingModel';
  *   - a real grid (role="grid"): arrow keys move a day or a week, Home/End
  *     to the week's ends, Page Up/Down a month; Enter or Space picks;
  *   - picked days carry aria-selected; the range between the ends is filled;
- *   - dots under the days already booked (approved, or faded while waiting),
- *     coloured by type, with the words in the day's label and tooltip;
- *   - weekends and holidays are muted and say so; days before `minKey` are
- *     disabled; today is outlined.
+ *   - dots under the days already booked (filled when approved, a hollow ring
+ *     while waiting), coloured by type, with the words in the day's label and
+ *     tooltip;
+ *   - weekends and holidays are muted and say so; past days are quieter but
+ *     can be picked (any type can be booked after the fact; it goes to an
+ *     approver); today is outlined. A harness may pass `minKey` to disable
+ *     the days before it, and the keyboard then stops at its month too.
  *
  * `onPick(key)` gets the day; the parent decides what a tap means (pickDay).
  */
 
 const HEAD = [1, 2, 3, 4, 5, 6, 0];
 const NAV_BTN = 'tp-focus-ring grid h-9 w-9 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40';
+
+const NO_BOOKINGS = new Map();
+const firstOfMonth = (key) => `${key.slice(0, 7)}-01`;
 
 const monthOf = (key) => {
   const d = parseDay(key);
@@ -38,8 +44,9 @@ export default function MonthPicker({
   today = todayKey(),
   minKey = null,
   holidays = {},
-  booked = new Map(),
+  booked = NO_BOOKINGS,
   labelledBy = null,
+  single = false,
 }) {
   const uid = useId().replace(/:/g, '');
   const headingId = `mp-${uid}-month`;
@@ -74,6 +81,8 @@ export default function MonthPicker({
   };
 
   const moveTo = (key) => {
+    // As the Previous button: never into a month before `minKey`'s.
+    if (minKey && key < firstOfMonth(minKey)) return;
     wantFocus.current = true;
     setFocusKey(key);
     if (!sameMonth(key, view)) setView(monthOf(key));
@@ -115,7 +124,7 @@ export default function MonthPicker({
         <button type="button" className={NAV_BTN} onClick={() => step(-1)} disabled={prevDisabled} aria-label="Previous month">
           <ChevronLeft className="h-4 w-4" aria-hidden="true" />
         </button>
-        <h3 id={headingId} className="text-sm font-semibold text-foreground" aria-live="polite">{MONTHS[view.month]} {view.year}</h3>
+        <h3 id={headingId} className="text-sm font-semibold text-foreground">{MONTHS[view.month]} {view.year}</h3>
         <button type="button" className={NAV_BTN} onClick={() => step(1)} aria-label="Next month">
           <ChevronRight className="h-4 w-4" aria-hidden="true" />
         </button>
@@ -123,6 +132,7 @@ export default function MonthPicker({
       <table
         ref={gridRef}
         role="grid"
+        aria-multiselectable={single ? undefined : 'true'}
         aria-labelledby={labelledBy ? `${labelledBy} ${headingId}` : headingId}
         className="w-full table-fixed border-collapse"
       >
@@ -154,12 +164,14 @@ export default function MonthPicker({
                 const band = inRange && lo !== hi
                   ? `bg-primary/10 dark:bg-primary/20 ${key === lo ? 'rounded-l-md' : ''} ${key === hi ? 'rounded-r-md' : ''}`
                   : '';
+                const past = key < today;
                 const face = isEnd && inRange
                   ? 'bg-primary text-primary-foreground font-semibold'
                   : disabled
                     ? 'text-muted-foreground/45'
-                    : offDay
-                      ? `text-muted-foreground ${between ? '' : 'hover:bg-muted'}`
+                    : past || offDay
+                      // Past days stay pickable, only quieter; weekends and holidays are muted.
+                      ? `${past ? 'text-muted-foreground/70' : 'text-muted-foreground'} ${between ? '' : 'hover:bg-muted'}`
                       : `text-foreground ${between ? '' : 'hover:bg-muted'}`;
                 return (
                   <td
@@ -180,11 +192,15 @@ export default function MonthPicker({
                       className={`mx-auto flex h-10 w-full max-w-[2.75rem] flex-col items-center justify-center rounded-md text-sm tabular-nums ${face} ${isToday && !(isEnd && inRange) ? 'ring-1 ring-inset ring-primary' : ''}`}
                     >
                       <span className="leading-none">{d.getDate()}</span>
-                      <span className="mt-1 flex h-1.5 items-center gap-0.5">
+                      <span className="mt-1 flex h-2 items-center gap-0.5">
                         {marks.slice(0, 3).map((m, i) => (
                           <span
                             key={`${m.name}-${m.status}-${i}`}
-                            className={`h-1.5 w-1.5 rounded-full ${COLOR_DOT[m.color] || COLOR_DOT.slate} ${m.status === 'pending' ? 'opacity-50' : ''} ${isEnd && inRange ? 'ring-1 ring-primary-foreground' : ''}`}
+                            data-dot={m.status === 'pending' ? 'waiting' : 'booked'}
+                            className={`h-2 w-2 rounded-full ${m.status === 'pending'
+                              // Waiting: a hollow ring in the type's colour; booked: a filled dot.
+                              ? `border-[1.5px] border-current ${COLOR_TEXT[m.color] || COLOR_TEXT.slate} ${isEnd && inRange ? 'bg-primary-foreground' : 'bg-transparent'}`
+                              : `${COLOR_DOT[m.color] || COLOR_DOT.slate} ${isEnd && inRange ? 'ring-1 ring-primary-foreground' : ''}`}`}
                           />
                         ))}
                       </span>
@@ -197,10 +213,10 @@ export default function MonthPicker({
         </tbody>
       </table>
       <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground" data-testid="month-picker-legend">
-        <span className="inline-flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60" aria-hidden="true" />Booked</span>
-        <span className="inline-flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60 opacity-50" aria-hidden="true" />Waiting for approval</span>
+        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-muted-foreground/70" aria-hidden="true" />Booked</span>
+        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full border-[1.5px] border-muted-foreground/70" aria-hidden="true" />Waiting for approval</span>
         <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded-sm ring-1 ring-inset ring-primary" aria-hidden="true" />Today</span>
-        <span>Grey days: weekends and holidays</span>
+        <span>Grey days: weekends, holidays and the past</span>
       </p>
     </div>
   );

@@ -1,4 +1,5 @@
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
+import { motionReduced } from '../../utils/motionPreference';
 
 /**
  * The light section tab bar (Knowledge redesign, 26 Sep 2026). Every section
@@ -22,7 +23,19 @@ export function tabAccessibleName(tab) {
 
 export default function LightTabBar({ tabs, activeId, onSelect, ariaLabel, idPrefix = 'tab', children = null, className = '' }) {
   const refs = useRef({});
+  const mounted = useRef(false);
   const activeIndex = Math.max(0, tabs.findIndex((t) => t.id === activeId));
+
+  // QA 11-25: on a phone the row scrolls sideways and the selected tab could sit
+  // cut off at the edge. Bring it into view on open (at once) and on change
+  // (smoothly, unless the app's motion setting is off).
+  useEffect(() => {
+    const el = refs.current[activeId];
+    if (!el || typeof el.scrollIntoView !== 'function') return;
+    const smooth = mounted.current && !motionReduced();
+    mounted.current = true;
+    el.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: smooth ? 'smooth' : 'auto' });
+  }, [activeId, tabs.length]);
 
   const onKeyDown = (e) => {
     let next = null;
