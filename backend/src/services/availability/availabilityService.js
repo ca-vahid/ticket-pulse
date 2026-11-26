@@ -19,6 +19,9 @@ import {
   cancelledInTicketPulse, scheduledVtImportEnabled, VT_IMPORT_EVERY_MINUTES, VT_IMPORT_DAYS_BACK, VT_IMPORT_DAYS_AHEAD, VT_IMPORT_STATUS_KEY,
 } from './vtImportPolicy.js';
 import {
+  getVacationTrackerRetirement, isVacationTrackerRetired, logRetiredOnce, saveVacationTrackerRetirement,
+} from './vtRetirement.js';
+import {
   CAL_SOURCE, CAL_IMPORT_MODES, getCalendarImportMode, setCalendarImportMode, calendarImportStatusAll, cancelledByPerson as calCancelledByPerson,
 } from './calendarImport.js';
 import { currentViewAs } from '../viewAsContext.js';
@@ -29,7 +32,7 @@ import {
 } from './availabilityRules.js';
 import {
   isSiteVisitType, siteFieldsFor, editTouchesTypeOrDates, sitePlaceOf, projectionSiteFields,
-  findAppTwin, collapseCalendarEntries,
+  findAppTwin, collapseCalendarEntries, isVtRow, sameLeaveRow,
 } from './siteVisit.js';
 
 const lc = (s) => String(s || '').trim().toLowerCase();
@@ -45,6 +48,8 @@ const roleView = (user) => {
 const AVAILABILITY_TO_CATEGORY = { OFF: 'OFF', WFH: 'WFH', ONSITE: 'OTHER', PARTIAL: 'OTHER' };
 // The office a site visit names (25 Nov 2026), read with the request.
 const SITE_OFFICE = { select: { id: true, name: true, timezone: true } };
+// What an import returns once Vacation Tracker is retired (26 Nov 2026).
+const RETIRED_IMPORT = Object.freeze({ retired: true, created: 0, updated: 0, cancelled: 0, skipped: 0, unmatched: 0, duplicates: 0 });
 
 /** Today in BC (YYYY-MM-DD): "over" means over where the people are. */
 export function pacificTodayKey(now = new Date()) {
@@ -897,6 +902,9 @@ class AvailabilityService {
         .then(() => prisma.technicianLeave.deleteMany({ where: { vtLeaveId: leaveId } }))
         .catch((err) => logger.warn(`Availability: could not clear Vacation Tracker rows for request ${request.id}: ${err.message}`));
     }
+    // Retired (26 Nov 2026): a booking that came from there is a Vacation Pulse
+    // booking now; there is nothing left to tell Vacation Tracker.
+    if (await isVacationTrackerRetired()) return null;
     const res = leaveId ? await vtWriteBack.pushCancelled(request.id, reason) : { skipped: 'not_applicable' };
     if (res?.ok) return { updated: true, message: 'Cancelled in Ticket Pulse and in Vacation Tracker.' };
     logger.info(`Availability: imported request ${request.id} cancelled in Ticket Pulse only (${res?.skipped || res?.failed || 'not written'})`);
@@ -917,7 +925,8 @@ class AvailabilityService {
         ? 'This request is already approved. Cancel it and book again to change it.'
         : `This request is already ${r.status}`);
     }
-    if (r.source === 'vacation_tracker') throw new ValidationError('This came from Vacation Tracker. Change it there, or cancel it here and book again.');
+    // Once Vacation Tracker is retired its bookings are changed here like any other.
+    if (r.source === 'vacation_tracker' && !(await isVacationTrackerRetired())) throw new ValidationError('This came from Vacation Tracker. Change it there, or cancel it here and book again.');
     if (r.source === CAL_SOURCE) throw new ValidationError('This came from the shared calendar. Change it there, or cancel it here and book again.');
     return r;
   }
@@ -1047,7 +1056,10 @@ class AvailabilityService {
       : new Map();
     // QA 11-09 #2: an imported leave cancelled here that Vacation Tracker could
     // not be told about says so on its row.
-    const cancelledVt = rows.filter((r) => r.source === 'vacation_tracker' && r.status === 'cancelled').map((r) => r.id);
+    // Retired (26 Nov 2026): bookings made in Vacation Tracker are ordinary
+    // Vacation Pulse bookings now, and nothing is "still there" to cancel.
+    const vtRetired = rows.some((r) => r.source === 'vacation_tracker') ? await isVacationTrackerRetired() : false;
+    const cancelledVt = vtRetired ? [] : rows.filter((r) => r.source === 'vacation_tracker' && r.status === 'cancelled').map((r) => r.id);
     const vtEvents = cancelledVt.length
       ? await Promise.resolve()
         .then(() => prisma.avRequestEvent.findMany({ where: { requestId: { in: cancelledVt }, kind: { in: ['cancelled', 'vt_cancelled'] } }, select: { id: true, requestId: true, kind: true, details: true } }))
@@ -1057,8 +1069,9 @@ class AvailabilityService {
       const out = serializeRequest(r);
       if (r.status === 'pending') {
         out.waitingOn = (Array.isArray(r.decision?.approvers) ? r.decision.approvers : []).map((e) => ({ email: lc(e), name: names.get(lc(e)) || null }));
-        out.editable = r.source !== 'vacation_tracker' && r.source !== CAL_SOURCE;
+        out.editable = (r.source !== 'vacation_tracker' || vtRetired) && r.source !== CAL_SOURCE;
       }
+      if (vtRetired && r.source === 'vacation_tracker') out.vtRetired = true;
       if (cancelledVt.includes(r.id)) {
         const mineEv = (vtEvents || []).filter((e) => e.requestId === r.id);
         out.stillInVacationTracker = cancelledInTicketPulse(mineEv) && !mineEv.some((e) => e.kind === 'vt_cancelled');
@@ -1099,8 +1112,9 @@ class AvailabilityService {
     const shown = rows.slice(0, take);
     const people = await prisma.avPerson.findMany({ where: { email: { in: [...new Set(shown.map((r) => r.email))] } }, select: { email: true, name: true } });
     const nameOf = new Map(people.map((p) => [lc(p.email), p.name]));
+    const retired = shown.length ? await isVacationTrackerRetired() : false;
     return {
-      requests: shown.map((r) => ({ ...serializeRequest(r), name: nameOf.get(lc(r.email)) || null, vacationTracker: vacationTrackerState(r) })),
+      requests: shown.map((r) => ({ ...serializeRequest(r), name: nameOf.get(lc(r.email)) || null, vacationTracker: vacationTrackerState(r, { retired }) })),
       truncated,
     };
   }
@@ -1301,7 +1315,7 @@ class AvailabilityService {
 
   // ------------------------------------------------------------------ projection into technician_leaves
 
-  async _projectionTargets(request) {
+  async _projectionTargets(request, { vtRetired = false } = {}) {
     const techs = await prisma.technician.findMany({ where: { email: { equals: request.email, mode: 'insensitive' } }, select: { id: true, workspaceId: true }, take: 20 });
     // QA 11-16: entries from the shared calendar are already on the dashboard
     // (the calendar sync's 'graph:' rows) wherever that sync is on.
@@ -1310,7 +1324,9 @@ class AvailabilityService {
       const synced = new Set(cal.map((c) => c.workspaceId));
       return techs.filter((t) => !synced.has(t.workspaceId));
     }
-    if (request.source !== 'vacation_tracker') return techs;
+    // Retired (26 Nov 2026): no Vacation Tracker sync writes these days any
+    // more, so a booking from there projects like any other.
+    if (request.source !== 'vacation_tracker' || vtRetired) return techs;
     const vt = await prisma.vacationTrackerConfig.findMany({ where: { syncEnabled: true }, select: { workspaceId: true } });
     const synced = new Set(vt.map((v) => v.workspaceId));
     return techs.filter((t) => !synced.has(t.workspaceId));
@@ -1324,7 +1340,13 @@ class AvailabilityService {
     const person = await prisma.avPerson.findUnique({ where: { email: request.email } });
     const isHoliday = holidayMatcher(await this._holidays());
     const dates = workingDates({ startDate: request.startDate, endDate: request.endDate, workdays: person?.workdays, isHoliday });
-    const targets = await this._projectionTargets(request);
+    const retirement = request.source === 'vacation_tracker' ? await getVacationTrackerRetirement() : null;
+    const targets = await this._projectionTargets(request, { vtRetired: Boolean(retirement) });
+    // A booking from a retired Vacation Tracker keeps its past: in a workspace
+    // the old leave sync wrote, the days before retirement stay the rows it
+    // wrote (analytics history) and are not written a second time here.
+    const syncedBefore = new Set((retirement?.syncedWorkspaceIds || []).map(Number));
+    const handedOverOn = retirement ? pacificTodayKey(new Date(retirement.retiredAt)) : null;
     const half = request.dayPart === 'am' ? 'AM' : request.dayPart === 'pm' ? 'PM' : null;
     const partial = request.dayPart !== 'full';
     // 25 Nov 2026: a site visit's office (name + time zone) rides along, so
@@ -1341,6 +1363,7 @@ class AvailabilityService {
       const key = `av:${request.id}:w${t.workspaceId}`;
       await prisma.technicianLeave.deleteMany({ where: { vtLeaveId: key } });
       for (const date of dates) {
+        if (handedOverOn && syncedBefore.has(Number(t.workspaceId)) && dayKey(date) < handedOverOn) continue;
         await prisma.technicianLeave.create({
           data: {
             workspaceId: t.workspaceId,
@@ -1500,6 +1523,10 @@ class AvailabilityService {
   async importFromVacationTracker(actor, { workspaceId, from, to }, { client = null } = {}) {
     await this.assertAdmin(actor);
     const ws = Number(workspaceId);
+    if (await isVacationTrackerRetired()) {
+      logRetiredOnce('the import');
+      return { ...RETIRED_IMPORT };
+    }
     try {
       const summary = await this.syncFromVacationTracker(ws, { from, to, client, actorEmail: lc(actor.email) });
       await this._recordVtImport([ws], 'manual', { ok: true, ...summary });
@@ -1525,6 +1552,10 @@ class AvailabilityService {
    */
   async runScheduledVtImport({ now = new Date(), gapMs = 10000, sleep = (ms) => new Promise((r) => { setTimeout(r, ms).unref?.(); }) } = {}) {
     if (!scheduledVtImportEnabled()) return { skipped: 'off' };
+    if (await isVacationTrackerRetired()) {
+      logRetiredOnce('the 15-minute import');
+      return { skipped: 'retired' };
+    }
     if (this._scheduledVtImport) return { skipped: 'running' };
     this._scheduledVtImport = true;
     const results = [];
@@ -1675,6 +1706,11 @@ class AvailabilityService {
   }
 
   async _syncFromVacationTracker(workspaceId, { from = null, to = null, client = null, actorEmail = 'vacation_tracker' } = {}) {
+    // Retired (26 Nov 2026): nothing is read, created, changed or cancelled.
+    if (await isVacationTrackerRetired()) {
+      logRetiredOnce('the import');
+      return { ...RETIRED_IMPORT };
+    }
     if (!client) {
       const config = await prisma.vacationTrackerConfig.findUnique({ where: { workspaceId: Number(workspaceId) } });
       if (!config?.apiKey) throw new ValidationError('Vacation Tracker is not set up for that workspace');
@@ -1852,6 +1888,198 @@ class AvailabilityService {
     await this.unproject(row).catch(() => null);
   }
 
+  // ------------------------------------------------------------------ retire Vacation Tracker (26 Nov 2026)
+
+  async assertSuperAdmin(user) {
+    if (!(await this.isSuperAdmin(user))) throw new AuthorizationError('Only super admins can retire Vacation Tracker', 'availability_super_admin');
+  }
+
+  /**
+   * Vacation Pulse → Settings → Vacation Tracker: still syncing or retired
+   * (when, by whom, and what the handover did), and how many upcoming
+   * bookings came from there. Vacation Pulse admins read it; only a super
+   * admin may retire (canRetire).
+   */
+  async vtRetirementStatus(actor) {
+    await this.assertAdmin(actor);
+    const today = toDay(pacificTodayKey());
+    const [retirement, upcomingFromVt, configs, settings, canRetire] = await Promise.all([
+      getVacationTrackerRetirement(),
+      prisma.avRequest.count({ where: { source: 'vacation_tracker', status: { in: ACTIVE }, endDate: { gte: today } } }),
+      prisma.vacationTrackerConfig.findMany({ select: { workspaceId: true, syncEnabled: true, lastSyncAt: true, apiKey: true } }),
+      this.getSettings(),
+      this.isSuperAdmin(actor),
+    ]);
+    const synced = (configs || []).filter((c) => c.syncEnabled && String(c.apiKey || '').trim());
+    const last = synced.map((c) => (c.lastSyncAt ? new Date(c.lastSyncAt).getTime() : 0)).filter(Boolean);
+    return {
+      retired: retirement
+        ? { retiredAt: retirement.retiredAt, retiredBy: retirement.retiredBy || null, retiredByName: retirement.retiredByName || null, report: retirement.report || null }
+        : null,
+      upcomingFromVt,
+      syncing: !retirement && synced.length > 0,
+      lastSyncAt: last.length ? new Date(Math.max(...last)).toISOString() : null,
+      writeBackEnabled: settings?.vtWriteBackEnabled !== false,
+      canRetire,
+    };
+  }
+
+  /**
+   * Retire Vacation Tracker (super admins). Idempotent: a second run keeps
+   * the first retiredAt / retiredBy and does the handover again, which then
+   * finds nothing left to move.
+   *   1. The switch first, so every Vacation Tracker caller (hourly sync,
+   *      import, write-back, user and type syncs, tests) stops before anything
+   *      moves; a running import or leave sync is waited for.
+   *   2. The handover (_handOverFromVacationTracker).
+   * Returns { retiredAt, retiredBy, retiredByName, handedOver,
+   * directRowsReplaced, keptUnmatched: [...] }.
+   */
+  async retireVacationTracker(actor, { now = new Date() } = {}) {
+    await this.assertSuperAdmin(actor);
+    const previous = await getVacationTrackerRetirement();
+    // The workspaces the old leave sync was writing: their days before
+    // retirement stay its rows (project() never writes them again).
+    const syncedWorkspaceIds = previous?.syncedWorkspaceIds
+      || ((await prisma.vacationTrackerConfig.findMany({ where: { syncEnabled: true }, select: { workspaceId: true } })) || []).map((c) => c.workspaceId);
+    const record = {
+      retiredAt: previous?.retiredAt || now.toISOString(),
+      retiredBy: previous?.retiredBy || lc(actor.email),
+      retiredByName: previous ? (previous.retiredByName || null) : (actor.name || null),
+      syncedWorkspaceIds,
+    };
+    await saveVacationTrackerRetirement({ ...record, report: previous?.report || null });
+    if (this._vtImportChain) await this._vtImportChain.catch(() => {});
+    await this._waitForLeaveSync();
+    const report = await this._handOverFromVacationTracker({ actorEmail: lc(actor.email), today: pacificTodayKey(now) });
+    await saveVacationTrackerRetirement({ ...record, report: { ...report, at: now.toISOString() } });
+    logger.info(`Availability: Vacation Tracker ${previous ? 'handover run again' : 'retired'} by ${lc(actor.email)}: ${report.handedOver} booking(s) handed over, ${report.directRowsReplaced} leave-day(s) replaced, ${report.keptUnmatched.length} kept for a look`);
+    return { ...record, ...report };
+  }
+
+  /** A leave sync already past its own retired check finishes before the handover reads (at most a minute). */
+  async _waitForLeaveSync({ timeoutMs = 60000, stepMs = 500 } = {}) {
+    try {
+      const { default: vtService } = await import('../vacationTrackerService.js');
+      const until = Date.now() + timeoutMs;
+      while (vtService.getSyncStatus().running && Date.now() < until) {
+        await new Promise((r) => { setTimeout(r, stepMs).unref?.(); });
+      }
+    } catch (err) {
+      logger.warn(`Availability: could not check for a running Vacation Tracker sync (${err.message})`);
+    }
+  }
+
+  /**
+   * The one-time handover. Idempotent; past days (before today, BC time) are
+   * never touched — they are analytics history.
+   *   - Every booking that came from Vacation Tracker (approved or waiting)
+   *     and is not over becomes an ordinary Vacation Pulse booking: it keeps
+   *     source 'vacation_tracker' (the "Booked in Vacation Tracker" label) and
+   *     its externalId, gets a 'vt_handed_over' event, and an approved one is
+   *     projected like any booking ('av:' rows, today onwards; its past days
+   *     stay the rows the old sync wrote).
+   *   - A leave-day the old sync wrote (not 'av:', not 'graph:') from today
+   *     on is removed when Vacation Pulse now covers it: it belongs to a
+   *     handed-over booking projected for that person, inside its dates; or
+   *     an 'av:' row of the same person, day, kind and part of the day.
+   *   - Every other upcoming leave-day the old sync wrote is kept and listed
+   *     (keptUnmatched), so an admin can check it.
+   */
+  async _handOverFromVacationTracker({ actorEmail, today }) {
+    const from = toDay(today);
+    const requests = await prisma.avRequest.findMany({
+      where: { source: 'vacation_tracker', status: { in: ACTIVE }, endDate: { gte: from } },
+      include: { events: { where: { kind: 'vt_handed_over' }, select: { id: true } } },
+      orderBy: { id: 'asc' },
+      take: 5000,
+    });
+    let handedOver = 0;
+    const failed = [];
+    const byLeaveId = new Map(); // Vacation Tracker leave id -> its handed-over booking
+    for (const r of requests || []) {
+      try {
+        await this.project(r);
+        if (!(r.events || []).length) {
+          await prisma.avRequestEvent.create({
+            data: { requestId: r.id, kind: 'vt_handed_over', actor: actorEmail, details: { note: 'Vacation Tracker retired: this booking now lives in Vacation Pulse' } },
+          });
+          handedOver += 1;
+        }
+        if (isVtExternalId(r.externalId)) byLeaveId.set(r.externalId.slice(3), r);
+      } catch (err) {
+        failed.push(r.id);
+        logger.warn(`Availability: Vacation Tracker handover could not move request ${r.id} (${err.message}); its leave-days are kept`);
+      }
+    }
+
+    const notVt = [{ vtLeaveId: { startsWith: 'av:' } }, { vtLeaveId: { startsWith: 'graph:' } }];
+    const rowSelect = {
+      id: true, workspaceId: true, technicianId: true, vtLeaveId: true, leaveDate: true, leaveTypeName: true, category: true,
+      isFullDay: true, halfDayPart: true, startMinute: true, endMinute: true,
+    };
+    const direct = ((await prisma.technicianLeave.findMany({ where: { leaveDate: { gte: from }, NOT: notVt }, select: rowSelect, take: 20000 })) || []).filter(isVtRow);
+    let directRowsReplaced = 0;
+    let kept = [];
+    if (direct.length) {
+      const [appRows, avTypes] = await Promise.all([
+        prisma.technicianLeave.findMany({ where: { leaveDate: { gte: from }, vtLeaveId: { startsWith: 'av:' } }, select: rowSelect, take: 50000 }),
+        prisma.avLeaveType.findMany({ select: { id: true, name: true, availability: true, vtLeaveTypeNames: true } }),
+      ]);
+      const appByDay = new Map();
+      const projectedFor = new Set(); // "<av key>|<technicianId>"
+      for (const a of appRows || []) {
+        const k = `${a.technicianId}|${dayKey(a.leaveDate)}`;
+        if (!appByDay.has(k)) appByDay.set(k, []);
+        appByDay.get(k).push(a);
+        projectedFor.add(`${a.vtLeaveId}|${a.technicianId}`);
+      }
+      const replace = [];
+      for (const d of direct) {
+        const day = dayKey(d.leaveDate);
+        const req = byLeaveId.get(d.vtLeaveId);
+        let covered = Boolean(req) && req.status === 'approved'
+          && day >= dayKey(req.startDate) && day <= dayKey(req.endDate)
+          && projectedFor.has(`av:${req.id}:w${d.workspaceId}|${d.technicianId}`);
+        if (!covered) covered = (appByDay.get(`${d.technicianId}|${day}`) || []).some((a) => sameLeaveRow(d, a, avTypes || []));
+        if (covered) replace.push(d.id);
+        else kept.push(d);
+      }
+      if (replace.length) {
+        const chunks = [];
+        for (let i = 0; i < replace.length; i += 500) chunks.push(replace.slice(i, i + 500));
+        // All or nothing, and only ever upcoming leave-days the old sync wrote.
+        const results = await prisma.$transaction(chunks.map((ids) => prisma.technicianLeave.deleteMany({ where: { id: { in: ids }, leaveDate: { gte: from }, NOT: notVt } })));
+        directRowsReplaced = results.reduce((s, res) => s + (res?.count || 0), 0);
+      }
+    }
+    if (kept.length) kept = await this._describeKeptRows(kept);
+    return { handedOver, directRowsReplaced, keptUnmatched: kept, requestsChecked: (requests || []).length, failed };
+  }
+
+  /** Kept leave-days, one line per person and Vacation Tracker leave: { technicianId, technicianName, workspaceId, leaveType, category, dates }. */
+  async _describeKeptRows(rows) {
+    const ids = [...new Set(rows.map((r) => r.technicianId))];
+    const techs = await Promise.resolve()
+      .then(() => prisma.technician.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }))
+      .catch(() => []);
+    const nameOf = new Map((techs || []).map((t) => [t.id, t.name]));
+    const groups = new Map();
+    for (const r of rows) {
+      const k = `${r.workspaceId}|${r.technicianId}|${r.vtLeaveId}`;
+      if (!groups.has(k)) {
+        groups.set(k, {
+          technicianId: r.technicianId, technicianName: nameOf.get(r.technicianId) || null, workspaceId: r.workspaceId,
+          leaveType: r.leaveTypeName || null, category: r.category || null, dates: [],
+        });
+      }
+      groups.get(k).dates.push(dayKey(r.leaveDate));
+    }
+    return [...groups.values()]
+      .map((g) => ({ ...g, dates: [...new Set(g.dates)].sort() }))
+      .sort((a, b) => a.dates[0].localeCompare(b.dates[0]) || a.technicianId - b.technicianId);
+  }
+
   /**
    * Opening balances from Vacation Tracker's Leave Balance Report (CSV/Excel
    * pasted as CSV). Columns (case-insensitive): email, leave type,
@@ -1917,12 +2145,14 @@ function guessAvailability(name) {
  * Where a request stands with Vacation Tracker, in words (QA 10-21 #1):
  * imported from it, written to it, or why not.
  */
-export function vacationTrackerState(r) {
+export function vacationTrackerState(r, { retired = false } = {}) {
   // QA 11-16: imported from Accounting's shared calendar; never sent anywhere.
   if (r.source === CAL_SOURCE) {
     if (r.status === 'cancelled' && r.events && calCancelledByPerson(r.events)) return { state: 'cancelled', label: 'From the shared calendar; cancelled here' };
     return { state: 'imported', label: 'From the shared calendar' };
   }
+  // 26 Nov 2026: Vacation Tracker is retired; its bookings live here now.
+  if (r.source === 'vacation_tracker' && retired) return { state: 'imported', label: 'Booked in Vacation Tracker' };
   if (r.source === 'vacation_tracker') {
     // QA 11-09 #2: cancelled in Ticket Pulse — and was Vacation Tracker told?
     if (r.status === 'cancelled' && r.events && cancelledInTicketPulse(r.events)) {
@@ -1944,6 +2174,7 @@ export function vacationTrackerState(r) {
     return { state: 'skipped', label: `Not in Vacation Tracker${reason ? `: ${reason}` : ''}` };
   }
   if (last?.kind === 'vt_write_failed') return { state: 'failed', label: `Vacation Tracker refused it: ${String(last.details?.error || 'unknown error').slice(0, 160)}` };
+  if (retired) return { state: 'not_sent', label: 'Not sent: Vacation Tracker is retired' };
   if (r.status !== 'approved') return { state: 'not_sent', label: 'Only approved requests go to Vacation Tracker' };
   return { state: 'waiting', label: 'Not sent to Vacation Tracker yet' };
 }

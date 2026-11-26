@@ -3,6 +3,10 @@ import vtRepo from './vacationTrackerRepository.js';
 import technicianRepository from './technicianRepository.js';
 import logger from '../utils/logger.js';
 import { sameLeaveRow } from './availability/siteVisit.js';
+import { isVacationTrackerRetired, logRetiredOnce } from './availability/vtRetirement.js';
+
+// What a sync returns once Vacation Tracker is retired: nothing read, nothing removed.
+const RETIRED_SYNC = Object.freeze({ skipped: 'retired', leavesProcessed: 0, leaveDaysCreated: 0, staleRemoved: 0, duplicateDaysSkipped: 0 });
 
 const syncState = {
   running: false,
@@ -87,6 +91,10 @@ class VacationTrackerService {
   }
 
   async testConnection(apiKey) {
+    if (await isVacationTrackerRetired()) {
+      logRetiredOnce('the connection test');
+      return { success: false, error: 'Vacation Tracker is retired: Ticket Pulse no longer connects to it' };
+    }
     try {
       const client = this._getClient(apiKey);
       const ok = await client.testConnection();
@@ -97,6 +105,10 @@ class VacationTrackerService {
   }
 
   async syncLeaveTypes(workspaceId) {
+    if (await isVacationTrackerRetired()) {
+      logRetiredOnce('the leave-type sync');
+      return [];
+    }
     const client = await this._getClientForWorkspace(workspaceId);
     const vtLeaveTypes = await client.fetchLeaveTypes();
 
@@ -119,6 +131,10 @@ class VacationTrackerService {
   }
 
   async syncUsers(workspaceId) {
+    if (await isVacationTrackerRetired()) {
+      logRetiredOnce('the user sync');
+      return [];
+    }
     const client = await this._getClientForWorkspace(workspaceId);
     const vtUsers = await client.fetchUsers();
     const technicians = await technicianRepository.getAllActive(workspaceId, { lite: true });
@@ -167,6 +183,10 @@ class VacationTrackerService {
   }
 
   async syncLeaves(workspaceId, startDate, endDate) {
+    if (await isVacationTrackerRetired()) {
+      logRetiredOnce('the hourly leave sync');
+      return { ...RETIRED_SYNC };
+    }
     if (syncState.running) {
       throw new Error('A vacation tracker sync is already in progress');
     }
@@ -274,13 +294,32 @@ class VacationTrackerService {
 
       if (duplicateDays) logger.info(`VT leave sync ws ${workspaceId}: ${duplicateDays} leave-day(s) skipped, already booked in Vacation Pulse`);
 
+      // Retired while this run was reading (26 Nov 2026): write nothing, remove
+      // nothing; the handover owns these days now.
+      if (await isVacationTrackerRetired()) {
+        logRetiredOnce('the hourly leave sync');
+        return { ...RETIRED_SYNC, leavesProcessed: leaves.length };
+      }
+
       syncState.progress = { step: 'saving to database', pct: 70 };
       await vtRepo.bulkUpsertLeaves(leaveRows);
 
       syncState.progress = { step: 'cleaning stale data', pct: 90 };
       const startDt = new Date(startDate + 'T00:00:00Z');
       const endDt = new Date(endDate + 'T00:00:00Z');
-      const deleted = await vtRepo.deleteStaleLeaves(workspaceId, startDt, endDt, validKeys);
+      // An empty listing never cancels (26 Nov 2026, the rule the Vacation
+      // Pulse import already follows): a cancelled or broken Vacation Tracker
+      // account can answer "no leaves" instead of an error, and the clean-up
+      // below would then wipe every leave-day it ever wrote in the window.
+      let deleted = { count: 0 };
+      const existingRows = (leaves || []).length === 0
+        ? await vtRepo.countDirectLeaves(workspaceId, startDt, endDt)
+        : 0;
+      if (existingRows > 0) {
+        logger.warn(`VT leave sync ws ${workspaceId}: Vacation Tracker listed no leaves for ${startDate}..${endDate}; keeping the ${existingRows} leave-day(s) already there (an empty listing never cancels)`);
+      } else {
+        deleted = await vtRepo.deleteStaleLeaves(workspaceId, startDt, endDt, validKeys);
+      }
 
       await vtRepo.updateLastSyncAt(workspaceId);
 
@@ -299,6 +338,10 @@ class VacationTrackerService {
   }
 
   async fullSync(workspaceId) {
+    if (await isVacationTrackerRetired()) {
+      logRetiredOnce('the Vacation Tracker sync');
+      return { ...RETIRED_SYNC };
+    }
     await this.syncLeaveTypes(workspaceId);
     await this.syncUsers(workspaceId);
 

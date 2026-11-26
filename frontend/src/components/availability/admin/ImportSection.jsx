@@ -160,7 +160,9 @@ export function SharedCalendarImport({ toast }) {
  * Import from Vacation Tracker (the leaves Ticket Pulse already syncs for a
  * workspace) and rebuild the calendar entries the dashboards read.
  */
-export default function ImportSection({ toast }) {
+export default function ImportSection({ toast, config = null }) {
+  // 26 Nov 2026: once Vacation Tracker is retired there is nothing to import from it.
+  const vtRetired = Boolean(config?.settings?.vtRetired);
   const [workspaceId, setWorkspaceId] = useState(1);
   const [from, setFrom] = useState(`${new Date().getFullYear()}-01-01`);
   const [to, setTo] = useState(addDaysKey(todayKey(), 365));
@@ -176,7 +178,7 @@ export default function ImportSection({ toast }) {
       .then((res) => setStatus(res?.data || null))
       .catch(() => setStatus(null));
   }, []);
-  useEffect(() => { loadStatus(); }, [loadStatus]);
+  useEffect(() => { if (!vtRetired) loadStatus(); }, [loadStatus, vtRetired]);
 
   const runImport = async () => {
     setBusy('import');
@@ -214,30 +216,37 @@ export default function ImportSection({ toast }) {
 
   return (
     <div className="space-y-6">
-      <section aria-label="Import from Vacation Tracker">
-        <SectionTitle hint="Reads approved leaves from Vacation Tracker (using that workspace's Vacation Tracker key) and adds them as approved requests, matched by e-mail. Already-imported leaves are skipped, so it is safe to run again.">
-          Import from Vacation Tracker
-        </SectionTitle>
-        <AutoImportLine status={status} workspaceId={workspaceId} />
-        <div className="grid max-w-2xl gap-3 sm:grid-cols-[8rem_1fr_1fr_auto] sm:items-end">
-          <Field label="Workspace id"><input type="number" min={1} className={INPUT} value={workspaceId} onChange={(e) => setWorkspaceId(e.target.value)} aria-label="Workspace id" /></Field>
-          <Field label="From"><input type="date" className={INPUT} value={from} onChange={(e) => setFrom(e.target.value)} aria-label="Import from" /></Field>
-          <Field label="To"><input type="date" className={INPUT} value={to} onChange={(e) => setTo(e.target.value)} aria-label="Import to" /></Field>
-          <button type="button" className={BTN_PRIMARY} onClick={runImport} disabled={Boolean(busy) || !from || !to}>
-            {busy === 'import' && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}Import
-          </button>
-        </div>
-        {result && (
-          <div className="mt-3 text-sm text-foreground/85" role="status" data-testid="vt-import-result">
-            <p>{result.created ?? 0} created · {result.skipped ?? 0} already there · {unmatchedCount} not matched ({result.from || from} to {result.to || to})</p>
-            {unmatchedList.length > 0 && (
-              <ul className="mt-1 max-h-40 overflow-y-auto text-xs text-amber-700 dark:text-amber-300">
-                {unmatchedList.slice(0, 50).map((u, i) => <li key={i}>{typeof u === 'string' ? u : JSON.stringify(u)}</li>)}
-              </ul>
-            )}
+      {vtRetired ? (
+        <section aria-label="Import from Vacation Tracker" data-testid="vt-import-retired">
+          <SectionTitle>Import from Vacation Tracker</SectionTitle>
+          <p className="text-sm text-muted-foreground">Vacation Tracker is retired, so nothing is imported from it. Its bookings are in Vacation Pulse now.</p>
+        </section>
+      ) : (
+        <section aria-label="Import from Vacation Tracker">
+          <SectionTitle hint="Reads approved leaves from Vacation Tracker (using that workspace's Vacation Tracker key) and adds them as approved requests, matched by e-mail. Already-imported leaves are skipped, so it is safe to run again.">
+            Import from Vacation Tracker
+          </SectionTitle>
+          <AutoImportLine status={status} workspaceId={workspaceId} />
+          <div className="grid max-w-2xl gap-3 sm:grid-cols-[8rem_1fr_1fr_auto] sm:items-end">
+            <Field label="Workspace id"><input type="number" min={1} className={INPUT} value={workspaceId} onChange={(e) => setWorkspaceId(e.target.value)} aria-label="Workspace id" /></Field>
+            <Field label="From"><input type="date" className={INPUT} value={from} onChange={(e) => setFrom(e.target.value)} aria-label="Import from" /></Field>
+            <Field label="To"><input type="date" className={INPUT} value={to} onChange={(e) => setTo(e.target.value)} aria-label="Import to" /></Field>
+            <button type="button" className={BTN_PRIMARY} onClick={runImport} disabled={Boolean(busy) || !from || !to}>
+              {busy === 'import' && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}Import
+            </button>
           </div>
-        )}
-      </section>
+          {result && (
+            <div className="mt-3 text-sm text-foreground/85" role="status" data-testid="vt-import-result">
+              <p>{result.created ?? 0} created · {result.skipped ?? 0} already there · {unmatchedCount} not matched ({result.from || from} to {result.to || to})</p>
+              {unmatchedList.length > 0 && (
+                <ul className="mt-1 max-h-40 overflow-y-auto text-xs text-amber-700 dark:text-amber-300">
+                  {unmatchedList.slice(0, 50).map((u, i) => <li key={i}>{typeof u === 'string' ? u : JSON.stringify(u)}</li>)}
+                </ul>
+              )}
+            </div>
+          )}
+        </section>
+      )}
 
       <SharedCalendarImport toast={toast} />
 

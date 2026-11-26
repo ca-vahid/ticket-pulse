@@ -53,15 +53,18 @@ export default function GeneralSection({ config, reload, toast }) {
         </div>
       </div>
 
-      <div className="border-t border-border pt-5">
-        <SectionTitle hint="For as long as people still look at Vacation Tracker.">Vacation Tracker</SectionTitle>
-        <Toggle
-          checked={draft.vtWriteBackEnabled}
-          onChange={(v) => set({ vtWriteBackEnabled: v })}
-          label="Copy approved requests to Vacation Tracker"
-          hint="A request approved here is added to Vacation Tracker as approved leave, and cancelled there if it is cancelled here. Only for people who are Vacation Tracker users; needs an API v2 key under Settings → Vacation Tracker."
-        />
-      </div>
+      {/* 26 Nov 2026: once Vacation Tracker is retired nothing is copied there, so the switch goes. */}
+      {!config.settings?.vtRetired && (
+        <div className="border-t border-border pt-5">
+          <SectionTitle hint="For as long as people still look at Vacation Tracker.">Vacation Tracker</SectionTitle>
+          <Toggle
+            checked={draft.vtWriteBackEnabled}
+            onChange={(v) => set({ vtWriteBackEnabled: v })}
+            label="Copy approved requests to Vacation Tracker"
+            hint="A request approved here is added to Vacation Tracker as approved leave, and cancelled there if it is cancelled here. Only for people who are Vacation Tracker users; needs an API v2 key under Settings → Vacation Tracker."
+          />
+        </div>
+      )}
 
       <div className="border-t border-border pt-5">
         <SectionTitle hint="Shown under the booking form, e.g. why the company records time away.">Purpose notice</SectionTitle>

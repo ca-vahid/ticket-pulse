@@ -12,6 +12,7 @@ import logger from '../utils/logger.js';
 import { isFreshServiceUnlinked } from '../utils/workspaceFsBinding.js';
 import { isFreshServiceOff, onModeChange } from './fsModeService.js';
 import { AVAILABILITY_VT_IMPORT_CRON, scheduledVtImportEnabled } from './availability/vtImportPolicy.js';
+import { isVacationTrackerRetired, logRetiredOnce } from './availability/vtRetirement.js';
 
 /**
  * Multi-workspace scheduled sync service.
@@ -237,8 +238,14 @@ class ScheduledSyncService {
 
     // Read before the stop: stop → schedule stays synchronous (no orphaned job).
     const config = await vtRepo.getConfig(wsId);
+    const retired = await isVacationTrackerRetired();
     this.stopVTSyncForWorkspace(wsId);
     if (!config?.apiKey || !config?.syncEnabled) {
+      return;
+    }
+    // Retired (26 Nov 2026): no hourly job, no catch-up watchdog.
+    if (retired) {
+      logRetiredOnce('the hourly sync schedule');
       return;
     }
 
@@ -268,6 +275,12 @@ class ScheduledSyncService {
   async vtCatchUp(wsId, wsName, now = Date.now()) {
     const config = await vtRepo.getConfig(wsId);
     if (!config?.apiKey || !config?.syncEnabled) return false;
+    // Retired since this job started: stop the hourly job and this watchdog.
+    if (await isVacationTrackerRetired()) {
+      logRetiredOnce('the hourly sync catch-up');
+      this.stopVTSyncForWorkspace(wsId);
+      return false;
+    }
     const last = config.lastSyncAt ? new Date(config.lastSyncAt).getTime() : 0;
     if (now - last < VT_STALE_MS) return false;
     logger.warn(`VT sync for workspace "${wsName}" is ${last ? Math.round((now - last) / 60000) : '∞'} min old; running a catch-up`);
@@ -281,6 +294,11 @@ class ScheduledSyncService {
     this.vtRunning.add(wsId);
     let logEntry = null;
     try {
+      // Retired while the job was already scheduled: no sync, no sync-log row, no write-back sweep.
+      if (await isVacationTrackerRetired()) {
+        logRetiredOnce('the hourly sync');
+        return { skipped: 'retired' };
+      }
       logEntry = await syncLogRepository.createLog({
         syncType: 'vacation-tracker',
         status: 'started',

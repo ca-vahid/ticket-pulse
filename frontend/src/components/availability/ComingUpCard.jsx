@@ -44,6 +44,8 @@ function partWords(r) {
 const DOT = ' ·';
 
 function sourceWords(r) {
+  // 26 Nov 2026: once Vacation Tracker is retired its bookings live here.
+  if (r.source === 'vacation_tracker' && r.vtRetired === true) return 'booked in Vacation Tracker';
   if (r.source === 'vacation_tracker') return 'from Vacation Tracker';
   if (r.source === 'shared_calendar') return 'from the shared calendar';
   if (r.inVacationTracker && r.status === 'approved') return 'synced to Vacation Tracker';
@@ -55,8 +57,10 @@ export function ComingUpRow({ r, type, today, offices = [], holidaySet = new Set
   const [busy, setBusy] = useState(false);
   const status = REQUEST_STATUS[r.status] || REQUEST_STATUS.cancelled;
   const fromVt = r.source === 'vacation_tracker';
+  // 26 Nov 2026: Vacation Tracker retired — its bookings are changed and cancelled like any other.
+  const handedOver = fromVt && r.vtRetired === true;
   const fromCal = r.source === 'shared_calendar';
-  const imported = fromVt || fromCal;
+  const imported = (fromVt && !handedOver) || fromCal;
   const live = r.status === 'pending' || r.status === 'approved';
   const cancellable = !readOnly && Boolean(onCancel) && (imported ? r.status === 'approved' : live) && r.endDate >= today;
   const editable = !readOnly && Boolean(onEdit) && !imported && r.status === 'pending' && r.editable !== false;
@@ -142,7 +146,8 @@ export function ComingUpRow({ r, type, today, offices = [], holidaySet = new Set
         <div role="group" aria-label="Confirm cancel" className="mt-2 space-y-2 pl-[2.125rem] text-sm animate-fadeIn">
           <p className="text-foreground/85">
             Cancel {type?.name?.toLowerCase() || 'this request'} for {dates}?
-            {fromVt && <span className="block text-xs text-muted-foreground">It came from Vacation Tracker. Ticket Pulse cancels it there too when it can.</span>}
+            {fromVt && !handedOver && <span className="block text-xs text-muted-foreground">It came from Vacation Tracker. Ticket Pulse cancels it there too when it can.</span>}
+            {handedOver && <span className="block text-xs text-muted-foreground">Booked in Vacation Tracker, which is retired: it is cancelled here only.</span>}
             {fromCal && <span className="block text-xs text-muted-foreground">It came from the shared calendar. It stays cancelled here; the calendar entry is not changed.</span>}
           </p>
           <div className="flex flex-wrap items-center gap-2">
