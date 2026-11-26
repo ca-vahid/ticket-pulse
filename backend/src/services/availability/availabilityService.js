@@ -24,6 +24,7 @@ import {
 import {
   CAL_SOURCE, CAL_IMPORT_MODES, getCalendarImportMode, setCalendarImportMode, calendarImportStatusAll, cancelledByPerson as calCancelledByPerson,
 } from './calendarImport.js';
+import { recordChange, changedFields, PAGE_SIZE as CHANGES_PAGE_SIZE } from './avSettingsChanges.js';
 import { currentViewAs } from '../viewAsContext.js';
 import { ValidationError, NotFoundError, AuthorizationError } from '../../utils/errors.js';
 import {
@@ -50,6 +51,36 @@ const AVAILABILITY_TO_CATEGORY = { OFF: 'OFF', WFH: 'WFH', ONSITE: 'OTHER', PART
 const SITE_OFFICE = { select: { id: true, name: true, timezone: true } };
 // What an import returns once Vacation Tracker is retired (26 Nov 2026).
 const RETIRED_IMPORT = Object.freeze({ retired: true, created: 0, updated: 0, cancelled: 0, skipped: 0, unmatched: 0, duplicates: 0 });
+// 26 Nov 2026 (Vahid): one workspace's admin never changes what other workspaces get.
+const SHARED_ONLY = 'Only super admins change shared settings';
+// A history row about people of no workspace: super admins only (never "company-wide").
+const NO_WORKSPACE = 0;
+// A read for the settings history that must never block the save it describes.
+const soft = async (fn) => { try { return await fn(); } catch { return null; } };
+/** create | update | activate | deactivate, from the row before and the data written. */
+const actionOf = (before, after) => {
+  if (!before) return 'create';
+  if (after && after.isActive !== undefined && Boolean(before.isActive) !== Boolean(after.isActive)) return after.isActive ? 'activate' : 'deactivate';
+  return 'update';
+};
+const GROUP_INCLUDE = { members: true, approvers: true };
+/** An approval group as the history keeps it: its fields, its members and approvers as sorted lists. */
+const groupSnapshot = (g) => (g ? {
+  name: g.name,
+  description: g.description ?? null,
+  autoApproveTypeIds: g.autoApproveTypeIds ?? [],
+  requireAll: Boolean(g.requireAll),
+  isActive: g.isActive !== false,
+  members: (g.members || []).map((m) => lc(m.email)).sort(),
+  approvers: (g.approvers || [])
+    .map((a) => ({
+      email: lc(a.email),
+      isDelegate: Boolean(a.isDelegate),
+      delegateFrom: a.delegateFrom ? dayKey(a.delegateFrom) : null,
+      delegateUntil: a.delegateUntil ? dayKey(a.delegateUntil) : null,
+    }))
+    .sort((x, y) => x.email.localeCompare(y.email)),
+} : null);
 
 /** Today in BC (YYYY-MM-DD): "over" means over where the people are. */
 export function pacificTodayKey(now = new Date()) {
@@ -86,7 +117,8 @@ class AvailabilityService {
   }
 
   async updateSettings(patch, actor) {
-    await this.assertAdmin(actor);
+    // Company-wide (leave year, Outlook offers, the notice): super admins only.
+    await this.assertSuperAdmin(actor, SHARED_ONLY);
     const data = {};
     if ((patch.yearStartMonth !== null && patch.yearStartMonth !== undefined)) {
       const m = Number(patch.yearStartMonth);
@@ -97,8 +129,11 @@ class AvailabilityService {
     if ((patch.autoRepliesEnabled !== null && patch.autoRepliesEnabled !== undefined)) data.autoRepliesEnabled = Boolean(patch.autoRepliesEnabled);
     if ((patch.vtWriteBackEnabled !== null && patch.vtWriteBackEnabled !== undefined)) data.vtWriteBackEnabled = Boolean(patch.vtWriteBackEnabled);
     if (patch.purposeNotice !== undefined) data.purposeNotice = patch.purposeNotice ? String(patch.purposeNotice).slice(0, 2000) : null;
-    await this.getSettings();
-    return prisma.avSettings.update({ where: { id: 1 }, data });
+    const before = await this.getSettings();
+    const saved = await prisma.avSettings.update({ where: { id: 1 }, data });
+    const diff = changedFields(before, data);
+    if (diff) await recordChange({ actor, entity: 'settings', entityId: '1', action: 'update', ...diff });
+    return saved;
   }
 
   /** Seed leave types and offices once; idempotent. */
@@ -163,6 +198,108 @@ class AvailabilityService {
     if (user.role === 'admin' || await this.isSuperAdmin(user)) return null;
     const rows = await prisma.workspaceAccess.findMany({ where: { email: lc(user.email), role: 'admin' }, select: { workspaceId: true }, take: 50 });
     return rows.map((r) => r.workspaceId).filter((id) => Number.isInteger(id));
+  }
+
+  /**
+   * The workspaces whose leave-type switches and settings history this person
+   * owns (26 Nov 2026): null = every one (a super admin), else the workspaces
+   * they are an admin of (workspaceAccess role admin). A role being tried on
+   * (View as) answers from that role: an admin of the viewed workspace only.
+   * Unlike _adminWorkspaceIds, a session role of 'admin' alone is not enough.
+   */
+  async _ownedWorkspaceIds(user) {
+    if (!user?.email) return [];
+    const view = roleView(user);
+    if (view) return view.role === 'admin' ? [Number(view.workspaceId)] : [];
+    if (await this.isSuperAdmin(user)) return null;
+    const rows = await prisma.workspaceAccess.findMany({ where: { email: lc(user.email), role: 'admin' }, select: { workspaceId: true }, take: 50 });
+    return [...new Set((rows || []).map((r) => r.workspaceId).filter((id) => Number.isInteger(id)))];
+  }
+
+  /** Super admin, or an admin of this one workspace (View as honoured). */
+  async canAdministerWorkspace(user, workspaceId) {
+    const ws = Number(workspaceId);
+    if (!Number.isInteger(ws) || ws <= 0) return false;
+    const ids = await this._ownedWorkspaceIds(user);
+    return ids === null || ids.includes(ws);
+  }
+
+  /** email -> Set of workspace ids (agent rows of any state, and workspace memberships), as canManagePerson counts them. */
+  async _workspacesByEmail(emails) {
+    const list = [...new Set((emails || []).map(lc).filter(Boolean))];
+    const out = new Map(list.map((e) => [e, new Set()]));
+    if (!list.length) return out;
+    const [techs, access] = await Promise.all([
+      // Active agent rows only: inactive, assignable-only agent rows (people from other
+      // teams kept in IT) must not make them count as that workspace's people.
+      prisma.technician.findMany({ where: { email: { in: list, mode: 'insensitive' }, isActive: true }, select: { email: true, workspaceId: true }, take: 10000 }),
+      prisma.workspaceAccess.findMany({ where: { email: { in: list } }, select: { email: true, workspaceId: true }, take: 10000 }),
+    ]);
+    for (const r of [...(techs || []), ...(access || [])]) {
+      const e = lc(r.email);
+      if (out.has(e) && Number.isInteger(r.workspaceId)) out.get(e).add(r.workspaceId);
+    }
+    return out;
+  }
+
+  /**
+   * May this person change something that applies to these people? A super
+   * admin always; anyone else only when every one of them belongs to a
+   * workspace they administer. Nobody in scope: no (a rule for an empty
+   * office or group would reach whoever joins it later).
+   */
+  async _allInMyWorkspaces(actor, emails) {
+    const ids = await this._ownedWorkspaceIds(actor);
+    if (ids === null) return true;
+    const list = [...new Set((emails || []).map(lc).filter(Boolean))];
+    if (!ids.length || !list.length) return false;
+    const byEmail = await this._workspacesByEmail(list);
+    return list.every((e) => [...(byEmail.get(e) || [])].some((w) => ids.includes(w)));
+  }
+
+  /**
+   * The history stamp for a change about these people: { workspaceId,
+   * workspaceIds } of every workspace they belong to, or [NO_WORKSPACE]
+   * when none, so the row is never shown as company-wide.
+   */
+  async _historyWorkspaces(emails) {
+    const byEmail = await soft(() => this._workspacesByEmail(emails));
+    const ids = [...new Set([...(byEmail?.values() || [])].flatMap((s) => [...s]))].sort((a, b) => a - b);
+    return ids.length ? { workspaceId: ids[0], workspaceIds: ids } : { workspaceId: null, workspaceIds: [NO_WORKSPACE] };
+  }
+
+  /** The people a rule reaches: null for a company rule, else the person, the group's members or the office's people. */
+  async _ruleScopeEmails(scopeType, scopeRef) {
+    if (!scopeType || scopeType === 'company') return null;
+    if (scopeType === 'person') return [lc(scopeRef)].filter(Boolean);
+    if (scopeType === 'group') {
+      const rows = await prisma.avApprovalGroupMember.findMany({ where: { groupId: Number(scopeRef) }, select: { email: true } });
+      return (rows || []).map((r) => lc(r.email));
+    }
+    if (scopeType === 'office') {
+      const rows = await prisma.avPerson.findMany({ where: { officeId: Number(scopeRef), isActive: true }, select: { email: true }, take: 5000 });
+      return (rows || []).map((r) => lc(r.email));
+    }
+    return [];
+  }
+
+  /** An approval group whose members are all in this admin's workspaces (an empty group is anyone's to set up). */
+  async _assertGroupMembers(actor, emails) {
+    const list = [...new Set((emails || []).map(lc).filter(Boolean))];
+    if (!list.length || await this.isSuperAdmin(actor)) return;
+    if (!(await this._allInMyWorkspaces(actor, list))) {
+      throw new AuthorizationError('You can change approval groups whose members are all in workspaces you administer', 'availability_not_your_workspace');
+    }
+  }
+
+  /** A rule for everyone is the super admins'; a scoped one may be changed by an admin of everyone it reaches. */
+  async _assertRuleScope(actor, rule) {
+    if (await this.isSuperAdmin(actor)) return;
+    const emails = await this._ruleScopeEmails(rule.scopeType, rule.scopeRef);
+    if (emails === null) throw new AuthorizationError('Only super admins change rules for everyone', 'availability_super_admin');
+    if (!(await this._allInMyWorkspaces(actor, emails))) {
+      throw new AuthorizationError('You can change rules only for people, groups and offices whose people are all in workspaces you administer', 'availability_not_your_workspace');
+    }
   }
 
   /** Sees waiting and private entries of this workspace's people: its admins and the super admins. */
@@ -350,7 +487,10 @@ class AvailabilityService {
 
   async updatePerson(id, patch, actor) {
     await this.assertAdmin(actor);
-    const target = await prisma.avPerson.findUnique({ where: { id: Number(id) }, select: { email: true } });
+    const target = await prisma.avPerson.findUnique({
+      where: { id: Number(id) },
+      select: { email: true, officeId: true, startDate: true, workdays: true, dailyHours: true, isActive: true, entitlementOverrides: true },
+    });
     if (!target) throw new NotFoundError('Person not found');
     if (!(await this.canManagePerson(actor, target.email))) throw new AuthorizationError('You can change people in the workspaces you administer', 'availability_not_your_team');
     const data = {};
@@ -376,7 +516,14 @@ class AvailabilityService {
       }
       data.entitlementOverrides = Object.keys(clean).length ? clean : null;
     }
-    return prisma.avPerson.update({ where: { id: Number(id) }, data });
+    const saved = await prisma.avPerson.update({ where: { id: Number(id) }, data });
+    const diff = changedFields({ ...target, startDate: target.startDate ? dayKey(target.startDate) : null }, { ...data, ...(data.startDate !== undefined ? { startDate: data.startDate ? dayKey(data.startDate) : null } : {}) });
+    if (diff) {
+      // The row belongs to the person's workspaces, so only their admins (and super admins) read it.
+      const ws = await this._historyWorkspaces([target.email]);
+      await recordChange({ actor, entity: 'person', entityId: String(Number(id)), action: 'update', ...ws, ...diff });
+    }
+    return saved;
   }
 
   // ------------------------------------------------------------------ catalogue CRUD (admin)
@@ -395,21 +542,231 @@ class AvailabilityService {
   }
 
   async saveOffice(input, actor) {
-    await this.assertAdmin(actor);
+    // Offices are shared by every workspace: super admins only.
+    await this.assertSuperAdmin(actor, SHARED_ONLY);
     const name = String(input.name || '').trim();
     if (!name) throw new ValidationError('Office name is required');
     const data = { name, province: input.province || null, timezone: input.timezone || 'America/Vancouver', isActive: input.isActive !== false };
-    return input.id
-      ? prisma.avOffice.update({ where: { id: Number(input.id) }, data })
-      : prisma.avOffice.create({ data });
+    const before = input.id ? await soft(() => prisma.avOffice.findUnique({ where: { id: Number(input.id) } })) : null;
+    const saved = input.id
+      ? await prisma.avOffice.update({ where: { id: Number(input.id) }, data })
+      : await prisma.avOffice.create({ data });
+    await this._recordSave(actor, 'office', saved, before, data, { updated: Boolean(input.id) });
+    return saved;
+  }
+
+  /**
+   * One history row for a create or an update of a catalogue row (office,
+   * leave type, rule): a create keeps what was written, an update only the
+   * fields that changed (no row when nothing did).
+   */
+  async _recordSave(actor, entity, saved, before, data, { updated = false, stamp = {} } = {}) {
+    if (!before) {
+      // An update whose earlier row could not be read keeps what was written.
+      await recordChange({ actor, entity, entityId: saved?.id ?? null, action: updated ? 'update' : 'create', ...stamp, after: data });
+      return;
+    }
+    const diff = changedFields(before, data);
+    if (diff) await recordChange({ actor, entity, entityId: saved?.id ?? before.id ?? null, action: actionOf(before, data), ...stamp, ...diff });
   }
 
   listLeaveTypes({ includeInactive = false } = {}) {
     return prisma.avLeaveType.findMany({ where: includeInactive ? {} : { isActive: true }, orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] });
   }
 
-  async saveLeaveType(input, actor) {
+  // ------------------------------------------------------------------ leave types per workspace (26 Nov 2026)
+
+  /** Rows that switch a type off somewhere. Never throws: unreadable reads as "nothing switched off". */
+  async _disabledTypeRows() {
+    try {
+      return (await prisma.avLeaveTypeWorkspace.findMany({ where: { enabled: false }, select: { leaveTypeId: true, workspaceId: true }, take: 5000 })) || [];
+    } catch (err) {
+      logger.warn(`Availability: could not read the per-workspace leave type switches (${err.message}); every active type stays bookable`);
+      return [];
+    }
+  }
+
+  /**
+   * The workspaces a person belongs to for leave types: the ones they are an
+   * active agent in (as the team views count them, rosterFor); someone who is
+   * nobody's agent, their workspace memberships. [] = no workspace.
+   */
+  async _personWorkspaceIds(email) {
+    const e = lc(email);
+    if (!e) return [];
+    try {
+      const techs = await prisma.technician.findMany({ where: { isActive: true, email: { equals: e, mode: 'insensitive' } }, select: { workspaceId: true }, take: 20 });
+      let ids = (techs || []).map((t) => t.workspaceId);
+      if (!ids.length) {
+        const access = await prisma.workspaceAccess.findMany({ where: { email: e }, select: { workspaceId: true }, take: 50 });
+        ids = (access || []).map((a) => a.workspaceId);
+      }
+      return [...new Set(ids.filter((id) => Number.isInteger(id)))];
+    } catch (err) {
+      logger.warn(`Availability: could not read the workspaces of a person (${err.message}); every active type stays bookable for them`);
+      return [];
+    }
+  }
+
+  /** The ids of the types switched off for this person (off in every workspace they belong to). */
+  async _typesOffFor(email) {
+    const off = await this._disabledTypeRows();
+    if (!off.length) return new Set();
+    const ws = await this._personWorkspaceIds(email);
+    return typesOffForWorkspaces(off, ws);
+  }
+
+  /**
+   * The booking form's types (me.leaveTypes): every globally active type,
+   * each with bookable = active AND on in at least one workspace the person
+   * belongs to (no workspace: every active type). Types switched off stay in
+   * the list (bookable false) so the person's existing bookings of them keep
+   * their name and colour and can still be cancelled.
+   */
+  async leaveTypesFor(user) {
+    const [types, off] = await Promise.all([this.listLeaveTypes(), this._typesOffFor(user?.email)]);
+    return (types || []).map((t) => ({ ...t, bookable: !off.has(t.id) }));
+  }
+
+  /** Can `email` book this type? */
+  async isTypeBookableFor(email, leaveTypeId) {
+    return !(await this._typesOffFor(email)).has(Number(leaveTypeId));
+  }
+
+  /**
+   * Settings → Leave types: may this person change the shared list (super
+   * admins), the workspaces whose switches they own (all active ones for a
+   * super admin, else the ones they administer), and those switches.
+   */
+  async leaveTypeAccess(user) {
+    const [canEditTypes, ids] = await Promise.all([this.isSuperAdmin(user), this._ownedWorkspaceIds(user)]);
+    let workspaces = [];
+    if (ids === null) {
+      workspaces = await prisma.workspace.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } });
+    } else if (ids.length) {
+      workspaces = await prisma.workspace.findMany({ where: { id: { in: ids } }, select: { id: true, name: true }, orderBy: { name: 'asc' } });
+    }
+    workspaces = workspaces || [];
+    const toggles = workspaces.length
+      ? (await soft(() => prisma.avLeaveTypeWorkspace.findMany({
+        where: { workspaceId: { in: workspaces.map((w) => w.id) } },
+        select: { leaveTypeId: true, workspaceId: true, enabled: true, updatedAt: true, updatedBy: true },
+      }))) || []
+      : [];
+    return { canEditTypes, workspaces, toggles };
+  }
+
+  /**
+   * Switch a shared type on or off for ONE workspace: a super admin, or an
+   * admin of that workspace (View as honoured). Never another workspace.
+   */
+  async setLeaveTypeWorkspace(actor, { leaveTypeId, workspaceId, enabled } = {}) {
+    const ws = Number(workspaceId);
+    const typeId = Number(leaveTypeId);
+    if (!Number.isInteger(ws) || ws <= 0) throw new ValidationError('Pick a workspace');
+    if (!Number.isInteger(typeId) || typeId <= 0) throw new ValidationError('Pick a leave type');
+    if (typeof enabled !== 'boolean') throw new ValidationError('Say whether the type is on or off');
+    if (!(await this.canAdministerWorkspace(actor, ws))) {
+      throw new AuthorizationError('You can switch leave types on or off for the workspaces you administer', 'availability_not_your_workspace');
+    }
+    const type = await prisma.avLeaveType.findUnique({ where: { id: typeId }, select: { id: true, name: true } });
+    if (!type) throw new NotFoundError('Leave type not found');
+    const existing = await soft(() => prisma.avLeaveTypeWorkspace.findUnique({ where: { leaveTypeId_workspaceId: { leaveTypeId: typeId, workspaceId: ws } } }));
+    const was = existing ? existing.enabled !== false : true;
+    const by = lc(actor.email);
+    const row = await prisma.avLeaveTypeWorkspace.upsert({
+      where: { leaveTypeId_workspaceId: { leaveTypeId: typeId, workspaceId: ws } },
+      update: { enabled, updatedAt: new Date(), updatedBy: by },
+      create: { leaveTypeId: typeId, workspaceId: ws, enabled, updatedAt: new Date(), updatedBy: by },
+    });
+    if (was !== enabled) {
+      await recordChange({
+        actor, workspaceId: ws, entity: 'leave_type_workspace', entityId: typeId, action: enabled ? 'enable' : 'disable', before: { enabled: was }, after: { enabled },
+      });
+      logger.info(`Availability: leave type ${typeId} switched ${enabled ? 'on' : 'off'} for workspace ${ws} by ${by}`);
+    }
+    return { leaveTypeId: row.leaveTypeId, workspaceId: row.workspaceId, enabled: row.enabled, updatedAt: row.updatedAt, updatedBy: row.updatedBy };
+  }
+
+  /**
+   * Settings → Recent changes: newest first, 50 a page. Super admins see
+   * everything; a workspace admin the changes to their workspaces plus the
+   * company-wide ones. Each row carries the names it needs to read in plain
+   * words (who, which type / office / group / rule / person, which workspace).
+   */
+  async listSettingsChanges(actor, { page = 1 } = {}) {
     await this.assertAdmin(actor);
+    const ids = await this._ownedWorkspaceIds(actor);
+    const p = Math.max(1, Math.min(1000, Math.floor(Number(page)) || 1));
+    // Company-wide rows (no workspace at all) for every admin; rows about a
+    // workspace (or its people) only for that workspace's admins.
+    const where = ids === null ? {} : {
+      OR: [
+        { workspaceId: null, workspaceIds: { isEmpty: true } },
+        ...(ids.length ? [{ workspaceId: { in: ids } }, { workspaceIds: { hasSome: ids } }] : []),
+      ],
+    };
+    const rows = (await prisma.avSettingsChange.findMany({
+      where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      skip: (p - 1) * CHANGES_PAGE_SIZE,
+      take: CHANGES_PAGE_SIZE + 1,
+    })) || [];
+    const hasMore = rows.length > CHANGES_PAGE_SIZE;
+    const shown = rows.slice(0, CHANGES_PAGE_SIZE);
+    const idsOf = (...entities) => [...new Set(shown.filter((r) => entities.includes(r.entity)).map((r) => Number(r.entityId)).filter((n) => Number.isInteger(n) && n > 0))];
+    const typeIds = idsOf('leave_type', 'leave_type_workspace');
+    const officeIds = idsOf('office');
+    const groupIds = idsOf('approval_group');
+    const ruleIds = idsOf('rule');
+    const personIds = idsOf('person');
+    const wsIds = [...new Set(shown.map((r) => r.workspaceId).filter((n) => Number.isInteger(n)))];
+    const actors = [...new Set(shown.map((r) => lc(r.actor)).filter(Boolean))];
+    const names = async (ids2, fn) => (ids2.length ? (await soft(fn)) || [] : []);
+    const [types, offices, groups, rules, peopleById, workspaces, actorPeople, actorTechs] = await Promise.all([
+      names(typeIds, () => prisma.avLeaveType.findMany({ where: { id: { in: typeIds } }, select: { id: true, name: true } })),
+      names(officeIds, () => prisma.avOffice.findMany({ where: { id: { in: officeIds } }, select: { id: true, name: true } })),
+      names(groupIds, () => prisma.avApprovalGroup.findMany({ where: { id: { in: groupIds } }, select: { id: true, name: true } })),
+      names(ruleIds, () => prisma.avRule.findMany({ where: { id: { in: ruleIds } }, select: { id: true, name: true } })),
+      names(personIds, () => prisma.avPerson.findMany({ where: { id: { in: personIds } }, select: { id: true, name: true } })),
+      names(wsIds, () => prisma.workspace.findMany({ where: { id: { in: wsIds } }, select: { id: true, name: true } })),
+      names(actors, () => prisma.avPerson.findMany({ where: { email: { in: actors } }, select: { email: true, name: true } })),
+      // Who, by the name people know them by: the agent name first, else the person row, else the e-mail.
+      names(actors, () => prisma.technician.findMany({ where: { email: { in: actors, mode: 'insensitive' }, name: { not: null } }, select: { email: true, name: true }, take: 500 })),
+    ]);
+    const map = (list) => new Map(list.map((x) => [x.id, x.name]));
+    const nameBy = {
+      leave_type: map(types), leave_type_workspace: map(types), office: map(offices), approval_group: map(groups), rule: map(rules), person: map(peopleById),
+    };
+    const wsName = map(workspaces);
+    const actorName = new Map(actorPeople.map((x) => [lc(x.email), x.name]));
+    for (const t of actorTechs) if (t?.name && t.email) actorName.set(lc(t.email), t.name);
+    return {
+      changes: shown.map((r) => ({
+        id: r.id,
+        createdAt: r.createdAt,
+        actor: r.actor,
+        actorName: actorName.get(lc(r.actor)) || null,
+        workspaceId: r.workspaceId ?? null,
+        workspaceName: r.workspaceId ? (wsName.get(r.workspaceId) || null) : null,
+        entity: r.entity,
+        entityId: r.entityId ?? null,
+        // A deleted row is gone from its table: its name comes from what it was.
+        entityName: nameBy[r.entity]?.get(Number(r.entityId)) || r.before?.name || r.after?.name || null,
+        action: r.action,
+        before: r.before ?? null,
+        after: r.after ?? null,
+      })),
+      page: p,
+      pageSize: CHANGES_PAGE_SIZE,
+      hasMore,
+    };
+  }
+
+  async saveLeaveType(input, actor) {
+    // 26 Nov 2026: the shared list is the super admins'. A workspace admin
+    // switches a type off for their own workspace (setLeaveTypeWorkspace).
+    await this.assertSuperAdmin(actor, 'Only super admins can change the shared leave types. You can switch a type off for your own workspace.');
     const name = String(input.name || '').trim();
     if (!name) throw new ValidationError('Leave type name is required');
     const pick = (k, allowed) => ((input[k] !== null && input[k] !== undefined) && allowed.includes(input[k]) ? input[k] : undefined);
@@ -431,9 +788,16 @@ class AvailabilityService {
       isActive: input.isActive,
     };
     Object.keys(data).forEach((k) => data[k] === undefined && delete data[k]);
-    if (input.id) return prisma.avLeaveType.update({ where: { id: Number(input.id) }, data });
+    if (input.id) {
+      const before = await soft(() => prisma.avLeaveType.findUnique({ where: { id: Number(input.id) } }));
+      const saved = await prisma.avLeaveType.update({ where: { id: Number(input.id) }, data });
+      await this._recordSave(actor, 'leave_type', saved, before, data, { updated: true });
+      return saved;
+    }
     const key = (String(input.key || name).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'type').slice(0, 40);
-    return prisma.avLeaveType.create({ data: { ...data, key } });
+    const saved = await prisma.avLeaveType.create({ data: { ...data, key } });
+    await this._recordSave(actor, 'leave_type', saved, null, { ...data, key });
+    return saved;
   }
 
   listGroups() {
@@ -448,6 +812,11 @@ class AvailabilityService {
       ? ['*']
       : (Array.isArray(input.autoApproveTypeIds) ? input.autoApproveTypeIds.map(Number).filter(Boolean) : []);
     const data = { name, description: input.description || null, autoApproveTypeIds: auto, requireAll: Boolean(input.requireAll), isActive: input.isActive !== false };
+    const before = input.id ? groupSnapshot(await soft(() => prisma.avApprovalGroup.findUnique({ where: { id: Number(input.id) }, include: GROUP_INCLUDE }))) : null;
+    // 26 Nov 2026: workspace admins manage approval groups, but not one with
+    // members (now or after this save) outside the workspaces they administer.
+    const nextMembers = Array.isArray(input.members) ? input.members : (before?.members || []);
+    await this._assertGroupMembers(actor, [...(before?.members || []), ...nextMembers]);
     const group = input.id
       ? await prisma.avApprovalGroup.update({ where: { id: Number(input.id) }, data })
       : await prisma.avApprovalGroup.create({ data });
@@ -473,12 +842,25 @@ class AvailabilityService {
         await prisma.avApprovalGroupApprover.upsert({ where: { groupId_email: { groupId: group.id, email } }, update: d, create: { groupId: group.id, email, ...d } });
       }
     }
-    return prisma.avApprovalGroup.findUnique({ where: { id: group.id }, include: { members: true, approvers: true } });
+    const saved = await prisma.avApprovalGroup.findUnique({ where: { id: group.id }, include: GROUP_INCLUDE });
+    // Members and approvers are part of the group's history: who was added or removed shows as before/after lists.
+    const after = groupSnapshot(saved || { ...data, members: [], approvers: [] });
+    if (!before) {
+      await recordChange({ actor, entity: 'approval_group', entityId: group.id, action: input.id ? 'update' : 'create', after });
+    } else {
+      const diff = changedFields(before, after);
+      if (diff) await recordChange({ actor, entity: 'approval_group', entityId: group.id, action: actionOf(before, after), ...diff });
+    }
+    return saved;
   }
 
   async deleteGroup(id, actor) {
     await this.assertAdmin(actor);
+    const before = groupSnapshot(await prisma.avApprovalGroup.findUnique({ where: { id: Number(id) }, include: GROUP_INCLUDE }));
+    if (!before) throw new NotFoundError('Approval group not found');
+    await this._assertGroupMembers(actor, before.members);
     await prisma.avApprovalGroup.delete({ where: { id: Number(id) } });
+    await recordChange({ actor, entity: 'approval_group', entityId: Number(id), action: 'delete', before });
     return { deleted: true };
   }
 
@@ -504,13 +886,41 @@ class AvailabilityService {
       priority: (input.priority !== null && input.priority !== undefined) ? Number(input.priority) : 100,
       isActive: input.isActive !== false,
     };
-    return input.id ? prisma.avRule.update({ where: { id: Number(input.id) }, data }) : prisma.avRule.create({ data });
+    // 26 Nov 2026: a workspace admin may change a rule only when everyone it
+    // reached and everyone it will reach is in a workspace they administer.
+    const before = input.id ? await prisma.avRule.findUnique({ where: { id: Number(input.id) } }) : null;
+    if (input.id && !before) throw new NotFoundError('Rule not found');
+    if (before) await this._assertRuleScope(actor, before);
+    await this._assertRuleScope(actor, data);
+    const saved = input.id ? await prisma.avRule.update({ where: { id: Number(input.id) }, data }) : await prisma.avRule.create({ data });
+    await this._recordSave(actor, 'rule', saved, before, data, { updated: Boolean(input.id), stamp: await this._ruleStamp(before, data) });
+    return saved;
   }
 
   async deleteRule(id, actor) {
     await this.assertAdmin(actor);
+    const before = await prisma.avRule.findUnique({ where: { id: Number(id) } });
+    if (!before) throw new NotFoundError('Rule not found');
+    await this._assertRuleScope(actor, before);
+    const stamp = await this._ruleStamp(before, null);
     await prisma.avRule.delete({ where: { id: Number(id) } });
+    await recordChange({
+      actor, entity: 'rule', entityId: Number(id), action: 'delete', ...stamp,
+      before: { name: before.name, scopeType: before.scopeType, scopeRef: before.scopeRef, leaveTypeIds: before.leaveTypeIds, condition: before.condition, outcome: before.outcome, isActive: before.isActive },
+    });
     return { deleted: true };
+  }
+
+  /**
+   * The history stamp of a rule change: none for a rule for everyone
+   * (company-wide), else the workspaces of everyone it reached or reaches.
+   */
+  async _ruleStamp(before, after) {
+    const scoped = [before, after].filter((r) => r && r.scopeType && r.scopeType !== 'company');
+    if (!scoped.length) return {};
+    const emails = [];
+    for (const r of scoped) emails.push(...((await soft(() => this._ruleScopeEmails(r.scopeType, r.scopeRef))) || []));
+    return this._historyWorkspaces(emails);
   }
 
   // ------------------------------------------------------------------ requests
@@ -584,9 +994,14 @@ class AvailabilityService {
   }
 
   /** Normalise input and compute dates/size. Throws ValidationError on bad input. */
-  async _shape(person, input) {
+  async _shape(person, input, { keepTypeId = null } = {}) {
     const leaveType = await prisma.avLeaveType.findUnique({ where: { id: Number(input.leaveTypeId) } });
     if (!leaveType || !leaveType.isActive) throw new ValidationError('Pick a leave type');
+    // 26 Nov 2026: a type switched off for every workspace of this person can't
+    // be booked, through the API either. A waiting request keeps its own type.
+    if (leaveType.id !== Number(keepTypeId) && !(await this.isTypeBookableFor(person.email, leaveType.id))) {
+      throw new ValidationError(`${leaveType.name} isn't available in your workspace`);
+    }
     const startDate = toDay(input.startDate);
     const endDate = toDay(input.endDate || input.startDate);
     if (!startDate || !endDate) throw new ValidationError('Pick the dates');
@@ -747,12 +1162,14 @@ class AvailabilityService {
     // Changing a waiting request (Nov 2026): the dry run leaves that request
     // out of balances and per-week counts, so it is not counted twice.
     let excludeRequestId = null;
+    let keepTypeId = null;
     if (input?.requestId) {
       const existing = await this._editableRequest(input.requestId, user);
       excludeRequestId = existing.id;
+      keepTypeId = existing.leaveTypeId;
       if (lc(existing.email) !== lc(person.email)) person = await this.ensurePerson({ email: existing.email });
     }
-    const shaped = await this._shape(person, input);
+    const shaped = await this._shape(person, input, { keepTypeId });
     const verdict = await this._decideFor(person, shaped, { excludeRequestId });
     return {
       outcome: verdict.outcome, reason: verdict.reason, fired: verdict.fired, warnings: verdict.warnings,
@@ -942,7 +1359,7 @@ class AvailabilityService {
   async updateRequest(id, user, input) {
     const r = await this._editableRequest(id, user);
     const person = await this.ensurePerson(lc(r.email) === lc(user.email) ? user : { email: r.email });
-    const shaped = await this._shape(person, input);
+    const shaped = await this._shape(person, input, { keepTypeId: r.leaveTypeId });
     // "Which office?" is asked again only when the type or the dates change;
     // a note-only change of an older site visit without one stays valid.
     const site = await this._siteFields(shaped.leaveType, input, {
@@ -1538,7 +1955,9 @@ class AvailabilityService {
    * is lost; people are matched by e-mail.
    */
   async importFromVacationTracker(actor, { workspaceId, from, to }, { client = null } = {}) {
-    await this.assertAdmin(actor);
+    // 26 Nov 2026: the import can create shared leave types, so it is the
+    // super admins' (the scheduled run has no person and is unchanged).
+    await this.assertSuperAdmin(actor, SHARED_ONLY);
     const ws = Number(workspaceId);
     if (await isVacationTrackerRetired()) {
       logRetiredOnce('the import');
@@ -1682,7 +2101,9 @@ class AvailabilityService {
     if (!(await this._privilegedIn(actor, ws))) throw new AuthorizationError('You can change this for the workspaces you administer', 'availability_admin');
     const config = await prisma.calendarLeaveSourceConfig.findUnique({ where: { workspaceId: ws }, select: { workspaceId: true } });
     if (!config) throw new NotFoundError('That workspace has no shared calendar set up');
+    const was = await soft(() => getCalendarImportMode(ws));
     const saved = await setCalendarImportMode(ws, mode);
+    if (was !== saved) await recordChange({ actor, workspaceId: ws, entity: 'calendar_import', entityId: ws, action: 'update', before: { mode: was ?? null }, after: { mode: saved } });
     logger.info(`Availability: shared calendar import for workspace ${ws} set to ${saved} by ${lc(actor.email)}`);
     return { workspaceId: ws, mode: saved };
   }
@@ -1907,8 +2328,8 @@ class AvailabilityService {
 
   // ------------------------------------------------------------------ retire Vacation Tracker (26 Nov 2026)
 
-  async assertSuperAdmin(user) {
-    if (!(await this.isSuperAdmin(user))) throw new AuthorizationError('Only super admins can retire Vacation Tracker', 'availability_super_admin');
+  async assertSuperAdmin(user, message = 'Only super admins can retire Vacation Tracker') {
+    if (!(await this.isSuperAdmin(user))) throw new AuthorizationError(message, 'availability_super_admin');
   }
 
   /**
@@ -1983,6 +2404,14 @@ class AvailabilityService {
     await this._waitForLeaveSync();
     const report = await this._handOverFromVacationTracker({ actorEmail: lc(actor.email), today: pacificTodayKey(now) });
     await saveVacationTrackerRetirement({ ...record, report: { ...report, at: now.toISOString() } });
+    await recordChange({
+      actor,
+      entity: 'settings',
+      entityId: 'vacation_tracker',
+      action: previous ? 'handover_again' : 'retire_vacation_tracker',
+      before: previous ? { retiredAt: previous.retiredAt } : { retired: false },
+      after: { retired: true, retiredAt: record.retiredAt, handedOver: report.handedOver, directRowsReplaced: report.directRowsReplaced, keptUnmatched: report.keptUnmatched.length },
+    });
     logger.info(`Availability: Vacation Tracker ${previous ? 'handover run again' : 'retired'} by ${lc(actor.email)}: ${report.handedOver} booking(s) handed over, ${report.directRowsReplaced} leave-day(s) replaced, ${report.keptUnmatched.length} kept for a look`);
     return { ...record, ...report };
   }
@@ -2145,6 +2574,25 @@ class AvailabilityService {
     }
     return { written, problems: problems.slice(0, 50), year: y };
   }
+}
+
+/**
+ * The leave type ids switched off for someone in `workspaceIds`: a type is off
+ * only when every one of those workspaces has switched it off (on in one is
+ * enough). No workspace: nothing is off.
+ */
+export function typesOffForWorkspaces(offRows, workspaceIds) {
+  const ws = [...new Set((workspaceIds || []).map(Number).filter((n) => Number.isInteger(n)))];
+  if (!ws.length) return new Set();
+  const offIn = new Map();
+  for (const r of offRows || []) {
+    const id = Number(r.leaveTypeId);
+    if (!offIn.has(id)) offIn.set(id, new Set());
+    offIn.get(id).add(Number(r.workspaceId));
+  }
+  const out = new Set();
+  for (const [id, set] of offIn) if (ws.every((w) => set.has(w))) out.add(id);
+  return out;
 }
 
 function daysSpan(a, b) {

@@ -5131,8 +5131,45 @@ model AvLeaveType {
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 
+  workspaceToggles AvLeaveTypeWorkspace[]
+
   @@unique([key])
   @@map("av_leave_types")
+}
+
+// A shared leave type switched off (or back on) for one workspace by its
+// admins (26 Nov 2026). No row means the type is on there.
+model AvLeaveTypeWorkspace {
+  id          Int         @id @default(autoincrement())
+  leaveTypeId Int         @map("leave_type_id")
+  leaveType   AvLeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
+  workspaceId Int         @map("workspace_id")
+  enabled     Boolean     @default(true)
+  updatedAt   DateTime?   @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedBy   String?     @map("updated_by")
+
+  @@unique([leaveTypeId, workspaceId])
+  @@map("av_leave_type_workspaces")
+}
+
+/// Append-only Vacation Pulse settings history (26 Nov 2026): who, when,
+/// what, before and after. workspaceId null = a company-wide setting.
+model AvSettingsChange {
+  id          Int       @id @default(autoincrement())
+  createdAt   DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+  actor       String
+  workspaceId Int?      @map("workspace_id")
+  // Every workspace the change is about (a person's, a scoped rule's people);
+  // [0] = people of no workspace (super admins only). Empty + no workspaceId = company-wide.
+  workspaceIds Int[]    @default([]) @map("workspace_ids")
+  entity      String
+  entityId    String?   @map("entity_id")
+  action      String
+  before      Json?
+  after       Json?
+
+  @@index([createdAt(sort: Desc)], map: "idx_av_settings_changes_created")
+  @@map("av_settings_changes")
 }
 
 model AvApprovalGroup {

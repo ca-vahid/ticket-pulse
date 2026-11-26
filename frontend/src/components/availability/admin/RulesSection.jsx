@@ -3,7 +3,7 @@ import { Pencil, Plus, Trash2 } from 'lucide-react';
 import FancySelect from '../../common/FancySelect';
 import { availabilityAPI } from '../../../services/api';
 import { BTN_LINK, BTN_QUIET, Field, INPUT, SectionTitle, StatusDot, Toggle, nameFromEmail } from '../availabilityUi';
-import { Drawer, MultiCheck } from './adminUi';
+import { Drawer, MultiCheck, SharedNote, canEditShared } from './adminUi';
 
 /**
  * Rules: evaluated in priority order (lowest number first) for every request.
@@ -167,6 +167,13 @@ export default function RulesSection({ config, reload, toast }) {
   const rules = [...(config.rules || [])].sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100) || a.id - b.id);
   const types = (config.leaveTypes || []).filter((t) => t.isActive !== false);
   const set = (patch) => setDraft((d) => ({ ...d, ...patch }));
+  // 26 Nov 2026: rules for everyone are the super admins'. A workspace admin
+  // adds and changes rules for their own people, groups and offices (the
+  // server checks that everyone a rule reaches is theirs).
+  const canEditAll = canEditShared(config);
+  const canTouch = (r) => canEditAll || (r.scopeType || 'company') !== 'company';
+  const scopes = canEditAll ? SCOPES : SCOPES.filter((s) => s.value !== 'company');
+  const blank = canEditAll ? BLANK : { ...BLANK, scopeType: 'person' };
 
   const scopeLabel = (r) => {
     if (r.scopeType === 'office') return (config.offices || []).find((o) => String(o.id) === String(r.scopeRef))?.name || 'An office';
@@ -183,7 +190,7 @@ export default function RulesSection({ config, reload, toast }) {
     : draft?.scopeType === 'group'
       ? (config.groups || []).map((g) => ({ value: String(g.id), label: g.name }))
       : draft?.scopeType === 'person'
-        ? (config.people || []).map((p) => ({ value: p.email, label: p.name || p.email }))
+        ? (config.people || []).filter((p) => canEditAll || p.inWorkspace).map((p) => ({ value: p.email, label: p.name || p.email }))
         : [];
 
   const save = async () => {
@@ -229,10 +236,11 @@ export default function RulesSection({ config, reload, toast }) {
     <section aria-label="Rules">
       <SectionTitle
         hint="Checked top to bottom on every request. Refuse beats send-to-approvers beats approve; warnings never block."
-        action={<button type="button" className={BTN_LINK} onClick={() => { setDraft({ ...BLANK }); setError(null); }}><Plus className="h-4 w-4" aria-hidden="true" />New rule</button>}
+        action={<button type="button" className={BTN_LINK} onClick={() => { setDraft({ ...blank }); setError(null); }}><Plus className="h-4 w-4" aria-hidden="true" />New rule</button>}
       >
         Rules
       </SectionTitle>
+      {!canEditAll && <SharedNote>You can add rules for your own people, approval groups and offices.</SharedNote>}
       {!rules.length && <p className="py-4 text-sm text-muted-foreground">No rules — every request follows its leave type&apos;s approval setting.</p>}
       <ol className="divide-y divide-border">
         {rules.map((r) => {
@@ -246,10 +254,12 @@ export default function RulesSection({ config, reload, toast }) {
                 {r.message && <p className="text-xs italic text-muted-foreground">“{r.message}”</p>}
               </div>
               <StatusDot tone={r.isActive === false ? 'grey' : outcome.tone} label={r.isActive === false ? 'Off' : outcome.label} />
-              <span className="flex gap-1">
-                <button type="button" className={BTN_QUIET} onClick={() => { setDraft({ ...BLANK, ...r, condition: r.condition || { kind: 'always' } }); setError(null); }} aria-label={`Edit ${r.name}`}><Pencil className="h-4 w-4" aria-hidden="true" /></button>
-                <button type="button" className={BTN_QUIET} onClick={() => remove(r)} aria-label={`Delete ${r.name}`}><Trash2 className="h-4 w-4" aria-hidden="true" /></button>
-              </span>
+              {canTouch(r) && (
+                <span className="flex gap-1">
+                  <button type="button" className={BTN_QUIET} onClick={() => { setDraft({ ...BLANK, ...r, condition: r.condition || { kind: 'always' } }); setError(null); }} aria-label={`Edit ${r.name}`}><Pencil className="h-4 w-4" aria-hidden="true" /></button>
+                  <button type="button" className={BTN_QUIET} onClick={() => remove(r)} aria-label={`Delete ${r.name}`}><Trash2 className="h-4 w-4" aria-hidden="true" /></button>
+                </span>
+              )}
             </li>
           );
         })}
@@ -261,7 +271,7 @@ export default function RulesSection({ config, reload, toast }) {
             <Field label="Name"><input className={INPUT} value={draft.name} onChange={(e) => set({ name: e.target.value })} aria-label="Rule name" /></Field>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Applies to">
-                <FancySelect value={draft.scopeType} onChange={(v) => set({ scopeType: v, scopeRef: null })} options={SCOPES} aria-label="Scope" />
+                <FancySelect value={draft.scopeType} onChange={(v) => set({ scopeType: v, scopeRef: null })} options={scopes} aria-label="Scope" />
               </Field>
               {draft.scopeType !== 'company' && (
                 <Field label="Which">

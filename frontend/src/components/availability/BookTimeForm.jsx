@@ -319,7 +319,12 @@ export default function BookTimeForm({
   const ids = {
     what: `bt-${uid}-what`, when: `bt-${uid}-when`, more: `bt-${uid}-more`, note: `bt-${uid}-note`, noteError: `bt-${uid}-note-error`, radio: `leaveType-${uid}`,
   };
-  const types = useMemo(() => (me.leaveTypes || []).filter((t) => t.isActive !== false).sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)), [me.leaveTypes]);
+  // 26 Nov 2026: a type switched off for the person's team (bookable false) is
+  // not offered, except as the type of the waiting request being changed.
+  const editingTypeId = editing?.leaveTypeId ?? null;
+  const types = useMemo(() => (me.leaveTypes || [])
+    .filter((t) => t.isActive !== false && (t.bookable !== false || t.id === editingTypeId))
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)), [me.leaveTypes, editingTypeId]);
   const typeById = useMemo(() => new Map((me.leaveTypes || []).map((t) => [t.id, t])), [me.leaveTypes]);
   const holidaySet = useMemo(() => new Set(Object.keys(holidays || {})), [holidays]);
   const ranked = useMemo(() => mostUsedTypes(types, requests, VISIBLE_TYPES), [types, requests]);

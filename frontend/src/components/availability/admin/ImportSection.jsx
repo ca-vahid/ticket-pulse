@@ -4,6 +4,7 @@ import { Loader2 } from 'lucide-react';
 import { availabilityAPI } from '../../../services/api';
 import { BTN_PRIMARY, BTN_QUIET, ErrorNote, Field, INPUT, SectionTitle, addDaysKey, todayKey } from '../availabilityUi';
 import { Segmented } from '../teamViews';
+import { SharedNote, canEditShared } from './adminUi';
 
 const fmtWhen = (iso) => {
   const d = iso ? new Date(iso) : null;
@@ -227,7 +228,9 @@ export default function ImportSection({ toast, config = null }) {
             Import from Vacation Tracker
           </SectionTitle>
           <AutoImportLine status={status} workspaceId={workspaceId} />
-          <div className="grid max-w-2xl gap-3 sm:grid-cols-[8rem_1fr_1fr_auto] sm:items-end">
+          {/* 26 Nov 2026: the import can add shared leave types, so it is the super admins'. */}
+          {!canEditShared(config) && <SharedNote />}
+          <div className={`grid max-w-2xl gap-3 sm:grid-cols-[8rem_1fr_1fr_auto] sm:items-end ${canEditShared(config) ? '' : 'hidden'}`}>
             <Field label="Workspace id"><input type="number" min={1} className={INPUT} value={workspaceId} onChange={(e) => setWorkspaceId(e.target.value)} aria-label="Workspace id" /></Field>
             <Field label="From"><input type="date" className={INPUT} value={from} onChange={(e) => setFrom(e.target.value)} aria-label="Import from" /></Field>
             <Field label="To"><input type="date" className={INPUT} value={to} onChange={(e) => setTo(e.target.value)} aria-label="Import to" /></Field>
