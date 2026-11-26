@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.4.27-preview';
+export const APP_VERSION = '4.4.28-preview';
 
 export const changelog = [
+  {
+    version: '4.4.28-preview',
+    date: 'November 26, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>The FreshService switch is easier to find</strong> &mdash; in Settings &rarr; Workspaces each workspace now has a &ldquo;FreshService: Connected / Shadow / Off&rdquo; button beside Native ticketing; it opens the switch.' },
+    ],
+  },
   {
     version: '4.4.27-preview',
     date: 'November 26, 2026',

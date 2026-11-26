@@ -7,7 +7,7 @@ import FreshServiceSwitchPanel from './FreshServiceSwitchPanel';
 import { FreshServiceModeText } from './FreshServiceSwitchView';
 import {
   Search, CheckCircle, XCircle, Plus, Loader, Globe,
-  Zap, Clock, RefreshCw, Power, PowerOff, Ticket,
+  Zap, Clock, RefreshCw, Power, PowerOff, Ticket, ChevronDown,
 } from 'lucide-react';
 
 const STATUS_BADGE = {
@@ -277,18 +277,6 @@ export default function WorkspaceManagementPanel({ canCreate = false }) {
                     )}
                     {ws.description && <span className="truncate max-w-[200px]">{ws.description}</span>}
                   </div>
-                  {ws.dbWorkspace && fsModes[ws.dbWorkspace.id]?.mode && (
-                    <button
-                      type="button"
-                      onClick={() => setFsOpenFor((cur) => (cur === ws.dbWorkspace.id ? null : ws.dbWorkspace.id))}
-                      aria-expanded={fsOpenFor === ws.dbWorkspace.id}
-                      aria-controls={`fs-panel-${ws.dbWorkspace.id}`}
-                      title="FreshService for this workspace: Connected, Shadow or Off"
-                      className="tp-focus-ring mt-1 inline-flex items-center gap-1 rounded hover:underline"
-                    >
-                      <FreshServiceModeText mode={fsModes[ws.dbWorkspace.id].mode} />
-                    </button>
-                  )}
                   {ws.dbWorkspace && linkFor === ws.dbWorkspace.id && (
                     <form
                       onSubmit={(e) => { e.preventDefault(); saveLinkName(ws); }}
@@ -344,6 +332,21 @@ export default function WorkspaceManagementPanel({ canCreate = false }) {
 
                 {/* Actions */}
                 <div className="flex items-center gap-2 flex-shrink-0">
+                  {/* 26 Nov 2026 (Vahid couldn't find it as a line of text): the FreshService switch is a
+                      button beside the other workspace actions; it opens the Connected / Shadow / Off panel. */}
+                  {ws.dbWorkspace && fsModes[ws.dbWorkspace.id]?.mode && (
+                    <button
+                      type="button"
+                      onClick={() => setFsOpenFor((cur) => (cur === ws.dbWorkspace.id ? null : ws.dbWorkspace.id))}
+                      aria-expanded={fsOpenFor === ws.dbWorkspace.id}
+                      aria-controls={`fs-panel-${ws.dbWorkspace.id}`}
+                      title="FreshService for this workspace: Connected, Shadow or Off"
+                      className="tp-focus-ring flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
+                    >
+                      <FreshServiceModeText mode={fsModes[ws.dbWorkspace.id].mode} />
+                      <ChevronDown className={`h-3 w-3 text-muted-foreground ${fsOpenFor === ws.dbWorkspace.id ? 'rotate-180' : ''}`} aria-hidden="true" />
+                    </button>
+                  )}
                   {ws.status === 'active' && ws.dbWorkspace && (
                     <button
                       onClick={() => toggleNativeTicketing(ws)}
