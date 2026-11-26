@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.4.25-preview';
+export const APP_VERSION = '4.4.26-preview';
 
 export const changelog = [
+  {
+    version: '4.4.26-preview',
+    date: 'November 26, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Retire Vacation Tracker</strong> &mdash; one switch moves upcoming bookings made there into Vacation Pulse and stops all syncing, so the subscription can end safely. It is in Vacation Pulse &rarr; Settings &rarr; Vacation Tracker (super admins). Bookings made in Vacation Tracker then read &ldquo;Booked in Vacation Tracker&rdquo; and can be changed or cancelled here like any other; past leave stays as it is.' },
+      { type: 'fixed', html: '<strong>An empty answer from Vacation Tracker no longer wipes leave</strong> &mdash; if Vacation Tracker ever lists no leave at all, the hourly sync now keeps the leave days it already has instead of removing them.' },
+    ],
+  },
   {
     version: '4.4.25-preview',
     date: 'November 26, 2026',

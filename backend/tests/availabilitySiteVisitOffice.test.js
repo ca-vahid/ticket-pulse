@@ -20,6 +20,7 @@ const prismaMock = {
   avPerson: { findMany: jest.fn(), findUnique: jest.fn(), create: jest.fn() },
   avBalanceAdjustment: { findMany: jest.fn() },
   technicianLeave: { deleteMany: jest.fn(), create: jest.fn() },
+  $transaction: jest.fn(async (fn) => fn(prismaMock)),
 };
 const vtMock = { pushApproved: jest.fn(), pushCancelled: jest.fn(), cancelledHereExternalIds: jest.fn() };
 const loggerMock = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() };

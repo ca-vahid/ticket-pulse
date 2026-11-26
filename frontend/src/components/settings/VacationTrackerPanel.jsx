@@ -188,6 +188,8 @@ export default function VacationTrackerPanel() {
     { id: 'user-matching', label: 'User Matching', Icon: Users },
   ];
 
+  // 26 Nov 2026: retired in Vacation Pulse → Settings; no button here calls Vacation Tracker any more.
+  const retired = config?.retired || null;
   const matched = userMappings.filter(m => m.matchStatus !== 'unmatched').length;
   const unmatched = userMappings.filter(m => m.matchStatus === 'unmatched').length;
 
@@ -203,7 +205,7 @@ export default function VacationTrackerPanel() {
             Sync leave data from Vacation Tracker to show who is OFF, WFH, or on training.
           </p>
         </div>
-        {config?.hasApiKey && (
+        {config?.hasApiKey && !retired && (
           <button
             onClick={handleFullSync}
             disabled={isSyncing}
@@ -214,6 +216,16 @@ export default function VacationTrackerPanel() {
           </button>
         )}
       </div>
+
+      {retired && (
+        <div className="rounded-lg border border-border bg-muted/50 p-3 text-sm text-foreground/85" role="status" data-testid="vt-panel-retired">
+          <p className="font-medium text-foreground">
+            Retired on {new Date(retired.retiredAt).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'America/Vancouver' })}
+            {retired.retiredByName ? ` by ${retired.retiredByName}` : ''}
+          </p>
+          <p className="mt-0.5 text-xs text-muted-foreground">Ticket Pulse no longer reads from or writes to Vacation Tracker. Time away is booked and changed in Vacation Pulse. The settings below are kept for reference only.</p>
+        </div>
+      )}
 
       {syncResult && (
         <div className={`p-3 rounded-lg border text-sm ${syncResult.error ? 'bg-red-50 dark:bg-red-500/15 border-red-200 dark:border-red-500/30 text-red-800 dark:text-red-200' : 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-200 dark:border-emerald-500/30 text-emerald-800 dark:text-emerald-200'}`}>
@@ -258,7 +270,7 @@ export default function VacationTrackerPanel() {
                 />
                 <button
                   onClick={handleTestConnection}
-                  disabled={isTesting}
+                  disabled={isTesting || Boolean(retired)}
                   className="flex items-center gap-1.5 px-3 py-2 bg-muted hover:bg-secondary disabled:bg-muted/50 text-foreground/85 text-sm font-medium rounded-lg border border-input transition-colors"
                 >
                   {isTesting ? <Loader className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
@@ -288,7 +300,7 @@ export default function VacationTrackerPanel() {
                 />
                 <button
                   onClick={handleTestV2}
-                  disabled={Boolean(v2Busy) || (!apiKeyV2 && !config?.hasApiKeyV2)}
+                  disabled={Boolean(v2Busy) || Boolean(retired) || (!apiKeyV2 && !config?.hasApiKeyV2)}
                   className="flex items-center gap-1.5 px-3 py-2 bg-muted hover:bg-secondary disabled:bg-muted/50 text-foreground/85 text-sm font-medium rounded-lg border border-input transition-colors"
                 >
                   {v2Busy === 'test' ? <Loader className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
@@ -332,7 +344,7 @@ export default function VacationTrackerPanel() {
             )}
           </div>
 
-          {config?.hasApiKey && (
+          {config?.hasApiKey && !retired && (
             <div className="bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 rounded-lg p-4 text-sm text-blue-800 dark:text-blue-200">
               <p className="font-medium mb-1">Setup steps:</p>
               <ol className="list-decimal list-inside space-y-1 text-blue-700 dark:text-blue-200">
@@ -357,7 +369,7 @@ export default function VacationTrackerPanel() {
             <div className="flex gap-2">
               <button
                 onClick={handleSyncLeaveTypes}
-                disabled={isSyncingTypes}
+                disabled={isSyncingTypes || Boolean(retired)}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-muted hover:bg-secondary disabled:bg-muted/50 text-foreground/85 text-xs font-medium rounded-lg border border-input transition-colors"
               >
                 {isSyncingTypes ? <Loader className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
@@ -444,7 +456,7 @@ export default function VacationTrackerPanel() {
             </p>
             <button
               onClick={handleSyncUsers}
-              disabled={isSyncingUsers}
+              disabled={isSyncingUsers || Boolean(retired)}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-muted hover:bg-secondary disabled:bg-muted/50 text-foreground/85 text-xs font-medium rounded-lg border border-input transition-colors"
             >
               {isSyncingUsers ? <Loader className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}

@@ -9,6 +9,7 @@ import express from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { AuthenticationError } from '../utils/errors.js';
 import availabilityService from '../services/availability/availabilityService.js';
+import { isVacationTrackerRetired } from '../services/availability/vtRetirement.js';
 
 const router = express.Router();
 
@@ -145,7 +146,7 @@ router.get('/admin/config', asyncHandler(async (req, res) => {
   // QA 10-05 #2: every person still comes back (approver pickers and names
   // need the whole company), each marked inWorkspace so the People and
   // Balances lists show only the workspace the admin is in.
-  const [settings, types, offices, groups, rules, people, roster] = await Promise.all([
+  const [settings, types, offices, groups, rules, people, roster, vtRetired] = await Promise.all([
     availabilityService.getSettings(),
     availabilityService.listLeaveTypes({ includeInactive: true }),
     availabilityService.listOffices(),
@@ -153,8 +154,17 @@ router.get('/admin/config', asyncHandler(async (req, res) => {
     availabilityService.listRules(),
     availabilityService.listPeople(),
     availabilityService.rosterFor(user, wsOf(req)),
+    isVacationTrackerRetired(),
   ]);
-  ok(res, { settings, leaveTypes: types, offices, groups, rules, people: people.map((p) => ({ ...p, dailyHours: Number(p.dailyHours), inWorkspace: roster.has(String(p.email).toLowerCase()) })) });
+  ok(res, {
+    // 26 Nov 2026: once retired, the write-back switch and the import hide.
+    settings: { ...settings, vtRetired },
+    leaveTypes: types,
+    offices,
+    groups,
+    rules,
+    people: people.map((p) => ({ ...p, dailyHours: Number(p.dailyHours), inWorkspace: roster.has(String(p.email).toLowerCase()) })),
+  });
 }));
 
 router.patch('/admin/settings', asyncHandler(async (req, res) => ok(res, await availabilityService.updateSettings(req.body || {}, me(req)))));
@@ -188,6 +198,11 @@ router.post('/admin/import/vacation-tracker', asyncHandler(async (req, res) => o
 // QA 11-16: Accounting's shared calendar → Vacation Pulse (Off / Shadow / Live).
 router.get('/admin/import/shared-calendar/status', asyncHandler(async (req, res) => ok(res, await availabilityService.calendarImportStatus(me(req)))));
 router.put('/admin/import/shared-calendar/mode', asyncHandler(async (req, res) => ok(res, await availabilityService.setCalendarImportMode(me(req), req.body || {}))));
-router.post('/admin/reproject', asyncHandler(async (req, res) => ok(res, await availabilityService.reprojectAll(me(req), req.body || {}))));
+// 26 Nov 2026: retire Vacation Tracker. The status is for Vacation Pulse
+// admins; the switch (which also runs the one-time handover) is super admins
+// only. Both checked in the service.
+router.get('/settings/vacation-tracker', asyncHandler(async (req, res) => ok(res, await availabilityService.vtRetirementStatus(me(req)))));
+router.post('/settings/retire-vacation-tracker', asyncHandler(async (req, res) => ok(res, await availabilityService.retireVacationTracker(me(req)))));
+router.post('/admin/reproject',asyncHandler(async (req, res) => ok(res, await availabilityService.reprojectAll(me(req), req.body || {}))));
 
 export default router;

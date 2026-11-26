@@ -22,6 +22,9 @@ jest.unstable_mockModule('../src/services/workspaceRepository.js', () => ({ defa
 jest.unstable_mockModule('../src/services/assignmentDailyReviewService.js', () => ({ default: { maybeRunScheduledReview: jest.fn() } }));
 jest.unstable_mockModule('../src/services/availability/availabilityService.js', () => ({ default: { syncFromVacationTracker: avSync, runScheduledVtImport: avScheduled } }));
 jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
+// 26 Nov 2026: the "Vacation Tracker retired" switch, off unless a test turns it on.
+const retiredMock = jest.fn().mockResolvedValue(false);
+jest.unstable_mockModule('../src/services/availability/vtRetirement.js', () => ({ isVacationTrackerRetired: retiredMock, logRetiredOnce: jest.fn() }));
 
 const { default: scheduler, VT_STALE_MS } = await import('../src/services/scheduledSyncService.js');
 
@@ -29,7 +32,34 @@ const NOW = Date.parse('2026-10-04T15:20:00Z');
 
 beforeEach(() => {
   jest.clearAllMocks();
+  retiredMock.mockResolvedValue(false);
   vtService.fullSync.mockResolvedValue({ leaveDaysCreated: 39, leavesProcessed: 25 });
+});
+
+describe('26 Nov 2026: Vacation Tracker retired', () => {
+  beforeEach(() => retiredMock.mockResolvedValue(true));
+
+  test('the hourly sync does not run: no Vacation Tracker call, no sync-log row', async () => {
+    expect(await scheduler.runVTSync(1, 'IT')).toEqual({ skipped: 'retired' });
+    expect(vtService.fullSync).not.toHaveBeenCalled();
+    expect(syncLog.createLog).not.toHaveBeenCalled();
+    // and the slot is free again
+    expect(scheduler.vtRunning.has(1)).toBe(false);
+  });
+
+  test('no hourly job is scheduled, and a running one is stopped by its catch-up check', async () => {
+    vtRepo.getConfig.mockResolvedValue({ apiKey: 'k', syncEnabled: true, lastSyncAt: new Date(NOW - 300 * 60000) });
+    await scheduler.startVTSyncForWorkspace({ id: 1, name: 'IT', defaultTimezone: 'America/Vancouver' });
+    expect(cronScheduleMock).not.toHaveBeenCalled();
+    expect(scheduler.vtCronJobs.has(1)).toBe(false);
+
+    retiredMock.mockResolvedValueOnce(false);
+    await scheduler.startVTSyncForWorkspace({ id: 1, name: 'IT', defaultTimezone: 'America/Vancouver' });
+    expect(scheduler.vtCronJobs.has(1)).toBe(true);
+    expect(await scheduler.vtCatchUp(1, 'IT', NOW)).toBe(false);
+    expect(vtService.fullSync).not.toHaveBeenCalled();
+    expect(scheduler.vtCronJobs.has(1)).toBe(false);
+  });
 });
 
 test('a sync older than 70 minutes runs a catch-up (the Availability copy has its own job now)', async () => {

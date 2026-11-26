@@ -26,6 +26,7 @@ const svc = {
 
 jest.unstable_mockModule('../src/services/availability/availabilityService.js', () => ({ default: svc }));
 jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
+jest.unstable_mockModule('../src/services/availability/vtRetirement.js', () => ({ isVacationTrackerRetired: jest.fn().mockResolvedValue(false) }));
 
 const { default: routes } = await import('../src/routes/availability.routes.js');
 const { errorHandler } = await import('../src/middleware/errorHandler.js');
@@ -92,4 +93,27 @@ test('admin config marks who is in the current workspace; balances ask for that 
   expect(res.body.data.people.map((p) => [p.email, p.inWorkspace])).toEqual([['ana@bgc.ca', true], ['Zed@bgc.ca', false]]);
   await request(a).get('/api/availability/admin/balances?year=2026').set('X-Workspace-Id', '5').expect(200);
   expect(svc.balanceReport).toHaveBeenCalledWith(expect.anything(), { year: 2026, workspaceId: 5 });
+  // 26 Nov 2026: the General and Import sections hide their Vacation Tracker parts once retired.
+  expect(res.body.data.settings.vtRetired).toBe(false);
+});
+
+// 26 Nov 2026: retire Vacation Tracker — super admins only (checked in the service).
+describe('retire Vacation Tracker', () => {
+  test('a non-super-admin is refused with 403', async () => {
+    svc.retireVacationTracker = jest.fn().mockRejectedValue(new AuthorizationError('Only super admins can retire Vacation Tracker', 'availability_super_admin'));
+    const res = await request(app({ email: 'ws.admin@example.com', role: 'viewer' })).post('/api/availability/settings/retire-vacation-tracker');
+    expect(res.status).toBe(403);
+  });
+
+  test('a super admin gets the report; the status reads through', async () => {
+    const report = { retiredAt: '2099-11-26T18:00:00.000Z', handedOver: 7, directRowsReplaced: 40, keptUnmatched: [{ technicianId: 13, dates: ['2099-12-10'], leaveType: 'PTO' }] };
+    svc.retireVacationTracker = jest.fn().mockResolvedValue(report);
+    svc.vtRetirementStatus = jest.fn().mockResolvedValue({ retired: null, upcomingFromVt: 7, canRetire: true });
+    const a = app({ email: 'super.admin@example.com', role: 'admin' });
+    const res = await request(a).post('/api/availability/settings/retire-vacation-tracker').expect(200);
+    expect(res.body.data).toEqual(report);
+    expect(svc.retireVacationTracker).toHaveBeenCalledWith(expect.objectContaining({ email: 'super.admin@example.com' }));
+    const status = await request(a).get('/api/availability/settings/vacation-tracker').expect(200);
+    expect(status.body.data).toMatchObject({ upcomingFromVt: 7, canRetire: true });
+  });
 });

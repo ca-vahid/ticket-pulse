@@ -170,6 +170,21 @@ class VacationTrackerRepository {
   }
 
   /**
+   * Leave-days this sync wrote itself in the window: not Vacation Pulse's
+   * ('av:') nor the shared calendar's ('graph:'). The empty-listing guard
+   * (26 Nov 2026) counts them before any clean-up.
+   */
+  async countDirectLeaves(workspaceId, startDate, endDate) {
+    return prisma.technicianLeave.count({
+      where: {
+        workspaceId,
+        leaveDate: { gte: startDate, lte: endDate },
+        NOT: [{ vtLeaveId: { startsWith: 'av:' } }, { vtLeaveId: { startsWith: 'graph:' } }],
+      },
+    });
+  }
+
+  /**
    * Vacation Pulse's own dashboard rows ('av:<requestId>:w<ws>') in the
    * window: a Vacation Tracker leave repeating one of them is not written a
    * second time (25 Nov 2026).

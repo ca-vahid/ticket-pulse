@@ -2500,6 +2500,9 @@ export const availabilityAPI = {
   calendarImportStatus: () => api.get('/availability/admin/import/shared-calendar/status'),
   setCalendarImportMode: (data) => api.put('/availability/admin/import/shared-calendar/mode', data),
   reproject: (data = {}) => apiLongTimeout.post('/availability/admin/reproject', data),
+  // 26 Nov 2026: retire Vacation Tracker (super admins; the handover can take a while).
+  vtRetirementStatus: () => api.get('/availability/settings/vacation-tracker'),
+  retireVacationTracker: () => apiLongTimeout.post('/availability/settings/retire-vacation-tracker', {}),
 };
 
 // ---- QA 11-19 item 2 — Dashboard view grant ---------------------------------

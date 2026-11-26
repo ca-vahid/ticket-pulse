@@ -4,6 +4,7 @@ import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import vtService from '../services/vacationTrackerService.js';
 import vtRepo from '../services/vacationTrackerRepository.js';
 import VacationTrackerV2Client, { describeV2Error, looksLikeV2Key } from '../integrations/vacationTrackerV2.js';
+import { getVacationTrackerRetirement, isVacationTrackerRetired, logRetiredOnce } from '../services/availability/vtRetirement.js';
 
 const router = express.Router();
 
@@ -14,7 +15,9 @@ router.use(requireAuth);
 router.get(
   '/config',
   asyncHandler(async (req, res) => {
-    const config = await vtRepo.getConfig(req.workspaceId);
+    const [config, retirement] = await Promise.all([vtRepo.getConfig(req.workspaceId), getVacationTrackerRetirement()]);
+    // Retired (26 Nov 2026): the panel says so and hides its sync buttons.
+    const retired = retirement ? { retiredAt: retirement.retiredAt, retiredByName: retirement.retiredByName || null } : null;
     res.json({
       success: true,
       data: config
@@ -23,8 +26,9 @@ router.get(
           lastSyncAt: config.lastSyncAt,
           hasApiKey: !!config.apiKey,
           hasApiKeyV2: !!config.apiKeyV2,
+          retired,
         }
-        : null,
+        : (retired ? { retired } : null),
     });
   }),
 );
@@ -63,6 +67,10 @@ router.post(
     if (!key) key = (await vtRepo.getConfig(req.workspaceId))?.apiKeyV2;
     if (!key) return res.status(400).json({ success: false, error: 'No API v2 key provided' });
     if (!looksLikeV2Key(key)) return res.json({ success: false, error: 'An API v2 key starts with vt_live_' });
+    if (await isVacationTrackerRetired()) {
+      logRetiredOnce('the API v2 connection test');
+      return res.json({ success: false, error: 'Vacation Tracker is retired: Ticket Pulse no longer connects to it' });
+    }
     try {
       await new VacationTrackerV2Client(key).testConnection();
       res.json({ success: true });

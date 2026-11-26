@@ -23,6 +23,7 @@ import VacationTrackerV2Client, { describeV2Error, looksLikeV2Key } from '../../
 import { dayKey, toDay } from './availabilityRules.js';
 import { cancelledInTicketPulse } from './vtImportPolicy.js';
 import { avTypeForVtName as mapVtTypeName } from './siteVisit.js';
+import { isVacationTrackerRetired, logRetiredOnce } from './vtRetirement.js';
 
 const lc = (s) => String(s || '').trim().toLowerCase();
 const CACHE_MS = 10 * 60 * 1000;
@@ -94,6 +95,11 @@ class VtWriteBack {
    */
   async enabled() {
     if (process.env.NODE_ENV !== 'production' && process.env.AVAILABILITY_VT_WRITE_BACK !== 'true') return false;
+    // Retired (26 Nov 2026): nothing is written to or cancelled in Vacation Tracker again.
+    if (await isVacationTrackerRetired()) {
+      logRetiredOnce('the write-back');
+      return false;
+    }
     const s = await prisma.avSettings.findUnique({ where: { id: 1 } });
     return s ? s.vtWriteBackEnabled !== false : true;
   }
