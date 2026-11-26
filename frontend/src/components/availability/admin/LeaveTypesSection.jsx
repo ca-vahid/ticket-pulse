@@ -6,7 +6,7 @@ import { availabilityAPI } from '../../../services/api';
 import {
   AVAILABILITY_LABEL, BTN_LINK, BTN_QUIET, COLOR_DOT, COLOR_NAMES, ColorSwatch, ErrorNote, Field, INPUT, SectionTitle, StatusDot, Toggle,
 } from '../availabilityUi';
-import { Drawer, DrawerSection, TD, TH } from './adminUi';
+import { Drawer, DrawerSection, SharedNote, TD, TH } from './adminUi';
 
 /**
  * Leave types: the table, and a drawer with every field incl. the balance policy.
@@ -22,14 +22,20 @@ const NO_ACCESS = { canEditTypes: true, workspaces: [], toggles: [] };
 const keyOf = (typeId, wsId) => `${typeId}:${wsId}`;
 const toggleMap = (list) => new Map((list || []).map((t) => [keyOf(t.leaveTypeId, t.workspaceId), t.enabled !== false]));
 
-/** "Every team" / "Off for Team Nine" / "Off for 3 of 5 teams". */
-export function teamsSummary(typeId, workspaces, isOn) {
+/** The "Used in" column: "Everywhere" / "All but Project Accounting" (each one switched off, by name) / "Nowhere". */
+export function usedInSummary(typeId, workspaces, isOn) {
   const off = workspaces.filter((w) => !isOn(typeId, w.id));
-  if (!off.length) return workspaces.length ? 'Every team' : '—';
-  if (off.length === workspaces.length) return 'Off for every team';
-  if (off.length <= 2) return `Off for ${off.map((w) => w.name).join(' and ')}`;
-  return `Off for ${off.length} of ${workspaces.length} teams`;
+  if (!workspaces.length) return '—';
+  if (!off.length) return 'Everywhere';
+  if (off.length === workspaces.length) return 'Nowhere';
+  return `All but ${off.map((w) => w.name).join(', ')}`;
 }
+
+/** "Accounting" / "Accounting or IT": the workspaces a workspace admin's switches act on. */
+const namesOr = (workspaces) => {
+  const names = workspaces.map((w) => w.name);
+  return names.length <= 1 ? (names[0] || '') : `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
+};
 
 const BLANK = {
   name: '', icon: '', color: 'emerald', unit: 'day', allowHalfDays: true, requiresApproval: true, availability: 'OFF',
@@ -88,7 +94,7 @@ export default function LeaveTypesSection({ config, reload, toast }) {
     setToggles((m) => new Map(m).set(k, enabled));
     try {
       await availabilityAPI.setLeaveTypeWorkspace(t.id, ws.id, enabled);
-      toast(`${t.name} is ${enabled ? 'on' : 'off'} for ${ws.name}`);
+      toast(`${t.name} turned ${enabled ? 'on' : 'off'} for ${ws.name}`);
     } catch (err) {
       setToggles((m) => new Map(m).set(k, !enabled));
       setSwitchError(err?.message || 'Could not change that');
@@ -115,7 +121,7 @@ export default function LeaveTypesSection({ config, reload, toast }) {
         },
         vtLeaveTypeNames: String(vtText || '').split(',').map((s) => s.trim()).filter(Boolean),
       });
-      // The per-team switches that changed in the drawer, one call each.
+      // The per-workspace switches that changed in the drawer, one call each.
       const typeId = rest.id || res?.data?.id;
       if (typeId) {
         for (const w of workspaces) {
@@ -141,15 +147,16 @@ export default function LeaveTypesSection({ config, reload, toast }) {
     <section aria-label="Leave types">
       <SectionTitle
         hint={canEdit
-          ? <>What people can book, shared by every team. &ldquo;Shows as&rdquo; decides how a type shows on the dashboards; visibility what colleagues see. Open a type to switch it off for one team.</>
-          : <>What people can book. The list is shared by every team and kept by the super admins.</>}
+          ? <>What people can book. &ldquo;Shows as&rdquo; decides how a type shows on the dashboards; visibility what colleagues see. Open a type to choose where it is used.</>
+          : <>What people can book.</>}
         action={canEdit ? <button type="button" className={BTN_LINK} onClick={() => openDraft(BLANK)}><Plus className="h-4 w-4" aria-hidden="true" />New type</button> : null}
       >
         Leave types
       </SectionTitle>
+      {!canEdit && <SharedNote />}
       {!canEdit && workspaces.length > 0 && (
         <p className="mb-2 text-xs text-muted-foreground" data-testid="ws-switch-hint">
-          Switching a type off here hides it only for {workspaces.length === 1 ? workspaces[0].name : 'that team'}. People there can still see and cancel what they already booked.
+          Switching a type off here hides it only for {namesOr(workspaces)}. People there can still see and cancel what they already booked.
         </p>
       )}
       <ErrorNote>{switchError}</ErrorNote>
@@ -160,7 +167,7 @@ export default function LeaveTypesSection({ config, reload, toast }) {
           <thead>
             <tr>
               <th className={TH}>Type</th><th className={TH}>Shows as</th><th className={TH}>Approval</th><th className={TH}>Balance</th><th className={TH}>Status</th>
-              {canEdit && workspaces.length > 0 && <th className={TH}>Teams</th>}
+              {canEdit && workspaces.length > 0 && <th className={TH}>Used in</th>}
               {!canEdit && workspaces.map((w) => <th key={w.id} className={TH}>Use in {w.name}</th>)}
               {canEdit && <th className={TH}><span className="sr-only">Edit</span></th>}
             </tr>
@@ -174,7 +181,7 @@ export default function LeaveTypesSection({ config, reload, toast }) {
                 <td className={`${TD} text-foreground/85`}>{t.tracksBalance ? `${t.balancePolicy?.annualDays ?? 0} days/yr` : '—'}</td>
                 <td className={TD}><StatusDot tone={t.isActive === false ? 'grey' : 'green'} label={t.isActive === false ? 'Retired' : 'Active'} /></td>
                 {canEdit && workspaces.length > 0 && (
-                  <td className={`${TD} text-foreground/85`} data-testid={`teams-${t.id}`}>{t.isActive === false ? '—' : teamsSummary(t.id, workspaces, isOn)}</td>
+                  <td className={`${TD} text-foreground/85`} data-testid={`used-in-${t.id}`}>{t.isActive === false ? '—' : usedInSummary(t.id, workspaces, isOn)}</td>
                 )}
                 {!canEdit && workspaces.map((w) => (
                   <td key={w.id} className={TD}>
@@ -259,8 +266,8 @@ export default function LeaveTypesSection({ config, reload, toast }) {
               <input className={INPUT} value={draft.vtText} onChange={(e) => set({ vtText: e.target.value })} aria-label="Vacation Tracker type names" />
             </Field>
             {workspaces.length > 0 && (
-              <DrawerSection title="Used by teams" hint="Switching a team off hides this type only for that team. Its people keep what they already booked.">
-                <div className="grid gap-2 sm:grid-cols-2" data-testid="type-teams">
+              <DrawerSection title="Used in" hint="Switching one off hides this type only there. People there keep what they already booked.">
+                <div className="grid gap-2 sm:grid-cols-2" data-testid="type-used-in">
                   {workspaces.map((w) => (
                     <Toggle
                       key={w.id}

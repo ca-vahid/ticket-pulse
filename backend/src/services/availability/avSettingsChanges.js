@@ -47,14 +47,20 @@ export function changedFields(before, after, fields = null) {
 
 /**
  * Write one history row. Never throws.
- * { actor, workspaceId, entity, entityId, action, before, after }
+ * { actor, workspaceId, workspaceIds, entity, entityId, action, before, after }
+ * workspaceIds: every workspace the change is about (a person's, a scoped
+ * rule's people); [0] = people of no workspace (super admins only). None and
+ * no workspaceId = company-wide.
  */
-export async function recordChange({ actor, workspaceId = null, entity, entityId = null, action, before = null, after = null }) {
+export async function recordChange({ actor, workspaceId = null, workspaceIds = null, entity, entityId = null, action, before = null, after = null }) {
   try {
+    const ws = Number.isInteger(Number(workspaceId)) && workspaceId !== null ? Number(workspaceId) : null;
+    const all = [...new Set([...(Array.isArray(workspaceIds) ? workspaceIds : []), ...(ws ? [ws] : [])].map(Number).filter((n) => Number.isInteger(n) && n >= 0))];
     await prisma.avSettingsChange.create({
       data: {
         actor: lc(typeof actor === 'string' ? actor : actor?.email) || 'unknown',
-        workspaceId: Number.isInteger(Number(workspaceId)) && workspaceId !== null ? Number(workspaceId) : null,
+        workspaceId: ws,
+        workspaceIds: all,
         entity: String(entity),
         entityId: entityId === null || entityId === undefined ? null : String(entityId),
         action: String(action),

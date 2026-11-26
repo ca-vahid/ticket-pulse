@@ -3,6 +3,7 @@ import { Loader2 } from 'lucide-react';
 import FancySelect from '../../common/FancySelect';
 import { availabilityAPI } from '../../../services/api';
 import { BTN_PRIMARY, Field, MONTHS, SectionTitle, TEXTAREA, Toggle } from '../availabilityUi';
+import { SharedNote, canEditShared } from './adminUi';
 
 /** General: leave-year start, the two Outlook switches (off by default), Vacation Tracker write-back, the purpose notice. */
 
@@ -20,6 +21,8 @@ export default function GeneralSection({ config, reload, toast }) {
   useEffect(() => { setDraft(pick(config.settings)); }, [config.settings]);
   const dirty = JSON.stringify(draft) !== JSON.stringify(pick(config.settings));
   const set = (patch) => setDraft((d) => ({ ...d, ...patch }));
+  // 26 Nov 2026: these apply to every workspace, so only super admins change them.
+  const canEdit = canEditShared(config);
 
   const save = async () => {
     setSaving(true);
@@ -37,45 +40,51 @@ export default function GeneralSection({ config, reload, toast }) {
   const outlookHint = 'Each person still confirms on every request; needs Microsoft Graph consent before turning on.';
 
   return (
-    <section aria-label="General" className="max-w-2xl space-y-5">
-      <div>
-        <SectionTitle hint="Balances reset at the start of this month.">Leave year</SectionTitle>
-        <Field label="Leave year starts in" className="max-w-xs">
-          <FancySelect value={String(draft.yearStartMonth)} onChange={(v) => set({ yearStartMonth: Number(v) })} options={MONTHS.map((m, i) => ({ value: String(i + 1), label: m }))} aria-label="Leave year start month" />
-        </Field>
-      </div>
-
-      <div className="border-t border-border pt-5">
-        <SectionTitle hint="Both are off by default. When on, the booking form offers them as switches, off to start.">Outlook</SectionTitle>
-        <div className="space-y-3">
-          <Toggle checked={draft.outlookEventsEnabled} onChange={(v) => set({ outlookEventsEnabled: v })} label="Offer “Add to my Outlook calendar”" hint={outlookHint} />
-          <Toggle checked={draft.autoRepliesEnabled} onChange={(v) => set({ autoRepliesEnabled: v })} label="Offer “Set my automatic reply”" hint={outlookHint} />
+    <section aria-label="General" className="max-w-2xl">
+      {!canEdit && <SharedNote />}
+      {/* A disabled fieldset makes every control inside read-only at once. */}
+      <fieldset disabled={!canEdit} className="min-w-0 space-y-5">
+        <div>
+          <SectionTitle hint="Balances reset at the start of this month.">Leave year</SectionTitle>
+          <Field label="Leave year starts in" className="max-w-xs">
+            <FancySelect value={String(draft.yearStartMonth)} onChange={(v) => set({ yearStartMonth: Number(v) })} options={MONTHS.map((m, i) => ({ value: String(i + 1), label: m }))} aria-label="Leave year start month" />
+          </Field>
         </div>
-      </div>
 
-      {/* 26 Nov 2026: once Vacation Tracker is retired nothing is copied there, so the switch goes. */}
-      {!config.settings?.vtRetired && (
         <div className="border-t border-border pt-5">
-          <SectionTitle hint="For as long as people still look at Vacation Tracker.">Vacation Tracker</SectionTitle>
-          <Toggle
-            checked={draft.vtWriteBackEnabled}
-            onChange={(v) => set({ vtWriteBackEnabled: v })}
-            label="Copy approved requests to Vacation Tracker"
-            hint="A request approved here is added to Vacation Tracker as approved leave, and cancelled there if it is cancelled here. Only for people who are Vacation Tracker users; needs an API v2 key under Settings → Vacation Tracker."
-          />
+          <SectionTitle hint="Both are off by default. When on, the booking form offers them as switches, off to start.">Outlook</SectionTitle>
+          <div className="space-y-3">
+            <Toggle checked={draft.outlookEventsEnabled} onChange={(v) => set({ outlookEventsEnabled: v })} label="Offer “Add to my Outlook calendar”" hint={outlookHint} />
+            <Toggle checked={draft.autoRepliesEnabled} onChange={(v) => set({ autoRepliesEnabled: v })} label="Offer “Set my automatic reply”" hint={outlookHint} />
+          </div>
         </div>
-      )}
 
-      <div className="border-t border-border pt-5">
-        <SectionTitle hint="Shown under the booking form, e.g. why the company records time away.">Purpose notice</SectionTitle>
-        <textarea rows={3} className={TEXTAREA} value={draft.purposeNotice} onChange={(e) => set({ purposeNotice: e.target.value })} aria-label="Purpose notice" maxLength={1000} />
-      </div>
+        {/* 26 Nov 2026: once Vacation Tracker is retired nothing is copied there, so the switch goes. */}
+        {!config.settings?.vtRetired && (
+          <div className="border-t border-border pt-5">
+            <SectionTitle hint="For as long as people still look at Vacation Tracker.">Vacation Tracker</SectionTitle>
+            <Toggle
+              checked={draft.vtWriteBackEnabled}
+              onChange={(v) => set({ vtWriteBackEnabled: v })}
+              label="Copy approved requests to Vacation Tracker"
+              hint="A request approved here is added to Vacation Tracker as approved leave, and cancelled there if it is cancelled here. Only for people who are Vacation Tracker users; needs an API v2 key under Settings → Vacation Tracker."
+            />
+          </div>
+        )}
 
-      <div className="flex justify-end">
-        <button type="button" className={BTN_PRIMARY} onClick={save} disabled={!dirty || saving}>
-          {saving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}Save changes
-        </button>
-      </div>
+        <div className="border-t border-border pt-5">
+          <SectionTitle hint="Shown under the booking form, e.g. why the company records time away.">Purpose notice</SectionTitle>
+          <textarea rows={3} className={TEXTAREA} value={draft.purposeNotice} onChange={(e) => set({ purposeNotice: e.target.value })} aria-label="Purpose notice" maxLength={1000} />
+        </div>
+
+        {canEdit && (
+          <div className="flex justify-end">
+            <button type="button" className={BTN_PRIMARY} onClick={save} disabled={!dirty || saving}>
+              {saving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}Save changes
+            </button>
+          </div>
+        )}
+      </fieldset>
     </section>
   );
 }

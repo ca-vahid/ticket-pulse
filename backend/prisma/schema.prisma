@@ -5159,6 +5159,9 @@ model AvSettingsChange {
   createdAt   DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
   actor       String
   workspaceId Int?      @map("workspace_id")
+  // Every workspace the change is about (a person's, a scoped rule's people);
+  // [0] = people of no workspace (super admins only). Empty + no workspaceId = company-wide.
+  workspaceIds Int[]    @default([]) @map("workspace_ids")
   entity      String
   entityId    String?   @map("entity_id")
   action      String

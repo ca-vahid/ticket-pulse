@@ -60,20 +60,27 @@ const TYPES = { 1: VACATION, 3: WFH, 4: SITE };
 let offRows;
 let agentWorkspaces;
 let accessWorkspaces;
+// email -> workspace ids, for the "is everyone in scope in my workspaces" checks.
+let wsOf;
 
 beforeEach(() => {
   jest.clearAllMocks();
   offRows = [];
   agentWorkspaces = [];
   accessWorkspaces = [];
+  wsOf = { 'a.person@example.com': [5], 'b.person@example.com': [5], 'c.person@example.com': [9], 'both@example.com': [5, 9] };
   settingsMock.get.mockImplementation(async (key) => (key === 'admin_emails' ? 'super@example.com' : null));
   settingsMock.set.mockResolvedValue();
   prismaMock.workspaceAccess.findFirst.mockImplementation(async ({ where }) => (where.email === 'lead@example.com' && where.role === 'admin' ? { id: 1 } : null));
   prismaMock.workspaceAccess.findMany.mockImplementation(async ({ where }) => {
     if (where.role === 'admin') return where.email === 'lead@example.com' ? [{ workspaceId: 5 }] : [];
+    if (where.email?.in) return [];
     return accessWorkspaces.map((workspaceId) => ({ workspaceId }));
   });
-  prismaMock.technician.findMany.mockImplementation(async () => agentWorkspaces.map((workspaceId) => ({ workspaceId })));
+  prismaMock.technician.findMany.mockImplementation(async ({ where }) => {
+    if (where.email?.in) return where.email.in.flatMap((email) => (wsOf[email] || []).map((workspaceId) => ({ email, workspaceId, name: null })));
+    return agentWorkspaces.map((workspaceId) => ({ workspaceId }));
+  });
   prismaMock.technician.findFirst.mockResolvedValue(null);
   prismaMock.workspace.findMany.mockImplementation(async ({ where }) => [{ id: 5, name: 'Team Five' }, { id: 9, name: 'Team Nine' }]
     .filter((w) => !where?.id?.in || where.id.in.includes(w.id)));
@@ -139,8 +146,8 @@ describe('effective leave types', () => {
     offRows = [{ leaveTypeId: 3, workspaceId: 5 }];
     agentWorkspaces = [5];
     const input = { leaveTypeId: 3, startDate: '2099-12-07', endDate: '2099-12-07' };
-    await expect(svc.submit(AGENT, input)).rejects.toThrow(/Working from home is switched off for this team/);
-    await expect(svc.preview(AGENT, input)).rejects.toThrow(/switched off/);
+    await expect(svc.submit(AGENT, input)).rejects.toThrow(/Working from home isn't available in your workspace/);
+    await expect(svc.preview(AGENT, input)).rejects.toThrow(/isn't available in your workspace/);
     expect(prismaMock.avRequest.create).not.toHaveBeenCalled();
   });
 
@@ -150,7 +157,7 @@ describe('effective leave types', () => {
     const person = { email: 'agent@example.com', workdays: null, dailyHours: 8 };
     const shaped = await svc._shape(person, { leaveTypeId: 3, startDate: '2099-12-07' }, { keepTypeId: 3 });
     expect(shaped.leaveType.id).toBe(3);
-    await expect(svc._shape(person, { leaveTypeId: 4, startDate: '2099-12-07' }, { keepTypeId: 3 })).rejects.toThrow(/Site visit is switched off/);
+    await expect(svc._shape(person, { leaveTypeId: 4, startDate: '2099-12-07' }, { keepTypeId: 3 })).rejects.toThrow(/Site visit isn't available in your workspace/);
   });
 });
 
@@ -216,20 +223,93 @@ describe('permissions', () => {
   });
 });
 
+describe('one workspace\'s admin never changes what other workspaces get', () => {
+  const RULE = { condition: { kind: 'always' }, outcome: 'needs_approval' };
+
+  test('general settings and offices are the super admins\'', async () => {
+    await expect(svc.updateSettings({ outlookEventsEnabled: true }, LEAD)).rejects.toThrow('Only super admins change shared settings');
+    await expect(svc.updateSettings({ outlookEventsEnabled: true }, SUPER_AS_ADMIN_OF_5)).rejects.toThrow('Only super admins change shared settings');
+    await expect(svc.saveOffice({ name: 'East Office' }, LEAD)).rejects.toThrow('Only super admins change shared settings');
+    expect(prismaMock.avSettings.update).not.toHaveBeenCalled();
+    expect(prismaMock.avOffice.create).not.toHaveBeenCalled();
+  });
+
+  test('the Vacation Tracker import (it can create shared types) is the super admins\'', async () => {
+    await expect(svc.importFromVacationTracker(LEAD, { workspaceId: 5 })).rejects.toThrow('Only super admins change shared settings');
+  });
+
+  test('a rule for everyone: super admins only, to create, change or delete', async () => {
+    await expect(svc.saveRule({ name: 'Everyone', scopeType: 'company', ...RULE }, LEAD)).rejects.toThrow('Only super admins change rules for everyone');
+    prismaMock.avRule.findUnique.mockResolvedValue({ id: 4, name: 'Everyone', scopeType: 'company', scopeRef: null, ...RULE });
+    await expect(svc.saveRule({ id: 4, name: 'Mine now', scopeType: 'person', scopeRef: 'a.person@example.com', ...RULE }, LEAD)).rejects.toThrow('rules for everyone');
+    await expect(svc.deleteRule(4, LEAD)).rejects.toThrow('rules for everyone');
+    expect(prismaMock.avRule.create).not.toHaveBeenCalled();
+    expect(prismaMock.avRule.update).not.toHaveBeenCalled();
+    expect(prismaMock.avRule.delete).not.toHaveBeenCalled();
+  });
+
+  test('a rule for a person: only when that person is in a workspace the admin administers', async () => {
+    prismaMock.avRule.create.mockResolvedValue({ id: 7 });
+    await expect(svc.saveRule({ name: 'Mine', scopeType: 'person', scopeRef: 'a.person@example.com', ...RULE }, LEAD)).resolves.toMatchObject({ id: 7 });
+    await expect(svc.saveRule({ name: 'Someone else\'s', scopeType: 'person', scopeRef: 'c.person@example.com', ...RULE }, LEAD)).rejects.toThrow(/workspaces you administer/);
+    expect(prismaMock.avRule.create).toHaveBeenCalledTimes(1);
+  });
+
+  test('a rule for a group or an office: only when everyone in it is the admin\'s', async () => {
+    prismaMock.avRule.create.mockResolvedValue({ id: 8 });
+    prismaMock.avApprovalGroupMember.findMany.mockResolvedValueOnce([{ email: 'a.person@example.com' }, { email: 'both@example.com' }]);
+    await expect(svc.saveRule({ name: 'Group', scopeType: 'group', scopeRef: '2', ...RULE }, LEAD)).resolves.toMatchObject({ id: 8 });
+    prismaMock.avApprovalGroupMember.findMany.mockResolvedValueOnce([{ email: 'a.person@example.com' }, { email: 'c.person@example.com' }]);
+    await expect(svc.saveRule({ name: 'Mixed group', scopeType: 'group', scopeRef: '3', ...RULE }, LEAD)).rejects.toThrow(/workspaces you administer/);
+    prismaMock.avPerson.findMany.mockResolvedValueOnce([{ email: 'a.person@example.com' }, { email: 'c.person@example.com' }]);
+    await expect(svc.saveRule({ name: 'Shared office', scopeType: 'office', scopeRef: '12', ...RULE }, LEAD)).rejects.toThrow(/workspaces you administer/);
+    prismaMock.avPerson.findMany.mockResolvedValueOnce([]);
+    await expect(svc.saveRule({ name: 'Empty office', scopeType: 'office', scopeRef: '13', ...RULE }, LEAD)).rejects.toThrow(/workspaces you administer/);
+    // A super admin may, of course.
+    prismaMock.avPerson.findMany.mockResolvedValue([{ email: 'c.person@example.com' }]);
+    await expect(svc.saveRule({ name: 'Shared office', scopeType: 'office', scopeRef: '12', ...RULE }, SUPER)).resolves.toMatchObject({ id: 8 });
+  });
+
+  test('moving a rule off another workspace\'s person is refused too', async () => {
+    prismaMock.avRule.findUnique.mockResolvedValue({ id: 9, name: 'Theirs', scopeType: 'person', scopeRef: 'c.person@example.com', ...RULE });
+    await expect(svc.saveRule({ id: 9, name: 'Theirs', scopeType: 'person', scopeRef: 'a.person@example.com', ...RULE }, LEAD)).rejects.toThrow(/workspaces you administer/);
+    await expect(svc.deleteRule(9, LEAD)).rejects.toThrow(/workspaces you administer/);
+  });
+
+  test('View as an admin of one workspace answers from that workspace', async () => {
+    prismaMock.avRule.create.mockResolvedValue({ id: 10 });
+    await expect(svc.saveRule({ name: 'Five', scopeType: 'person', scopeRef: 'a.person@example.com', ...RULE }, SUPER_AS_ADMIN_OF_5)).resolves.toMatchObject({ id: 10 });
+    await expect(svc.saveRule({ name: 'Nine', scopeType: 'person', scopeRef: 'c.person@example.com', ...RULE }, SUPER_AS_ADMIN_OF_5)).rejects.toThrow(/workspaces you administer/);
+  });
+
+  test('approval groups: a workspace admin manages their own, never one with people elsewhere', async () => {
+    prismaMock.avApprovalGroup.create.mockResolvedValue({ id: 20 });
+    prismaMock.avApprovalGroup.findUnique.mockResolvedValue({ id: 20, name: 'New', members: [], approvers: [] });
+    await expect(svc.saveGroup({ name: 'New', members: ['a.person@example.com'], approvers: ['lead@example.com'] }, LEAD)).resolves.toBeTruthy();
+    await expect(svc.saveGroup({ name: 'Reach', members: ['a.person@example.com', 'c.person@example.com'], approvers: ['lead@example.com'] }, LEAD)).rejects.toThrow(/approval groups whose members/);
+    // An existing group with someone from elsewhere can't be changed or deleted, even to take them out.
+    prismaMock.avApprovalGroup.findUnique.mockResolvedValue({ id: 21, name: 'Mixed', members: [{ email: 'c.person@example.com' }], approvers: [] });
+    await expect(svc.saveGroup({ id: 21, name: 'Mixed', members: [], approvers: ['lead@example.com'] }, LEAD)).rejects.toThrow(/approval groups whose members/);
+    await expect(svc.deleteGroup(21, LEAD)).rejects.toThrow(/approval groups whose members/);
+    expect(prismaMock.avApprovalGroup.delete).not.toHaveBeenCalled();
+    await expect(svc.deleteGroup(21, SUPER)).resolves.toEqual({ deleted: true });
+  });
+});
+
 describe('change history rows', () => {
   test('general settings: only the changed fields', async () => {
     prismaMock.avSettings.findUnique.mockResolvedValue({ id: 1, yearStartMonth: 1, outlookEventsEnabled: false, autoRepliesEnabled: false });
     prismaMock.avSettings.update.mockResolvedValue({ id: 1 });
-    await svc.updateSettings({ yearStartMonth: 1, outlookEventsEnabled: true }, LEAD);
+    await svc.updateSettings({ yearStartMonth: 1, outlookEventsEnabled: true }, SUPER);
     expect(recorded()).toEqual([expect.objectContaining({ entity: 'settings', action: 'update', before: { outlookEventsEnabled: false }, after: { outlookEventsEnabled: true } })]);
   });
 
   test('offices: a new one and a change', async () => {
     prismaMock.avOffice.create.mockResolvedValue({ id: 12, name: 'North Office' });
-    await svc.saveOffice({ name: 'North Office', province: 'BC' }, LEAD);
+    await svc.saveOffice({ name: 'North Office', province: 'BC' }, SUPER);
     prismaMock.avOffice.findUnique.mockResolvedValue({ id: 12, name: 'North Office', province: 'BC', timezone: 'America/Vancouver', isActive: true });
     prismaMock.avOffice.update.mockResolvedValue({ id: 12 });
-    await svc.saveOffice({ id: 12, name: 'North Office', province: 'BC', timezone: 'America/Edmonton' }, LEAD);
+    await svc.saveOffice({ id: 12, name: 'North Office', province: 'BC', timezone: 'America/Edmonton' }, SUPER);
     expect(recorded()).toEqual([
       expect.objectContaining({ entity: 'office', entityId: '12', action: 'create', after: expect.objectContaining({ name: 'North Office' }) }),
       expect.objectContaining({ entity: 'office', entityId: '12', action: 'update', before: { timezone: 'America/Vancouver' }, after: { timezone: 'America/Edmonton' } }),
@@ -238,33 +318,48 @@ describe('change history rows', () => {
 
   test('rules: saved and deleted (the deleted one keeps its name)', async () => {
     prismaMock.avRule.create.mockResolvedValue({ id: 4 });
-    await svc.saveRule({ name: 'Two at most', condition: { kind: 'capacity', max: 2 }, outcome: 'needs_approval' }, LEAD);
+    await svc.saveRule({ name: 'Two at most', condition: { kind: 'capacity', max: 2 }, outcome: 'needs_approval' }, SUPER);
     prismaMock.avRule.findUnique.mockResolvedValue({ id: 4, name: 'Two at most', scopeType: 'company', condition: { kind: 'capacity', max: 2 }, outcome: 'needs_approval', isActive: true });
-    await svc.deleteRule(4, LEAD);
+    await svc.deleteRule(4, SUPER);
     expect(recorded()).toEqual([
-      expect.objectContaining({ entity: 'rule', entityId: '4', action: 'create' }),
-      expect.objectContaining({ entity: 'rule', entityId: '4', action: 'delete', before: expect.objectContaining({ name: 'Two at most' }) }),
+      expect.objectContaining({ entity: 'rule', entityId: '4', action: 'create', workspaceId: null, workspaceIds: [] }),
+      expect.objectContaining({ entity: 'rule', entityId: '4', action: 'delete', workspaceIds: [], before: expect.objectContaining({ name: 'Two at most' }) }),
     ]);
+  });
+
+  test('a rule for one person is stamped with that person\'s workspaces', async () => {
+    prismaMock.avRule.create.mockResolvedValue({ id: 6 });
+    await svc.saveRule({ name: 'Notice', scopeType: 'person', scopeRef: 'both@example.com', condition: { kind: 'always' }, outcome: 'needs_approval' }, SUPER);
+    expect(recorded()).toEqual([expect.objectContaining({ entity: 'rule', workspaceId: 5, workspaceIds: [5, 9] })]);
   });
 
   test('approval groups: members and approvers added or removed show as lists', async () => {
-    const was = { id: 2, name: 'Team Five', description: null, autoApproveTypeIds: [], requireAll: false, isActive: true, members: [{ email: 'a@example.com' }], approvers: [{ email: 'lead@example.com' }] };
-    const now = { ...was, members: [{ email: 'a@example.com' }, { email: 'b@example.com' }] };
+    const was = { id: 2, name: 'Five group', description: null, autoApproveTypeIds: [], requireAll: false, isActive: true, members: [{ email: 'a.person@example.com' }], approvers: [{ email: 'lead@example.com' }] };
+    const now = { ...was, members: [{ email: 'a.person@example.com' }, { email: 'b.person@example.com' }] };
     prismaMock.avApprovalGroup.findUnique.mockResolvedValueOnce(was).mockResolvedValueOnce(now).mockResolvedValueOnce(now);
     prismaMock.avApprovalGroup.update.mockResolvedValue({ id: 2 });
-    await svc.saveGroup({ id: 2, name: 'Team Five', members: ['a@example.com', 'b@example.com'], approvers: ['lead@example.com'] }, LEAD);
+    await svc.saveGroup({ id: 2, name: 'Five group', members: ['a.person@example.com', 'b.person@example.com'], approvers: ['lead@example.com'] }, LEAD);
     await svc.deleteGroup(2, LEAD);
     expect(recorded()).toEqual([
-      expect.objectContaining({ entity: 'approval_group', entityId: '2', action: 'update', before: { members: ['a@example.com'] }, after: { members: ['a@example.com', 'b@example.com'] } }),
-      expect.objectContaining({ entity: 'approval_group', entityId: '2', action: 'delete', before: expect.objectContaining({ name: 'Team Five' }) }),
+      expect.objectContaining({ entity: 'approval_group', entityId: '2', action: 'update', before: { members: ['a.person@example.com'] }, after: { members: ['a.person@example.com', 'b.person@example.com'] } }),
+      expect.objectContaining({ entity: 'approval_group', entityId: '2', action: 'delete', before: expect.objectContaining({ name: 'Five group' }) }),
     ]);
   });
 
-  test('people: the allowance that changed', async () => {
-    prismaMock.avPerson.findUnique.mockResolvedValue({ email: 'agent@example.com', officeId: null, startDate: null, workdays: null, dailyHours: 8, isActive: true, entitlementOverrides: null });
+  test('people: the allowance that changed, stamped with the person\'s workspace', async () => {
+    prismaMock.avPerson.findUnique.mockResolvedValue({ email: 'a.person@example.com', officeId: null, startDate: null, workdays: null, dailyHours: 8, isActive: true, entitlementOverrides: null });
     prismaMock.avPerson.update.mockResolvedValue({ id: 7 });
     await svc.updatePerson(7, { entitlementOverrides: { 1: 15 } }, SUPER);
-    expect(recorded()).toEqual([expect.objectContaining({ entity: 'person', entityId: '7', action: 'update', before: { entitlementOverrides: null }, after: { entitlementOverrides: { 1: 15 } } })]);
+    expect(recorded()).toEqual([expect.objectContaining({
+      entity: 'person', entityId: '7', action: 'update', workspaceId: 5, workspaceIds: [5], before: { entitlementOverrides: null }, after: { entitlementOverrides: { 1: 15 } },
+    })]);
+  });
+
+  test('a person of no workspace: the row is for super admins only, never company-wide', async () => {
+    prismaMock.avPerson.findUnique.mockResolvedValue({ email: 'nobody@example.com', officeId: null, startDate: null, workdays: null, dailyHours: 8, isActive: true, entitlementOverrides: null });
+    prismaMock.avPerson.update.mockResolvedValue({ id: 8 });
+    await svc.updatePerson(8, { dailyHours: 6 }, SUPER);
+    expect(recorded()).toEqual([expect.objectContaining({ entity: 'person', workspaceId: null, workspaceIds: [0] })]);
   });
 
   test('the shared calendar import mode, for its workspace', async () => {
@@ -288,7 +383,7 @@ describe('change history rows', () => {
   test('a failed history write never blocks the save; it is a warning', async () => {
     prismaMock.avSettingsChange.create.mockRejectedValue(new Error('database is down'));
     prismaMock.avOffice.create.mockResolvedValue({ id: 13, name: 'South Office' });
-    await expect(svc.saveOffice({ name: 'South Office' }, LEAD)).resolves.toMatchObject({ id: 13 });
+    await expect(svc.saveOffice({ name: 'South Office' }, SUPER)).resolves.toMatchObject({ id: 13 });
     await expect(svc.setLeaveTypeWorkspace(LEAD, { leaveTypeId: 3, workspaceId: 5, enabled: false })).resolves.toMatchObject({ enabled: false });
     expect(loggerMock.warn).toHaveBeenCalledWith(expect.stringMatching(/could not record a settings change/));
   });
@@ -305,10 +400,20 @@ describe('recent changes', () => {
   test('a workspace admin sees their workspace and the company-wide changes; a super admin everything', async () => {
     prismaMock.avSettingsChange.findMany.mockResolvedValue([]);
     await svc.listSettingsChanges(LEAD);
-    expect(prismaMock.avSettingsChange.findMany.mock.calls[0][0].where).toEqual({ OR: [{ workspaceId: null }, { workspaceId: { in: [5] } }] });
+    expect(prismaMock.avSettingsChange.findMany.mock.calls[0][0].where).toEqual({
+      OR: [{ workspaceId: null, workspaceIds: { isEmpty: true } }, { workspaceId: { in: [5] } }, { workspaceIds: { hasSome: [5] } }],
+    });
     await svc.listSettingsChanges(SUPER);
     expect(prismaMock.avSettingsChange.findMany.mock.calls[1][0].where).toEqual({});
     await expect(svc.listSettingsChanges(AGENT)).rejects.toThrow(/Only administrators/);
+  });
+
+  test('who is named as the agent they are, else the e-mail', async () => {
+    prismaMock.avSettingsChange.findMany.mockResolvedValue([row(1, { entity: 'settings', action: 'update' }), row(2, { actor: 'unknown.person@example.com', entity: 'settings', action: 'update' })]);
+    prismaMock.avPerson.findMany.mockResolvedValue([{ email: 'lead@example.com', name: 'lead' }]);
+    prismaMock.technician.findMany.mockImplementation(async ({ where }) => (where.email?.in?.includes('lead@example.com') ? [{ email: 'Lead@Example.com', name: 'Lee Lead' }] : []));
+    const res = await svc.listSettingsChanges(SUPER);
+    expect(res.changes.map((c) => [c.actor, c.actorName])).toEqual([['lead@example.com', 'Lee Lead'], ['unknown.person@example.com', null]]);
   });
 
   test('50 a page, with names to read it by', async () => {

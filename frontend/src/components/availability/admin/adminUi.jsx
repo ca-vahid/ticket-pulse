@@ -10,6 +10,22 @@ import { BTN_PRIMARY, BTN_QUIET, INPUT, nameFromEmail } from '../availabilityUi'
  * rows, never chips).
  */
 
+/**
+ * 26 Nov 2026: may this person change what every workspace shares (leave
+ * types, offices, general settings, rules for everyone)? Super admins only;
+ * the server says so in config.typeAccess.
+ */
+export const canEditShared = (config) => config?.typeAccess?.canEditTypes !== false;
+
+/** The one line a workspace admin sees above a shared setting they can read but not change. */
+export function SharedNote({ children = null }) {
+  return (
+    <p className="mb-3 text-xs text-muted-foreground" data-testid="shared-note">
+      Only super admins change shared settings.{children ? <> {children}</> : null}
+    </p>
+  );
+}
+
 /** A titled block inside a drawer: what it is, one line on what it does, then the controls. */
 export function DrawerSection({ title, hint = null, children }) {
   return (

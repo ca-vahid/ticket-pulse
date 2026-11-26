@@ -3,7 +3,7 @@ import { Pencil, Plus } from 'lucide-react';
 import FancySelect from '../../common/FancySelect';
 import { availabilityAPI } from '../../../services/api';
 import { BTN_LINK, BTN_QUIET, Field, INPUT, SectionTitle, StatusDot, Toggle } from '../availabilityUi';
-import { Drawer, TD, TH } from './adminUi';
+import { Drawer, SharedNote, TD, TH, canEditShared } from './adminUi';
 
 /** Offices: the province picks the statutory holidays; the time zone the day boundaries. */
 
@@ -17,6 +17,8 @@ export default function OfficesSection({ config, reload, toast }) {
   const [error, setError] = useState(null);
   const set = (patch) => setDraft((d) => ({ ...d, ...patch }));
   const peopleIn = (id) => (config.people || []).filter((p) => p.officeId === id).length;
+  // 26 Nov 2026: offices are shared by every workspace; super admins change them.
+  const canEdit = canEditShared(config);
 
   const save = async () => {
     if (!draft.name.trim()) { setError('Give the office a name'); return; }
@@ -40,10 +42,11 @@ export default function OfficesSection({ config, reload, toast }) {
     <section aria-label="Offices">
       <SectionTitle
         hint="The province decides which statutory holidays are skipped."
-        action={<button type="button" className={BTN_LINK} onClick={() => { setDraft({ ...BLANK }); setError(null); }}><Plus className="h-4 w-4" aria-hidden="true" />New office</button>}
+        action={canEdit ? <button type="button" className={BTN_LINK} onClick={() => { setDraft({ ...BLANK }); setError(null); }}><Plus className="h-4 w-4" aria-hidden="true" />New office</button> : null}
       >
         Offices
       </SectionTitle>
+      {!canEdit && <SharedNote />}
       <div className="relative overflow-x-auto">
         <table className="w-full min-w-[32rem] text-sm">
           <thead><tr><th className={TH}>Office</th><th className={TH}>Province</th><th className={TH}>Time zone</th><th className={TH}>People</th><th className={TH}>Status</th><th className={TH}><span className="sr-only">Edit</span></th></tr></thead>
@@ -55,7 +58,9 @@ export default function OfficesSection({ config, reload, toast }) {
                 <td className={`${TD} text-foreground/85`}>{o.timezone || '—'}</td>
                 <td className={`${TD} tabular-nums text-foreground/85`}>{peopleIn(o.id)}</td>
                 <td className={TD}><StatusDot tone={o.isActive === false ? 'grey' : 'green'} label={o.isActive === false ? 'Closed' : 'Open'} /></td>
-                <td className={`${TD} text-right`}><button type="button" className={BTN_QUIET} onClick={() => { setDraft({ ...BLANK, ...o }); setError(null); }} aria-label={`Edit ${o.name}`}><Pencil className="h-4 w-4" aria-hidden="true" /></button></td>
+                <td className={`${TD} text-right`}>
+                  {canEdit && <button type="button" className={BTN_QUIET} onClick={() => { setDraft({ ...BLANK, ...o }); setError(null); }} aria-label={`Edit ${o.name}`}><Pencil className="h-4 w-4" aria-hidden="true" /></button>}
+                </td>
               </tr>
             ))}
           </tbody>
