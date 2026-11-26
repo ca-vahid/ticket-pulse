@@ -506,7 +506,9 @@ describe('Coming up', () => {
     const text = (id) => screen.getByTestId(id).textContent;
     // A no-break space before every dot, a plain space after: the line can only break after a dot.
     expect(text('coming-up-1-what')).toBe('Working from home · synced to Vacation Tracker');
-    expect(text('coming-up-9-status')).toBe('Waiting for approval · Robin Vale · back Thu');
+    // 26 Nov 2026: the date comes with the day ("back Thu 17 Dec"), and a name or a date never
+    // splits across lines (no-break spaces inside it).
+    expect(text('coming-up-9-status')).toBe('Waiting for approval\u00A0· Robin\u00A0Vale\u00A0· back\u00A0Thu\u00A017\u00A0Dec');
     for (const id of ['coming-up-1-what', 'coming-up-6-what', 'coming-up-6-status', 'coming-up-9-status']) {
       expect(text(id)).not.toMatch(/[ \n\t]·/);
     }

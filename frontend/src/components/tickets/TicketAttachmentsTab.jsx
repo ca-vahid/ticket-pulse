@@ -320,8 +320,8 @@ export default function TicketAttachmentsTab({
               </button>
               <div className="flex min-w-0 flex-1 flex-col gap-0.5 p-2.5">
                 <AttachmentName ticketId={ticketId} a={a} variant="grid" canRename={canRename} onChanged={nameChanged} />
-                <span className="truncate text-[11px] text-muted-foreground">{KIND_WORD[kind]}{who ? ` · ${who}` : ''}</span>
-                <span className="text-[11px] text-muted-foreground/75">{formatDayTime(at)} · {formatBytes(a.sizeBytes)}</span>
+                <span className="line-clamp-2 break-words text-[11px] text-muted-foreground" title={`${KIND_WORD[kind]}${who ? ` · ${who}` : ''}`}>{KIND_WORD[kind]}{who ? ` · ${who}` : ''}</span>
+                <span className="text-[11px] text-muted-foreground/75"><span className="whitespace-nowrap">{formatDayTime(at)}</span> · <span className="whitespace-nowrap">{formatBytes(a.sizeBytes)}</span></span>
                 <span className="mt-1 flex items-center gap-2">
                   {entryId && (
                     <button type="button" onClick={() => onJumpToEntry?.(entryId)} title="Show in conversation" className="tp-focus-ring inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-semibold text-primary hover:underline">

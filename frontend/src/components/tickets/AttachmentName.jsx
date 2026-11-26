@@ -155,7 +155,8 @@ export default function AttachmentName({ ticketId, a, variant = 'grid', canRenam
                 {name}
               </button>
             )
-            : <span className={`block truncate ${nameText} text-foreground`} title={name}>{name}</span>}
+            // 26 Nov 2026: two lines before it clips, so a phone shows "north-wall-photo.png" whole.
+            : <span className={`line-clamp-2 [overflow-wrap:anywhere] ${nameText} text-foreground`} title={name}>{name}</span>}
           {original && (
             // "Named automatically" leads, so a long original name can't push it
             // out of view; the line wraps (a long name breaks anywhere) instead

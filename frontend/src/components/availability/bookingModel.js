@@ -175,5 +175,6 @@ export function nextWeekRange(today) {
 
 /** "back Mon": the first working day after an all-day absence. */
 export function backDay(endDate, holidaySet = new Set()) {
-  return WEEKDAY_SHORT_UK[parseDay(nextWorkingDayKey(endDate, holidaySet)).getDay()];
+  // 26 Nov 2026: "back Mon 4 Jan", never a bare "back Mon" a week or a year away.
+  return shortDay(nextWorkingDayKey(endDate, holidaySet));
 }

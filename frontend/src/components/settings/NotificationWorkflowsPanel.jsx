@@ -9,6 +9,7 @@ import StarterKit from '@tiptap/starter-kit';
 import MonacoEditor from '@monaco-editor/react';
 
 import {
+  AlertTriangle,
   MessagesSquare,
   ArrowUpDown,
   Activity,
@@ -91,6 +92,7 @@ import WorkflowPreviewPage, {
 import { useTheme } from '../../contexts/ThemeContext';
 import { compactTemplateHtml, formatTemplateHtml } from '../../utils/templateHtmlFormat';
 import { groupWorkflowsByStage } from '../../utils/workflowStages';
+import { swapFsTicketId, usesFsTicketId } from './fsTicketIdLint';
 import { Switch, SwitchCue, SwitchRow } from '../ui/switch';
 import {
   DraftRestoreLine,
@@ -11303,6 +11305,24 @@ export default function NotificationWorkflowsPanel({
               onChange={(event) => updateNodeData({ subject: event.target.value })}
               className="mt-1 w-full rounded-md border border-border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
             />
+            {/* 26 Nov 2026: "Ticket received: #" in Accounting came from this variable. */}
+            {usesFsTicketId(selectedNode.data?.subject, selectedNode.data?.html, selectedNode.data?.text) && (
+              <p className="mt-1.5 flex flex-wrap items-start gap-x-2 gap-y-1 text-xs text-amber-800 dark:text-amber-200" role="note" data-testid="fs-ticket-id-warning">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span className="min-w-0 flex-1">This e-mail uses <code className="font-mono">{'{{ ticket.freshserviceTicketId }}'}</code>, which is blank on Ticket Pulse tickets. Use the ticket number instead.</span>
+                <button
+                  type="button"
+                  onClick={() => updateNodeData({
+                    subject: swapFsTicketId(selectedNode.data?.subject),
+                    html: swapFsTicketId(selectedNode.data?.html),
+                    text: swapFsTicketId(selectedNode.data?.text),
+                  })}
+                  className="tp-focus-ring rounded font-semibold text-primary hover:underline"
+                >
+                  Use ticket number
+                </button>
+              </p>
+            )}
           </div>
 
           <div className="flex flex-wrap gap-1 rounded-md bg-muted p-1">

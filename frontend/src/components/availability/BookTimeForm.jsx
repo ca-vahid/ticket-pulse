@@ -116,7 +116,7 @@ export function buildRequestBody(form, type) {
  * box when "Other site…" is picked, else the select), which is marked
  * aria-invalid and described by it. Props in, so it renders on its own.
  */
-export function SiteOfficeField({ offices = [], value = '', location = '', onChange, required = true, keepOfficeId = null, error = null }) {
+export function SiteOfficeField({ offices = [], value = '', location = '', onChange, required = true, keepOfficeId = null, error = null, step = null }) {
   const uid = useId().replace(/:/g, '');
   const ids = { select: `av-site-office-${uid}`, hint: `av-site-office-${uid}-hint`, site: `av-site-text-${uid}`, error: `av-site-${uid}-error` };
   const choices = (offices || [])
@@ -125,10 +125,12 @@ export function SiteOfficeField({ offices = [], value = '', location = '', onCha
   const other = value === OTHER_SITE;
   const officeInvalid = Boolean(error) && !other;
   const siteInvalid = Boolean(error) && other;
-  const errorNote = error ? <p id={ids.error} role="alert" className="text-xs text-red-700 dark:text-red-300">{error}</p> : null;
+  const errorNote = error ? <p id={ids.error} role="alert" className="text-xs text-destructive">{error}</p> : null;
   return (
     <div className="space-y-1.5" data-testid="site-office-field">
       <div className="grid min-w-0 gap-1 text-sm">
+        {/* 26 Nov 2026: in the booking form it is a numbered step like the others ("2. Where"); the label keeps its words. */}
+        {step && <span className={STEP} aria-hidden="true">{step}. Where</span>}
         <label htmlFor={ids.select} className="text-xs font-medium text-muted-foreground">{required ? 'Which office? (required)' : 'Which office?'}</label>
         <select
           id={ids.select}
@@ -624,6 +626,7 @@ export default function BookTimeForm({
           required={siteRequired}
           keepOfficeId={editing?.siteOfficeId ?? null}
           error={siteError}
+          step={2}
         />
       )}
 
@@ -631,7 +634,7 @@ export default function BookTimeForm({
       <fieldset className="min-w-0 space-y-3" aria-labelledby={ids.when}>
         <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
           <p className="text-xs text-muted-foreground">
-            <span id={ids.when} className={STEP}>2. When</span>
+            <span id={ids.when} className={STEP}>{onSite ? 3 : 2}. When</span>
             <span> — {isHours ? 'tap a day' : 'tap a day, or tap two days for a range'}</span>
           </p>
           <span className="-mr-2 flex flex-wrap items-center">
@@ -696,7 +699,7 @@ export default function BookTimeForm({
       {/* 3. Note */}
       <div className="grid min-w-0 gap-1.5 text-sm">
         <label htmlFor={ids.note} className="text-xs text-muted-foreground">
-          <span className={STEP}>3. Note</span> {type?.requiresNote ? '(required)' : '(optional)'}
+          <span className={STEP}>{onSite ? 4 : 3}. Note</span> {type?.requiresNote ? '(required)' : '(optional)'}
         </label>
         <textarea
           id={ids.note}

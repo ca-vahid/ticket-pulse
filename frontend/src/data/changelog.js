@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.4.21-preview';
+export const APP_VERSION = '4.4.22-preview';
 
 export const changelog = [
+  {
+    version: '4.4.22-preview',
+    date: 'November 26, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>My time reads more clearly</strong> &mdash; weekends and holidays are now visibly shaded on the booking calendar in light mode, a site visit&rsquo;s office is its own numbered step (&ldquo;2. Where&rdquo;), Coming up says the day you are back with its date (&ldquo;back Mon 4 Jan&rdquo;), names and dates no longer break across lines, and the &times; says &ldquo;Cancel this request&rdquo;. The &ldquo;Book time away&rdquo; button no longer repeats the form on My time.' },
+      { type: 'improved', html: '<strong>Attachments on phones</strong> &mdash; file names and who added them wrap to two lines instead of being cut short, and the date and size stay whole.' },
+      { type: 'new', html: '<strong>A warning for a blank ticket number in workflow e-mails</strong> &mdash; when a workflow e-mail uses the FreshService ticket number, which is blank on Ticket Pulse tickets, the editor says so and offers <em>Use ticket number</em>, which swaps in the ticket number in one click.' },
+    ],
+  },
   {
     version: '4.4.21-preview',
     date: 'November 25, 2026',
