@@ -26,7 +26,7 @@ import RequestHistoryPanel from '../components/availability/RequestHistoryPanel'
  *   /availability/overview   who is out this week, my balance, holidays, coverage (default)
  *   /availability/calendar   wallchart: people by day, grouped by office / approval group
  *   /availability/month      the month with named bars
- *   /availability/my-time    balances, book time away (live verdict), my requests
+ *   /availability/my-time    balances, book time away (live verdict), coming up
  *   /availability/approvals  pending requests I may decide (approvers / admins)
  *   /availability/history    anyone's requests, past and present (admins, QA 10-21 #1)
  *   /availability/settings   types, groups, rules, offices, people, balances, import
@@ -145,9 +145,19 @@ export default function Availability() {
         {tab === 'overview' && <OverviewPanel me={me} base={base} onBook={bookTime} />}
         {tab === 'calendar' && <TeamCalendarPanel me={me} />}
         {tab === 'month' && <MonthCalendarPanel me={me} />}
-        {tab === 'my-time' && <MyTimePanel me={me} onChanged={loadMe} toast={toast.show} bookType={location.state?.bookType ?? null} />}
+        {tab === 'my-time' && (
+          <MyTimePanel
+            me={me}
+            onChanged={loadMe}
+            toast={toast.show}
+            bookType={location.state?.bookType ?? null}
+            // QA 11-25 #1: past and cancelled requests live in History (admins see that tab, filtered to them).
+            onOpenHistory={me.isAdmin ? () => navigate(`${base}/history`, { state: { historyEmail: me.person?.email || null } }) : null}
+            historyHref={me.isAdmin ? `${base}/history` : null}
+          />
+        )}
         {tab === 'approvals' && <ApprovalsPanel me={me} nameByEmail={nameByEmail} toast={toast.show} onChanged={() => { loadMe(); notifyAvailabilityChanged(); }} />}
-        {tab === 'history' && <RequestHistoryPanel me={me} config={config} />}
+        {tab === 'history' && <RequestHistoryPanel me={me} config={config} initialEmail={location.state?.historyEmail || ''} />}
         {tab === 'settings' && <AdminSettingsPanel config={config} error={configError} reload={reloadAdmin} toast={toast.show} />}
       </section>
     );

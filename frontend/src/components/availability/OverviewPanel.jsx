@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, ChevronLeft, ChevronRight } from 'lucide-react';
 import { availabilityAPI } from '../../services/api';
 import {
-  CARD, COLOR_DOT, ErrorNote, REQUEST_STATUS, addDaysKey, fmtDay, fmtMinute, fmtRange, leaveLabel, parseDay, sitePlace, todayKey, trimNum,
+  CARD, COLOR_DOT, ErrorNote, Pictogram, REQUEST_STATUS, addDaysKey, fmtDay, fmtMinute, fmtRange, leaveLabel, parseDay, pictogramFor, sitePlace, todayKey, trimNum,
 } from './availabilityUi';
 import {
   WEEKDAY_SHORT, collapseDuplicateEntries, daysUntil, isWeekend, nextWorkingDayKey, rangeDays, weekStartKey,
@@ -41,19 +41,8 @@ const partWords = (e) => {
 };
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
-/** The pictogram for a leave type, by what it is. */
-export function pictogramFor(type) {
-  const key = `${type?.key || ''} ${type?.name || ''}`.toLowerCase();
-  if (/sick|medical leave|illness/.test(key)) return 'sick';
-  if (type?.availability === 'WFH' || /home|remote/.test(key)) return 'wfh';
-  if (type?.availability === 'ONSITE' || /site|field|travel/.test(key)) return 'site';
-  if (type?.unit === 'hour' || /appoint|personal|errand/.test(key)) return 'appointment';
-  return 'vacation';
-}
-
-function Pictogram({ name, className = 'h-5 w-5' }) {
-  return <img src={`${ART}/${name}.webp`} alt="" aria-hidden="true" draggable="false" className={`shrink-0 select-none object-contain ${className}`} />;
-}
+// The pictogram for a leave type now lives in availabilityUi (My time uses it too).
+export { pictogramFor };
 
 /**
  * One week as columns. Returns { days, lanes, perDay } where a lane is an

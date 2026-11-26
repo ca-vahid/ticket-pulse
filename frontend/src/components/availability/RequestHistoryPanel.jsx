@@ -141,8 +141,9 @@ function HistoryRow({ r, type, nameOf, offices = [] }) {
   );
 }
 
-export default function RequestHistoryPanel({ me, config }) {
-  const [email, setEmail] = useState('');
+export default function RequestHistoryPanel({ me, config, initialEmail = '' }) {
+  // From My time's "Past and cancelled requests are in History": opens on the person's own.
+  const [email, setEmail] = useState(initialEmail || '');
   const [status, setStatus] = useState('');
   const [leaveTypeId, setLeaveTypeId] = useState('');
   const [from, setFrom] = useState('');

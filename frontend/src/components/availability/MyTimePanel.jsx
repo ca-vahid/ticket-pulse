@@ -1,28 +1,35 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Info } from 'lucide-react';
 import { availabilityAPI } from '../../services/api';
 import { notifyAvailabilityChanged } from '../../hooks/useAvailabilityApprovalCount';
 import BalancesRow from './BalancesRow';
 import BookTimeForm from './BookTimeForm';
-import MyRequestsList from './MyRequestsList';
-import { CARD, ErrorNote } from './availabilityUi';
+import ComingUpCard from './ComingUpCard';
+import { CARD, ErrorNote, todayKey } from './availabilityUi';
 
 /** Fired by the page's "Book time away" button: leave a change and book anew. */
 export const BOOK_NEW_EVENT = 'tp:availability-book-new';
 
 /**
- * My time: balances on top, the booking form beside my requests. After a
- * booking, change or cancel the page reloads /me (balances move) and the list.
- * "Change" on a waiting request turns the form into "Change your request"
- * (Nov 2026) until it is saved or left as it was.
+ * My time (redesigned for QA 11-25 #1): the balances as a strip on top, then
+ * "Book time away" (about two thirds) beside "Coming up" (a third). On a phone
+ * it is one column, the booking first. The long list of every request is gone:
+ * Coming up shows the approved and waiting ones that are not over, and past
+ * or cancelled requests are in History (admins) or folded under Coming up.
+ *
+ * After a booking, change or cancel the page reloads /me (balances move) and
+ * the requests. "Change" on a waiting request turns the form into "Change
+ * your request" (Nov 2026) until it is saved or left as it was.
  */
-export default function MyTimePanel({ me, onChanged, toast, bookType = null }) {
+export default function MyTimePanel({ me, onChanged, toast, bookType = null, onOpenHistory = null, historyHref = null }) {
   const [requests, setRequests] = useState(null);
+  const [holidays, setHolidays] = useState({});
   const [error, setError] = useState(null);
   const [editing, setEditing] = useState(null);
+  const today = todayKey();
   // Overview's one-click buttons arrive with the leave type to start on.
   const presetTypeId = Number(bookType) || null;
   const typeById = useMemo(() => new Map((me.leaveTypes || []).map((t) => [t.id, t])), [me.leaveTypes]);
+  const holidaySet = useMemo(() => new Set(Object.keys(holidays)), [holidays]);
 
   const load = useCallback(() => {
     availabilityAPI.myRequests()
@@ -31,6 +38,16 @@ export default function MyTimePanel({ me, onChanged, toast, bookType = null }) {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  // The calendar mutes holidays: the next ones within a year (the most the API gives).
+  useEffect(() => {
+    let live = true;
+    if (typeof availabilityAPI.upcomingHolidays !== 'function') return undefined;
+    Promise.resolve()
+      .then(() => availabilityAPI.upcomingHolidays(10))
+      .then((res) => { if (live) setHolidays(Object.fromEntries((Array.isArray(res?.data) ? res.data : []).map((h) => [String(h.date).slice(0, 10), h.name || 'Holiday']))); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, []);
   useEffect(() => {
     const leave = () => setEditing(null);
     window.addEventListener(BOOK_NEW_EVENT, leave);
@@ -55,37 +72,47 @@ export default function MyTimePanel({ me, onChanged, toast, bookType = null }) {
 
   const startEditing = (r) => {
     setEditing(r);
-    // Bring the form into view (on phones it sits above the list).
+    // Bring the form into view (on phones it sits above Coming up).
     setTimeout(() => {
       const form = document.querySelector('form[data-booking-form]');
-      form?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      form?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
       form?.querySelector('input:checked, input, button')?.focus?.({ preventScroll: true });
     }, 60);
   };
 
   return (
-    <div>
+    <div className="min-w-0" data-testid="my-time">
       <BalancesRow balances={me.balances} leaveTypes={me.leaveTypes} />
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)] lg:items-start">
-        <div className={`${CARD} ${editing ? 'ring-2 ring-primary/40' : ''}`}>
+      <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] lg:items-start" data-testid="my-time-columns">
+        <div className={`min-w-0 ${CARD} ${editing ? 'ring-2 ring-primary/40' : ''}`}>
           <BookTimeForm
             key={editing ? `edit-${editing.id}` : `new-${presetTypeId || 0}`}
             presetTypeId={presetTypeId}
             me={me}
+            requests={requests || []}
+            holidays={holidays}
+            today={today}
             editing={editing}
             onStopEditing={() => setEditing(null)}
             onBooked={() => { setEditing(null); refresh(); }}
             toast={toast}
+            notice={!editing ? me.settings?.purposeNotice || null : null}
           />
-          {me.settings?.purposeNotice && !editing && (
-            <p className="mt-4 flex items-start gap-1.5 text-xs leading-relaxed text-muted-foreground">
-              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />{me.settings.purposeNotice}
-            </p>
-          )}
         </div>
-        <div className="min-w-0">
+        <div className="min-w-0 space-y-3">
           <ErrorNote>{error}</ErrorNote>
-          <MyRequestsList requests={requests} typeById={typeById} onCancel={cancel} onEdit={startEditing} editingId={editing?.id ?? null} offices={me.offices || []} />
+          <ComingUpCard
+            requests={requests}
+            typeById={typeById}
+            offices={me.offices || []}
+            holidaySet={holidaySet}
+            today={today}
+            onCancel={cancel}
+            onEdit={startEditing}
+            editingId={editing?.id ?? null}
+            onOpenHistory={onOpenHistory}
+            historyHref={historyHref}
+          />
         </div>
       </div>
     </div>

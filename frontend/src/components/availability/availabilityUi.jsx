@@ -336,6 +336,24 @@ export function leaveLabel(name, place = null) {
   return place ? `${base} · ${place}` : base;
 }
 
+// ---------------------------------------------------------------- pictograms
+
+const ART = '/brand/vacation-pulse';
+
+/** The pictogram for a leave type, by what it is (Overview, My time). */
+export function pictogramFor(type) {
+  const key = `${type?.key || ''} ${type?.name || ''}`.toLowerCase();
+  if (/sick|medical leave|illness/.test(key)) return 'sick';
+  if (type?.availability === 'WFH' || /home|remote/.test(key)) return 'wfh';
+  if (type?.availability === 'ONSITE' || /site|field|travel/.test(key)) return 'site';
+  if (type?.unit === 'hour' || /appoint|personal|errand/.test(key)) return 'appointment';
+  return 'vacation';
+}
+
+export function Pictogram({ name, className = 'h-5 w-5' }) {
+  return <img src={`${ART}/${name}.webp`} alt="" aria-hidden="true" draggable="false" className={`shrink-0 select-none object-contain ${className}`} />;
+}
+
 export const AVAILABILITY_LABEL = {
   OFF: 'Away', WFH: 'Working from home', ONSITE: 'On site', PARTIAL: 'Partly away', NONE: 'No change',
 };
