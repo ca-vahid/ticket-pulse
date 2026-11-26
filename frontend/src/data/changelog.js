@@ -1,6 +1,14 @@
-export const APP_VERSION = '4.4.20-preview';
+export const APP_VERSION = '4.4.21-preview';
 
 export const changelog = [
+  {
+    version: '4.4.21-preview',
+    date: 'November 25, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>My time, redesigned</strong> &mdash; booking time away is three steps: pick what (your usual types first, the rest under More types), tap a day or two days on the calendar, add a note if needed. One line shows the working days and who approves before you send. A short Coming up list shows what is booked or waiting, each with its details; past and cancelled requests are in History.' },
+      { type: 'fixed', html: '<strong>Cancelled requests left Upcoming</strong> &mdash; a cancelled or denied request no longer shows among your upcoming time away.' },
+    ],
+  },
   {
     version: '4.4.20-preview',
     date: 'November 25, 2026',

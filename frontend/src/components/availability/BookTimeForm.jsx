@@ -1,22 +1,38 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Clock3, Loader2, Pencil, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, Clock3, Info, Loader2, Pencil, XCircle } from 'lucide-react';
 import { availabilityAPI } from '../../services/api';
 import {
-  BTN_LINK, BTN_PRIMARY, BTN_QUIET, COLOR_DOT, COLOR_FILL, ErrorNote, Field, INPUT, TEXTAREA, Toggle,
-  addDaysKey, fmtDay, fmtRange, isSiteVisitType, leaveLabel, minuteToTime, nextWorkdayKey, parseDay, sitePlace, timeToMinute, todayKey, trimNum,
+  BTN_LINK, BTN_PRIMARY, BTN_QUIET, COLOR_FILL, ColorSwatch, ErrorNote, Field, INPUT, TEXTAREA, Toggle, TypeGlyph,
+  addDaysKey, fmtDay, fmtMinute, isSiteVisitType, leaveLabel, minuteToTime, parseDay, sitePlace, timeToMinute, todayKey, trimNum,
 } from './availabilityUi';
+import MonthPicker from './MonthPicker';
+import {
+  PAST_SENTENCE, bookedByDay, countWorkingDays, mostUsedTypes, nextWeekRange, pickDay, rangeWords, requestWords, tomorrowKey,
+} from './bookingModel';
 
 /**
  * "Book time away" — and, since Nov 2026, "Change your request" for one that
- * is still waiting (Vahid: Gaby booked Thu + Fri, then wanted only Fri, and
- * had to cancel and book again).
+ * is still waiting (someone booked Thu + Fri, then wanted only Fri, and had
+ * to cancel and book again).
  *
- * Top to bottom it reads as the questions people ask themselves:
- *   What?   the leave types as a short list to tick (colour + name)
- *   When?   dates with quick picks (Today, Tomorrow, Next week), the part of
- *           the day, and a strip of the days that shows which ones count
- *   Note
- *   Verdict a dry run on the server, in plain words, before anything is sent
+ * Redesigned for QA 11-25 #1 (the QA mockup, refined) as three numbered steps:
+ *   1. What   the person's four most-used types as quiet tiles (pictogram and
+ *             colour as on the Overview); "More types (N)" opens the rest in
+ *             place as their own toggle buttons (the picked one takes the 4th
+ *             tile once More is closed). A site visit asks "Which office?".
+ *   2. When   an inline month calendar: tap a day, tap a second day for a
+ *             range, tap again to start over. Today / Tomorrow / Next week.
+ *             Past days can be picked for any type (an approver confirms
+ *             them, as the server says). Full day / Morning / Afternoon where
+ *             the type allows half days, ranges too (or the hours for an hours
+ *             type). A plain summary of the pick.
+ *   3. Note   optional, or required where the type says so.
+ * Footer: the server's dry run in one line ("5 working days · Vacation · Goes
+ * to your approvers"), rule messages and warnings, and Send request. It stays
+ * reachable on a phone (sticky above the tab bar).
+ *
+ * Props in (`me`, `requests`, `holidays`); the only calls are the dry run and
+ * the send, so it renders in a harness with the API mocked.
  */
 
 const DAY_PARTS = [
@@ -28,11 +44,13 @@ const DAY_PARTS = [
 const STRIP_MAX = 14;
 const OTHER_SITE = 'other';
 const SITE_LOCATION_MAX = 160;
+const VISIBLE_TYPES = 4;
 
 const emptyForm = (typeId) => ({
   leaveTypeId: typeId ? String(typeId) : '',
-  startDate: nextWorkdayKey(),
-  endDate: nextWorkdayKey(),
+  startDate: '',
+  endDate: '',
+  open: false,
   dayPart: 'full',
   startTime: '09:00',
   endTime: '10:00',
@@ -49,6 +67,7 @@ export function formFromRequest(r) {
     leaveTypeId: String(r.leaveTypeId),
     startDate: r.startDate,
     endDate: r.endDate,
+    open: false,
     dayPart: r.dayPart === 'hours' ? 'full' : (r.dayPart || 'full'),
     startTime: r.startMinute != null ? minuteToTime(r.startMinute) : '09:00',
     endTime: r.endMinute != null ? minuteToTime(r.endMinute) : '10:00',
@@ -149,32 +168,24 @@ export function SiteOfficeField({ offices = [], value = '', location = '', onCha
   );
 }
 
-/** Monday to Friday of next week. */
-function nextWeek() {
-  const d = parseDay(todayKey());
-  const toMonday = ((8 - d.getDay()) % 7) || 7;
-  const monday = addDaysKey(todayKey(), toMonday);
-  return { startDate: monday, endDate: addDaysKey(monday, 4) };
-}
-
-/** The next working day after today (skips the weekend). */
-function tomorrowKey() {
-  let k = addDaysKey(todayKey(), 1);
-  while ([0, 6].includes(parseDay(k).getDay())) k = addDaysKey(k, 1);
-  return k;
-}
-
-export function Verdict({ preview, unit, editing = false }) {
-  if (!preview) return null;
+/** What the dry run says, in the words the form has always used. */
+function verdictLook(preview, editing) {
   const { outcome } = preview;
-  const look = outcome === 'approved'
-    ? { Icon: CheckCircle2, cls: 'text-emerald-700 dark:text-emerald-300', text: editing ? 'The change will be approved automatically' : 'Will be approved automatically' }
-    : outcome === 'pending'
-      ? { Icon: Clock3, cls: 'text-amber-700 dark:text-amber-300', text: editing ? 'The change goes to your approvers' : 'Goes to your approvers' }
-      : { Icon: XCircle, cls: 'text-red-700 dark:text-red-300', text: preview.reason || 'This request cannot be booked' };
-  const amount = unit === 'hour'
+  if (outcome === 'approved') return { Icon: CheckCircle2, cls: 'text-emerald-700 dark:text-emerald-300', text: editing ? 'The change will be approved automatically' : 'Will be approved automatically' };
+  if (outcome === 'pending') return { Icon: Clock3, cls: 'text-amber-700 dark:text-amber-300', text: editing ? 'The change goes to your approvers' : 'Goes to your approvers' };
+  return { Icon: XCircle, cls: 'text-red-700 dark:text-red-300', text: preview.reason || 'This request cannot be booked' };
+}
+
+function verdictAmount(preview, unit) {
+  return unit === 'hour'
     ? `${trimNum(preview.hours)} ${Number(preview.hours) === 1 ? 'hour' : 'hours'}`
     : `${trimNum(preview.days)} working ${Number(preview.days) === 1 ? 'day' : 'days'}`;
+}
+
+/** The dry run as a block (kept for other callers; the booking card uses RequestCheck). */
+export function Verdict({ preview, unit, editing = false }) {
+  if (!preview) return null;
+  const look = verdictLook(preview, editing);
   const messages = (preview.fired || []).filter((f) => f.message && f.outcome !== 'warn' && f.message !== preview.reason);
   const warnings = preview.warnings || [];
   return (
@@ -184,9 +195,9 @@ export function Verdict({ preview, unit, editing = false }) {
         <span>{look.text}</span>
       </p>
       <p className="pl-6 text-xs text-muted-foreground">
-        {amount}{unit !== 'hour' && ' (weekends and holidays skipped)'}
+        {verdictAmount(preview, unit)}{unit !== 'hour' && ' (weekends and holidays skipped)'}
         {preview.remaining != null && ` · ${trimNum(preview.remaining)} left after this`}
-        {outcome === 'pending' && preview.reason && ` · ${preview.reason}`}
+        {preview.outcome === 'pending' && preview.reason && ` · ${preview.reason}`}
       </p>
       {messages.length > 0 && (
         <ul className="space-y-0.5 pl-6 text-xs text-foreground/85">
@@ -207,9 +218,52 @@ export function Verdict({ preview, unit, editing = false }) {
 }
 
 /**
+ * The footer's request check in one line: "5 working days · Vacation · Goes
+ * to your approvers", then what is left after it, the rules' messages and
+ * warnings underneath in small type.
+ */
+export function RequestCheck({ preview, unit, typeName, editing = false, hideReason = null }) {
+  if (!preview) return null;
+  const look = verdictLook(preview, editing);
+  const messages = (preview.fired || []).filter((f) => f.message && f.outcome !== 'warn' && f.message !== preview.reason);
+  const warnings = preview.warnings || [];
+  const extra = [
+    preview.remaining != null ? `${trimNum(preview.remaining)} left after this` : null,
+    // `hideReason`: a sentence already shown above (the past-start one), said once only.
+    preview.outcome === 'pending' && preview.reason && preview.reason !== hideReason ? preview.reason : null,
+  ].filter(Boolean).join(' · ');
+  return (
+    <div className="min-w-0 space-y-1" data-testid="availability-verdict">
+      <p className="flex items-start gap-1.5 text-sm">
+        <look.Icon className={`mt-0.5 h-4 w-4 shrink-0 ${look.cls}`} aria-hidden="true" />
+        <span className="min-w-0">
+          {preview.outcome !== 'refused' && <span className="text-foreground" data-testid="request-check-amount">{verdictAmount(preview, unit)} · {typeName} · </span>}
+          <span className={`font-medium ${look.cls}`}>{look.text}</span>
+        </span>
+      </p>
+      {extra && <p className="pl-[1.375rem] text-xs text-muted-foreground">{extra}</p>}
+      {messages.length > 0 && (
+        <ul className="space-y-0.5 pl-[1.375rem] text-xs text-foreground/85">
+          {messages.map((f) => <li key={`r-${f.ruleId}-${f.name}`}>{f.message}</li>)}
+        </ul>
+      )}
+      {warnings.length > 0 && (
+        <ul className="space-y-0.5 pl-[1.375rem] text-xs text-amber-700 dark:text-amber-300">
+          {warnings.map((w) => (
+            <li key={`w-${w.ruleId}-${w.name}`} className="flex items-start gap-1.5">
+              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />{w.message || w.name}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/**
  * The days in the range, one small cell each: counted days filled in the
- * type's colour, weekends and holidays struck through. The server's dry run
- * says which days count; until it answers, weekends are greyed by weekday.
+ * type's colour, weekends and holidays struck through. (The booking card now
+ * shows the range on its calendar; this stays for other callers.)
  */
 export function DayStrip({ startDate, endDate, counted, color, dayPart }) {
   if (!startDate || !endDate || endDate < startDate) return null;
@@ -240,23 +294,67 @@ export function DayStrip({ startDate, endDate, counted, color, dayPart }) {
   );
 }
 
-export default function BookTimeForm({ me, onBooked, toast, editing = null, onStopEditing = null, presetTypeId = null }) {
+const STEP = 'text-xs font-semibold text-foreground';
+// Stable defaults, so the memos below do not recompute on every render.
+const NO_REQUESTS = [];
+const NO_HOLIDAYS = {};
+
+export default function BookTimeForm({
+  me,
+  onBooked,
+  toast,
+  editing = null,
+  onStopEditing = null,
+  presetTypeId = null,
+  requests = NO_REQUESTS,
+  holidays = NO_HOLIDAYS,
+  today = todayKey(),
+  notice = null,
+}) {
+  const uid = useId().replace(/:/g, '');
+  const ids = {
+    what: `bt-${uid}-what`, when: `bt-${uid}-when`, more: `bt-${uid}-more`, note: `bt-${uid}-note`, noteError: `bt-${uid}-note-error`, radio: `leaveType-${uid}`,
+  };
   const types = useMemo(() => (me.leaveTypes || []).filter((t) => t.isActive !== false).sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)), [me.leaveTypes]);
+  const typeById = useMemo(() => new Map((me.leaveTypes || []).map((t) => [t.id, t])), [me.leaveTypes]);
+  const holidaySet = useMemo(() => new Set(Object.keys(holidays || {})), [holidays]);
+  const ranked = useMemo(() => mostUsedTypes(types, requests, VISIBLE_TYPES), [types, requests]);
   const original = useMemo(() => (editing ? formFromRequest(editing) : null), [editing]);
-  const [form, setForm] = useState(() => original || emptyForm((presetTypeId && types.some((t) => t.id === presetTypeId) ? presetTypeId : null) || types[0]?.id));
+  const preset = presetTypeId && types.some((t) => t.id === presetTypeId) ? presetTypeId : null;
+  const [form, setForm] = useState(() => original || emptyForm(preset || ranked[0]?.id || types[0]?.id));
+  // Until the person picks a type, the first tile follows their most-used type (their requests load after the form).
+  const typeTouched = useRef(Boolean(original || preset));
+  const [moreOpen, setMoreOpen] = useState(false);
+  // While More is open the four tiles keep their places (ids); a pick there moves in when it closes.
+  const [frozenTiles, setFrozenTiles] = useState(null);
   const [preview, setPreview] = useState(null);
   const [previewing, setPreviewing] = useState(false);
   const [previewError, setPreviewError] = useState(null);
   const [submitError, setSubmitError] = useState(null);
   const [siteError, setSiteError] = useState(null);
+  const [noteError, setNoteError] = useState(null);
+  const [sent, setSent] = useState(null);
   const [saving, setSaving] = useState(false);
   const seq = useRef(0);
+  const formRef = useRef(null);
+
+  useEffect(() => {
+    if (typeTouched.current || !ranked[0]) return;
+    setForm((f) => (f.leaveTypeId === String(ranked[0].id) ? f : { ...f, leaveTypeId: String(ranked[0].id) }));
+  }, [ranked]);
 
   const type = types.find((t) => String(t.id) === form.leaveTypeId) || null;
   const isHours = type?.unit === 'hour';
-  const set = (patch) => { setForm((f) => ({ ...f, ...patch })); setSubmitError(null); setSiteError(null); };
+  // Any change by the person stops the default type following their most-used one.
+  const set = (patch) => { typeTouched.current = true; setForm((f) => ({ ...f, ...patch })); setSubmitError(null); setSiteError(null); setNoteError(null); setSent(null); };
 
-  const valid = Boolean(type && form.startDate && (isHours || (form.endDate && form.endDate >= form.startDate))
+  const picked = Boolean(form.startDate);
+  const single = picked && (isHours || form.startDate === form.endDate);
+  // Any type can be booked in the past (as before the redesign); one that is
+  // not "booked after the fact" then goes to an approver, and the summary says so.
+  const startsInPast = picked && form.startDate < today;
+  const pastNeedsApprover = startsInPast && !type?.allowPastDated;
+  const valid = Boolean(type && picked && (isHours || (form.endDate && form.endDate >= form.startDate))
     && (!isHours || (form.startTime && form.endTime && form.endTime > form.startTime)));
   // "Which office?" (25 Nov 2026): required for a site visit when booking, and
   // when a change touches the type or the dates (an older booking without one
@@ -265,12 +363,13 @@ export default function BookTimeForm({ me, onBooked, toast, editing = null, onSt
   const siteRequired = onSite && (!original || original.leaveTypeId !== form.leaveTypeId
     || original.startDate !== form.startDate || original.endDate !== form.endDate);
   const siteOk = !siteRequired || siteAnswered(form);
-  const body = useMemo(() => (type ? buildRequestBody(form, type) : null), [form, type]);
+  const body = useMemo(() => (type && picked ? buildRequestBody(form, type) : null), [form, type, picked]);
   const bodyKey = JSON.stringify(body);
-  // The dry run does not depend on the place, so typing a site does not re-ask it.
+  // The dry run does not depend on the place or the note, so typing either does
+  // not re-ask it (nor flip the footer back to "Checking…").
   const previewKey = useMemo(() => {
     if (!body) return 'null';
-    return JSON.stringify(Object.fromEntries(Object.entries(body).filter(([k]) => k !== 'siteOfficeId' && k !== 'siteLocation')));
+    return JSON.stringify(Object.fromEntries(Object.entries(body).filter(([k]) => !['siteOfficeId', 'siteLocation', 'note'].includes(k))));
   }, [body]);
   const originalKey = useMemo(() => {
     if (!original) return null;
@@ -282,23 +381,143 @@ export default function BookTimeForm({ me, onBooked, toast, editing = null, onSt
     && Boolean(original.wantsAutoReply) === Boolean(form.wantsAutoReply));
 
   useEffect(() => {
-    if (!valid) { setPreview(null); setPreviewError(null); return undefined; }
+    if (!valid) { setPreview(null); setPreviewError(null); setPreviewing(false); return undefined; }
     const mine = ++seq.current;
     setPreviewing(true);
     const t = setTimeout(() => {
       availabilityAPI.preview({ ...JSON.parse(previewKey), ...(editing ? { requestId: editing.id } : {}) })
-        .then((res) => { if (mine === seq.current) { setPreview(res?.data || null); setPreviewError(null); } })
+        // Each answer remembers the pick it is for, so an older one is never shown for a newer pick.
+        .then((res) => { if (mine === seq.current) { setPreview(res?.data ? { ...res.data, forKey: previewKey } : null); setPreviewError(null); } })
         .catch((err) => { if (mine === seq.current) { setPreview(null); setPreviewError(err?.message || 'Could not check this request'); } })
         .finally(() => { if (mine === seq.current) setPreviewing(false); });
     }, 350);
     return () => clearTimeout(t);
   }, [previewKey, valid, editing]);
 
+  const booked = useMemo(
+    () => bookedByDay(requests, typeById, { excludeId: editing?.id ?? null, holidaySet }),
+    [requests, typeById, editing, holidaySet],
+  );
+  const fresh = valid && preview?.forKey === previewKey ? preview : null;
+
+  if (!types.length) {
+    return <p className="text-sm text-muted-foreground">No leave types are set up yet — ask a Vacation Pulse admin.</p>;
+  }
+
+  // ---- 1. What
+  const byId = new Map(types.map((t) => [t.id, t]));
+  const openVisible = !type || ranked.some((t) => t.id === type.id) ? ranked : [...ranked.slice(0, VISIBLE_TYPES - 1), type];
+  const visible = frozenTiles ? frozenTiles.map((id) => byId.get(id)).filter(Boolean) : openVisible;
+  const rest = types.filter((t) => !visible.some((v) => v.id === t.id));
+  const toggleMore = () => {
+    if (moreOpen) { setMoreOpen(false); setFrozenTiles(null); return; }
+    setFrozenTiles(openVisible.map((t) => t.id));
+    setMoreOpen(true);
+  };
+  const chooseType = (t) => {
+    typeTouched.current = true;
+    const patch = { leaveTypeId: String(t.id) };
+    // An hours type is one day: a range keeps its first day.
+    if (t.unit === 'hour' && form.startDate && form.endDate !== form.startDate) Object.assign(patch, { endDate: form.startDate, open: false });
+    if (!t.allowHalfDays) patch.dayPart = 'full';
+    set(patch);
+  };
+
+  const tileInner = (t, on, hintId) => (
+    <>
+      <TypeGlyph type={t} className="h-6 w-6" />
+      <span className="min-w-0 flex-1 leading-tight">
+        <span className={on ? 'font-medium' : ''}>{t.name}</span>
+        {t.description && <span id={hintId} className="mt-0.5 block text-xs text-muted-foreground">{t.description}</span>}
+      </span>
+      <ColorSwatch color={t.color} />
+    </>
+  );
+  const tileClass = (on) => `flex min-h-[2.75rem] min-w-0 cursor-pointer items-center gap-2.5 rounded-md border px-2.5 py-2 text-left text-sm ${on
+    ? 'border-primary bg-primary/5 text-foreground dark:bg-primary/15'
+    : 'border-border text-foreground/85 hover:bg-muted'}`;
+
+  // The four tiles: one radio group (arrow keys move within it).
+  const tile = (t) => {
+    const on = String(t.id) === form.leaveTypeId;
+    const hintId = t.description ? `bt-${uid}-type-${t.id}-hint` : undefined;
+    return (
+      <label key={t.id} className={`${tileClass(on)} has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring`}>
+        <input
+          type="radio"
+          name={ids.radio}
+          value={String(t.id)}
+          checked={on}
+          onChange={() => chooseType(t)}
+          aria-label={t.name}
+          aria-describedby={hintId}
+          className="sr-only"
+        />
+        {tileInner(t, on, hintId)}
+      </label>
+    );
+  };
+  // More types: toggle buttons of their own, each reached with Tab; the group stays open after a pick.
+  const moreTile = (t) => {
+    const on = String(t.id) === form.leaveTypeId;
+    const hintId = t.description ? `bt-${uid}-more-${t.id}-hint` : undefined;
+    return (
+      <button key={t.id} type="button" className={`tp-focus-ring ${tileClass(on)}`} aria-pressed={on} aria-label={t.name} aria-describedby={hintId} onClick={() => chooseType(t)}>
+        {tileInner(t, on, hintId)}
+      </button>
+    );
+  };
+
+  // ---- 2. When
+  const sel = { start: form.startDate || null, end: form.endDate || null, open: form.open };
+  // A range keeps its part of the day: half days on a range are allowed (each day a morning, say).
+  const applyPick = (p) => set({ startDate: p.start, endDate: p.end, open: p.open });
+  const onPick = (key) => applyPick(pickDay(sel, key, { single: isHours }));
+  const quick = [
+    { label: 'Today', run: () => applyPick({ start: today, end: today, open: !isHours }) },
+    { label: 'Tomorrow', run: () => { const k = tomorrowKey(today, holidaySet); applyPick({ start: k, end: k, open: !isHours }); } },
+    ...(isHours ? [] : [{ label: 'Next week', run: () => { const r = nextWeekRange(today); applyPick({ start: r.start, end: r.end, open: false }); } }]),
+  ];
+  const showDayPart = picked && !isHours && Boolean(type?.allowHalfDays);
+  const half = type?.allowHalfDays && (form.dayPart === 'am' || form.dayPart === 'pm') ? form.dayPart : null;
+  // The count: the server's once its check for this pick is back (it knows the
+  // person's own working week), else weekends and holidays skipped here.
+  const localDays = picked && !isHours ? countWorkingDays(form.startDate, form.endDate, holidaySet) * (half ? 0.5 : 1) : 0;
+  const dayCount = fresh && !isHours && fresh.days != null ? Number(fresh.days) : localDays;
+  const countWords = dayCount === 0 ? 'no working days' : `${trimNum(dayCount)} working ${dayCount === 1 ? 'day' : 'days'}`;
+  const halfWords = half ? (single ? (half === 'am' ? 'morning' : 'afternoon') : (half === 'am' ? 'mornings' : 'afternoons')) : null;
+  const amountWords = !picked ? '' : isHours
+    ? (form.startTime && form.endTime && form.endTime > form.startTime ? `${fmtMinute(timeToMinute(form.startTime))}–${fmtMinute(timeToMinute(form.endTime))}` : 'pick the hours')
+    : single && halfWords ? halfWords
+      : [countWords, halfWords].filter(Boolean).join(' · ');
+  const extendHint = picked && form.open && single && !isHours ? 'tap another day for a range' : null;
+  const dates = picked ? rangeWords(form.startDate, isHours ? form.startDate : form.endDate, { today }) : '';
+  const summary = picked ? [dates, amountWords, extendHint].filter(Boolean).join(' · ') : '';
+  const spoken = picked ? [rangeWords(form.startDate, isHours ? form.startDate : form.endDate, { today, joiner: ' to ' }), amountWords.replace(' · ', ', '), extendHint, pastNeedsApprover ? PAST_SENTENCE : null].filter(Boolean).join(', ') : '';
+
+  // ---- Footer
+  const refused = fresh?.outcome === 'refused';
+  const stays = type?.availability === 'WFH' || type?.availability === 'ONSITE';
+  const submitLabel = editing
+    ? (fresh?.outcome === 'approved' ? 'Save changes' : 'Send changes for approval')
+    : 'Send request';
+  const waitingOn = (editing?.waitingOn || []).map((p) => p.name || p.email).filter(Boolean);
+
   const submit = async (e) => {
     e.preventDefault();
     if (!valid || saving || unchanged) return;
-    if (!siteOk) { setSiteError(form.siteOfficeId === OTHER_SITE ? 'Say which site you are visiting' : 'Pick which office the site visit is at'); return; }
-    if (type?.requiresNote && !form.note.trim()) { setSubmitError(`${type.name} needs a note`); return; }
+    if (!siteOk) {
+      const other = form.siteOfficeId === OTHER_SITE;
+      setSiteError(other ? 'Say which site you are visiting' : 'Pick which office the site visit is at');
+      // Focus the control the error is about, as for the note.
+      formRef.current?.querySelector(`[data-testid="site-office-field"] ${other ? 'input' : 'select'}`)?.focus?.();
+      return;
+    }
+    if (type?.requiresNote && !form.note.trim()) {
+      setNoteError(`${type.name} needs a note`);
+      document.getElementById(ids.note)?.focus?.();
+      return;
+    }
     setSaving(true);
     setSubmitError(null);
     const extras = {
@@ -312,7 +531,11 @@ export default function BookTimeForm({ me, onBooked, toast, editing = null, onSt
       const status = res?.data?.status;
       if (editing) toast?.(status === 'approved' ? `${type.name} changed and approved` : 'Your changes went to your approvers');
       else toast?.(status === 'approved' ? `${type.name} booked and approved` : `${type.name} sent to your approvers`);
-      if (!editing) setForm(emptyForm(type.id));
+      if (!editing) {
+        const what = `${leaveLabel(type.name, sitePlace(siteBody(form, type), me.offices))}, ${rangeWords(form.startDate, body.endDate, { today })}`;
+        setForm(emptyForm(type.id));
+        setSent({ text: status === 'approved' ? `${what}: booked and approved.` : `${what}: sent to your approvers.` });
+      }
       setPreview(null);
       onBooked?.(res?.data);
     } catch (err) {
@@ -322,61 +545,74 @@ export default function BookTimeForm({ me, onBooked, toast, editing = null, onSt
     }
   };
 
-  if (!types.length) {
-    return <p className="text-sm text-muted-foreground">No leave types are set up yet — ask a Vacation Pulse admin.</p>;
-  }
-
-  const refused = preview?.outcome === 'refused';
-  const counted = preview?.dates ? new Set(preview.dates.map((d) => String(d).slice(0, 10))) : null;
-  const stays = type?.availability === 'WFH' || type?.availability === 'ONSITE';
-  const pickDates = (patch) => set(isHours ? { startDate: patch.startDate, endDate: patch.startDate } : patch);
-  const quick = [
-    { label: 'Today', run: () => pickDates({ startDate: todayKey(), endDate: todayKey() }) },
-    { label: 'Tomorrow', run: () => { const k = tomorrowKey(); pickDates({ startDate: k, endDate: k }); } },
-    ...(isHours ? [] : [{ label: 'Next week', run: () => pickDates(nextWeek()) }]),
-  ];
-  const submitLabel = editing
-    ? (preview?.outcome === 'approved' ? 'Save changes' : 'Send changes for approval')
-    : (preview?.outcome === 'pending' ? 'Send for approval' : 'Book');
-  const waitingOn = (editing?.waitingOn || []).map((p) => p.name || p.email).filter(Boolean);
+  const typeName = leaveLabel(type?.name, onSite ? sitePlace(siteBody(form, type), me.offices) : null);
+  let status;
+  let statusWords = '';
+  if (editing && unchanged) { statusWords = 'Change the type, dates, place or note to save.'; status = <span className="text-sm text-muted-foreground">{statusWords}</span>; }
+  else if (!picked) {
+    statusWords = sent ? sent.text : '';
+    status = sent
+      ? <span className="flex items-start gap-1.5 text-sm text-foreground" data-testid="booking-sent"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-300" aria-hidden="true" />{sent.text}</span>
+      : <span className="text-sm text-muted-foreground" data-testid="booking-pick-first">Pick a day to continue</span>;
+  } else if (!valid) { statusWords = 'Pick a start and an end time'; status = <span className="text-sm text-muted-foreground">{statusWords}</span>; }
+  else if (fresh) {
+    const look = verdictLook(fresh, Boolean(editing));
+    statusWords = fresh.outcome === 'refused' ? look.text : `${verdictAmount(fresh, type?.unit)} · ${typeName} · ${look.text}`;
+    status = <RequestCheck preview={fresh} unit={type?.unit} typeName={typeName} editing={Boolean(editing)} hideReason={pastNeedsApprover ? PAST_SENTENCE : null} />;
+  } else if (previewing) status = <span className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Checking…</span>;
+  // One polite live region for the whole card: the pick, then what the check says (or the confirmation).
+  const live = [spoken, statusWords].filter(Boolean).join('. ');
 
   return (
-    <form onSubmit={submit} className="space-y-4" aria-label={editing ? 'Change your request' : 'Book time away'} data-booking-form="true" data-editing={editing ? 'true' : undefined}>
+    <form
+      ref={formRef}
+      onSubmit={submit}
+      noValidate
+      // The sticky footer never covers the field in focus.
+      className="space-y-5 [&_input]:scroll-mb-28 [&_select]:scroll-mb-28 [&_textarea]:scroll-mb-28 [&_td]:scroll-mb-28 [&_button]:scroll-mb-28"
+      aria-label={editing ? 'Change your request' : 'Book time away'}
+      data-booking-form="true"
+      data-editing={editing ? 'true' : undefined}
+    >
       {editing ? (
         <div className="space-y-1">
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
             <Pencil className="h-4 w-4 text-primary" aria-hidden="true" />Change your request
           </h2>
           <p className="text-xs text-muted-foreground">
-            Now: {leaveLabel(types.find((t) => t.id === editing.leaveTypeId)?.name, sitePlace(editing, me.offices))}, {fmtRange(editing)}
+            Now: {leaveLabel(types.find((t) => t.id === editing.leaveTypeId)?.name, sitePlace(editing, me.offices))}, {requestWords(editing, { today })}
             {waitingOn.length > 0 && ` · waiting for ${waitingOn.join(' or ')}`}.
             {' '}It stays the same request; the rules check it again and your approvers see what changed.
           </p>
         </div>
       ) : (
-        <h2 className="text-sm font-semibold text-foreground">Book time away</h2>
+        <h2 className="text-base font-semibold text-foreground">Book time away</h2>
       )}
 
-      <fieldset>
-        <legend className="mb-1.5 text-xs font-medium text-muted-foreground">What</legend>
-        <div className="grid grid-cols-2 gap-1.5">
-          {types.map((t) => {
-            const on = String(t.id) === form.leaveTypeId;
-            return (
-              <label
-                key={t.id}
-                className={`flex min-w-0 cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-2 text-sm transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring ${on
-                  ? 'border-primary bg-primary/5 text-foreground dark:bg-primary/15'
-                  : 'border-border text-foreground/85 hover:bg-muted'}`}
-              >
-                <input type="radio" name="leaveType" value={String(t.id)} checked={on} onChange={() => set({ leaveTypeId: String(t.id) })} className="sr-only" />
-                <span className={`h-2.5 w-2.5 shrink-0 rounded-sm ${COLOR_DOT[t.color] || COLOR_DOT.slate}`} aria-hidden="true" />
-                <span className="min-w-0 leading-tight">{t.name}</span>
-              </label>
-            );
-          })}
+      {/* 1. What */}
+      <fieldset className="min-w-0 space-y-2">
+        <legend id={ids.what} className={`${STEP} mb-2`}>1. What</legend>
+        <div className="grid grid-cols-2 gap-2" data-testid="type-tiles">
+          {visible.map((t) => tile(t))}
         </div>
-        {stays && <p className="mt-1.5 text-xs text-muted-foreground">Shows on the team calendar; you stay available.</p>}
+        {rest.length > 0 && (
+          <button
+            type="button"
+            className={`${BTN_LINK} -ml-2 text-xs`}
+            onClick={toggleMore}
+            aria-expanded={moreOpen}
+            aria-controls={moreOpen ? ids.more : undefined}
+          >
+            {moreOpen ? 'Fewer types' : `More types (${rest.length})`}
+            <ChevronDown className={`h-3.5 w-3.5 ${moreOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+          </button>
+        )}
+        {moreOpen && rest.length > 0 && (
+          <div id={ids.more} role="group" aria-label="More types" className="grid grid-cols-2 gap-2 animate-fadeIn" data-testid="more-types">
+            {rest.map((t) => moreTile(t))}
+          </div>
+        )}
+        {stays && <p className="text-xs text-muted-foreground">Shows on the team calendar; you stay available.</p>}
       </fieldset>
 
       {onSite && (
@@ -391,50 +627,40 @@ export default function BookTimeForm({ me, onBooked, toast, editing = null, onSt
         />
       )}
 
-      <fieldset className="space-y-2" aria-labelledby="av-when-label">
-        <div className="flex flex-wrap items-baseline justify-between gap-x-2">
-          <span id="av-when-label" className="text-xs font-medium text-muted-foreground">When</span>
+      {/* 2. When */}
+      <fieldset className="min-w-0 space-y-3" aria-labelledby={ids.when}>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <p className="text-xs text-muted-foreground">
+            <span id={ids.when} className={STEP}>2. When</span>
+            <span> — {isHours ? 'tap a day' : 'tap a day, or tap two days for a range'}</span>
+          </p>
           <span className="-mr-2 flex flex-wrap items-center">
             {quick.map((q) => (
               <button key={q.label} type="button" className={`${BTN_LINK} px-1.5 py-0.5 text-xs`} onClick={q.run}>{q.label}</button>
             ))}
           </span>
         </div>
-        {/* QA 10-15 #8: in the narrow drawer the two time boxes could not shrink and "To" sat on top of
-            "From". For an hours booking the date and the From/To pair each get the full row. */}
-        <div className="grid gap-2 sm:grid-cols-2">
-          <Field label={isHours ? 'Date' : 'From'} className={isHours ? 'sm:col-span-2' : ''}>
-            <input
-              type="date"
-              className={INPUT}
-              value={form.startDate}
-              onChange={(e) => set({ startDate: e.target.value, ...(form.endDate < e.target.value ? { endDate: e.target.value } : {}) })}
-              aria-label={isHours ? 'Date' : 'Start date'}
-            />
-          </Field>
-          {!isHours ? (
-            <Field label="To">
-              <input type="date" className={INPUT} min={form.startDate} value={form.endDate} onChange={(e) => set({ endDate: e.target.value })} aria-label="End date" />
-            </Field>
-          ) : (
-            <div className="grid grid-cols-2 gap-2 sm:col-span-2">
-              <Field label="From">
-                <input type="time" className={INPUT} value={form.startTime} onChange={(e) => set({ startTime: e.target.value })} aria-label="Start time" />
-              </Field>
-              <Field label="To">
-                <input type="time" className={INPUT} value={form.endTime} onChange={(e) => set({ endTime: e.target.value })} aria-label="End time" />
-              </Field>
-            </div>
-          )}
+
+        <div className="rounded-lg border border-border/70 p-2 sm:p-3">
+          <MonthPicker
+            start={sel.start}
+            end={isHours ? sel.start : sel.end}
+            onPick={onPick}
+            today={today}
+            holidays={holidays || {}}
+            booked={booked}
+            labelledBy={ids.when}
+            single={isHours}
+          />
         </div>
 
-        {!isHours && type?.allowHalfDays && (
-          <div role="radiogroup" aria-label="Part of the day" className="inline-flex rounded-lg border border-input p-0.5">
+        {showDayPart && (
+          <div role="radiogroup" aria-label="Part of the day" className="inline-flex rounded-md border border-input p-0.5">
             {DAY_PARTS.map((p) => {
               const on = form.dayPart === p.value;
               return (
-                <label key={p.value} className={`cursor-pointer rounded-md px-3 py-1 text-xs font-medium has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring ${on ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
-                  <input type="radio" name="dayPart" value={p.value} checked={on} onChange={() => set({ dayPart: p.value })} className="sr-only" />
+                <label key={p.value} className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring ${on ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                  <input type="radio" name={`dayPart-${uid}`} value={p.value} checked={on} onChange={() => set({ dayPart: p.value })} className="sr-only" />
                   {p.label}
                 </label>
               );
@@ -442,12 +668,50 @@ export default function BookTimeForm({ me, onBooked, toast, editing = null, onSt
           </div>
         )}
 
-        {!isHours && <DayStrip startDate={form.startDate} endDate={form.endDate} counted={counted} color={type?.color} dayPart={type?.allowHalfDays ? form.dayPart : 'full'} />}
+        {isHours && picked && (
+          <div className="grid max-w-xs grid-cols-2 gap-2">
+            <Field label="From">
+              <input type="time" className={INPUT} value={form.startTime} onChange={(e) => set({ startTime: e.target.value })} aria-label="Start time" />
+            </Field>
+            <Field label="To">
+              <input type="time" className={INPUT} value={form.endTime} onChange={(e) => set({ endTime: e.target.value })} aria-label="End time" />
+            </Field>
+          </div>
+        )}
+
+        {picked && (
+          <div className="space-y-0.5" aria-hidden="true">
+            <p className="text-sm font-medium text-foreground" data-testid="pick-summary">{summary}</p>
+            {pastNeedsApprover && (
+              <p className="flex items-start gap-1.5 text-xs text-muted-foreground" data-testid="pick-past">
+                <Clock3 className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />{PAST_SENTENCE}
+              </p>
+            )}
+          </div>
+        )}
+        {/* The spoken words of the pick, for the live region below; hidden so it is never read twice. */}
+        <p hidden data-testid="pick-spoken">{spoken}</p>
       </fieldset>
 
-      <Field label={type?.requiresNote ? 'Note (required)' : 'Note (optional)'}>
-        <textarea rows={2} className={TEXTAREA} value={form.note} onChange={(e) => set({ note: e.target.value })} aria-label="Note" maxLength={1000} placeholder={type?.requiresNote ? 'Why you need it' : 'Anything your approver should know'} />
-      </Field>
+      {/* 3. Note */}
+      <div className="grid min-w-0 gap-1.5 text-sm">
+        <label htmlFor={ids.note} className="text-xs text-muted-foreground">
+          <span className={STEP}>3. Note</span> {type?.requiresNote ? '(required)' : '(optional)'}
+        </label>
+        <textarea
+          id={ids.note}
+          rows={2}
+          className={`${TEXTAREA}${noteError ? ' border-destructive' : ''}`}
+          value={form.note}
+          onChange={(e) => set({ note: e.target.value })}
+          maxLength={1000}
+          placeholder={type?.requiresNote ? 'Why you need it' : 'Anything your approver should know'}
+          aria-required={type?.requiresNote || undefined}
+          aria-invalid={noteError ? true : undefined}
+          aria-describedby={noteError ? ids.noteError : undefined}
+        />
+        {noteError && <p id={ids.noteError} role="alert" className="text-xs text-red-700 dark:text-red-300">{noteError}</p>}
+      </div>
 
       {(me.settings?.outlookEventsEnabled || me.settings?.autoRepliesEnabled) && (
         <div className="space-y-1.5">
@@ -460,23 +724,36 @@ export default function BookTimeForm({ me, onBooked, toast, editing = null, onSt
         </div>
       )}
 
-      {previewing && !preview && (
-        <p className="flex items-center gap-2 border-t border-border pt-3 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Checking…</p>
+      {notice && (
+        <p className="flex items-start gap-1.5 text-xs leading-relaxed text-muted-foreground">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />{notice}
+        </p>
       )}
-      {!unchanged && <Verdict preview={preview} unit={type?.unit} editing={Boolean(editing)} />}
       {previewError && <p className="text-xs text-red-700 dark:text-red-300">{previewError}</p>}
       <ErrorNote>{submitError}</ErrorNote>
 
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        {editing && unchanged && <span className="mr-auto text-xs text-muted-foreground">Change the type, dates, place or note to save.</span>}
-        {editing && (
-          <button type="button" className={BTN_QUIET} onClick={() => onStopEditing?.()} disabled={saving}>Keep it as it was</button>
-        )}
-        <button type="submit" className={BTN_PRIMARY} disabled={!valid || saving || refused || unchanged}>
-          {saving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
-          {submitLabel}
-        </button>
+      <p className="sr-only" aria-live="polite" data-testid="booking-live">{live}</p>
+
+      {/* The footer stays reachable on a phone: sticky above the tab bar and the safe area.
+          `!-mb-4`: the form's space-y would zero the bottom margin, leaving a gap under the footer. */}
+      <div
+        className="sticky bottom-[calc(3.25rem_+_env(safe-area-inset-bottom))] z-10 -mx-4 !-mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-b-xl border-t border-border bg-card px-4 py-3 md:bottom-0"
+        data-testid="booking-footer"
+      >
+        <div className="min-w-0 flex-1 basis-56">{status}</div>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {editing && (
+            <button type="button" className={BTN_QUIET} onClick={() => onStopEditing?.()} disabled={saving}>Keep it as it was</button>
+          )}
+          <button type="submit" className={`${BTN_PRIMARY} h-10 px-4`} disabled={!valid || saving || refused || unchanged}>
+            {saving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+            {submitLabel}
+          </button>
+        </div>
       </div>
     </form>
   );
 }
+
+/** The booking card, by the name the redesign uses. */
+export { BookTimeForm as BookTimeCard };

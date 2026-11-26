@@ -80,7 +80,8 @@ describe('#2 what My time says after the cancel', () => {
     api.cancelRequest.mockResolvedValue({ data: response });
     const toast = vi.fn();
     render(<MyTimePanel me={me} toast={toast} onChanged={vi.fn()} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    // QA 11-25: the cancel is the × on the row in Coming up.
+    fireEvent.click(await screen.findByRole('button', { name: /^Cancel Vacation, / }));
     fireEvent.click(screen.getByRole('button', { name: 'Cancel request' }));
     await waitFor(() => expect(toast).toHaveBeenCalled());
     return toast;

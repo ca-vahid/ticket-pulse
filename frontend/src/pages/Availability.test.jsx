@@ -17,12 +17,6 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
 const pad = (n) => String(n).padStart(2, '0');
 const now = new Date();
 const TODAY = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-// The booking form starts on the next working day (today, or Monday at a weekend).
-const NEXT_WORKDAY = (() => {
-  const d = new Date();
-  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-})();
 
 const TYPES = [
   { id: 1, key: 'vacation', name: 'Vacation', color: 'emerald', unit: 'day', allowHalfDays: true, requiresApproval: true, availability: 'OFF', visibility: 'public', requiresNote: false, tracksBalance: true, sortOrder: 10, isActive: true },
@@ -105,41 +99,53 @@ beforeEach(() => {
 });
 afterEach(() => cleanup());
 
+// QA 11-25 #1: the card starts with no day picked; "Today" picks one.
+const pickToday = async () => {
+  fireEvent.click(await screen.findByRole('button', { name: 'Today' }));
+};
+
 describe('My time', () => {
-  test('shows balances, the purpose notice and my requests', async () => {
+  test('shows balances, the purpose notice and Coming up (no long list)', async () => {
     renderAt('/availability/my-time');
     const balances = await screen.findByTestId('availability-balances');
     expect(within(balances).getByText('9')).toBeInTheDocument();
     expect(balances).toHaveTextContent('of 15 · 3 taken · 2 booked · 1 pending');
     expect(screen.getByText('We record time away for scheduling only.')).toBeInTheDocument();
-    expect(await screen.findByText('Upcoming')).toBeInTheDocument();
-    expect(screen.getByText('Past')).toBeInTheDocument();
+    expect(await screen.findByTestId('coming-up-31')).toBeInTheDocument();
+    // The 2020 request is past: folded away, not listed.
+    expect(screen.queryByTestId('coming-up-30')).toBeNull();
+    expect(screen.queryByText('Upcoming')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Past and cancelled requests (1)' })).toBeInTheDocument();
     // No Outlook boxes while the admin switches are off.
     expect(screen.queryByLabelText('Add to my Outlook calendar')).not.toBeInTheDocument();
   });
 
   test('verdict: pending says it goes to approvers, with warnings and working days', async () => {
     renderAt('/availability/my-time');
+    expect(await screen.findByRole('button', { name: 'Send request' })).toBeDisabled();
+    expect(screen.getByText('Pick a day to continue')).toBeInTheDocument();
+    await pickToday();
     const verdict = await screen.findByTestId('availability-verdict', {}, { timeout: 2000 });
-    expect(verdict).toHaveTextContent('Goes to your approvers');
-    expect(verdict).toHaveTextContent('3 working days');
+    expect(verdict).toHaveTextContent('3 working days · Vacation · Goes to your approvers');
     expect(verdict).toHaveTextContent('Two others are away that week.');
-    expect(screen.getByRole('button', { name: 'Send for approval' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Send request' })).toBeEnabled();
   });
 
   test('verdict: approved automatically', async () => {
     previewKind = 'approved';
     renderAt('/availability/my-time');
     await pickType('Working from home');
+    await pickToday();
     await waitFor(() => expect(screen.getByTestId('availability-verdict')).toHaveTextContent('Will be approved automatically'), { timeout: 2000 });
   });
 
   test('verdict: refused shows the reason and blocks submit', async () => {
     previewKind = 'refused';
     renderAt('/availability/my-time');
+    await pickToday();
     const verdict = await screen.findByTestId('availability-verdict', {}, { timeout: 2000 });
     expect(verdict).toHaveTextContent('It overlaps a blackout period (2026-12-20 to 2026-12-31): Year end.');
-    expect(screen.getByRole('button', { name: 'Book' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Send request' })).toBeDisabled();
   });
 
   test('submitting sends the request and offers Outlook boxes only when enabled', async () => {
@@ -147,33 +153,44 @@ describe('My time', () => {
     renderAt('/availability/my-time');
     const outlook = await screen.findByLabelText('Add to my Outlook calendar');
     expect(outlook).not.toBeChecked();
+    await pickToday();
     fireEvent.click(screen.getByRole('radio', { name: 'Morning' }));
-    fireEvent.change(screen.getByLabelText('Note'), { target: { value: 'Dentist after' } });
+    fireEvent.change(screen.getByLabelText(/Note/), { target: { value: 'Dentist after' } });
     fireEvent.click(outlook);
     await screen.findByTestId('availability-verdict', {}, { timeout: 2000 });
-    fireEvent.click(screen.getByRole('button', { name: 'Send for approval' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send request' }));
     await waitFor(() => expect(api.createRequest).toHaveBeenCalled());
     expect(api.createRequest.mock.calls[0][0]).toEqual(expect.objectContaining({
-      leaveTypeId: 1, startDate: NEXT_WORKDAY, endDate: NEXT_WORKDAY, dayPart: 'am', note: 'Dentist after', wantsOutlookEvent: true, wantsAutoReply: false,
+      leaveTypeId: 1, startDate: TODAY, endDate: TODAY, dayPart: 'am', note: 'Dentist after', wantsOutlookEvent: true, wantsAutoReply: false,
     }));
     expect(await screen.findByTestId('availability-toast')).toHaveTextContent('Vacation sent to your approvers');
+    expect(await screen.findByTestId('booking-sent')).toHaveTextContent('sent to your approvers.');
     await waitFor(() => expect(api.me).toHaveBeenCalledTimes(2));
   });
 
   test('a server refusal on submit shows inline', async () => {
     api.createRequest.mockRejectedValueOnce(new Error('At least 14 days notice is needed.'));
     renderAt('/availability/my-time');
+    await pickToday();
     await screen.findByTestId('availability-verdict', {}, { timeout: 2000 });
-    fireEvent.click(screen.getByRole('button', { name: 'Send for approval' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send request' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('At least 14 days notice is needed.');
   });
 
   test('cancel asks first', async () => {
     renderAt('/availability/my-time');
-    const row = await screen.findByTestId('my-request-31');
-    fireEvent.click(within(row).getByRole('button', { name: 'Cancel' }));
+    const row = await screen.findByTestId('coming-up-31');
+    fireEvent.click(within(row).getByRole('button', { name: /^Cancel Vacation, / }));
     fireEvent.click(within(row).getByRole('button', { name: 'Cancel request' }));
     await waitFor(() => expect(api.cancelRequest).toHaveBeenCalledWith(31));
+  });
+
+  test('admins: "Past and cancelled requests are in History" opens History on their own requests', async () => {
+    me = baseMe({ isAdmin: true });
+    renderAt('/availability/my-time');
+    fireEvent.click(await screen.findByRole('link', { name: 'Past and cancelled requests are in History' }));
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'History' })).toHaveAttribute('aria-selected', 'true'));
+    await waitFor(() => expect(api.requestHistory).toHaveBeenLastCalledWith(expect.objectContaining({ email: 'kim@x.ca' })));
   });
 });
 

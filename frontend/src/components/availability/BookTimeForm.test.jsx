@@ -20,10 +20,10 @@ const ME = {
   ],
   settings: {},
 };
-// Gaby: Thu 12 + Fri 13 Nov, waiting for Vahid.
+// Thu 12 + Fri 13 Nov, waiting for an approver (invented names).
 const THU_FRI = {
   id: 210, leaveTypeId: 1, startDate: '2099-11-12', endDate: '2099-11-13', dayPart: 'full', days: 2, status: 'pending',
-  note: null, source: 'app', editable: true, waitingOn: [{ email: 'vahid@bgc.ca', name: 'Vahid Haeri' }],
+  note: null, source: 'app', editable: true, waitingOn: [{ email: 'robin.vale@example.com', name: 'Robin Vale' }],
 };
 
 beforeEach(() => {
@@ -41,15 +41,17 @@ describe('changing a waiting request', () => {
     const toast = vi.fn();
     render(<BookTimeForm me={ME} editing={THU_FRI} onBooked={onBooked} toast={toast} onStopEditing={vi.fn()} />);
     expect(screen.getByRole('form', { name: 'Change your request' })).toBeInTheDocument();
-    expect(screen.getByText(/waiting for Vahid Haeri/)).toBeInTheDocument();
-    expect(screen.getByLabelText('Start date')).toHaveValue('2099-11-12');
+    expect(screen.getByText(/waiting for Robin Vale/)).toBeInTheDocument();
+    // The calendar opens on the request's month with its two days picked.
+    expect(screen.getAllByRole('gridcell', { selected: true }).map((c) => c.dataset.day)).toEqual(['2099-11-12', '2099-11-13']);
     expect(screen.getByRole('radio', { name: 'Vacation' })).toBeChecked();
 
     // Unchanged: nothing to save yet.
     const save = screen.getByRole('button', { name: /Send changes for approval|Save changes/ });
     expect(save).toBeDisabled();
 
-    fireEvent.change(screen.getByLabelText('Start date'), { target: { value: '2099-11-13' } });
+    // A tap after a finished pick starts over: Friday alone.
+    fireEvent.click(screen.getByRole('gridcell', { name: /^\w+ 13 November/ }));
     await flushPreview();
     // The dry run leaves this request out of the counts.
     expect(api.preview).toHaveBeenLastCalledWith(expect.objectContaining({ requestId: 210, startDate: '2099-11-13', endDate: '2099-11-13' }));
@@ -78,10 +80,8 @@ describe('booking anew', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Work from home' }));
     expect(screen.getByText('Shows on the team calendar; you stay available.')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Next week' }));
-    const start = screen.getByLabelText('Start date').value;
-    const end = screen.getByLabelText('End date').value;
-    expect(new Date(`${start}T12:00`).getDay()).toBe(1);
-    expect(new Date(`${end}T12:00`).getDay()).toBe(5);
+    // Monday to Friday of next week (no holidays given here).
+    expect(screen.getByTestId('pick-spoken')).toHaveTextContent(/^Mon .* to Fri .*, 5 working days$/);
   });
 });
 
@@ -100,6 +100,8 @@ describe('"Which office?" on a site visit', () => {
     api.preview.mockResolvedValue({ data: { outcome: 'approved', days: 1, dates: [] } });
     api.createRequest.mockResolvedValue({ data: { id: 9001, status: 'approved' } });
   });
+  // The card starts with no day picked (QA 11-25): pick today first.
+  const pickToday = () => fireEvent.click(screen.getByRole('button', { name: 'Today' }));
 
   test('only a site visit asks; the active offices by name, then "Other site…"', () => {
     render(<BookTimeForm me={SITE_ME} />);
@@ -113,8 +115,9 @@ describe('"Which office?" on a site visit', () => {
   test('booking without an office says so and sends nothing; with Toronto it sends the office', async () => {
     render(<BookTimeForm me={SITE_ME} />);
     fireEvent.click(screen.getByRole('radio', { name: 'Site visit' }));
+    pickToday();
     await flushPreview();
-    fireEvent.click(screen.getByRole('button', { name: 'Book' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send request' }));
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('Pick which office the site visit is at');
     expect(api.createRequest).not.toHaveBeenCalled();
@@ -125,7 +128,7 @@ describe('"Which office?" on a site visit', () => {
     expect(select).toHaveAccessibleDescription(/Pick which office the site visit is at/);
 
     fireEvent.change(screen.getByLabelText(/^Which office\?/), { target: { value: '2' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Book' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send request' }));
     await waitFor(() => expect(api.createRequest).toHaveBeenCalledWith(expect.objectContaining({ leaveTypeId: 4, siteOfficeId: 2 })));
     expect(api.createRequest.mock.calls[0][0]).not.toHaveProperty('siteLocation');
   });
@@ -136,7 +139,8 @@ describe('"Which office?" on a site visit', () => {
     fireEvent.change(screen.getByLabelText(/^Which office\?/), { target: { value: 'other' } });
     const box = screen.getByLabelText(/^Which site\?/);
     expect(box).toHaveAttribute('maxLength', '160');
-    fireEvent.click(screen.getByRole('button', { name: /Book|Send for approval/ }));
+    pickToday();
+    fireEvent.click(screen.getByRole('button', { name: 'Send request' }));
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('Say which site you are visiting');
     // The "Which site?" box has a visible label, is marked invalid and described by the error.
@@ -145,7 +149,7 @@ describe('"Which office?" on a site visit', () => {
     expect(box).toHaveAttribute('aria-describedby', alert.id);
     expect(screen.getByLabelText(/^Which office\?/)).not.toHaveAttribute('aria-invalid');
     fireEvent.change(box, { target: { value: '  Client plant, Kamloops ' } });
-    fireEvent.click(screen.getByRole('button', { name: /Book|Send for approval/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send request' }));
     await waitFor(() => expect(api.createRequest).toHaveBeenCalledWith(expect.objectContaining({ siteLocation: 'Client plant, Kamloops' })));
     expect(api.createRequest.mock.calls[0][0]).not.toHaveProperty('siteOfficeId');
   });
@@ -153,6 +157,7 @@ describe('"Which office?" on a site visit', () => {
   test('choosing the place does not re-run the dry run', async () => {
     render(<BookTimeForm me={SITE_ME} />);
     fireEvent.click(screen.getByRole('radio', { name: 'Site visit' }));
+    pickToday();
     await flushPreview();
     const calls = api.preview.mock.calls.length;
     fireEvent.change(screen.getByLabelText(/^Which office\?/), { target: { value: '1' } });
@@ -165,7 +170,7 @@ describe('"Which office?" on a site visit', () => {
     const older = { ...THU_FRI, id: 9030, leaveTypeId: 4, siteOfficeId: null, siteLocation: null };
     const { unmount } = render(<BookTimeForm me={SITE_ME} editing={older} onStopEditing={vi.fn()} />);
     expect(screen.getByLabelText(/^Which office\?/)).not.toBeRequired();
-    fireEvent.change(screen.getByLabelText('Note'), { target: { value: 'Bring the badge' } });
+    fireEvent.change(screen.getByLabelText(/Note/), { target: { value: 'Bring the badge' } });
     await flushPreview();
     fireEvent.click(screen.getByRole('button', { name: /Save changes|Send changes for approval/ }));
     await waitFor(() => expect(api.updateRequest).toHaveBeenCalledWith(9030, expect.objectContaining({ note: 'Bring the badge' })));
@@ -198,13 +203,13 @@ describe('the day strip', () => {
   });
 });
 
-describe('my requests', () => {
+describe('my requests (the old list, kept for other callers)', () => {
   const typeById = new Map(ME.leaveTypes.map((t) => [t.id, t]));
   test('a waiting request offers Change and names who it waits for; an approved one does not', () => {
     const onEdit = vi.fn();
     const approved = { ...THU_FRI, id: 211, status: 'approved', waitingOn: undefined, editable: undefined };
     render(<MyRequestsList requests={[THU_FRI, approved]} typeById={typeById} onCancel={vi.fn()} onEdit={onEdit} />);
-    expect(screen.getAllByText('Waiting for Vahid Haeri')).toHaveLength(1);
+    expect(screen.getAllByText('Waiting for Robin Vale')).toHaveLength(1);
     const change = screen.getAllByRole('button', { name: /^Change Vacation/ });
     expect(change).toHaveLength(1);
     fireEvent.click(change[0]);

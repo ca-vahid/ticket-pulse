@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { Activity } from 'lucide-react';
+import {
+  Activity, Baby, CalendarDays, CalendarX, Flower2, GraduationCap, PiggyBank,
+} from 'lucide-react';
 import { Switch } from '../ui/switch';
 
 /**
@@ -334,6 +336,73 @@ export function sitePlace(r, offices = []) {
 export function leaveLabel(name, place = null) {
   const base = name || 'Time away';
   return place ? `${base} · ${place}` : base;
+}
+
+// ---------------------------------------------------------------- pictograms
+
+const ART = '/brand/vacation-pulse';
+
+/** The pictogram for a leave type, by what it is (Overview, My time). */
+export function pictogramFor(type) {
+  const key = `${type?.key || ''} ${type?.name || ''}`.toLowerCase();
+  if (/sick|medical leave|illness/.test(key)) return 'sick';
+  if (type?.availability === 'WFH' || /home|remote/.test(key)) return 'wfh';
+  if (type?.availability === 'ONSITE' || /site|field|travel/.test(key)) return 'site';
+  if (type?.unit === 'hour' || /appoint|personal|errand/.test(key)) return 'appointment';
+  return 'vacation';
+}
+
+export function Pictogram({ name, className = 'h-5 w-5' }) {
+  return <img src={`${ART}/${name}.webp`} alt="" aria-hidden="true" draggable="false" className={`shrink-0 select-none object-contain ${className}`} />;
+}
+
+// Types with no artwork of their own (QA 11-25: Training fell back to the
+// beach chair): a line glyph in the type's colour. By the type's `icon` first,
+// then by its name.
+const GLYPH_BY_ICON = {
+  'graduation-cap': GraduationCap, flower: Flower2, 'flower-2': Flower2, 'piggy-bank': PiggyBank, 'calendar-x': CalendarX, baby: Baby,
+};
+const GLYPH_BY_WORD = [
+  [/train|conference|course|seminar|learn/, GraduationCap],
+  [/bereave|compassion|funeral/, Flower2],
+  [/bank|in lieu|toil|overtime/, PiggyBank],
+  [/unpaid/, CalendarX],
+  [/parent|maternity|paternity|adoption/, Baby],
+];
+/** Readable text in a leave type's colour (glyphs, the calendar's waiting rings). */
+export const COLOR_TEXT = {
+  emerald: 'text-emerald-600 dark:text-emerald-300', green: 'text-green-600 dark:text-green-300', teal: 'text-teal-600 dark:text-teal-300',
+  cyan: 'text-cyan-600 dark:text-cyan-300', sky: 'text-sky-600 dark:text-sky-300', blue: 'text-blue-600 dark:text-blue-300',
+  indigo: 'text-indigo-600 dark:text-indigo-300', violet: 'text-violet-600 dark:text-violet-300', purple: 'text-purple-600 dark:text-purple-300',
+  fuchsia: 'text-fuchsia-600 dark:text-fuchsia-300', pink: 'text-pink-600 dark:text-pink-300', rose: 'text-rose-600 dark:text-rose-300',
+  red: 'text-red-600 dark:text-red-300', orange: 'text-orange-600 dark:text-orange-300', amber: 'text-amber-600 dark:text-amber-300',
+  yellow: 'text-yellow-600 dark:text-yellow-300', lime: 'text-lime-600 dark:text-lime-300', slate: 'text-muted-foreground', gray: 'text-muted-foreground',
+};
+
+/**
+ * What a leave type looks like: { art } (one of the pictograms) or { Icon }
+ * (a Lucide glyph). Vacation art only for vacation-like types.
+ */
+export function typeArt(type) {
+  const art = pictogramFor(type);
+  // Sick, at home, site visit and appointment have their own art.
+  if (art !== 'vacation') return { art };
+  const words = `${type?.key || ''} ${type?.name || ''}`.toLowerCase();
+  const Icon = GLYPH_BY_ICON[type?.icon] || GLYPH_BY_WORD.find(([re]) => re.test(words))?.[1];
+  if (Icon) return { Icon };
+  if (!type || /vacation|holiday|pto|paid time off|annual/.test(words)) return { art: 'vacation' };
+  return { Icon: CalendarDays };
+}
+
+/** The leave type's picture: its pictogram, or its glyph in a soft square of its colour. */
+export function TypeGlyph({ type, className = 'h-6 w-6' }) {
+  const { art, Icon } = typeArt(type);
+  if (art) return <Pictogram name={art} className={className} />;
+  return (
+    <span className={`grid shrink-0 place-items-center rounded-md ${COLOR_FILL[type?.color] || COLOR_FILL.slate} ${className}`} aria-hidden="true" data-glyph="true">
+      <Icon className={`h-[62%] w-[62%] ${COLOR_TEXT[type?.color] || COLOR_TEXT.slate}`} strokeWidth={2} />
+    </span>
+  );
 }
 
 export const AVAILABILITY_LABEL = {

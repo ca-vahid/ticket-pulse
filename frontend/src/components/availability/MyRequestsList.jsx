@@ -3,8 +3,11 @@ import { ChevronDown, Loader2, Pencil } from 'lucide-react';
 import {
   BTN_QUIET, ColorSwatch, REQUEST_STATUS, SectionTitle, StatusDot, fmtAmount, fmtRange, leaveLabel, sitePlace, todayKey,
 } from './availabilityUi';
+import { pastRequests, upcomingRequests } from './bookingModel';
 
 /**
+ * (My time no longer shows this list since QA 11-25 #1 — see ComingUpCard;
+ * it is kept for other callers.)
  * My requests: upcoming first (soonest at the top), then past (latest first).
  * Each row: type, range, amount, status dot + word. The decision reason and
  * the approver note open underneath. Pending and future approved requests can
@@ -110,8 +113,10 @@ export default function MyRequestsList({ requests, typeById, onCancel, onEdit = 
     return <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />Loading your requests…</p>;
   }
   const today = todayKey();
-  const upcoming = requests.filter((r) => r.endDate >= today).sort((a, b) => a.startDate.localeCompare(b.startDate));
-  const past = requests.filter((r) => r.endDate < today).sort((a, b) => b.startDate.localeCompare(a.startDate));
+  // QA 11-25 #1: only approved and waiting requests are upcoming; a cancelled or
+  // denied one, even in the future, is listed with the past ones.
+  const upcoming = upcomingRequests(requests, today);
+  const past = pastRequests(requests, today);
 
   const list = (rows) => (
     <ul className="divide-y divide-border">
@@ -131,7 +136,7 @@ export default function MyRequestsList({ requests, typeById, onCancel, onEdit = 
       )}
       {past.length > 0 && (
         <>
-          <h3 className="mt-4 text-xs font-medium text-muted-foreground">Past</h3>
+          <h3 className="mt-4 text-xs font-medium text-muted-foreground">Past and cancelled</h3>
           {list(past)}
         </>
       )}
