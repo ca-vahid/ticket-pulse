@@ -2,6 +2,7 @@
  * Pure presentation maps + helpers for the public approval page. Accent tints
  * follow the design-system convention: light tint + `dark:` twin at ~10–20%.
  */
+import { currentApiOrigin } from '../../config/apiOrigin';
 
 export const STATUS_CHIP = {
   pending: { label: 'Awaiting your decision', className: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200' },
@@ -135,7 +136,7 @@ export function firstName(name) {
 // The API returns token-scoped photo URLs as app-relative paths (`/api/ticket-approvals/public/…`). The
 // public page is served from the SWA host, which does not proxy /api, so make them absolute against the
 // configured API origin (same-origin in dev, the App Service host in prod).
-const API_ORIGIN = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+const API_ORIGIN = currentApiOrigin({ fallback: '' });
 export function absoluteApiUrl(url) {
   if (!url || typeof url !== 'string') return null;
   if (/^https?:\/\//i.test(url) || url.startsWith('data:') || url.startsWith('blob:')) return url;

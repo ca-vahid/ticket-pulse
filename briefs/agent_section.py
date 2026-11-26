@@ -22,7 +22,7 @@ import json
 import sys
 from urllib.parse import urlencode
 
-BASE_TP = 'https://ticketpulse.bgcsaas.com/tickets'
+BASE_TP = 'https://ticketpulse.bgcsi.com/tickets'
 WS_ID = 1  # IT; ?ws= makes links open in this workspace whatever the browser last used (v4.1.28)
 BLUE, GREY, RED, TRACK = '#3b82f6', '#cbd5e1', '#ef4444', '#f1f5f9'
 INK, SUB, FAINT, LINE = '#0f172a', '#475569', '#94a3b8', '#e2e8f0'

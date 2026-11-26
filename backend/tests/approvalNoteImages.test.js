@@ -11,7 +11,7 @@ process.env.PUBLIC_API_URL = 'https://api.example.test/';
 
 const {
   noteImageNames, findNoteImages, noteHtmlWithImages, noteTextForPreview, noteTextWithoutMarkers,
-  noteImagePath, tokenFromDecisionUrl, imagePixelWidth,
+  noteImagePath, tokenFromDecisionUrl, imagePixelWidth, apiPublicOrigin,
 } = await import('../src/services/approvalNoteImages.js');
 
 const at = (iso) => new Date(iso);
@@ -65,6 +65,12 @@ describe('approval note pictures', () => {
     expect(tokenFromDecisionUrl('https://tp.example/approvals')).toBeNull();
     expect(noteImagePath('tok', 7)).toBe('/api/ticket-approvals/public/tok/image/7');
     expect(noteImagePath('tok', 7, { absolute: true })).toBe('https://api.example.test/api/ticket-approvals/public/tok/image/7');
+  });
+
+  test('25 Nov 2026: the production API origin default is the new main address; settings still win', () => {
+    expect(apiPublicOrigin({ NODE_ENV: 'production' })).toBe('https://api.ticketpulse.bgcsi.com');
+    expect(apiPublicOrigin({ NODE_ENV: 'production', GRAPH_NOTIFICATION_BASE_URL: 'https://api.example.test/' })).toBe('https://api.example.test');
+    expect(apiPublicOrigin({ NODE_ENV: 'development' })).toBe('');
   });
 
   test('pixel width from PNG, GIF and JPEG headers', () => {

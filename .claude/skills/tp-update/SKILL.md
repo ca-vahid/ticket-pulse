@@ -69,7 +69,7 @@ changelog entry per item in plain product language. Plumbing commit from the rep
 `GIT_INDEX_FILE=<scratch>/idx git read-tree origin/main` → `git hash-object -w --path` + `git update-index --add --cacheinfo 100644,<sha>,<path>` per file → `git write-tree` → `git commit-tree -p origin/main -F <msg>` → `git update-ref refs/heads/cursor/qa-<MMDD>` → push → `gh pr create` → `gh pr merge <N> --squash --admin --delete-branch`.
 Commit trailer `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>` and `Claude-Session: <url>`; PR body ends with the 🤖 line.
 Then wait for `/health` on `ticket-pulse-app.azurewebsites.net` (backend) and the served `assets/index-*.js`
-bundle on `ticketpulse.bgcsaas.com` (frontend) to show the version.
+bundle on `ticketpulse.bgcsi.com` (frontend; the old `ticketpulse.bgcsaas.com` forwards there) to show the version.
 
 **Migrations are NOT run by the deploy pipeline** (memory `prod-migrations-manual`). Right after the merge:
 `cd backend && DATABASE_URL="$(cat <scratch>/.produrl)" npx prisma migrate deploy`, verify with

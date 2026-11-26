@@ -41,9 +41,14 @@ describe('resolvePublicBaseUrl', () => {
 
   test('production: PUBLIC_APP_URL wins, trailing slashes trimmed, no warning', () => {
     const warn = jest.fn();
-    const env = { PUBLIC_APP_URL: 'https://ticketpulse.bgcsaas.com//', CORS_ORIGIN: 'https://a.example,https://b.example', DATABASE_URL: REMOTE_DB };
-    expect(resolvePublicBaseUrl({ env, warn })).toBe('https://ticketpulse.bgcsaas.com');
+    const env = { PUBLIC_APP_URL: 'https://ticketpulse.bgcsi.com//', CORS_ORIGIN: 'https://a.example,https://b.example', DATABASE_URL: REMOTE_DB };
+    expect(resolvePublicBaseUrl({ env, warn })).toBe('https://ticketpulse.bgcsi.com');
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  test('25 Nov 2026: the production default is the new main address', () => {
+    expect(PRODUCTION_PUBLIC_URL).toBe('https://ticketpulse.bgcsi.com');
+    expect(resolvePublicBaseUrl({ env: { DATABASE_URL: REMOTE_DB }, warn: () => {} })).toBe('https://ticketpulse.bgcsi.com');
   });
 
   test('precedence: PUBLIC_APP_URL > FRONTEND_PUBLIC_URL > FRONTEND_URL > APP_URL > first CORS origin > fallback', () => {
@@ -64,7 +69,7 @@ describe('resolvePublicBaseUrl', () => {
 describe('helpers', () => {
   test('isLocalUrl', () => {
     for (const u of ['http://localhost:5173', 'http://127.0.0.1', 'http://[::1]:3000', 'http://host.docker.internal:5173', '', 'not a url']) expect(isLocalUrl(u)).toBe(true);
-    for (const u of ['https://ticketpulse.bgcsaas.com', 'https://localhost.example.com']) expect(isLocalUrl(u)).toBe(false);
+    for (const u of ['https://ticketpulse.bgcsi.com', 'https://ticketpulse.bgcsaas.com', 'https://localhost.example.com']) expect(isLocalUrl(u)).toBe(false);
   });
   test('databaseIsRemote', () => {
     expect(databaseIsRemote({ DATABASE_URL: REMOTE_DB })).toBe(true);
@@ -85,6 +90,20 @@ describe('no service keeps its own localhost fallback', () => {
     for (const f of await readdir(dir)) {
       if (!f.endsWith('.js')) continue;
       if ((await readFile(resolve(dir, f), 'utf8')).includes('localhost:5173')) offenders.push(f);
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  test('25 Nov 2026: no service falls back to the old web address', async () => {
+    const { readdir, readFile } = await import('node:fs/promises');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, resolve, join } = await import('node:path');
+    const dir = resolve(dirname(fileURLToPath(import.meta.url)), '../src/services');
+    const offenders = [];
+    for (const entry of await readdir(dir, { recursive: true })) {
+      if (!entry.endsWith('.js')) continue;
+      // A fallback (`fallback: '…'` or `|| '…'`); recognising old links (teamsNotificationService) is fine.
+      if (/(fallback:\s*|\|\|\s*)'https:\/\/ticketpulse\.bgcsaas\.com/.test(await readFile(join(dir, entry), 'utf8'))) offenders.push(entry);
     }
     expect(offenders).toEqual([]);
   });

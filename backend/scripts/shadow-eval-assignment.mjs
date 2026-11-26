@@ -29,7 +29,7 @@ const MODELS = String(arg('--models', 'claude-sonnet-5,gpt-6-sol')).split(',').m
 const [BASE, CANDIDATE] = MODELS;
 const CONCURRENCY = Number(arg('--concurrency', '3'));
 const OUT = resolve(arg('--out', '../qa/evidence-ai-cost/phase-c-shadow'));
-const APP = 'https://ticketpulse.bgcsaas.com';
+const APP = 'https://ticketpulse.bgcsi.com';
 const INVOICE_RE = /\b(invoice|bill|billing|statement|remittance|payment|receipt|credit memo|past due|overdue)\b/i;
 const AGREEMENT_GATE = { 1: 0.85, 2: 0.90 };
 if (WORKSPACES.some((ws) => ws >= 6 && ws <= 8)) throw new Error('sandbox workspaces 6/7/8 are out of scope');

@@ -132,6 +132,16 @@ const MUTE_FOREVER = new Date('2999-01-01T00:00:00Z');
 const PRIORITY_WORD = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
 
 const baseUrl = () => resolvePublicBaseUrl({ warn: (m) => logger.warn(m) });
+// 25 Nov 2026: ticketpulse.bgcsi.com became the main address. Cards sent before the
+// switch carry the old host, and their links (with the token) must still count as ours.
+const KNOWN_WEB_BASES = ['https://ticketpulse.bgcsi.com', 'https://ticketpulse.bgcsaas.com'];
+/** True when `url` is a page of this app: the configured base or a known web address. */
+export function isOwnAppUrl(url, base = baseUrl()) {
+  const text = String(url || '');
+  if (!text) return false;
+  return [base, ...KNOWN_WEB_BASES].map((b) => String(b || '').replace(/\/+$/, '')).filter(Boolean)
+    .some((root) => text.startsWith(`${root}/`));
+}
 const lc = (s) => String(s || '').trim().toLowerCase();
 const fmtDue = (d, tz) => {
   if (!d) return null;
@@ -929,7 +939,8 @@ class TeamsNotificationService {
     const cat = ap.approvalCategoryId ? await prisma.approvalCategory.findUnique({ where: { id: ap.approvalCategoryId }, select: { name: true } }).catch(() => null) : null;
     const last = await prisma.teamsDelivery.findFirst({ where: { ticketId: ap.ticketId, eventKey: 'approval_waiting', email: lc(ap.approverEmail) }, orderBy: { id: 'desc' }, select: { id: true } });
     // The card's own link carries the token the pictures are served under.
-    const token = decisionUrl && String(decisionUrl).startsWith(baseUrl()) ? tokenFromDecisionUrl(decisionUrl) : null;
+    const ownLink = isOwnAppUrl(decisionUrl);
+    const token = ownLink ? tokenFromDecisionUrl(decisionUrl) : null;
     const noteImages = token
       ? (await findNoteImages(ap)).map((img) => ({ name: img.fileName, url: noteImagePath(token, img.id, { absolute: true }) })).filter((x) => x.url)
       : [];
@@ -941,7 +952,7 @@ class TeamsNotificationService {
         askedByName: null, noteMd: textToCardMarkdown(noteImages.length ? noteTextWithoutMarkers(ap.requestNote) : ap.requestNote), noteImages,
         tierLabel: ap.tier && ap.tier > 1 ? `Tier ${ap.tier}` : null,
         // The approver's own link rides in the card data (the token is stored hashed).
-        decisionUrl: decisionUrl && String(decisionUrl).startsWith(baseUrl()) ? decisionUrl : `${baseUrl()}/approvals`,
+        decisionUrl: ownLink ? decisionUrl : `${baseUrl()}/approvals`,
         lastDeliveryId: last?.id || null,
       },
     };

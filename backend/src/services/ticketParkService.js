@@ -457,7 +457,7 @@ class TicketParkService {
     const to = ticket.assignedTech?.email;
     if (!to) return { sent: false, reason: 'no_assignee' };
     const { resolvePublicBaseUrl } = await import('../utils/publicBaseUrl.js').catch(() => ({}));
-    const base = typeof resolvePublicBaseUrl === 'function' ? resolvePublicBaseUrl() : (process.env.PUBLIC_APP_URL || 'https://ticketpulse.bgcsaas.com');
+    const base = typeof resolvePublicBaseUrl === 'function' ? resolvePublicBaseUrl() : (process.env.PUBLIC_APP_URL || 'https://ticketpulse.bgcsi.com');
     const ref = ticketDisplayRef(ticket);
     const esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const what = park.kind === 'waiting_on'

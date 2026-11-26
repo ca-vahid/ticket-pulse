@@ -1,8 +1,11 @@
 import axios from 'axios';
 import { formatDateLocal } from '../utils/dateHelpers';
 import { isDemoMode, maybeScrub } from '../utils/demoMode';
+import { currentApiOrigin } from '../config/apiOrigin';
 
-export const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3000') + '/api';
+// The API host follows the page's host (config/apiOrigin.js): ticketpulse.bgcsi.com
+// calls api.ticketpulse.bgcsi.com, everything else the build-time VITE_API_URL.
+export const API_BASE_URL = `${currentApiOrigin()}/api`;
 const AUTH_TOKEN_STORAGE_KEY = 'tp_authToken';
 
 function readSessionStorage(key) {

@@ -3,6 +3,7 @@ import {
   Check, Copy, KeyRound, Loader2, Lock, Plus, RefreshCw, Send, Trash2, Webhook,
 } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
+import { currentApiOrigin } from '../../config/apiOrigin';
 import PersonalKeysAdmin from './PersonalKeysAdmin';
 
 // Grouped scope catalogue — mirrors backend API_KEY_SCOPES (apiKeyService.js).
@@ -52,9 +53,8 @@ const loadErrorMessage = (e) => e?.response?.data?.detail || e?.response?.data?.
 // The public API is served from the backend host — the Static Web App can't
 // proxy /api on the current plan, so calling it at the app domain returns the
 // SPA HTML. Surface the real base URL integrators must call, derived from the
-// same VITE_API_URL the app itself uses (QA 07-20 #15-17).
-const API_ORIGIN = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '')
-  || (typeof window !== 'undefined' ? window.location.origin : '');
+// same API origin the app itself uses (QA 07-20 #15-17; config/apiOrigin.js).
+const API_ORIGIN = currentApiOrigin({ fallback: typeof window !== 'undefined' ? window.location.origin : '' });
 const API_BASE_URL = `${API_ORIGIN}/api/v1`;
 
 function DeliveryLog({ subId }) {

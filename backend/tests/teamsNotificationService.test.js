@@ -18,6 +18,7 @@ const prismaMock = {
   ticketThreadEntry: { findUnique: jest.fn() },
   ticketApproval: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
   approvalCategory: { findUnique: jest.fn() },
+  ticketAttachment: { findMany: jest.fn().mockResolvedValue([]) },
   workspace: { findUnique: jest.fn().mockResolvedValue({ nativeTicketingEnabled: true }) },
   group: { findFirst: jest.fn() },
   groupMember: { findMany: jest.fn() },
@@ -47,7 +48,7 @@ jest.unstable_mockModule('../src/services/ticketApprovalService.js', () => ({ de
 const statusNamesForBase = jest.fn();
 jest.unstable_mockModule('../src/services/statusService.js', () => ({ default: { statusNamesForBase, resolveBaseStatus: jest.fn() } }));
 
-const { default: svc, effectivePrefs, cleanPrefs, eventActor, EVENTS, approvalClosedStage } = await import('../src/services/teamsNotificationService.js');
+const { default: svc, effectivePrefs, cleanPrefs, eventActor, EVENTS, approvalClosedStage, isOwnAppUrl } = await import('../src/services/teamsNotificationService.js');
 const { ticketCard, approvalCard } = await import('../src/services/teamsCards.js');
 
 const ctx = (type, extra = {}, over = {}) => ({
@@ -478,6 +479,34 @@ describe('approval cards follow the approval', () => {
     prismaMock.ticketApproval.findMany.mockResolvedValue([AP]);
     prismaMock.ticketApproval.findFirst.mockResolvedValue(AP);
     await expect(svc._refreshApprovalCards(50)).resolves.toBe(1);
+  });
+
+  test('25 Nov 2026: a card sent from the old address keeps its link, token and pictures', async () => {
+    const old = 'https://ticketpulse.bgcsaas.com/approval/tok-old';
+    const prevApi = process.env.PUBLIC_API_URL;
+    process.env.PUBLIC_API_URL = 'https://api.example.test';
+    prismaMock.ticketApproval.findFirst.mockResolvedValue({ ...AP, status: 'pending', requestNote: 'See [Image: a.png]' });
+    prismaMock.ticketAttachment.findMany.mockResolvedValueOnce([{ id: 7, fileName: 'a.png', contentType: 'image/png', createdAt: new Date('2026-10-05T14:59:00Z') }]);
+    try {
+      const { model } = await svc._approvalModel(31, 50, 1, old);
+      expect(model.decisionUrl).toBe(old);
+      expect(model.noteImages).toEqual([{ name: 'a.png', url: 'https://api.example.test/api/ticket-approvals/public/tok-old/image/7' }]);
+      // A link that is not ours still falls back to the generic page.
+      const other = await svc._approvalModel(31, 50, 1, 'https://elsewhere.example/approval/tok');
+      expect(other.model.decisionUrl).toMatch(/\/approvals$/);
+      expect(other.model.noteImages).toEqual([]);
+    } finally {
+      if (prevApi === undefined) delete process.env.PUBLIC_API_URL; else process.env.PUBLIC_API_URL = prevApi;
+    }
+  });
+
+  test('isOwnAppUrl accepts the configured base and both web addresses, nothing else', () => {
+    expect(isOwnAppUrl('https://ticketpulse.bgcsi.com/approval/t', 'http://localhost:5173')).toBe(true);
+    expect(isOwnAppUrl('https://ticketpulse.bgcsaas.com/approval/t', 'http://localhost:5173')).toBe(true);
+    expect(isOwnAppUrl('https://tp.example/approval/t', 'https://tp.example/')).toBe(true);
+    expect(isOwnAppUrl('https://ticketpulse.bgcsaas.com.evil.example/approval/t', 'http://localhost:5173')).toBe(false);
+    expect(isOwnAppUrl('https://elsewhere.example/approval/t', 'http://localhost:5173')).toBe(false);
+    expect(isOwnAppUrl(null)).toBe(false);
   });
 
   test('a failed Teams update is logged, never thrown', async () => {

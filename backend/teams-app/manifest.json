@@ -1,13 +1,13 @@
 {
   "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.19/MicrosoftTeams.schema.json",
   "manifestVersion": "1.19",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "id": "ddd8d5f7-17cd-40b2-8d2c-f40010fc040d",
   "developer": {
     "name": "BGC Engineering — Ticket Pulse",
-    "websiteUrl": "https://ticketpulse.bgcsaas.com",
-    "privacyUrl": "https://ticketpulse.bgcsaas.com",
-    "termsOfUseUrl": "https://ticketpulse.bgcsaas.com"
+    "websiteUrl": "https://ticketpulse.bgcsi.com",
+    "privacyUrl": "https://ticketpulse.bgcsi.com",
+    "termsOfUseUrl": "https://ticketpulse.bgcsi.com"
   },
   "name": { "short": "Ticket Pulse", "full": "Ticket Pulse notifications" },
   "description": {
@@ -35,7 +35,13 @@
     }
   ],
   "permissions": ["identity", "messageTeamMembers"],
-  "validDomains": ["ticketpulse.bgcsaas.com", "ticket-pulse-app.azurewebsites.net"],
+  "validDomains": [
+    "ticketpulse.bgcsi.com",
+    "api.ticketpulse.bgcsi.com",
+    "ticketpulse.bgcsaas.com",
+    "api.ticketpulse.bgcsaas.com",
+    "ticket-pulse-app.azurewebsites.net"
+  ],
   "webApplicationInfo": { "id": "ddd8d5f7-17cd-40b2-8d2c-f40010fc040d", "resource": "api://ticket-pulse-app.azurewebsites.net/ddd8d5f7-17cd-40b2-8d2c-f40010fc040d" },
   "activities": {
     "activityTypes": [
