@@ -7,7 +7,7 @@ export const changelog = [
     entries: [
       { type: 'new', html: '<strong>FreshService switch, one workspace at a time</strong> &mdash; super admins can set each workspace to Connected, Shadow or Off under Settings &rarr; Workspaces. Shadow counts every FreshService call that Off would stop, so hidden dependencies show up first. Off stops all sync and copies for that workspace, makes its open FreshService tickets Ticket Pulse tickets (all history kept, the old number kept as a reference) and shows closed ones as imported history. Every workspace stays Connected until someone switches it.' },
       { type: 'new', html: '<strong>Remove a file from the Attachments tab</strong> &mdash; the person who added a file, or an admin, can remove it from the Attachments tab after confirming; the ticket&rsquo;s history records who removed what.' },
-      { type: 'fixed', html: '<strong>Reminder subjects are never a vendor</strong> &mdash; attachments on a collection reminder (&ldquo;Reminder: 71 Days Outstanding Invoice &hellip;&rdquo;) are named after the company on the invoice, not the reminder&rsquo;s wording.' }
+      { type: 'fixed', html: '<strong>Reminder subjects are never a vendor</strong> &mdash; attachments on a collection reminder (&ldquo;Reminder: 71 Days Outstanding Invoice &hellip;&rdquo;) are named after the company on the invoice, not the reminder&rsquo;s wording.' },
     ],
   },
   {
@@ -23,14 +23,14 @@ export const changelog = [
     entries: [
       { type: 'new', html: '<strong>Site visits say where</strong> &mdash; booking a site visit in Vacation Pulse now asks &ldquo;Which office?&rdquo; (or another site), and the wallchart, overview and approvals show it as &ldquo;Site visit &middot; Toronto&rdquo;.' },
       { type: 'improved', html: '<strong>Assignment knows where you are</strong> &mdash; on a site-visit day, ticket assignment treats the person as working at the office they are visiting, in that office&rsquo;s time zone, so on-site work there can go to them.' },
-      { type: 'fixed', html: '<strong>One booking, counted once</strong> &mdash; the same leave booked in both Vacation Tracker and Vacation Pulse no longer shows or counts twice.' }
+      { type: 'fixed', html: '<strong>One booking, counted once</strong> &mdash; the same leave booked in both Vacation Tracker and Vacation Pulse no longer shows or counts twice.' },
     ],
   },
   {
     version: '4.4.17-preview',
     date: 'November 25, 2026',
     entries: [
-      { type: 'fixed', html: '<strong>A site visit is work, not time off</strong> &mdash; people booked on a site visit in Vacation Pulse were treated as off by assignment, shares, urgent response and Teams notifications. They now count as working and can be assigned tickets; physio, training and leaving early still count as away.' }
+      { type: 'fixed', html: '<strong>A site visit is work, not time off</strong> &mdash; people booked on a site visit in Vacation Pulse were treated as off by assignment, shares, urgent response and Teams notifications. They now count as working and can be assigned tickets; physio, training and leaving early still count as away.' },
     ],
   },
   {
@@ -46,7 +46,7 @@ export const changelog = [
       { type: 'fixed', html: '<strong>Source on the FreshService copy</strong> &mdash; a Ticket Pulse ticket&rsquo;s source (phone, walk-up, Teams and so on) is now carried to its FreshService copy instead of always showing Email.' },
       { type: 'new', html: '<strong>Workflow condition: intake mailbox</strong> &mdash; workflows can check which mailbox an e-mail came in through, for example to skip notices for one team mailbox but not another.' },
       { type: 'fixed', html: '<strong>Pictures open at the one you clicked</strong> &mdash; when a message has several pictures with the same file name, clicking one now opens that picture instead of the first.' },
-      { type: 'fixed', html: '<strong>Same-day repeats raise priority only for people</strong> &mdash; a second e-mail from a vendor, an automated notice or a monitoring alert no longer raises a ticket&rsquo;s priority; a colleague reporting the same problem again still does.' }
+      { type: 'fixed', html: '<strong>Same-day repeats raise priority only for people</strong> &mdash; a second e-mail from a vendor, an automated notice or a monitoring alert no longer raises a ticket&rsquo;s priority; a colleague reporting the same problem again still does.' },
     ],
   },
   {
@@ -54,7 +54,7 @@ export const changelog = [
     date: 'November 24, 2026',
     entries: [
       { type: 'fixed', html: '<strong>Dates written day-first</strong> &mdash; when a document says &ldquo;12/11/2026&rdquo; and means 12 November, the attachment&rsquo;s new name now uses 12 November instead of 11 December. A date well after the e-mail arrived is read the other way round when that gives a recent date.' },
-      { type: 'improved', html: '<strong>Our own mailboxes are never a ticket&rsquo;s requester</strong> &mdash; creating a ticket from held mail now asks who the ticket is for when it would otherwise be filed under one of our team mailboxes, and every intake path follows the same rule.' }
+      { type: 'improved', html: '<strong>Our own mailboxes are never a ticket&rsquo;s requester</strong> &mdash; creating a ticket from held mail now asks who the ticket is for when it would otherwise be filed under one of our team mailboxes, and every intake path follows the same rule.' },
     ],
   },
   {
@@ -62,7 +62,7 @@ export const changelog = [
     date: 'November 24, 2026',
     entries: [
       { type: 'fixed', html: '<strong>Workflow e-mails never go to our own mailboxes</strong> &mdash; a workflow e-mail is no longer sent to any of Ticket Pulse&rsquo;s connected team mailboxes, and an e-mail sent by one of our mailboxes never becomes a new ticket in another. Workflow e-mails are now marked as automatic, so other systems don&rsquo;t answer them either. This stops acknowledgements bouncing between two team mailboxes.' },
-      { type: 'improved', html: '<strong>Small fixes</strong> &mdash; invoice numbers printed with spaces (&ldquo;328 9392&rdquo;) appear without them in attachment names; the invoice-matching Shadow report no longer counts a reply that was already filed on its ticket as a disagreement.' }
+      { type: 'improved', html: '<strong>Small fixes</strong> &mdash; invoice numbers printed with spaces (&ldquo;328 9392&rdquo;) appear without them in attachment names; the invoice-matching Shadow report no longer counts a reply that was already filed on its ticket as a disagreement.' },
     ],
   },
   {
@@ -70,7 +70,7 @@ export const changelog = [
     date: 'November 24, 2026',
     entries: [
       { type: 'new', html: '<strong>Matching mail by invoice number (Shadow)</strong> &mdash; when an e-mail arrives in Accounting, Ticket Pulse reads its vendor and invoice number and checks whether an open ticket already holds a document with the same vendor and number. For now it only records what it would have matched, so the results can be checked before it is switched on.' },
-      { type: 'improved', html: '<strong>Tidier vendor names on attachments</strong> &mdash; vendors written in all capitals read in normal capitals, and a vendor&rsquo;s name written in two languages keeps one.' }
+      { type: 'improved', html: '<strong>Tidier vendor names on attachments</strong> &mdash; vendors written in all capitals read in normal capitals, and a vendor&rsquo;s name written in two languages keeps one.' },
     ],
   },
   {
@@ -85,7 +85,7 @@ export const changelog = [
     date: 'November 24, 2026',
     entries: [
       { type: 'improved', html: '<strong>Attachment names read better</strong> &mdash; the grey line under a renamed file now starts with &ldquo;Named automatically&rdquo; and wraps instead of cutting off; PDFs whose file name or type got mangled in transit (like &ldquo;report.pdf_&rdquo;) are now recognised and named.' },
-      { type: 'improved', html: '<strong>Small fixes</strong> &mdash; a long &ldquo;Why this priority&rdquo; note shows two lines with More; the Raised by requester tab and its heading use one name; on a phone, a personal key&rsquo;s &ldquo;from&rdquo; address stays together; red text and red buttons are easier to read in dark mode.' }
+      { type: 'improved', html: '<strong>Small fixes</strong> &mdash; a long &ldquo;Why this priority&rdquo; note shows two lines with More; the Raised by requester tab and its heading use one name; on a phone, a personal key&rsquo;s &ldquo;from&rdquo; address stays together; red text and red buttons are easier to read in dark mode.' },
     ],
   },
   {
@@ -118,7 +118,7 @@ export const changelog = [
       { type: 'fix', html: '<strong>Held e-mail digest switch for every workspace admin</strong> &mdash; Mail &amp; alerts now shows the switch to workspace admins, not only super admins.' },
       { type: 'new', html: '<strong>Merge attachments into one PDF</strong> &mdash; tick files on the Attachments tab, set the order and name, and save one PDF (PDFs and pictures). The originals stay.' },
       { type: 'improved', html: '<strong>&ldquo;Can&rsquo;t work at all&rdquo; is High</strong> &mdash; the AI rates one person who can&rsquo;t sign in or is locked out as High, even with no outage. The same problem reported again by the same person on the same day goes up one level (never to Urgent after hours), and a person&rsquo;s own change always wins.' },
-      { type: 'improved', html: '<strong>Fairer level matching</strong> &mdash; Level match no longer moves a ticket to someone with 5 or more extra open tickets for a one-ticket difference today, says the real reason for each move, and counts &ldquo;today&rdquo; the same way everywhere. Same-day follow-ups from one person show who would get them (Shadow).' }
+      { type: 'improved', html: '<strong>Fairer level matching</strong> &mdash; Level match no longer moves a ticket to someone with 5 or more extra open tickets for a one-ticket difference today, says the real reason for each move, and counts &ldquo;today&rdquo; the same way everywhere. Same-day follow-ups from one person show who would get them (Shadow).' },
     ],
   },
   {
