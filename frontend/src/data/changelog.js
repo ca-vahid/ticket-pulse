@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.4.24-preview';
+export const APP_VERSION = '4.4.25-preview';
 
 export const changelog = [
+  {
+    version: '4.4.25-preview',
+    date: 'November 26, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>My time fits mid-size screens</strong> &mdash; on tablets and small laptops the type tiles no longer break &ldquo;Working from home&rdquo; one word per line, the Full day / Morning / Afternoon switch stays on one line, and the summary beside the calendar wraps cleanly.' },
+    ],
+  },
   {
     version: '4.4.24-preview',
     date: 'November 26, 2026',
