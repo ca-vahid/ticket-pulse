@@ -594,7 +594,7 @@ export default function BookTimeForm({
       {/* 1. What */}
       <fieldset className="min-w-0 space-y-2">
         <legend id={ids.what} className={`${STEP} mb-2`}>1. What</legend>
-        <div className="grid grid-cols-2 gap-2" data-testid="type-tiles">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="type-tiles">
           {visible.map((t) => tile(t))}
         </div>
         {rest.length > 0 && (
@@ -610,7 +610,7 @@ export default function BookTimeForm({
           </button>
         )}
         {moreOpen && rest.length > 0 && (
-          <div id={ids.more} role="group" aria-label="More types" className="grid grid-cols-2 gap-2 animate-fadeIn" data-testid="more-types">
+          <div id={ids.more} role="group" aria-label="More types" className="grid grid-cols-2 gap-2 animate-fadeIn sm:grid-cols-4" data-testid="more-types">
             {rest.map((t) => moreTile(t))}
           </div>
         )}
@@ -632,7 +632,7 @@ export default function BookTimeForm({
 
       {/* 2. When */}
       <fieldset className="min-w-0 space-y-3" aria-labelledby={ids.when}>
-        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <p className="text-xs text-muted-foreground">
             <span id={ids.when} className={STEP}>{onSite ? 3 : 2}. When</span>
             <span> — {isHours ? 'tap a day' : 'tap a day, or tap two days for a range'}</span>
@@ -644,54 +644,60 @@ export default function BookTimeForm({
           </span>
         </div>
 
-        <div className="rounded-lg border border-border/70 p-2 sm:p-3">
-          <MonthPicker
-            start={sel.start}
-            end={isHours ? sel.start : sel.end}
-            onPick={onPick}
-            today={today}
-            holidays={holidays || {}}
-            booked={booked}
-            labelledBy={ids.when}
-            single={isHours}
-          />
-        </div>
-
-        {showDayPart && (
-          <div role="radiogroup" aria-label="Part of the day" className="inline-flex rounded-md border border-input p-0.5">
-            {DAY_PARTS.map((p) => {
-              const on = form.dayPart === p.value;
-              return (
-                <label key={p.value} className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring ${on ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
-                  <input type="radio" name={`dayPart-${uid}`} value={p.value} checked={on} onChange={() => set({ dayPart: p.value })} className="sr-only" />
-                  {p.label}
-                </label>
-              );
-            })}
+        {/* From sm up the month is a normal-sized calendar (20rem) with the day part, hours and the
+            summary beside it, instead of a month stretched across the whole card (Vahid, 26 Nov). */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-5" data-testid="when-layout">
+          <div className="rounded-lg border border-border/70 p-2 sm:w-[20rem] sm:shrink-0 sm:p-3">
+            <MonthPicker
+              start={sel.start}
+              end={isHours ? sel.start : sel.end}
+              onPick={onPick}
+              today={today}
+              holidays={holidays || {}}
+              booked={booked}
+              labelledBy={ids.when}
+              single={isHours}
+            />
           </div>
-        )}
 
-        {isHours && picked && (
-          <div className="grid max-w-xs grid-cols-2 gap-2">
-            <Field label="From">
-              <input type="time" className={INPUT} value={form.startTime} onChange={(e) => set({ startTime: e.target.value })} aria-label="Start time" />
-            </Field>
-            <Field label="To">
-              <input type="time" className={INPUT} value={form.endTime} onChange={(e) => set({ endTime: e.target.value })} aria-label="End time" />
-            </Field>
-          </div>
-        )}
+          <div className="min-w-0 flex-1 space-y-3 sm:pt-1">
+            {showDayPart && (
+              <div role="radiogroup" aria-label="Part of the day" className="inline-flex rounded-md border border-input p-0.5">
+                {DAY_PARTS.map((p) => {
+                  const on = form.dayPart === p.value;
+                  return (
+                    <label key={p.value} className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring ${on ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                      <input type="radio" name={`dayPart-${uid}`} value={p.value} checked={on} onChange={() => set({ dayPart: p.value })} className="sr-only" />
+                      {p.label}
+                    </label>
+                  );
+                })}
+              </div>
+            )}
 
-        {picked && (
-          <div className="space-y-0.5" aria-hidden="true">
-            <p className="text-sm font-medium text-foreground" data-testid="pick-summary">{summary}</p>
-            {pastNeedsApprover && (
-              <p className="flex items-start gap-1.5 text-xs text-muted-foreground" data-testid="pick-past">
-                <Clock3 className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />{PAST_SENTENCE}
-              </p>
+            {isHours && picked && (
+              <div className="grid max-w-xs grid-cols-2 gap-2">
+                <Field label="From">
+                  <input type="time" className={INPUT} value={form.startTime} onChange={(e) => set({ startTime: e.target.value })} aria-label="Start time" />
+                </Field>
+                <Field label="To">
+                  <input type="time" className={INPUT} value={form.endTime} onChange={(e) => set({ endTime: e.target.value })} aria-label="End time" />
+                </Field>
+              </div>
+            )}
+
+            {picked && (
+              <div className="space-y-0.5" aria-hidden="true">
+                <p className="text-sm font-medium text-foreground" data-testid="pick-summary">{summary}</p>
+                {pastNeedsApprover && (
+                  <p className="flex items-start gap-1.5 text-xs text-muted-foreground" data-testid="pick-past">
+                    <Clock3 className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />{PAST_SENTENCE}
+                  </p>
+                )}
+              </div>
             )}
           </div>
-        )}
+        </div>
         {/* The spoken words of the pick, for the live region below; hidden so it is never read twice. */}
         <p hidden data-testid="pick-spoken">{spoken}</p>
       </fieldset>

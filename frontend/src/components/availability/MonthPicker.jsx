@@ -158,7 +158,8 @@ export default function MonthPicker({
           {weeks.map((week) => (
             <tr key={week[0].key}>
               {week.map(({ key, inMonth }) => {
-                if (!inMonth) return <td key={key} className="h-11 p-0" />;
+                // Phone cells stay 44 px tall (tap targets); from sm up the month is a compact, normal-sized calendar.
+                if (!inMonth) return <td key={key} className="h-11 p-0 sm:h-9" />;
                 const d = parseDay(key);
                 const holiday = holidays[key] || null;
                 const offDay = isWeekend(d.getDay()) || Boolean(holiday);
@@ -202,11 +203,11 @@ export default function MonthPicker({
                     title={tip || undefined}
                     onClick={() => { if (!disabled) { setFocusKey(key); onPick?.(key); } }}
                     onKeyDown={(e) => onKeyDown(e, key)}
-                    className={`tp-focus-ring h-11 cursor-pointer p-0 align-middle outline-none ${band} ${disabled ? 'cursor-not-allowed' : ''}`}
+                    className={`tp-focus-ring h-11 cursor-pointer p-0 align-middle outline-none sm:h-9 ${band} ${disabled ? 'cursor-not-allowed' : ''}`}
                   >
                     <span
                       aria-hidden="true"
-                      className={`mx-auto flex h-10 w-full max-w-[2.75rem] flex-col items-center justify-center rounded-md text-sm tabular-nums ${face} ${isToday && !(isEnd && inRange) ? 'ring-1 ring-inset ring-primary' : ''}`}
+                      className={`mx-auto flex h-10 w-full max-w-[2.75rem] flex-col items-center justify-center rounded-md text-sm tabular-nums sm:h-8 sm:max-w-[2.25rem] ${face} ${isToday && !(isEnd && inRange) ? 'ring-1 ring-inset ring-primary' : ''}`}
                     >
                       <span className="leading-none">{d.getDate()}</span>
                       <span className="mt-1 flex h-2 items-center gap-0.5">
