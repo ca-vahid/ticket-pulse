@@ -2,7 +2,7 @@ import express from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireAdmin } from '../middleware/auth.js';
 import personalApiKeyService from '../services/personalApiKeyService.js';
-import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
+import { resolveApiPublicBase } from '../utils/apiPublicBase.js';
 import { AuthenticationError } from '../utils/errors.js';
 
 // Inline (not auth.js sessionUser / apiKeyAuth clientIp) so the many tests
@@ -29,8 +29,11 @@ function me(req) {
   return user;
 }
 
+// The guide tells an assistant where to CALL the API, so it names the API host
+// this request came in on (an allowlisted one), never PUBLIC_APP_URL: the web
+// host is a static app that answers /api/v1 with an HTML 404 (4.4.24).
 function baseUrlFor(req) {
-  return resolvePublicBaseUrl() || `${req.protocol}://${req.get('host')}`;
+  return resolveApiPublicBase(req);
 }
 
 export const personalKeysOwnerRouter = express.Router();

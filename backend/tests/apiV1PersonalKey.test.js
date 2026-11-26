@@ -285,11 +285,35 @@ describe('/me and /me/guide with a personal key', () => {
     expect(res.body.data).toEqual({ markdown: '# guide', filename: 'ticket-pulse-api-guide.md' });
     expect(personalSvcMock.buildGuide).toHaveBeenCalledWith(expect.objectContaining({
       workspaceId: 1,
-      baseUrl: 'https://tickets.example.com',
+      // supertest calls 127.0.0.1:<port>, a local API host outside production
+      baseUrl: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/),
       access: { email: 'dana.fox@example.com', technician: { name: 'Dana Fox' }, readOnly: false },
       key: expect.objectContaining({ name: 'Laptop script', keyPrefix: 'tpu_AbCdEfGh' }),
     }));
     const refused = await request(buildApp()).get('/api/v1/me/guide').expect(403);
     expect(refused.body.code).toBe('personal_key_required');
+  });
+
+  // 4.4.24: the guide named the web host (PUBLIC_APP_URL, mocked here as
+  // tickets.example.com), which answers /api/v1 with an HTML 404.
+  test('/me/guide names the API host, never the web host', async () => {
+    personalSvcMock.buildGuide.mockResolvedValue({ markdown: '# guide', filename: 'ticket-pulse-api-guide.md' });
+    await personal(request(buildApp()).get('/api/v1/me/guide'))
+      .set('Host', 'ticket-pulse-app.azurewebsites.net').set('x-forwarded-host', 'api.ticketpulse.bgcsi.com').expect(200);
+    expect(personalSvcMock.buildGuide.mock.calls.at(-1)[0].baseUrl).toBe('https://api.ticketpulse.bgcsi.com');
+
+    await personal(request(buildApp()).get('/api/v1/me/guide')).set('Host', 'tickets.example.com').expect(200);
+    const base = personalSvcMock.buildGuide.mock.calls.at(-1)[0].baseUrl;
+    expect(base).not.toBe('https://tickets.example.com');
+    expect(base).toBe('https://api.ticketpulse.bgcsi.com');
+  });
+
+  test('/openapi.json servers name an allowlisted API host; a forged Host is not echoed', async () => {
+    const ok = await request(buildApp()).get('/api/v1/openapi.json').set('Host', 'api.ticketpulse.bgcsaas.com').expect(200);
+    expect(ok.body.servers).toEqual([{ url: 'https://api.ticketpulse.bgcsaas.com/api/v1' }]);
+    const forged = await request(buildApp()).get('/api/v1/openapi.json').set('Host', 'evil.example.com').expect(200);
+    expect(forged.body.servers[0].url).toBe('https://api.ticketpulse.bgcsi.com/api/v1');
+    const docs = await request(buildApp()).get('/api/v1/docs').set('Host', 'evil.example.com').expect(200);
+    expect(docs.text).not.toContain('evil.example.com');
   });
 });

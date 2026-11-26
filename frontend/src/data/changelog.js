@@ -1,6 +1,13 @@
-export const APP_VERSION = '4.4.23-preview';
+export const APP_VERSION = '4.4.24-preview';
 
 export const changelog = [
+  {
+    version: '4.4.24-preview',
+    date: 'November 26, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>The API key guide gives the right address</strong> &mdash; the guide you hand to your AI assistant now gives it the API address (api.ticketpulse&hellip;), not the web address, which doesn&rsquo;t answer API calls. Its &ldquo;Full reference&rdquo; link works too. If you saved the guide before, download it again.' },
+    ],
+  },
   {
     version: '4.4.23-preview',
     date: 'November 26, 2026',

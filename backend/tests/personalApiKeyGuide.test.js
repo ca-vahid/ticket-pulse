@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { buildPersonalKeyGuide, keptTags, GUIDE_FILENAME } from '../src/services/personalApiKeyGuide.js';
+import { resolveApiPublicBase } from '../src/utils/apiPublicBase.js';
 
 /**
  * Personal API keys (4.4.05), owner change 3: the guide a person feeds to
@@ -95,5 +96,29 @@ describe('the guide follows the key', () => {
     const md = buildPersonalKeyGuide({ ...base, readOnly: true });
     expect(md).not.toContain('/replies');
     expect(md).toMatch(/read-only right now/);
+  });
+});
+
+// 4.4.24: the guide's base came from PUBLIC_APP_URL, the web host, which
+// answers /api/v1 with an HTML 404. The routes now pass resolveApiPublicBase.
+describe('the guide names the API host', () => {
+  const WEB = 'https://tickets.example.com';
+  const API_HOSTS = ['api.ticketpulse.bgcsi.com', 'api.ticketpulse.bgcsaas.com', 'ticket-pulse-app.azurewebsites.net'];
+  const env = { NODE_ENV: 'production', PUBLIC_APP_URL: WEB };
+  const req = (headers) => ({ protocol: 'https', get: (n) => headers[String(n).toLowerCase()] });
+
+  test.each([
+    ['the API host it was fetched from', { host: 'api.ticketpulse.bgcsaas.com' }],
+    ['a forwarded API host', { host: 'ticket-pulse-app.azurewebsites.net', 'x-forwarded-host': 'api.ticketpulse.bgcsi.com' }],
+    ['the web host (fallback)', { host: 'tickets.example.com' }],
+    ['a spoofed host (fallback)', { host: 'evil.example.com', 'x-forwarded-host': 'evil.example.com' }],
+  ])('%s: never PUBLIC_APP_URL, always an API host, docs link included', (_label, headers) => {
+    const baseUrl = resolveApiPublicBase(req(headers), { env });
+    expect(baseUrl).not.toBe(WEB);
+    expect(API_HOSTS).toContain(new URL(baseUrl).hostname);
+    const md = buildPersonalKeyGuide({ ...base, baseUrl });
+    expect(md).not.toContain(WEB);
+    expect(md).toContain(`Full reference: ${baseUrl}/api/v1/docs`);
+    expect(md).toContain(`- Base URL: \`${baseUrl}/api/v1\``);
   });
 });

@@ -20,6 +20,7 @@ import { resolveCategoryNames } from '../services/categoryNameResolver.js';
 import ticketResubmissionService, { normalizeExternalRef } from '../services/ticketResubmissionService.js';
 import { buildOpenApiSpec, renderDocsPage } from './apiV1.openapi.js';
 import { resolvePublicBaseUrl } from '../utils/publicBaseUrl.js';
+import { resolveApiPublicBase } from '../utils/apiPublicBase.js';
 import { requesterTitle } from '../utils/requesterTitle.js';
 import { isPersonalKeyRequest, personalKeyActor, PERSONAL_KEY_REFUSAL } from '../utils/personalKeyRequest.js';
 
@@ -364,7 +365,8 @@ router.get('/me/guide', S(), asyncHandler(async (req, res) => {
     workspaceId: req.workspaceId,
     access: { email: p.actor.email, technician: { name: p.actor.name }, readOnly: p.readOnly === true },
     key: { name: req.apiKey.name, keyPrefix: req.apiKey.keyPrefix, scopes: p.keyScopes, expiresAt: p.expiresAt },
-    baseUrl: resolvePublicBaseUrl() || `${req.protocol}://${req.get('host')}`,
+    // The API host, never PUBLIC_APP_URL: the web host answers /api/v1 with an HTML 404 (4.4.24).
+    baseUrl: resolveApiPublicBase(req),
   });
   res.json({ success: true, data });
 }));
@@ -1743,12 +1745,14 @@ router.get('/search/tickets', S('search:read'), asyncHandler(async (req, res) =>
 
 // ------------------------------------------------ OpenAPI spec + docs (public)
 
+// The spec's `servers` and the docs' curl lines name an allowlisted API host
+// (4.4.24): a forged Host header can't put a foreign address into either.
 router.get('/openapi.json', (req, res) => {
-  res.json(buildOpenApiSpec(`${req.protocol}://${req.get('host')}`));
+  res.json(buildOpenApiSpec(resolveApiPublicBase(req)));
 });
 
 router.get('/docs', (req, res) => {
-  res.type('html').send(renderDocsPage(`${req.protocol}://${req.get('host')}`));
+  res.type('html').send(renderDocsPage(resolveApiPublicBase(req)));
 });
 
 // Unknown route inside /api/v1 (21 Sep 2026): answer with a problem document.
