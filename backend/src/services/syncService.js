@@ -40,7 +40,8 @@ import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { clearReadCache } from './dashboardReadCache.js';
 import { ExternalAPIError } from '../utils/errors.js';
-import { FreshServiceNotLinkedError, assertFreshServiceLinked } from '../utils/workspaceFsBinding.js';
+import { FreshServiceNotLinkedError, FreshServiceOffError, assertFreshServiceLinked } from '../utils/workspaceFsBinding.js';
+import { fsGate, getModeRecord, isFreshServiceOff } from './fsModeService.js';
 import { TICKET_ORIGIN, isTicketPulseOrigin } from '../utils/ticketOrigin.js';
 import { repairMojibake } from '../utils/textEncoding.js';
 import groupSyncService from './groupSyncService.js';
@@ -290,7 +291,10 @@ class SyncService {
       // FS workspace filter, which would read EVERY FreshService workspace and
       // re-home their tickets here. Refuse it (configs without the flag —
       // older callers, test doubles — are taken as linked).
-      if (config && config.freshserviceLinked === false) throw new FreshServiceNotLinkedError();
+      // A linked workspace switched off (FreshService exit A1) gives its own code.
+      if (config && config.freshserviceLinked === false) {
+        throw config.freshserviceOff === true ? new FreshServiceOffError() : new FreshServiceNotLinkedError();
+      }
       return config;
     }
     const config = await settingsRepository.getFreshServiceConfig();
@@ -312,6 +316,11 @@ class SyncService {
       return;
     }
     assertFreshServiceLinked(row);
+    // FreshService exit A1: a workspace switched off is refused the same way
+    // (409 freshservice_off). In Shadow the run goes ahead and is counted.
+    const { mode } = await getModeRecord(workspaceId);
+    if (mode === 'off') throw new FreshServiceOffError();
+    if (mode === 'shadow') await fsGate(workspaceId, 'sync');
   }
 
   async _getTicketPulseLookupMaps(wsConfig) {
@@ -445,6 +454,9 @@ class SyncService {
       });
     }
     if (tech) return { techId: tech.id, tech };
+
+    // FreshService switched off for this workspace: local rows only.
+    if (workspaceId && !(await fsGate(workspaceId, 'sync'))) return null;
 
     // Not in DB: fetch from FS and upsert as inactive. This closes the gap
     // where a ticket is assigned to an agent that our system doesn't
@@ -1010,6 +1022,11 @@ class SyncService {
         return { skipped: true, reason: 'preheat_disabled_for_workspace' };
       }
 
+      // FreshService switched off: the daily review reads the cache only.
+      if (!(await fsGate(workspaceId, 'thread_pull'))) {
+        return { skipped: true, reason: 'freshservice_off' };
+      }
+
       const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
       if (!fsConfig?.domain || !fsConfig?.apiKey) {
         return { skipped: true, reason: 'freshservice_not_configured' };
@@ -1484,6 +1501,8 @@ class SyncService {
    */
   async _retryFailedUpserts(workspaceId) {
     if (!workspaceId) return null;
+    // Switched off: the persisted retry list waits (a rollback resumes it).
+    if (await isFreshServiceOff(workspaceId)) return null;
     try {
       let client = null;
       const summary = await retryFailedUpserts(workspaceId, async (freshserviceTicketId) => {
@@ -2269,6 +2288,7 @@ class SyncService {
    * @returns {Promise<number>} Number of tickets synced
    */
   async syncTickets(options = {}) {
+    if (options.workspaceId && await isFreshServiceOff(options.workspaceId)) return 0;
     try {
       this.progress.currentStep = 'Syncing tickets from FreshService';
       this.progress.currentStepNumber = 2;
@@ -2463,6 +2483,11 @@ class SyncService {
       maxTickets,
       maxPipelineRuns,
     });
+
+    // FreshService switched off: the fast lane has nothing to read (Shadow counts it).
+    if (!(await fsGate(workspaceId, 'fast_lane'))) {
+      return { status: 'skipped', reason: 'freshservice_off', ticketsFetched: 0, ticketsSynced: 0 };
+    }
 
     const wsConfig = await this._getWorkspaceConfig(workspaceId);
     if (!wsConfig?.domain || !wsConfig?.apiKey) {
@@ -2985,6 +3010,14 @@ class SyncService {
 
   async performFullSync(options = {}) {
     const workspaceId = options.workspaceId || 1;
+
+    // FreshService switched off for this workspace (FreshService exit A1): no
+    // run, no lock, no sync-log row. The schedulers already skip it; this is
+    // the backstop for every other caller. (In Shadow the run goes ahead; the
+    // technician step counts it.)
+    if (await isFreshServiceOff(workspaceId)) {
+      return { status: 'skipped', reason: 'freshservice_off' };
+    }
 
     const lockHeldSince = this.runningWorkspaces.get(workspaceId);
     if (lockHeldSince) {
@@ -4395,11 +4428,14 @@ class SyncService {
    * avoids racing in-flight syncs that are just slow.
    */
   async _recoverOrphanedSyncs(workspaceId) {
+    // FreshService switched off: there is no FreshService write to retry.
+    if (await isFreshServiceOff(workspaceId)) return;
     const orphans = await assignmentRepository.findOrphanedSyncRuns({
       workspaceId,
       olderThanMinutes: 5,
     });
     if (orphans.length === 0) return;
+    await fsGate(workspaceId, 'writeback'); // Shadow: counted
 
     logger.info('Orphan sync recovery: found stuck runs to retry', {
       workspaceId,
@@ -4434,11 +4470,14 @@ class SyncService {
 
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
-      select: { id: true, origin: true, freshserviceTicketId: true, status: true, priority: true, resolvedAt: true, createdAt: true, freshserviceUpdatedAt: true, updatedAt: true },
+      select: { id: true, origin: true, freshserviceTicketId: true, status: true, priority: true, resolvedAt: true, createdAt: true, freshserviceUpdatedAt: true, updatedAt: true, mirrorState: true },
     });
     if (!ticket || !ticket.freshserviceTicketId) {
       return { changed: false };
     }
+    // Adopted from FreshService (FreshService exit A3): its FS id is a
+    // tombstone, never a live copy to read or pull back from.
+    if (ticket.mirrorState === 'adopted') return { changed: false, skipped: 'adopted' };
     // TP-born tickets already in a terminal state have nothing left to heal.
     // FS-born tickets ALWAYS fetch FS truth on open (FR 08-07 #13) — a plain
     // status flip (Open→Resolved) or even an FS-side reopen must show
@@ -4446,6 +4485,8 @@ class SyncService {
     if (ticket.origin === TICKET_ORIGIN.TICKETPULSE && TERMINAL_STATUSES.includes(String(ticket.status))) {
       return { changed: false };
     }
+    // FreshService switched off for this workspace: nothing to heal from.
+    if (!(await fsGate(workspaceId, 'reconcile'))) return { changed: false, skipped: 'freshservice_off' };
 
     let client;
     try {
@@ -4810,6 +4851,9 @@ class SyncService {
    * back of the queue.
    */
   async _reconcileTicketStatuses(workspaceId) {
+    // FreshService switched off (FreshService exit A1): the deleted-ticket check
+    // NEVER runs — a FreshService "not found" must never mark tickets Deleted.
+    if (!(await fsGate(workspaceId, 'deleted_check'))) return;
     const { default: prisma } = await import('./prisma.js');
     const TERMINAL_STATUSES = ['Closed', 'Resolved', 'closed', 'resolved', 'Deleted', 'Spam', '4', '5'];
     const BATCH_SIZE = 200;
@@ -4861,6 +4905,8 @@ class SyncService {
       if (reconcileShouldYield(client.limiter?.getStats?.())) { yielded = true; break; }
       try {
         await reconcileSlot(sleep);
+        // A batch takes minutes: stop the moment the workspace is switched off (cached read).
+        if (await isFreshServiceOff(workspaceId)) break;
         const fsTicket = await client.fetchTicketSafe(Number(ticket.freshserviceTicketId));
 
         // 403 from FS — ticket exists but this API key can't see it (e.g.
@@ -4892,10 +4938,21 @@ class SyncService {
             reason = 'Ticket was marked as spam in FreshService (spam=true)';
           }
 
-          await prisma.ticket.update({
-            where: { id: ticket.id },
-            data: { status: newStatus, lastReconciledAt: new Date() },
-          });
+          // Only while the row is still FS-born (data-safety review, 25 Nov): a
+          // ticket adopted while this batch waited (origin now 'ticketpulse')
+          // is never marked Deleted by a late check. No match = skip quietly.
+          try {
+            await prisma.ticket.update({
+              where: { id: ticket.id, origin: TICKET_ORIGIN.FRESHSERVICE },
+              data: { status: newStatus, lastReconciledAt: new Date() },
+            });
+          } catch (err) {
+            if (err?.code === 'P2025') {
+              logger.info(`Reconciliation: ticket ${ticket.id} is no longer FreshService-born (adopted); not marked ${newStatus}`);
+              continue;
+            }
+            throw err;
+          }
           // TU-3d: skip the audit row when the previous sweep already logged
           // exactly this transition (the 956-identical-rows case).
           if (!(await this._recentDuplicateStatusChange(ticket.id, newStatus, reason))) {

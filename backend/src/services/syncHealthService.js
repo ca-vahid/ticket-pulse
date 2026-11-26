@@ -6,6 +6,7 @@ import syncService, { SYNC_LOCK_STALE_MS } from './syncService.js';
 import { sendTransactionalEmail } from './transactionalEmailService.js';
 import logger from '../utils/logger.js';
 import { isFreshServiceUnlinked } from '../utils/workspaceFsBinding.js';
+import { isFreshServiceOff } from './fsModeService.js';
 
 /**
  * Sync liveness self-monitoring (realtime plan Phase 3): compares each active
@@ -117,7 +118,28 @@ class SyncHealthService {
   async _computeHealth(now = Date.now()) {
     // QA 11-24 #4: a workspace with no FreshService link never syncs, so it
     // has no freshness to report (it would read 'unknown' for ever).
-    const workspaces = (await workspaceRepository.getAllActive()).filter((ws) => !isFreshServiceUnlinked(ws));
+    const linked = (await workspaceRepository.getAllActive()).filter((ws) => !isFreshServiceUnlinked(ws));
+    // FreshService exit A1: a workspace switched OFF never syncs either. It is
+    // listed as "FreshService off" (never late, stale or alerting) instead of
+    // going stale and mailing the admins. A mode read error means connected.
+    const offFlags = await Promise.all(linked.map((ws) => isFreshServiceOff(ws).catch(() => false)));
+    const offRows = linked.filter((ws, i) => offFlags[i]).map((ws) => ({
+      workspaceId: ws.id,
+      name: ws.name,
+      status: 'freshservice_off',
+      statusLabel: 'FreshService off',
+      freshserviceOff: true,
+      intervalMinutes: effectiveIntervalMinutes(ws.syncIntervalMinutes),
+      lastSyncAt: null,
+      ageMs: null,
+      syncRunning: false,
+      runningSince: null,
+      runningForMs: null,
+      dataFreshAt: null,
+      dataAgeMs: null,
+      thresholds: null,
+    }));
+    const workspaces = linked.filter((ws, i) => !offFlags[i]);
     const workspaceIds = workspaces.map((ws) => ws.id);
     // Both helpers swallow their own DB errors into an empty Map — a failed
     // side-signal degrades to the old completions-only behavior, never a 500.
@@ -198,7 +220,8 @@ class SyncHealthService {
       (worst, row) => (STATUS_RANK[row.status] > STATUS_RANK[worst] ? row.status : worst),
       'ok',
     );
-    return { checkedAt: new Date(now).toISOString(), overall, workspaces: rows };
+    // Off rows never count towards `overall` (they are not a sync problem).
+    return { checkedAt: new Date(now).toISOString(), overall, workspaces: [...rows, ...offRows] };
   }
 
   /**
@@ -213,7 +236,8 @@ class SyncHealthService {
     // workspace flapping between late and stale doesn't re-alert). Any
     // non-stale tick resets the email debounce counter.
     for (const row of health.workspaces) {
-      if (row.status === 'ok') this._alertedIncidents.delete(row.workspaceId);
+      // Off is not an incident: clear the latch so a rollback starts clean.
+      if (row.status === 'ok' || row.status === 'freshservice_off') this._alertedIncidents.delete(row.workspaceId);
       if (row.status !== 'stale') this._consecutiveStale.delete(row.workspaceId);
     }
 

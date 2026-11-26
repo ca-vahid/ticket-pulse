@@ -3,6 +3,8 @@ import { Timer } from 'lucide-react';
 import { workspaceAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import NativeWorkspacesSection from './NativeWorkspacesSection';
+import FreshServiceSwitchPanel from './FreshServiceSwitchPanel';
+import { FreshServiceModeText } from './FreshServiceSwitchView';
 import {
   Search, CheckCircle, XCircle, Plus, Loader, Globe,
   Zap, Clock, RefreshCw, Power, PowerOff, Ticket,
@@ -37,6 +39,12 @@ export default function WorkspaceManagementPanel({ canCreate = false }) {
   const [savingCadence, setSavingCadence] = useState(false);
   const [error, setError] = useState(null);
   const [successMsg, setSuccessMsg] = useState(null);
+  // FreshService switch (25 Nov 2026): each workspace's mode, and the open detail panel.
+  const [fsModes, setFsModes] = useState({});
+  const [fsOpenFor, setFsOpenFor] = useState(null);
+  const onFsModeChanged = useCallback((id, mode) => {
+    setFsModes((m) => ({ ...m, [id]: { ...(m[id] || {}), mode } }));
+  }, []);
 
   const discover = useCallback(async () => {
     setIsDiscovering(true);
@@ -45,6 +53,9 @@ export default function WorkspaceManagementPanel({ canCreate = false }) {
     try {
       const res = await workspaceAPI.discover();
       setWorkspaces(res.data || []);
+      workspaceAPI.getFreshServiceModes()
+        .then((r) => setFsModes(r?.data || {}))
+        .catch(() => {});
     } catch (err) {
       setError(err.message || 'Failed to discover workspaces');
     } finally {
@@ -213,7 +224,7 @@ export default function WorkspaceManagementPanel({ canCreate = false }) {
 
           <div className="divide-y divide-border/60">
             {workspaces.map((ws) => (
-              <div key={ws.freshserviceId} className="px-4 py-3 flex items-center gap-4">
+              <div key={ws.freshserviceId} className="px-4 py-3 flex flex-wrap items-center gap-4">
                 {/* Status icon */}
                 <div className="flex-shrink-0">
                   {ws.status === 'active' ? (
@@ -266,6 +277,18 @@ export default function WorkspaceManagementPanel({ canCreate = false }) {
                     )}
                     {ws.description && <span className="truncate max-w-[200px]">{ws.description}</span>}
                   </div>
+                  {ws.dbWorkspace && fsModes[ws.dbWorkspace.id]?.mode && (
+                    <button
+                      type="button"
+                      onClick={() => setFsOpenFor((cur) => (cur === ws.dbWorkspace.id ? null : ws.dbWorkspace.id))}
+                      aria-expanded={fsOpenFor === ws.dbWorkspace.id}
+                      aria-controls={`fs-panel-${ws.dbWorkspace.id}`}
+                      title="FreshService for this workspace: Connected, Shadow or Off"
+                      className="tp-focus-ring mt-1 inline-flex items-center gap-1 rounded hover:underline"
+                    >
+                      <FreshServiceModeText mode={fsModes[ws.dbWorkspace.id].mode} />
+                    </button>
+                  )}
                   {ws.dbWorkspace && linkFor === ws.dbWorkspace.id && (
                     <form
                       onSubmit={(e) => { e.preventDefault(); saveLinkName(ws); }}
@@ -385,6 +408,11 @@ export default function WorkspaceManagementPanel({ canCreate = false }) {
                     </button>
                   )}
                 </div>
+                {ws.dbWorkspace && fsOpenFor === ws.dbWorkspace.id && (
+                  <div id={`fs-panel-${ws.dbWorkspace.id}`} className="basis-full min-w-0 border-t border-border/60 pt-4 sm:pl-9">
+                    <FreshServiceSwitchPanel workspaceId={ws.dbWorkspace.id} onModeChanged={onFsModeChanged} />
+                  </div>
+                )}
               </div>
             ))}
           </div>

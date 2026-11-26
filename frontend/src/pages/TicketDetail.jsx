@@ -75,7 +75,9 @@ import {
   BrandArt, ExternalChip, SolutionMark, MirrorBadge, OriginChip, LinkedText, PersonAvatar, PriorityBadge, ProvenanceChip, SafeHtml, SlaTargetChip, StateChip, StatusBadge, StatusPill, TypeBadge,
   PRIORITY_LABELS, PRIORITY_STRIP_COLORS, SOURCE_OPTIONS, formatBytes, formatDayTime, formatPhone, isConversationEntry, phoneCopyValue,
   ticketCategoryLabels, ticketSourceLabel, timeAgo,
+  freshserviceEnabledFrom, isAdoptedTicket, isImportedTicket,
 } from '../components/tickets/ticketUi';
+import FsProvenanceLine from '../components/tickets/FsProvenanceLine';
 import ParkDialog, { ParkLine, ParkSuggestion, formatParkDate, formatWakeTime } from '../components/tickets/ParkControls';
 import UrgentClockLine from '../components/tickets/UrgentClockLine';
 import NewRequestSuggestionLine from '../components/tickets/NewRequestSuggestionLine';
@@ -1619,10 +1621,22 @@ export default function TicketDetail() {
   }, [ticketId]);
 
   useEffect(() => { fetchTicket(); }, [fetchTicket]);
+  // FreshService switch: a meta that never arrives must not leave FS-born
+  // tickets on hold forever — retry once after 2 s, then fall back to today's
+  // default (FreshService on) via metaFailed.
+  const [metaFailed, setMetaFailed] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    ticketsAPI.meta().then((res) => { if (!cancelled) setMeta(res.data); }).catch(() => {});
-    return () => { cancelled = true; };
+    let retryTimer = null;
+    const fetchMeta = (retry) => ticketsAPI.meta()
+      .then((res) => { if (!cancelled) setMeta(res.data); })
+      .catch(() => {
+        if (cancelled) return;
+        if (retry) retryTimer = setTimeout(() => fetchMeta(false), 2000);
+        else setMetaFailed(true);
+      });
+    fetchMeta(true);
+    return () => { cancelled = true; if (retryTimer) clearTimeout(retryTimer); };
   }, []);
 
   // Browser tab shows the ticket ref
@@ -1657,6 +1671,16 @@ export default function TicketDetail() {
   useEffect(() => () => { if (liveRefetchTimerRef.current) clearTimeout(liveRefetchTimerRef.current); }, []);
 
   const isNative = ticket?.origin === 'ticketpulse';
+  // FreshService switch (25 Nov 2026): Off (or never connected) hides every
+  // FreshService affordance. An FS-born ticket is then imported history —
+  // read-only until someone adopts it. An old meta without the flag reads as
+  // on. While meta is still loading the answer is "hold": no FreshService-only
+  // affordance (strip, Edit, Open in FreshService, inline write-backs) shows,
+  // and nothing reads as imported. If meta fails (after one retry), today's
+  // default applies: FreshService on, everything as before.
+  const metaLoaded = Boolean(meta) || metaFailed;
+  const fsOn = metaLoaded && freshserviceEnabledFrom(meta);
+  const isImported = Boolean(meta) && isImportedTicket(ticket, freshserviceEnabledFrom(meta));
   // QA 10-28 #4: closed into another ticket by grouping (kept out of totals with is_noise).
   const isGroupedCopy = isGroupedCopyOf(ticket);
   const ticketingOn = meta?.nativeTicketingEnabled !== false;
@@ -1674,7 +1698,7 @@ export default function TicketDetail() {
   const ticketSlaPaused = ticket ? baseStatusOf(statusDefs, ticket.status) === 'Pending' : false;
   // Per-workspace type registry: sidebar Type options ('Case' for Accounting…).
   const { activeTypes: activeTicketTypes } = useTicketTypes();
-  const canConverse = ticketingOn && (isNative || Boolean(ticket?.freshserviceTicketId));
+  const canConverse = ticketingOn && (isNative || (Boolean(ticket?.freshserviceTicketId) && fsOn));
   // Parked (plans/PARKED_BUILD_PLAN.md): any origin, Standard role or higher
   // (the server refuses read-only members too).
   const canPark = Boolean(ticket) && meta?.actor?.workspaceRole !== 'readonly' && meta?.actor?.role !== 'readonly'
@@ -1722,7 +1746,8 @@ export default function TicketDetail() {
   );
   const [teamForward, setTeamForward] = useState(null);
   // FS-born tickets take confirmed write-backs for assignee/status/priority/category.
-  const fsEditable = !isNative && Boolean(ticket?.freshserviceTicketId);
+  // Never while the workspace's FreshService is off: there is nothing to write to.
+  const fsEditable = !isNative && Boolean(ticket?.freshserviceTicketId) && fsOn;
   // "Send and set status": every status this ticket can move to, bar the one it has.
   const sendStatusChoices = useMemo(
     () => ((canWrite || fsEditable) ? statusOptions.filter((st) => st !== ticket?.status) : []),
@@ -1771,12 +1796,31 @@ export default function TicketDetail() {
   // Why this ticket cannot RECEIVE a merge (Phase MB1) — null when it can.
   // Same copy as the survivor radios in MergeTicketsModal.
   const mergeBlockedReason = !ticket ? null
-    : !isNative ? MERGE_FS_BLOCKED_REASON
-      : !ticketOpenLike ? MERGE_TERMINAL_BLOCKED_REASON
-        : null;
-  const fsUrl = ticket?.freshserviceTicketId
+    : isImported ? 'Imported from FreshService (read-only) — adopt it to edit, then merge'
+      : !isNative ? MERGE_FS_BLOCKED_REASON
+        : !ticketOpenLike ? MERGE_TERMINAL_BLOCKED_REASON
+          : null;
+  const fsUrl = ticket?.freshserviceTicketId && fsOn
     ? `https://${FRESHSERVICE_DOMAIN}/a/tickets/${ticket.freshserviceTicketId}`
     : null;
+  // "Adopt to edit" (imported tickets): agents and admins, the same people the server allows.
+  const canAdopt = Boolean(meta?.actor && (meta.actor.role === 'admin' || meta.actor.workspaceRole === 'admin' || meta.actor.technicianId));
+  const [adopting, setAdopting] = useState(false);
+  const [adoptError, setAdoptError] = useState(null);
+  const adoptTicket = async () => {
+    setAdopting(true);
+    setAdoptError(null);
+    try {
+      const res = await ticketsAPI.adopt(ticketId);
+      lastLocalMutationRef.current = Date.now();
+      await fetchTicket({ silent: true });
+      showToast('emerald', res?.data?.displayRef ? `Adopted — now ${res.data.displayRef}, editable here` : 'Adopted — editable here');
+    } catch (err) {
+      setAdoptError(err?.response?.data?.message || err?.message || 'The ticket could not be adopted');
+    } finally {
+      setAdopting(false);
+    }
+  };
 
   // At-a-glance approval state for the header (open > approved > rejected).
   const approvalSummary = useMemo(() => {
@@ -2494,7 +2538,7 @@ export default function TicketDetail() {
     if (fsDelete && !fsDelete.deleted) {
       showToast('red', `${source.displayRef} was merged, but FreshService did not delete it: ${fsDelete.error || 'unknown reason'}`, { duration: 7000 });
     } else {
-      showToast('emerald', `${source.displayRef} merged into ${ticket.displayRef}${fsDelete?.deleted ? ' and deleted in FreshService' : ''}`);
+      showToast('emerald', `${source.displayRef} merged into ${ticket.displayRef}${fsDelete?.deleted && fsOn ? ' and deleted in FreshService' : ''}`);
     }
   };
   const dismissDupes = () => {
@@ -3084,6 +3128,16 @@ export default function TicketDetail() {
                           )}
                         </h1>
                       )}
+                      {/* FreshService switch: "Imported from FreshService" (Off) or
+                          "Adopted from FreshService #n on <date>" — one quiet line. */}
+                      {(metaLoaded || isAdoptedTicket(ticket)) && <FsProvenanceLine
+                        ticket={ticket}
+                        fsEnabled={fsOn}
+                        canAdopt={canAdopt && ticket.status !== 'Deleted'}
+                        onAdopt={adoptTicket}
+                        adopting={adopting}
+                        error={adoptError}
+                      />}
                       {ticket.urgentClock && <UrgentClockLine clock={ticket.urgentClock} />}
                       {ticket.parkedUntil ? (
                         <ParkLine
@@ -3177,6 +3231,7 @@ export default function TicketDetail() {
                       fsUrl={isNative && ticket.freshserviceTicketId ? fsUrl : null}
                       onRetry={isNative && isAdmin && ['pending', 'error'].includes(ticket.mirrorState) ? retryMirror : null}
                       busy={savingField === 'mirror'}
+                      fsEnabled={fsOn}
                     />
                     <ProvenanceChip ticket={ticket} iconOnly />
                     <StateChip state={ticket.stateChip} />
@@ -3519,7 +3574,7 @@ export default function TicketDetail() {
                     </div>
                   )}
 
-                  {!isNative && (
+                  {!isNative && fsOn && (
                     <div className="mt-3 flex items-center gap-2 rounded-lg border border-border/70 bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground" data-testid="fs-owner-strip">
                       <ActionIcon name="freshservice" className="h-[18px] w-[18px]" />
                       <span className="font-medium text-foreground/80">FreshService owns this ticket</span>
@@ -4785,7 +4840,7 @@ export default function TicketDetail() {
                                       <span className="min-w-0 flex-1 text-xs text-foreground/85 truncate">{r.subject || '(no subject)'}</span>
                                       <StatusPill status={r.status} className="!text-[9px] !px-1.5" />
                                     </Link>
-                                    {mergeableHere(r) && <RelatedMergeButton source={r} target={ticket} canDeleteFs={canReview} onMerged={afterRelatedMerge} />}
+                                    {mergeableHere(r) && <RelatedMergeButton source={r} target={ticket} canDeleteFs={canReview && fsOn} fsEnabled={fsOn} onMerged={afterRelatedMerge} />}
                                   </li>
                                 ))}
                               </ul>
@@ -4817,7 +4872,7 @@ export default function TicketDetail() {
                                       <span className="min-w-0 flex-1 text-xs text-foreground/85 truncate">{r.subject || '(no subject)'}</span>
                                       <span className="text-[10px] text-muted-foreground/75 whitespace-nowrap">{timeAgo(r.createdAt)}</span>
                                     </Link>
-                                    {mergeableHere(r) && <RelatedMergeButton source={r} target={ticket} canDeleteFs={canReview} onMerged={afterRelatedMerge} />}
+                                    {mergeableHere(r) && <RelatedMergeButton source={r} target={ticket} canDeleteFs={canReview && fsOn} fsEnabled={fsOn} onMerged={afterRelatedMerge} />}
                                   </li>
                                 ))}
                               </ul>
@@ -4848,7 +4903,7 @@ export default function TicketDetail() {
                                         {Math.round((r.similarity || 0) * 100)}%
                                       </span>
                                     </Link>
-                                    {mergeableHere(r) && <RelatedMergeButton source={r} target={ticket} canDeleteFs={canReview} onMerged={afterRelatedMerge} />}
+                                    {mergeableHere(r) && <RelatedMergeButton source={r} target={ticket} canDeleteFs={canReview && fsOn} fsEnabled={fsOn} onMerged={afterRelatedMerge} />}
                                   </li>
                                 ))}
                               </ul>
@@ -4890,6 +4945,13 @@ export default function TicketDetail() {
                     subject={ticket.subject}
                     // 4.4.08: edit / revert a file's name (agents who can work the ticket).
                     canRename={canConverse && !actorReadOnly}
+                    // 25 Nov 2026: Remove on the tab too, with the same rule as the side panel's
+                    // card (the uploader or an admin, on a ticket you can write to).
+                    canRemove={(a) => Boolean(canWrite && !actorReadOnly && (meta?.actor?.email === a.uploadedBy || meta?.actor?.kind === 'admin' || meta?.actor?.workspaceRole === 'admin'))}
+                    onRemoved={(a) => {
+                      fetchTicket({ silent: true });
+                      showToast('emerald', `${attachmentName(a)} removed`);
+                    }}
                     onRenamed={attachmentRenamed}
                   />
                 )}
@@ -5810,6 +5872,7 @@ export default function TicketDetail() {
         <MergeTicketsModal
           ticket={ticket}
           statusDefs={statusDefs}
+          fsEnabled={fsOn}
           onClose={() => setMergeOpen(false)}
           onMerged={(result) => {
             setMergeOpen(false);
@@ -5829,6 +5892,7 @@ export default function TicketDetail() {
           ticket={ticket}
           isNative={isNative}
           fsRef={ticket.freshserviceTicketId ? String(ticket.freshserviceTicketId) : null}
+          fsEnabled={fsOn}
           onClose={() => setEditOpen(false)}
           onSubmit={submitTicketEdit}
         />

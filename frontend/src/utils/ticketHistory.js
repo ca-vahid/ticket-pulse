@@ -406,6 +406,9 @@ export function buildHistoryItems({ activities = [], assignmentEpisodes = [], pi
         importance: 1,
         machine: false,
       });
+    } else if (t === 'attachment_removed') {
+      // 25 Nov 2026: "Vahid Haeri removed an attachment · teams-picture-1.png".
+      item = baseItem({ event: 'field', verb: 'removed an attachment', detail: d.fileName || d.originalName || null, importance: 1, machine: false });
     } else if (t === 'mirror_conflict') {
       item = baseItem({ event: 'system', verb: 'mirror conflict', detail: d.note || (Array.isArray(d.drift) ? d.drift.join(', ') : null) });
     } else if (t === 'created') {

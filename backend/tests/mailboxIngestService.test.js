@@ -1168,7 +1168,10 @@ describe('FS-born tickets on the Ticket Pulse reply lane', () => {
     });
 
     expect(outcome).toBe('reply');
-    expect(prismaMock.ticket.findFirst).toHaveBeenCalledWith({ where: { workspaceId: 1, freshserviceTicketId: 241459n, origin: 'freshservice' } });
+    // FreshService switch: an adopted ticket (tombstone FS id) is found by its old FS number too.
+    expect(prismaMock.ticket.findFirst).toHaveBeenCalledWith({
+      where: { workspaceId: 1, freshserviceTicketId: 241459n, OR: [{ origin: 'freshservice' }, { mirrorState: 'adopted' }] },
+    });
     expect(activityMock.create).toHaveBeenCalledWith(expect.objectContaining({ activityType: 'requester_reply', details: expect.objectContaining({ via: 'plus_address_fs' }) }));
     expect(fsClient.addNote).toHaveBeenCalledWith(241459, expect.stringContaining('It is jammed again'), expect.objectContaining({ isPrivate: false, incoming: true, userId: 1001249103 }));
     expect(prismaMock.ticketThreadEntry.update).toHaveBeenCalledWith(expect.objectContaining({

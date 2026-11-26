@@ -1,5 +1,6 @@
 import prisma from '../services/prisma.js';
-import { isFreshServiceUnlinked, NOT_LINKED_MESSAGE } from '../utils/workspaceFsBinding.js';
+import { fsGate, getModeRecord } from '../services/fsModeService.js';
+import { isFreshServiceUnlinked, NOT_LINKED_MESSAGE, OFF_MESSAGE } from '../utils/workspaceFsBinding.js';
 
 /**
  * Route gate for "pull from FreshService" actions (QA 11-24 #4 review): sync
@@ -26,9 +27,44 @@ export function notLinkedResponse(res) {
   return res.status(409).json({ success: false, code: 'freshservice_not_linked', message: NOT_LINKED_MESSAGE });
 }
 
+/** A linked workspace whose FreshService mode is 'off' (FreshService exit A1). */
+export async function isWorkspaceFreshServiceOff(workspaceId) {
+  if (!workspaceId) return false;
+  return (await getModeRecord(workspaceId)).mode === 'off';
+}
+
+export function offResponse(res) {
+  return res.status(409).json({ success: false, code: 'freshservice_off', message: OFF_MESSAGE });
+}
+
+/**
+ * Route gate for a FreshService call that answers "not linked" itself (the
+ * ticket-type check): refuses a workspace switched off (409 freshservice_off)
+ * and, in Shadow, counts `purpose`. Unlinked workspaces pass to the route.
+ */
+export function requireFreshServiceOn(purpose = 'other') {
+  return async function freshServiceOnGate(req, res, next) {
+    try {
+      if (!req.workspaceId) return next();
+      const { mode } = await getModeRecord(req.workspaceId);
+      if (mode === 'off') return offResponse(res);
+      if (mode === 'shadow') await fsGate(req.workspaceId, purpose);
+      return next();
+    } catch (err) {
+      return next(err);
+    }
+  };
+}
+
+/**
+ * Also refuses a workspace switched off (25 Nov 2026): 409 freshservice_off.
+ * The mode read is cached and falls back to 'connected' on a read error, so
+ * a live workspace is never blocked by a hiccup.
+ */
 export async function requireFreshServiceLink(req, res, next) {
   try {
     if (await isWorkspaceUnlinked(req.workspaceId)) return notLinkedResponse(res);
+    if (await isWorkspaceFreshServiceOff(req.workspaceId)) return offResponse(res);
     return next();
   } catch (err) {
     return next(err);

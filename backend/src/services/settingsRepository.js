@@ -23,6 +23,19 @@ async function getFreshServiceConfigForWorkspace(workspaceId, settingsRepo) {
       throw new NotFoundError(`Workspace ${workspaceId} not found`);
     }
 
+    const linked = isFreshServiceBound(workspace);
+    // FreshService exit A1 (25 Nov 2026): a linked workspace switched OFF reads
+    // as not linked, so syncService._getWorkspaceConfig and the backfills refuse
+    // it (409 freshservice_off). The mode read is cached and falls back to
+    // 'connected' on any error; loaded lazily (fsModeService imports this file).
+    let freshserviceOff = false;
+    if (linked) {
+      try {
+        const { getModeRecord } = await import('./fsModeService.js');
+        freshserviceOff = (await getModeRecord(workspace.id ?? workspaceId)).mode === 'off';
+      } catch { /* connected */ }
+    }
+
     return {
       domain,
       apiKey,
@@ -30,7 +43,9 @@ async function getFreshServiceConfigForWorkspace(workspaceId, settingsRepo) {
       // QA 11-24 #4 review: false for a workspace with no FreshService link
       // (id 0). Its workspaceId above is null, and a null filter means "every
       // FreshService workspace" — syncService refuses such a config.
-      freshserviceLinked: isFreshServiceBound(workspace),
+      freshserviceLinked: linked && !freshserviceOff,
+      // Why it is not linked: true = switched off (a different 409 code).
+      freshserviceOff,
       defaultTimezone: workspace.defaultTimezone,
       syncIntervalMinutes: workspace.syncIntervalMinutes,
       categoryCustomField: workspace.categoryCustomField || 'security',

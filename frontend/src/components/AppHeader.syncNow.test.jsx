@@ -109,6 +109,18 @@ describe('AppHeader — response-driven Sync now feedback', () => {
     });
   });
 
+  test("FreshService switch: {status:'skipped', reason:'freshservice_off'} says FreshService is off, not an error", async () => {
+    mocks.trigger.mockResolvedValue({ success: true, data: { status: 'skipped', reason: 'freshservice_off' } });
+    setup({ userRole: 'admin', wsRole: 'admin' });
+    await openStatusPopover();
+
+    fireEvent.click(screen.getByRole('button', { name: /sync now/i }));
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('FreshService is off for this workspace');
+    });
+    expect(screen.getByRole('status')).not.toHaveTextContent(/already running|failed/i);
+  });
+
   test('a successful trigger reports completion', async () => {
     setup({ userRole: 'admin', wsRole: 'admin' });
     await openStatusPopover();

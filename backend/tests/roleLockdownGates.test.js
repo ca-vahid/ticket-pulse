@@ -103,6 +103,9 @@ jest.unstable_mockModule('../src/routes/publicTicketStatus.routes.js', () => ({ 
 // The Dashboard viewer router answers only listed viewers and lets everyone
 // else through; an empty router is that "through" (its own test pins the rest).
 jest.unstable_mockModule('../src/routes/dashboardViewer.routes.js', () => ({ default: express.Router() }));
+// FreshService switch (25 Nov 2026): mounted at /workspaces ahead of workspace.routes.js
+// with its own gates (fsModeRoutes.test.js pins them); an empty router passes through.
+jest.unstable_mockModule('../src/routes/fsMode.routes.js', () => ({ default: express.Router() }));
 jest.unstable_mockModule('../src/routes/tickets.routes.js', routeStub('tickets', { ticketApprovalPublicRouter: stubRouter('approvals-public'), approvalReplyPublicRouter: stubRouter('approvals-reply') }));
 
 // ---- B. assignment.routes.js, real router ----------------------------------

@@ -90,6 +90,8 @@ export async function resolveAssignmentTarget(workspaceId, assignTo = {}) {
   return { error: `Unknown assignment mode "${mode}"` };
 }
 
+export const IMPORTED_LEFT_UNCHANGED = 'Imported from FreshService; left unchanged';
+
 /** Apply an assignment origin-aware: TP-born via ticketService, FS-born via the FS write-back. */
 export async function applyWorkflowAssignment(ticket, techId) {
   const { default: ticketService } = await import('./ticketService.js');
@@ -98,7 +100,12 @@ export async function applyWorkflowAssignment(ticket, techId) {
     return { via: 'ticketpulse' };
   }
   // FS-born: responder write-back through the existing confirmed-update path.
-  await ticketService.updateFsTicket(ticket.id, ticket.workspaceId, { assignedTechId: techId }, WORKFLOW_ACTOR);
+  const result = await ticketService.updateFsTicket(ticket.id, ticket.workspaceId, { assignedTechId: techId }, WORKFLOW_ACTOR);
+  // FreshService switch: on imported history in an Off workspace a workflow
+  // changes nothing (it never adopts) — say so instead of "assigned".
+  if (result?.skipped === 'freshservice_off_imported') {
+    return { via: 'freshservice_off', skipped: true, reason: IMPORTED_LEFT_UNCHANGED };
+  }
   return { via: 'freshservice_writeback' };
 }
 

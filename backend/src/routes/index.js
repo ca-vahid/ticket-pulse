@@ -1,6 +1,7 @@
 import express from 'express';
 import authRoutes from './auth.routes.js';
 import workspaceRoutes from './workspace.routes.js';
+import fsModeRoutes from './fsMode.routes.js';
 import dashboardRoutes from './dashboard.routes.js';
 import settingsRoutes from './settings.routes.js';
 import syncRoutes from './sync.routes.js';
@@ -60,6 +61,9 @@ router.get('/health', (req, res) => {
 
 // Auth & workspace selection (handle their own auth internally)
 router.use('/auth', authRoutes);
+// FreshService switch (25 Nov 2026): /workspaces/:id/freshservice[/off] and
+// /workspaces/freshservice-modes. Own auth + target-workspace admin gates.
+router.use('/workspaces', fsModeRoutes);
 router.use('/workspaces', workspaceRoutes);
 
 // External webhooks: uses shared-secret auth, NOT session/JWT auth.

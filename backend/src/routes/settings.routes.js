@@ -7,6 +7,7 @@ import {
 import { requireWorkspace } from '../middleware/workspace.js';
 import { AuthorizationError, NotFoundError, ValidationError } from '../utils/errors.js';
 import { isFreshServiceUnlinked, NOT_LINKED_MESSAGE } from '../utils/workspaceFsBinding.js';
+import { requireFreshServiceOn } from '../middleware/requireFreshServiceLink.js';
 import settingsRepository from '../services/settingsRepository.js';
 import prisma from '../services/prisma.js';
 import technicianRepository from '../services/technicianRepository.js';
@@ -1111,6 +1112,7 @@ router.post(
   requireWorkspace,
   requireWorkspaceAccess,
   requireAdmin,
+  requireFreshServiceOn('ticket_types'),
   asyncHandler(async (req, res) => {
     const { default: ticketTypeService } = await import('../services/ticketTypeService.js');
     const { default: prisma } = await import('../services/prisma.js');

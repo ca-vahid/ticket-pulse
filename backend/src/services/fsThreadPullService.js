@@ -4,6 +4,7 @@ import settingsRepository from './settingsRepository.js';
 import mirrorService from './mirrorService.js';
 import ticketThreadRepository from './ticketThreadRepository.js';
 import { TICKET_ORIGIN } from '../utils/ticketOrigin.js';
+import { fsGate, isFreshServiceOff } from './fsModeService.js';
 import { isQuietHours, pacificParts } from '../utils/quietHours.js';
 
 /**
@@ -166,7 +167,11 @@ class FsThreadPullService {
 
   async _queueDepth(workspaceId) {
     try {
-      const client = await mirrorService.getClient(workspaceId || 1);
+      // Only the SHARED limiter's queue depth is read (no FreshService call), so
+      // the ungated client is used: with workspace 1 switched off, getClient()
+      // returns null and the worker would read an empty queue for ever.
+      const get = typeof mirrorService._getClient === 'function' ? mirrorService._getClient.bind(mirrorService) : mirrorService.getClient.bind(mirrorService);
+      const client = await get(workspaceId || 1);
       const stats = typeof client?.getLimiterStats === 'function' ? client.getLimiterStats() : null;
       const depth = Number(stats?.queueDepth);
       return Number.isFinite(depth) ? depth : 0;
@@ -243,9 +248,13 @@ class FsThreadPullService {
   async pull(ticketId) {
     const ticket = await prisma.ticket.findUnique({
       where: { id: Number(ticketId) },
-      select: { id: true, workspaceId: true, origin: true, freshserviceTicketId: true, freshserviceUpdatedAt: true },
+      select: { id: true, workspaceId: true, origin: true, freshserviceTicketId: true, freshserviceUpdatedAt: true, mirrorState: true },
     });
     if (!ticket?.freshserviceTicketId || ticket.origin !== TICKET_ORIGIN.FRESHSERVICE) return 0;
+    // Adopted from FreshService: its FS id is a tombstone (FreshService exit A3).
+    if (ticket.mirrorState === 'adopted') return 0;
+    // FreshService switched off for this workspace: nothing to pull (Shadow counts it).
+    if (!(await fsGate(ticket.workspaceId, 'thread_pull'))) return 0;
     const client = await mirrorService.getClient(ticket.workspaceId);
     if (!client) return 0;
     const fsId = Number(ticket.freshserviceTicketId);
@@ -331,6 +340,14 @@ class FsThreadPullService {
     if (!(await this._enabled())) return { skipped: 'disabled' };
     const state = await this._state();
     const phase = SWEEP_PHASES[state.phase % SWEEP_PHASES.length];
+    // FreshService switched off for this phase's workspace: move on to the
+    // next phase without scanning (FreshService exit A1).
+    if (await isFreshServiceOff(phase.workspaceId)) {
+      const rest = { ...state };
+      delete rest.afterId;
+      await settingsRepository.set(STATE_KEY, JSON.stringify({ ...rest, phase: (state.phase + 1) % SWEEP_PHASES.length, beforeId: null, updatedAt: new Date().toISOString() })).catch(() => {});
+      return { skipped: 'freshservice_off', phase: state.phase };
+    }
     const maxId = await this._maxTicketId();
     // An old ascending state (afterId) restarts the phase from the top; ranges
     // already swept are cheap to re-read (their tickets carry the marker).

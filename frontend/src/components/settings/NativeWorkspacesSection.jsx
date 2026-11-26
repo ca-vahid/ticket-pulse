@@ -190,6 +190,8 @@ export default function NativeWorkspacesSection({ canCreate = false }) {
               <span className="font-medium text-foreground">{ws.name}</span>
               <span className="text-xs text-muted-foreground">Ticket links: /{ws.linkName || ws.slug}/TP-…</span>
               <span className="text-xs text-muted-foreground">{ws.defaultTimezone}</span>
+              {/* FreshService switch (25 Nov 2026): these were never on FreshService. */}
+              <span className="text-xs text-muted-foreground/75" data-testid="fs-never-connected-line">Never connected to FreshService — nothing to switch</span>
             </li>
           ))}
         </ul>

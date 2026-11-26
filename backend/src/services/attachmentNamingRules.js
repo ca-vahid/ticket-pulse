@@ -45,6 +45,9 @@ const MONTHS = 'january|february|march|april|may|june|july|august|september|octo
 // A "vendor" that is really a generic word ("September Invoice", "Your Invoice").
 const GENERIC_VENDOR = new RegExp(`^(?:${MONTHS}|new|your|our|the|an?|my|monthly|weekly|annual|final|past due|overdue|outstanding|open|unpaid|paid|proforma|pro forma|sales|tax|commercial|rental|copy|copy of|re|fw|fwd|invoice|invoices|statement|statements|receipt|receipts|bill|payment|remittance|attached|please find|reminder|updated|revised|corrected|draft|credit|debit|ar|ap|signed|scan|scanned|doc|docs|document|documents|file|files|form|forms|attachment|image|page|pages|untitled|printout|print|original|originals|return|returned|returns|duplicate|reprint|reissued|amended|replacement|cancelled|canceled|void|voided|customer|client|vendor|supplier|summary|details|detail|confirmation|quote|quotation|estimate|order|purchase order|po|report)$`, 'i');
 
+/** Phrases that mark a reminder or overdue notice, never a company name. */
+const REMINDER_PHRASE = /\b(?:reminders?|days?\s+(?:past\s+due|outstanding|overdue)|past\s+due|overdue|outstanding\s+(?:invoices?|balance|amount)|payment\s+(?:due|reminder)|statement\s+of\s+account|final\s+notice|collection\s+notice)\b/i;
+
 // ---------------------------------------------------------------- helpers
 
 // An extension is 1–8 letters or digits ("pdf", "xlsx"); anything else after
@@ -241,6 +244,10 @@ export function looksLikeOwnCompany(vendor, internalDomains = []) {
 export function plausibleVendor(raw, internalDomains = []) {
   let v = cleanNamePart(raw);
   if (!v) return null;
+  // A collection-reminder subject ("Reminder: 71 Days Outstanding Invoice - …")
+  // is not a vendor (25 Nov 2026: three files were named "Reminder 71 Days Outstanding_…").
+  // Checked on the whole text, before the trims below can cut "Past Due Notice" to "Past".
+  if (REMINDER_PHRASE.test(v)) return null;
   // Trailing codes and asides: "Acme Rentals_A1B2C3", "Acme - Account 991", "Acme (Canada)".
   v = v.replace(/_(?=[^_]*\d)[\s\S]*$/, '').replace(/\s+[-–|]\s+[\s\S]*$/, '').replace(/\s*\(.*$/, '').trim();
   v = v.replace(/\s+(?:for|regarding|re|dated|on|due)\b[\s\S]*$/i, '').trim();

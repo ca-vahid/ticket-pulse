@@ -52,4 +52,19 @@ export function assertFreshServiceLinked(workspace) {
   if (isFreshServiceUnlinked(workspace)) throw new FreshServiceNotLinkedError();
 }
 
-export default { isFreshServiceBound, isFreshServiceUnlinked, assertFreshServiceLinked, FreshServiceNotLinkedError, NOT_LINKED_MESSAGE };
+export const OFF_MESSAGE = 'FreshService is switched off for this workspace.';
+
+/**
+ * 409 for a FreshService action asked of a workspace whose FreshService mode
+ * is 'off' (FreshService exit A1, 25 Nov 2026; services/fsModeService.js).
+ * A linked workspace switched off is a different answer from "never linked",
+ * so it carries its own code.
+ */
+export class FreshServiceOffError extends ConflictError {
+  constructor(message = OFF_MESSAGE) {
+    super(message);
+    this.code = 'freshservice_off';
+  }
+}
+
+export default { isFreshServiceBound, isFreshServiceUnlinked, assertFreshServiceLinked, FreshServiceNotLinkedError, FreshServiceOffError, NOT_LINKED_MESSAGE, OFF_MESSAGE };

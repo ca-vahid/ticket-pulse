@@ -822,6 +822,9 @@ export const ticketsAPI = {
     return await api.get('/tickets/meta');
   },
 
+  // FreshService switch: "Adopt to edit" an imported FreshService ticket.
+  adopt: async (id) => await api.post(`/tickets/${id}/adopt`),
+
   // QA 11-24 #1: job class → department table (defaults + admin override), read-only.
   getDepartmentMap: async () => {
     return await api.get('/tickets/department-map');
@@ -1871,6 +1874,13 @@ export const workspaceAPI = {
   createNative: async (data) => {
     return await api.post('/workspaces/native', data);
   },
+
+  // FreshService switch (25 Nov 2026): Connected / Shadow / Off per workspace.
+  getFreshServiceModes: async () => await api.get('/workspaces/freshservice-modes'),
+  getFreshService: async (workspaceId) => await api.get(`/workspaces/${workspaceId}/freshservice`),
+  setFreshServiceMode: async (workspaceId, mode) => await api.put(`/workspaces/${workspaceId}/freshservice`, { mode }),
+  startFreshServiceOff: async (workspaceId, confirmName) => await api.post(`/workspaces/${workspaceId}/freshservice/off`, { confirmName }),
+  getFreshServiceOff: async (workspaceId) => await api.get(`/workspaces/${workspaceId}/freshservice/off`),
 
   update: async (id, data) => {
     return await api.put(`/workspaces/${id}`, data);

@@ -148,11 +148,11 @@ describe('the reason travels everywhere it must', () => {
     expect(fn).toMatch(/if \(!fromFreshService\) await mirrorService\.enqueueFieldSync\(workspaceId, ticket\.id\);/);
     expect(fn).toMatch(/const kind = fromFreshService \? 'freshservice' : resolvedByKindFromActor\(actor\);/);
     // QA 10-30 #2: a Resolved from FreshService that became Closed (Resolved retired) IS written back.
-    expect(fn).toMatch(/mirrorState: fromFreshService && !retiredSwap \? 'mirrored' : 'pending'/);
+    expect(fn).toMatch(/_mirrorStatePatch\(ticket, workspaceId, fromFreshService && !retiredSwap \? 'mirrored' : 'pending'\)/);
     const assign = ticketSvc.slice(ticketSvc.indexOf('async assignTicket('), ticketSvc.indexOf('async _isAiOverride('));
     expect(assign).toMatch(/if \(!fromFreshService\) await mirrorService\.enqueueFieldSync\(workspaceId, ticket\.id\);/);
     const del = ticketSvc.slice(ticketSvc.indexOf('async deleteTicket('), ticketSvc.indexOf('async _notifyLifecycle('));
-    expect(del).toMatch(/if \(ticket\.freshserviceTicketId && !fromFreshService\)/);
+    expect(del).toMatch(/if \(ticket\.freshserviceTicketId && !fromFreshService && !isAdopted\(ticket\)\)/);
   });
 
   test('the actor reaches the lifecycle emitter, and the status-family events carry who/when/why', () => {

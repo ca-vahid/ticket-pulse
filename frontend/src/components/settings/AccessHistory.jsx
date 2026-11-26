@@ -11,6 +11,7 @@ import { workspaceAPI } from '../../services/api';
 const ROLE_LABEL = { admin: 'Admin', reviewer: 'Reviewer', viewer: 'Viewer', readonly: 'Read-only', observer: 'Observer' };
 const role = (r) => ROLE_LABEL[r] || r || 'none';
 const who = (email) => (email ? String(email).split('@')[0] : 'someone');
+const FS_MODE_WORD = { connected: 'Connected', shadow: 'Shadow', off: 'Off' };
 
 const CREDENTIAL_VERB = {
   created: 'created', updated: 'changed', enabled: 'switched back on', rotated: 'gave a new secret to',
@@ -26,6 +27,15 @@ export function describeAccessEvent(e) {
   case 'role_changed': return `${actor} changed ${target} from ${role(e.oldValue)} to ${role(e.newValue)}`;
   case 'access_revoked': return `${actor} removed ${target}'s access (was ${role(e.oldValue)})`;
   case 'workspace_created': return `${actor} created the workspace "${e.targetLabel || 'unnamed'}"`;
+  // FreshService switch (25 Nov 2026).
+  case 'freshservice_mode_changed': return `${actor} set FreshService to ${FS_MODE_WORD[e.newValue] || e.newValue || 'a new mode'}${e.oldValue ? ` (was ${FS_MODE_WORD[e.oldValue] || e.oldValue})` : ''}`;
+  case 'freshservice_tickets_adopted': {
+    const n = Number(e.newValue ?? e.details?.adopted) || 0;
+    const failed = Number(e.details?.failed) || 0;
+    const tail = failed > 0 ? `; ${failed} could not be adopted` : '';
+    const stillOn = e.details?.switchedOff === false ? ' (FreshService stayed on)' : '';
+    return `${actor} adopted ${n} open FreshService ticket${n === 1 ? '' : 's'} while switching FreshService off${tail}${stillOn}`;
+  }
   case 'dashboard_view_changed': return `${actor} turned Dashboard view ${e.newValue === 'on' ? 'on' : 'off'} for ${target}`;
   case 'admin_list_changed': {
     const added = e.details?.added || [];

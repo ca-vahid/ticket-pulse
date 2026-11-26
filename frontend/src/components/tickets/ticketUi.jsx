@@ -1002,9 +1002,41 @@ export function ProvenanceChip({ ticket, iconOnly = false }) {
   );
 }
 
-/** Fallback-mirror state for TP-born tickets. */
-export function MirrorChip({ ticket }) {
+// ── FreshService switch (25 Nov 2026) ─────────────────────────────────────────
+// A workspace can be Connected / Shadow / Off. /tickets/meta carries
+// `freshserviceEnabled` (true for connected and shadow); an older cached meta
+// without the flag reads as true, so connected behaviour never changes.
+// Adopted tickets (mirrorState 'adopted') were FreshService-born and are now
+// Ticket Pulse tickets: their FreshService number is only a tombstone, never a
+// live copy, so no mirror marker is shown for them.
+
+/** meta.freshserviceEnabled, defaulting to true when absent (old cached meta). */
+export function freshserviceEnabledFrom(meta) {
+  return meta?.freshserviceEnabled !== false;
+}
+
+export function isAdoptedTicket(ticket) {
+  return ticket?.mirrorState === 'adopted';
+}
+
+/** When the ticket was adopted, from its adoption activity row (null when not loaded). */
+export function adoptedAtOf(ticket) {
+  const row = (ticket?.activities || []).find((a) => a?.activityType === 'adopted_from_freshservice');
+  return row?.performedAt || null;
+}
+
+/**
+ * A FreshService-born ticket in a workspace whose FreshService is off (or was
+ * never connected): imported history, read-only until someone adopts it.
+ */
+export function isImportedTicket(ticket, fsEnabled = true) {
+  return Boolean(ticket) && ticket.origin !== 'ticketpulse' && !isAdoptedTicket(ticket) && fsEnabled === false;
+}
+
+/** Fallback-mirror state for TP-born tickets. Nothing when FreshService is off or the ticket was adopted. */
+export function MirrorChip({ ticket, fsEnabled = true }) {
   if (ticket?.origin !== 'ticketpulse') return null;
+  if (!fsEnabled || isAdoptedTicket(ticket)) return null;
   const state = ticket.mirrorState;
   // QA 11-24 #4: a workspace with no FreshService link keeps no fallback copy.
   if (state === 'none') return null;
@@ -1170,7 +1202,14 @@ export function ticketRefLabel(ticket) {
   return ticket.id ? `TP-ID-${ticket.id}` : '—';
 }
 
-export function ticketFsUrl(ticket) {
+/**
+ * The FreshService page for this ticket, or null. With `fsEnabled: false`
+ * (the workspace's FreshService is off) there is no live FreshService page to
+ * open, so it is always null; an adopted ticket links to its OLD ticket only
+ * while FreshService is connected or in Shadow.
+ */
+export function ticketFsUrl(ticket, { fsEnabled = true } = {}) {
+  if (!fsEnabled) return null;
   return ticket?.freshserviceTicketId
     ? `https://${FRESHSERVICE_DOMAIN}/a/tickets/${ticket.freshserviceTicketId}`
     : null;
@@ -1187,9 +1226,11 @@ export function TicketRefLink({
   // Optional router location state passed to the internal link — lets origin
   // pages (e.g. the agent page) hand /tickets/:id a `{ from }` return address.
   state,
+  // FreshService switch: false when the workspace's FreshService is off — no FS link.
+  fsEnabled = true,
 }) {
   const internalHref = ticket?.id ? `/tickets/${ticket.id}` : null;
-  const fsUrl = ticketFsUrl(ticket);
+  const fsUrl = ticketFsUrl(ticket, { fsEnabled });
   const text = label ?? ticketRefLabel(ticket);
   const stop = (e) => { e.stopPropagation(); onNavigate?.(); };
   return (
@@ -1198,6 +1239,8 @@ export function TicketRefLink({
         <Link to={internalHref} state={state} title="Open in Ticket Pulse" className={`min-w-0 truncate ${linkClassName}`} onClick={stop}>
           {text}
         </Link>
+      ) : !fsEnabled ? (
+        <span className="min-w-0 truncate">{text}</span>
       ) : (
         <a href={fsUrl || '#'} target="_blank" rel="noopener noreferrer" className={`min-w-0 truncate ${linkClassName}`} onClick={(e) => e.stopPropagation()}>
           {text}
@@ -1328,8 +1371,10 @@ export function TypeBadge({ type, className = '' }) {
  * links to the FS copy; pending / error → the admin's retry. Replaces the three
  * separate chips (Mirrored / Mirror now / View FS mirror) on the header.
  */
-export function MirrorBadge({ ticket, fsUrl = null, onRetry = null, busy = false }) {
+export function MirrorBadge({ ticket, fsUrl = null, onRetry = null, busy = false, fsEnabled = true }) {
   if (ticket?.origin !== 'ticketpulse') return null;
+  // FreshService switch: no copy is kept while Off, and an adopted ticket's FS number is a tombstone.
+  if (!fsEnabled || isAdoptedTicket(ticket)) return null;
   const state = ticket.mirrorState;
   if (state === 'none') return null; // no FreshService link (QA 11-24 #4)
   const base = 'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium';

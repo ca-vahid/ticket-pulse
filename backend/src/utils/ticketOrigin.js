@@ -73,9 +73,16 @@ export function ticketSourceLabel(source) {
 /**
  * Human-facing ticket reference: TP-born tickets show their native number
  * ("TP-1042"); FS-born tickets keep the familiar FreshService "#12345".
+ * A ticket adopted from FreshService (mirrorState 'adopted', FS exit A3)
+ * reads TP-n too — its FreshService id is only a tombstone.
  */
+export function isAdoptedFromFreshService(ticketOrRow) {
+  return ticketOrRow?.mirrorState === 'adopted';
+}
+
 export function ticketDisplayRef(ticket) {
-  if (isTicketPulseOrigin(ticket) && ticket.nativeNumber !== null && ticket.nativeNumber !== undefined) {
+  const native = isTicketPulseOrigin(ticket) || isAdoptedFromFreshService(ticket);
+  if (native && ticket.nativeNumber !== null && ticket.nativeNumber !== undefined) {
     return `TP-${ticket.nativeNumber}`;
   }
   if (ticket?.freshserviceTicketId !== null && ticket?.freshserviceTicketId !== undefined) {

@@ -1,5 +1,6 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
+import { fsGate } from './fsModeService.js';
 
 // Groups change rarely — refresh the cache at most this often per workspace.
 const GROUP_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -23,6 +24,10 @@ class GroupSyncService {
           return { skipped: true, reason: 'recently_synced' };
         }
       }
+
+      // FreshService switched off: the cached groups stay as they are (none
+      // deactivated); local pickers keep working (FreshService exit A1).
+      if (!(await fsGate(workspaceId, 'groups'))) return { skipped: true, reason: 'freshservice_off' };
 
       const filters = {};
       if (freshserviceWorkspaceId) {

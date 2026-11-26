@@ -1,7 +1,8 @@
 import prisma from './prisma.js';
 import settingsRepository from './settingsRepository.js';
 import { createFreshServiceClient } from '../integrations/freshservice.js';
-import { NotFoundError, ValidationError } from '../utils/errors.js';
+import { ConflictError, NotFoundError, ValidationError } from '../utils/errors.js';
+import { fsGate } from './fsModeService.js';
 // Flag-split assignment (Phase PA): FS-SYNC set — this service is the
 // FS-coupled hierarchy machinery (legacy draft/publish editor, Summit import,
 // FS custom-object drift/sync). Canonical-only workspaces manage their tree
@@ -18,6 +19,17 @@ function assertSkillHierarchyWorkspace(workspaceId) {
   if (!isFsTaxonomySyncWorkspace(workspaceId)) {
     throw new ValidationError('The category/subcategory hierarchy editor is not enabled for this workspace');
   }
+}
+
+/**
+ * FreshService switch: the FreshService field/object routes need FreshService.
+ * Off → 409 freshservice_off (the local hierarchy keeps working).
+ */
+async function assertFreshServiceOn(workspaceId) {
+  if (await fsGate(workspaceId, 'other')) return;
+  const err = new ConflictError('FreshService is off for this workspace, so its category fields cannot be read or synced.');
+  err.code = 'freshservice_off';
+  throw err;
 }
 
 function normalizeName(value) {
@@ -702,6 +714,7 @@ class SkillHierarchyService {
 
   async getFreshserviceFields(workspaceId) {
     assertSkillHierarchyWorkspace(workspaceId);
+    await assertFreshServiceOn(workspaceId);
     const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
     const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey, {
       priority: 'normal',
@@ -732,6 +745,7 @@ class SkillHierarchyService {
 
   async getFreshserviceDrift(workspaceId) {
     assertSkillHierarchyWorkspace(workspaceId);
+    await assertFreshServiceOn(workspaceId);
     const [categories, fieldReport] = await Promise.all([
       prisma.competencyCategory.findMany({
         where: { workspaceId, isActive: true },
@@ -805,6 +819,7 @@ class SkillHierarchyService {
 
   async syncFreshserviceObjects(workspaceId, options = {}) {
     assertSkillHierarchyWorkspace(workspaceId);
+    await assertFreshServiceOn(workspaceId);
     const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
     const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey, {
       priority: 'normal',

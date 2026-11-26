@@ -1,5 +1,5 @@
 import {
-  cleanNamePart, contentDisposition, dayMonthCorrected, extensionFor, extractFromRules, formatAttachmentName, holdsToken, isNameableDocument,
+  cleanNamePart, contentDisposition, plausibleVendor, dayMonthCorrected, extensionFor, extractFromRules, formatAttachmentName, holdsToken, isNameableDocument,
   mightBePdf, normaliseEditedName, pacificDate, startsLikePdf, tidyVendor, uniqueName, vendorFromEditedName, withNameFields, MAX_NAME_CHARS, MAX_STEM_CHARS,
 } from '../src/services/attachmentNamingRules.js';
 
@@ -362,5 +362,18 @@ describe('day and month written the other way round', () => {
   test('past dates and missing values are left alone', () => {
     expect(dayMonthCorrected('2026-03-04', '2026-11-24')).toBe('2026-03-04');
     expect(dayMonthCorrected(null, '2026-11-24')).toBeNull();
+  });
+});
+
+describe('reminder phrases are never a vendor', () => {
+  test('a collection-reminder subject is refused', () => {
+    expect(plausibleVendor('Reminder: 71 Days Outstanding Invoice')).toBeNull();
+    expect(plausibleVendor('Reminder 71 Days Outstanding')).toBeNull();
+    expect(plausibleVendor('Past Due Notice')).toBeNull();
+    expect(plausibleVendor('Statement of Account')).toBeNull();
+  });
+  test('a real company still passes', () => {
+    expect(plausibleVendor('Example Mining Corporation')).toBe('Example Mining Corporation');
+    expect(plausibleVendor('Outstanding Rentals Ltd')).toBe('Outstanding Rentals Ltd');
   });
 });

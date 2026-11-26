@@ -458,8 +458,11 @@ export default function Settings() {
   const handleTriggerSync = async () => {
     try {
       setSaveStatus({ success: true, message: 'Manual sync triggered...' });
-      await syncAPI.trigger();
-      setSaveStatus({ success: true, message: 'Sync completed successfully!' });
+      const res = await syncAPI.trigger();
+      // FreshService switch (25 Nov 2026): an Off workspace has nothing to sync.
+      setSaveStatus(res?.data?.status === 'skipped' && res?.data?.reason === 'freshservice_off'
+        ? { success: true, message: 'FreshService is off for this workspace' }
+        : { success: true, message: 'Sync completed successfully!' });
     } catch (err) {
       setSaveStatus({ success: false, message: `Sync failed: ${err.message}` });
     }

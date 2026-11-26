@@ -88,10 +88,11 @@ const makeBucketFor = (statusDefs) => (status) => {
  * column into the status to set — or null when nothing should happen (same
  * bucket, unknown column, unknown ticket).
  */
-export const canDragTicket = (ticket, ticketingOn) => {
+export const canDragTicket = (ticket, ticketingOn, fsEnabled = true) => {
   if (!ticket || ['Deleted', 'Spam'].includes(ticket.status)) return false;
   if (ticket.origin === 'ticketpulse') return Boolean(ticketingOn);
-  return Boolean(ticket.freshserviceTicketId); // FS-born → confirmed write-back
+  // FS-born → confirmed write-back; never while the workspace's FreshService is off.
+  return Boolean(ticket.freshserviceTicketId) && fsEnabled !== false;
 };
 export const planStatusDrop = (ticket, overId, statusDefs = null) => {
   const column = BOARD_COLUMNS.find((c) => c.key === overId);
@@ -108,7 +109,7 @@ export const planStatusDrop = (ticket, overId, statusDefs = null) => {
 // so the root card's onClick doesn't double-fire alongside a native open.
 const isModifiedClick = (e) => e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button === 1;
 
-function BoardCard({ ticket, statusDefs, canDrag, dragging, linkState, onClick, onDoubleClick, slaCalendarAware = false }) {
+function BoardCard({ ticket, statusDefs, canDrag, dragging, linkState, onClick, onDoubleClick, slaCalendarAware = false, fsEnabled = true }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: String(ticket.id),
     disabled: !canDrag,
@@ -175,7 +176,9 @@ function BoardCard({ ticket, statusDefs, canDrag, dragging, linkState, onClick, 
               className="ml-auto inline-flex items-center text-muted-foreground/50"
               title={ticket.origin === 'ticketpulse'
                 ? 'Native ticketing is off for this workspace — status is read-only here'
-                : 'FreshService-born ticket without write-back — change status in FreshService'}
+                : fsEnabled === false
+                  ? 'Imported from FreshService (read-only) — open it and Adopt to edit'
+                  : 'FreshService-born ticket without write-back — change status in FreshService'}
             >
               <Lock className="h-3 w-3" aria-hidden="true" />
             </span>
@@ -357,6 +360,8 @@ function BoardColumn({ column, tickets, activeBucket, paginated, emptyState, tot
 
 function TicketBoardInner({
   tickets, ticketingOn, onCardClick, onCardDoubleClick, onStatusDrop,
+  // FreshService switch: false when the workspace's FreshService is off.
+  fsEnabled = true,
   closedExcluded = false, onShowClosed = null, paginated = false,
   statusDefs = null, // workspace status registry (queue meta) — base-aware buckets
   slaCalendarAware = false, // Phase SLA: business-hours tooltip on due chips
@@ -488,7 +493,8 @@ function TicketBoardInner({
                   key={ticket.id}
                   ticket={ticket}
                   statusDefs={statusDefs}
-                  canDrag={canDragTicket(ticket, ticketingOn)}
+                  canDrag={canDragTicket(ticket, ticketingOn, fsEnabled)}
+                  fsEnabled={fsEnabled}
                   linkState={linkState}
                   onClick={onCardClick}
                   onDoubleClick={onCardDoubleClick}

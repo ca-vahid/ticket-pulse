@@ -12,6 +12,7 @@ import { validateResolution, requiresResolutionReason, resolvedByKindFromActor }
 import { AuthorizationError, AppError, ValidationError, NotFoundError, ServiceBusyError, ConflictError } from '../utils/errors.js';
 import { TICKET_ORIGIN, TICKET_SOURCE, TICKET_SOURCE_LABELS, APP_NATIVE_TRIGGER_SOURCE, AGENT_SELECTABLE_SOURCES, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { isFreshServiceUnlinked } from '../utils/workspaceFsBinding.js';
+import { fsGate, isFreshServiceOff } from './fsModeService.js';
 import { refPositionFor, replyMailSubject } from './mailSubjectService.js';
 import noiseRuleService from './noiseRuleService.js';
 import ticketTypeService from './ticketTypeService.js';
@@ -206,6 +207,22 @@ function isFsGroupMembershipError(err) {
 // preserved code OR message. A queue timeout means the request never launched
 // — nothing reached FreshService, so "try again" is always safe advice.
 const FS_BUSY_MESSAGE = 'FreshService is busy with background sync right now — nothing was changed. Please try again in a few seconds.';
+
+/**
+ * FreshService switch (FS exit A1, 25 Nov 2026): an FS-born ticket in a
+ * workspace whose FreshService is Off is imported history. Nothing may write
+ * it through FreshService; it is adopted first (fsAdoptionService) if someone
+ * needs to work it.
+ */
+export const FRESHSERVICE_OFF_MESSAGE = 'Imported from FreshService (read-only). Adopt it to work on it here.';
+export class FreshServiceOffError extends ConflictError {
+  constructor(message = FRESHSERVICE_OFF_MESSAGE) {
+    super(message);
+    this.code = 'freshservice_off';
+  }
+}
+/** Adopted from FreshService: its FS id is a tombstone, never a live copy. */
+const isAdopted = (ticket) => ticket?.mirrorState === 'adopted';
 
 // Closed FS-born tickets refresh their files and thread on open at most once
 // per ticket in this window (QA 11-06 #2), so re-opening one costs nothing.
@@ -1004,6 +1021,135 @@ class TicketService {
   }
 
   /**
+   * FreshService switch: may this FS-born ticket be written THROUGH
+   * FreshService? Connected → yes; Shadow → yes, and the call is counted by
+   * purpose; Off (or never connected) → no. TP-born tickets → always false
+   * (they are never written through FreshService here).
+   */
+  async _fsBornWritable(ticket, workspaceId, purpose = 'writeback') {
+    if (!ticket || ticket.origin === TICKET_ORIGIN.TICKETPULSE) return false;
+    return fsGate(workspaceId ?? ticket.workspaceId, purpose);
+  }
+
+  /**
+   * A write reached imported history (an FS-born ticket in an Off workspace):
+   * adopt it first, then the caller performs the write on the now-native
+   * ticket through the normal Ticket Pulse path — never a refusal, never a
+   * FreshService call (QA 25 Nov: an integration's routine notes on old
+   * FS-born tickets). Adoption alone does not reopen anything. Returns the
+   * re-read ticket (TICKET_INCLUDE), or null for a background writer.
+   */
+  async _adoptForWrite(ticket, workspaceId, actor) {
+    const { default: fsAdoptionService } = await import('./fsAdoptionService.js');
+    const adopted = await fsAdoptionService.adoptForWrite(ticket.id, workspaceId, actor);
+    // A background writer (workflow, automation, Ticket Pulse itself) never
+    // adopts imported history: null → the caller leaves the ticket as it is.
+    if (!adopted) return null;
+    return prisma.ticket.findFirst({ where: { id: ticket.id, workspaceId }, include: TICKET_INCLUDE });
+  }
+
+  /**
+   * The updateFsTicket input applied to a just-adopted ticket through the
+   * Ticket Pulse paths: fields (updateTicketFields), then the assignee
+   * (assignTicket), then the status (changeStatus) — so a resolve lands after
+   * the fields it may depend on. Nothing here calls FreshService.
+   */
+  /** A background write that reached imported history: the ticket, unchanged. */
+  _importedLeftAsIs(ticket) {
+    logger.debug?.(`Imported ticket ${ticket.id} left as it is (FreshService off; background write)`);
+    return {
+      ...ticket, displayRef: ticketDisplayRef(ticket), synced: [], noChanges: true, skipped: 'freshservice_off_imported',
+    };
+  }
+
+  async _applyFsEditNatively(ticket, workspaceId, input = {}, actor, { allowAssignableOnly = false, notifyLifecycle = true } = {}) {
+    const numOrNull = (v) => (v === null || v === '' ? null : Number(v));
+    const fields = {};
+    if (input.priority !== undefined) fields.priority = Number(input.priority);
+    if (input.dueBy !== undefined) {
+      if (input.dueBy === null || input.dueBy === '') {
+        fields.dueBy = null;
+      } else {
+        const due = new Date(input.dueBy);
+        if (Number.isNaN(due.getTime())) throw new ValidationError('Resolution due must be a valid date and time');
+        fields.dueBy = due.toISOString();
+      }
+    }
+    if (input.internalCategoryId !== undefined) fields.internalCategoryId = numOrNull(input.internalCategoryId);
+    if (input.internalSubcategoryId !== undefined) fields.internalSubcategoryId = numOrNull(input.internalSubcategoryId);
+    for (const key of ['ccEmails', 'subject', 'description', 'requesterEmail', 'requesterName']) {
+      if (input[key] !== undefined) fields[key] = input[key];
+    }
+    if (input.requesterId !== undefined) fields.requesterId = Number(input.requesterId);
+
+    const applied = [];
+    let changed = false;
+    // No transaction: each step is its own Ticket Pulse write. A later step
+    // that fails says what the earlier ones already applied (and the ticket
+    // stays adopted).
+    const step = async (keys, fn) => {
+      try {
+        const r = await fn();
+        if (r?.changed !== false) { changed = true; applied.push(...keys); }
+      } catch (err) {
+        if (applied.length) {
+          err.message = `${err.message} (already applied in Ticket Pulse: ${applied.join(', ')})`;
+          err.applied = [...applied];
+          err.partial = true;
+          if (err instanceof ValidationError) err.details = { ...(err.details || {}), applied: [...applied] };
+        }
+        throw err;
+      }
+    };
+    if (Object.keys(fields).length) {
+      await step(Object.keys(fields), () => this.updateTicketFields(ticket.id, workspaceId, fields, actor));
+    }
+    if (input.assignedTechId !== undefined) {
+      const techId = input.assignedTechId === null || input.assignedTechId === '' ? null : Number(input.assignedTechId);
+      await step(['assignedTechId'], () => this.assignTicket(ticket.id, workspaceId, techId, actor, {
+        handBack: input.handBack ?? null, allowAssignableOnly, notifyLifecycle,
+      }));
+    }
+    if (input.status !== undefined) {
+      await step(['status'], () => this.changeStatus(ticket.id, workspaceId, input.status, actor, { notifyLifecycle }));
+    }
+    const fresh = await prisma.ticket.findFirst({ where: { id: ticket.id, workspaceId }, include: TICKET_INCLUDE });
+    return {
+      ...fresh,
+      displayRef: ticketDisplayRef(fresh),
+      synced: [],
+      applied,
+      adopted: true,
+      skipped: 'freshservice_off',
+      ...(changed ? {} : { noChanges: true }),
+    };
+  }
+
+  /**
+   * The ticket mirrorState a write should set. An adopted ticket keeps
+   * 'adopted', an unlinked one keeps 'none', and in an Off workspace a ticket
+   * never flips to 'pending' (no FreshService copy will be written: no red chips).
+   * Returns a patch fragment ({} = leave it as it is).
+   */
+  /**
+   * mirrorState for a new thread entry on a Ticket Pulse ticket. Adopted
+   * tickets and Off workspaces have no FreshService copy (the mirror never
+   * takes their jobs), so the entry is 'none', never a stuck "waiting to
+   * copy" 'pending'. Connected / Shadow: 'pending', as before.
+   */
+  async _entryMirrorState(ticket, workspaceId) {
+    if (isAdopted(ticket)) return 'none';
+    if (await isFreshServiceOff(workspaceId ?? ticket?.workspaceId)) return 'none';
+    return 'pending';
+  }
+
+  async _mirrorStatePatch(ticket, workspaceId, desired) {
+    if (isAdopted(ticket) || ticket?.mirrorState === 'none') return {};
+    if (desired === 'pending' && await isFreshServiceOff(workspaceId ?? ticket?.workspaceId)) return {};
+    return { mirrorState: desired };
+  }
+
+  /**
    * MEGA 11-14 Part B: settle the ticket's open AI review suggestions when it
    * no longer needs one (owner, closed, removed, noise). Paths that report
    * through _notifyLifecycle are settled there; this covers the ones that do
@@ -1217,7 +1363,9 @@ class TicketService {
     // Clean up the FreshService fallback mirror copy (best-effort, async) so a
     // ticket deleted in Ticket Pulse doesn't linger open in FreshService.
     // Deleted IN FreshService (latest change wins): the copy is already gone.
-    if (ticket.freshserviceTicketId && !fromFreshService) {
+    // Adopted from FreshService: the FS id is a tombstone of the OLD FS
+    // ticket, never a copy of this one — it is never trashed from here.
+    if (ticket.freshserviceTicketId && !fromFreshService && !isAdopted(ticket)) {
       mirrorService.enqueueDelete(workspaceId, ticket.id).catch((err) => {
         logger.warn(`Failed to enqueue FS mirror delete for ticket ${ticket.id}: ${err.message}`);
       });
@@ -1245,27 +1393,38 @@ class TicketService {
     if (String(ticket.status) === 'Deleted') {
       return { ...ticket, displayRef: ticketDisplayRef(ticket), deleted: true, alreadyDeleted: true };
     }
-
     const fsId = Number(ticket.freshserviceTicketId);
-    const client = await mirrorService.getInteractiveClient(workspaceId);
-    if (!client) throw new ValidationError('FreshService is not configured for this workspace');
-    let fsResult;
-    try {
-      fsResult = await client.deleteTicket(fsId); // 404/405 → { alreadyGone: true }
-    } catch (err) {
-      if (isFsQueueTimeout(err)) throw new ServiceBusyError(FS_BUSY_MESSAGE);
-      const status = getFreshServiceStatus(err);
-      const detail = getFreshServiceDetail(err);
-      const reason = detail?.description || detail?.message || err?.message || 'no reason given';
-      const message = `FreshService refused the delete — ${reason}. Nothing was changed in Ticket Pulse.`;
-      if (status && status >= 400 && status < 500) throw new ValidationError(message);
-      throw new AppError(message, 502);
+    // FreshService switch: Off (imported history) → a local-only delete; the
+    // FreshService ticket is never touched (and its id is kept).
+    const fsOn = await this._fsBornWritable(ticket, workspaceId, 'writeback');
+    if (!fsOn) {
+      // A background job never deletes imported history (people and API keys do).
+      const { isBackgroundWriter } = await import('./fsAdoptionService.js');
+      if (isBackgroundWriter(actor)) return this._importedLeftAsIs(ticket);
+    }
+    let fsResult = null;
+    if (fsOn) {
+      const client = await mirrorService.getInteractiveClient(workspaceId);
+      if (!client) throw new ValidationError('FreshService is not configured for this workspace');
+      try {
+        fsResult = await client.deleteTicket(fsId); // 404/405 → { alreadyGone: true }
+      } catch (err) {
+        if (isFsQueueTimeout(err)) throw new ServiceBusyError(FS_BUSY_MESSAGE);
+        const status = getFreshServiceStatus(err);
+        const detail = getFreshServiceDetail(err);
+        const reason = detail?.description || detail?.message || err?.message || 'no reason given';
+        const message = `FreshService refused the delete — ${reason}. Nothing was changed in Ticket Pulse.`;
+        if (status && status >= 400 && status < 500) throw new ValidationError(message);
+        throw new AppError(message, 502);
+      }
     }
 
     const who = actor?.name || actor?.email || 'a user';
-    const note = fsResult?.alreadyGone
-      ? `Deleted from Ticket Pulse by ${who} — it was already gone in FreshService`
-      : `Deleted in FreshService from Ticket Pulse by ${who} (moved to FreshService's trash)`;
+    const note = !fsOn
+      ? `Deleted in Ticket Pulse by ${who} (FreshService is off for this workspace; the FreshService ticket was not touched)`
+      : fsResult?.alreadyGone
+        ? `Deleted from Ticket Pulse by ${who} — it was already gone in FreshService`
+        : `Deleted in FreshService from Ticket Pulse by ${who} (moved to FreshService's trash)`;
     const updated = await prisma.ticket.update({
       where: { id: ticket.id },
       data: { status: 'Deleted', updatedAt: new Date() },
@@ -1283,12 +1442,17 @@ class TicketService {
       oldStatus: ticket.status,
       newStatus: 'Deleted',
       note,
-      deletedInFreshService: true,
+      ...(fsOn ? { deletedInFreshService: true } : { deletedLocallyOnly: true, skipped: 'freshservice_off' }),
       freshserviceTicketId: fsId,
     });
     this._broadcast(workspaceId, 'deleted', updated);
-    logger.info(`FS #${fsId} (ticket ${ticket.id}) deleted in FreshService from Ticket Pulse by ${actor?.email || 'unknown'}${fsResult?.alreadyGone ? ' (already gone in FS)' : ''}`);
-    return { ...updated, displayRef: ticketDisplayRef(updated), deleted: true, alreadyGone: Boolean(fsResult?.alreadyGone) };
+    logger.info(fsOn
+      ? `FS #${fsId} (ticket ${ticket.id}) deleted in FreshService from Ticket Pulse by ${actor?.email || 'unknown'}${fsResult?.alreadyGone ? ' (already gone in FS)' : ''}`
+      : `Imported FS #${fsId} (ticket ${ticket.id}) deleted in Ticket Pulse only (FreshService off) by ${actor?.email || 'unknown'}`);
+    return {
+      ...updated, displayRef: ticketDisplayRef(updated), deleted: true, alreadyGone: Boolean(fsResult?.alreadyGone),
+      ...(fsOn ? {} : { skipped: 'freshservice_off' }),
+    };
   }
 
   /**
@@ -3068,7 +3232,14 @@ class TicketService {
     // tickets (pull a FreshService-side closure back) — reconcileSingleTicket
     // branches by origin.
     const NON_TERMINAL = !['Closed', 'Resolved', 'closed', 'resolved', 'Deleted', 'Spam', '4', '5'].includes(String(ticket.status));
-    const shouldReconcile = withReconcile && Boolean(ticket.freshserviceTicketId) && NON_TERMINAL;
+    // FreshService switch: an adopted ticket's FS id is a tombstone (never
+    // reconciled or read), and an Off workspace calls FreshService for nothing.
+    const fsCandidate = withReconcile && Boolean(ticket.freshserviceTicketId) && !isAdopted(ticket);
+    const wantsClosedRefresh = fsCandidate && !NON_TERMINAL && closedFsRefreshWanted(ticket, withReconcile) && closedFsRefreshDue(ticket.id);
+    const fsReadable = (fsCandidate && NON_TERMINAL) || wantsClosedRefresh
+      ? await fsGate(workspaceId, 'reconcile')
+      : false;
+    const shouldReconcile = fsReadable && NON_TERMINAL;
 
     // The FreshService reconcile runs in the BACKGROUND (not awaited) so the page
     // never waits on a FS round-trip. If it flips the status (deleted/closed in
@@ -3086,7 +3257,7 @@ class TicketService {
       } else {
         this._refreshFsBornThread(ticket).catch(() => null);
       }
-    } else if (closedFsRefreshWanted(ticket, withReconcile) && closedFsRefreshDue(ticket.id)) {
+    } else if (fsReadable && wantsClosedRefresh) {
       // QA 11-06 #2: a closed FS-born ticket was never refreshed on open, so the
       // files on its original e-mail (ticket-level attachments, only in the FS
       // ticket detail) never reached Ticket Pulse: TP 18853 showed no invoice PDF.
@@ -3612,8 +3783,11 @@ class TicketService {
     ]);
     // Their own FreshService group, so the confirm can show the group move.
     // Never waits on FreshService: a cold cache warms in the background.
+    // FreshService switch: Off → no FreshService groups (and the ticket pages
+    // drop their FreshService affordances: `freshserviceEnabled` below).
+    const freshserviceEnabled = !(await isFreshServiceOff(workspace?.id ? workspace : workspaceId));
     let homeGroups = {};
-    if (assignableOnlyTechs.length) {
+    if (assignableOnlyTechs.length && freshserviceEnabled) {
       homeGroups = await import('./fsHomeGroupService.js')
         .then(async ({ getFsGroups, homeGroupsByTech }) => {
           const client = await mirrorService.getInteractiveClient(workspaceId).catch(() => null);
@@ -3683,6 +3857,9 @@ class TicketService {
     }
     return {
       nativeTicketingEnabled: workspace.nativeTicketingEnabled === true,
+      // FreshService switch (FS exit A1): false when the workspace's FreshService
+      // is Off or was never connected.
+      freshserviceEnabled,
       forwardAvailable,
       // QA 09-15 #8 / #1
       members,
@@ -4193,8 +4370,9 @@ class TicketService {
         nativeNumber,
         freshserviceTicketId: null,
         // QA 11-24 #4: a workspace with no FreshService link never gets a
-        // fallback copy ('none' — the ticket shows no mirror chip).
-        mirrorState: isFreshServiceUnlinked(workspace) ? 'none' : 'pending',
+        // fallback copy ('none' — the ticket shows no mirror chip). FreshService
+        // switch: nor does one whose FreshService is Off (no copy is ever written).
+        mirrorState: isFreshServiceUnlinked(workspace) || await isFreshServiceOff(workspace) ? 'none' : 'pending',
         subject: data.subject,
         ...normalizeDescriptionInput(data.description),
         // Resubmission key (Phase PA) — partial unique (workspace_id, external_ref).
@@ -4609,7 +4787,7 @@ class TicketService {
     const ccChanged = Boolean(changes.ccEmails);
     const otherChanges = Object.fromEntries(Object.entries(changes).filter(([k]) => !(k in dueChanges) && k !== 'ccEmails'));
     const dueOnly = Object.keys(otherChanges).length === 0 && !ccChanged && Object.keys(dueChanges).length > 0;
-    if (!dueOnly) patch.mirrorState = 'pending';
+    if (!dueOnly) Object.assign(patch, await this._mirrorStatePatch(ticket, workspaceId, 'pending'));
     // QA 11-23 item 2: a priority edit is its own priority_changed row (below),
     // not part of the fields_updated row — one line in the history, not two.
     // _audit would have stamped the activity time; a priority-only edit does it here.
@@ -4700,6 +4878,13 @@ class TicketService {
     if (!ticket) throw new NotFoundError(`Ticket ${ticketId} not found in this workspace`);
     if (ticket.origin === TICKET_ORIGIN.TICKETPULSE || !ticket.freshserviceTicketId) {
       throw new ValidationError('This ticket is Ticket Pulse-owned — edit it directly, no FreshService sync needed');
+    }
+    // FreshService switch: Off → imported history. Adopt it, then apply the
+    // same edit through the Ticket Pulse path (no FreshService call).
+    if (!(await this._fsBornWritable(ticket, workspaceId, 'writeback'))) {
+      const adopted = await this._adoptForWrite(ticket, workspaceId, actor);
+      if (!adopted) return this._importedLeftAsIs(ticket);
+      return this._applyFsEditNatively(adopted, workspaceId, input, actor, { allowAssignableOnly, notifyLifecycle, auditDetails });
     }
 
     const workspace = await this._getWorkspace(workspaceId);
@@ -5311,6 +5496,9 @@ class TicketService {
 
   async _refreshFsBornThread(ticket, { client: injectedClient = null, broadcast = true } = {}) {
     if (!ticket.freshserviceTicketId) return;
+    // FreshService switch: an adopted ticket's FS id is a tombstone; Off reads nothing.
+    if (isAdopted(ticket)) return;
+    if (!(await fsGate(ticket.workspaceId, 'thread_pull'))) return;
     // Interactive client: the reader is on the page waiting for the thread.
     // If the queue is congested the 15s budget makes this refresh a silent
     // skip (caller swallows the rejection) rather than minutes-late data.
@@ -5449,7 +5637,7 @@ class TicketService {
    *   wins, 23 Sep 2026): not written back, and no resolution reason demanded
    *   (the person closed it in FreshService, where there is no such field).
    */
-  async changeStatus(ticketId, workspaceId, status, actor, { resolutionReason = null, resolutionNote = null, fromFreshService = false } = {}) {
+  async changeStatus(ticketId, workspaceId, status, actor, { resolutionReason = null, resolutionNote = null, fromFreshService = false, notifyLifecycle = true } = {}) {
     // Per-workspace registry validation (Phase 8a) — replaces the hardcoded
     // NATIVE_TICKET_STATUSES allowlist. Returns the canonical-cased label.
     status = await statusService.assertValidStatus(workspaceId, status);
@@ -5474,7 +5662,7 @@ class TicketService {
     const newBase = await statusService.baseStatusOf(workspaceId, status);
 
     const now = new Date();
-    const patch = { status, mirrorState: fromFreshService && !retiredSwap ? 'mirrored' : 'pending' };
+    const patch = { status, ...(await this._mirrorStatePatch(ticket, workspaceId, fromFreshService && !retiredSwap ? 'mirrored' : 'pending')) };
     const wasTerminal = TERMINAL_STATUSES.includes(oldBase);
     const isTerminal = TERMINAL_STATUSES.includes(newBase);
 
@@ -5562,7 +5750,16 @@ class TicketService {
     // e-mail with the AI, which held the person's click for ~5 s. The status is
     // saved and the FreshService copy is queued before this; the workflows run
     // on in the background and log their own failures (_notifyLifecycle never throws).
-    this._notifyLifecycle(ticket, updated, { actorKind: resolvedByKindFromActor(actor), actor });
+    // notifyLifecycle:false — a workflow's write (carried from updateFsTicket on
+    // a just-adopted ticket): no status_changed, exactly as on the FS path; a
+    // close still ends the ticket's open approvals.
+    if (notifyLifecycle) {
+      this._notifyLifecycle(ticket, updated, { actorKind: resolvedByKindFromActor(actor), actor });
+    } else if (isTerminal && !wasTerminal) {
+      await import('./approvalTicketCloseService.js')
+        .then(({ closeApprovalsAfterStatusChange }) => closeApprovalsAfterStatusChange(ticket, updated, { source: 'workflow' }))
+        .catch((err) => logger.warn(`Approval close after status change skipped for ticket ${ticket.id}: ${err.message}`));
+    }
     this._broadcast(workspaceId, 'status', updated, { oldStatus: ticket.status });
     // Parked (plans/PARKED_BUILD_PLAN.md): a status change that is not the
     // park's own ends the park — a person, the API, bulk, or a change adopted
@@ -5581,7 +5778,7 @@ class TicketService {
     return { ...updated, displayRef: ticketDisplayRef(updated), changed: true };
   }
 
-  async assignTicket(ticketId, workspaceId, technicianId, actor, { fromFreshService = false, handBack: handBackInput = null, allowAssignableOnly = false } = {}) {
+  async assignTicket(ticketId, workspaceId, technicianId, actor, { fromFreshService = false, handBack: handBackInput = null, allowAssignableOnly = false, notifyLifecycle = true } = {}) {
     const ticket = await this._requireNativeTicket(ticketId, workspaceId);
     const targetId = technicianId === null || technicianId === undefined ? null : Number(technicianId);
     // QA 10-16 item 1: a change from one person to another may carry the same
@@ -5616,16 +5813,16 @@ class TicketService {
       });
     }
 
-    const mirrorState = fromFreshService ? 'mirrored' : 'pending';
+    const mirrorPatch = await this._mirrorStatePatch(ticket, workspaceId, fromFreshService ? 'mirrored' : 'pending');
     const patch = targetId === null
-      ? { assignedTechId: null, mirrorState, ...(isHandBack ? { rejectionCount: { increment: 1 } } : {}) }
+      ? { assignedTechId: null, ...mirrorPatch, ...(isHandBack ? { rejectionCount: { increment: 1 } } : {}) }
       : {
         assignedTechId: targetId,
         assignedAt: now,
         firstAssignedAt: ticket.firstAssignedAt || now,
         isSelfPicked,
         assignedBy: actor?.name || actor?.email || 'Ticket Pulse',
-        mirrorState,
+        ...mirrorPatch,
       };
 
     const updated = await prisma.ticket.update({
@@ -5669,8 +5866,12 @@ class TicketService {
       ...(handBackEvent ? { handBack: handBackEvent } : {}),
     });
     // The actor rides along so a review this settles names who assigned it (MEGA 11-14 Part B).
-    if (actor) await this._notifyLifecycle(ticket, updated, { actor });
-    else await this._notifyLifecycle(ticket, updated);
+    // notifyLifecycle:false (a workflow's write, carried from updateFsTicket on
+    // a just-adopted ticket) tells no lifecycle listener, as on the FS path.
+    if (notifyLifecycle) {
+      if (actor) await this._notifyLifecycle(ticket, updated, { actor });
+      else await this._notifyLifecycle(ticket, updated);
+    }
     this._broadcast(workspaceId, 'assignment', updated, { fromTechId: ticket.assignedTechId });
     if (!fromFreshService) await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
     // The new owner inherits the ticket's unassigned open tasks (Simorgh B7).
@@ -5845,6 +6046,10 @@ class TicketService {
    */
   async _recordReplyOnFreshService(ticket, entry, actor, { attachments = [] } = {}) {
     const esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // FreshService switch: never for an adopted ticket (tombstone id) or an Off
+    // workspace. The entry is left as it is (no 'failed' chip): nothing is owed.
+    if (isAdopted(ticket) || ticket.origin === TICKET_ORIGIN.TICKETPULSE) return null;
+    if (await isFreshServiceOff(ticket.workspaceId)) return null;
     try {
       const client = await mirrorService.getInteractiveClient(ticket.workspaceId);
       if (typeof client?.addNote !== 'function') throw new Error('FreshService is not configured for this workspace');
@@ -6030,6 +6235,7 @@ class TicketService {
     const signature = await getEnabledSignatureForSend(workspaceId, actorEmail);
     const sentSignature = signature ? signatureAsSent(signature) : null;
     const directReply = { entryId: source.id, email: address, name: source.actorName || null, wasForwardedTo };
+    const entryMirrorState = isNative ? await this._entryMirrorState(ticket, workspaceId) : null;
     const entry = await prisma.ticketThreadEntry.create({
       data: {
         ticketId: ticket.id,
@@ -6046,7 +6252,7 @@ class TicketService {
         bodyHtml,
         bodyText,
         occurredAt: now,
-        mirrorState: isNative ? 'pending' : null,
+        mirrorState: entryMirrorState,
         rawPayload: {
           to_emails: [address],
           ...(cc.length ? { cc_emails: cc } : {}),
@@ -6066,7 +6272,7 @@ class TicketService {
       signature,
       direct: { to: address, subject, inReplyTo: source.emailMessageId || null, quoteOf: source },
     });
-    if (isNative) await mirrorService.enqueueThreadEntry(workspaceId, ticket.id, entry.id);
+    if (entryMirrorState === 'pending') await mirrorService.enqueueThreadEntry(workspaceId, ticket.id, entry.id);
     await this._audit(ticket.id, 'replied_to_participant', actor, {
       to: address, ...(cc.length ? { cc } : {}), inReplyToEntryId: source.id, sent: email?.sent === true,
     });
@@ -6113,6 +6319,15 @@ class TicketService {
     const isNative = ticket.origin === TICKET_ORIGIN.TICKETPULSE;
     if (!isNative && !ticket.freshserviceTicketId) {
       throw new ValidationError('This FreshService ticket has no FS id to reply through');
+    }
+    // FreshService switch: a note or reply on imported history (FS-born, Off)
+    // adopts the ticket, then goes out as a Ticket Pulse note/reply.
+    if (!isNative && !(await this._fsBornWritable(ticket, workspaceId, 'reply_or_note'))) {
+      // A background writer (workflow, automation) leaves imported history as it is.
+      if (!(await this._adoptForWrite(ticket, workspaceId, actor))) {
+        return { entry: null, email: { sent: false }, attachments: [], skipped: 'freshservice_off_imported' };
+      }
+      return this._addThreadEntry(ticketId, workspaceId, input, actor, { isPrivate, files: uploadedFiles, systemNote, replyOptions });
     }
 
     // Pasted pictures become attachments before the size check (30 Sep 2026).
@@ -6309,6 +6524,9 @@ class TicketService {
     const sentWithApiKey = actor?.via?.kind === 'personal_key'
       ? { id: actor.via.keyId ?? null, name: actor.via.keyName ?? null }
       : null;
+    // Native entries: 'pending' for the mirror, or 'none' when there is no
+    // FreshService copy (adopted ticket, Off workspace).
+    const nativeEntryMirrorState = isNative ? await this._entryMirrorState(ticket, workspaceId) : null;
     const entry = await prisma.ticketThreadEntry.create({
       data: {
         ticketId: ticket.id,
@@ -6328,7 +6546,7 @@ class TicketService {
         occurredAt: now,
         // Native entries queue for the mirror; FS-born entries are already there —
         // unless Ticket Pulse mailed the reply itself and records it on FS below.
-        mirrorState: isNative || viaTicketPulse ? 'pending' : 'mirrored',
+        mirrorState: isNative ? nativeEntryMirrorState : (viaTicketPulse ? 'pending' : 'mirrored'),
         mirroredAt: isNative || viaTicketPulse ? null : now,
         ...((recipients || stageMeta || sentSignature || sentWithApiKey) ? { rawPayload: { ...(recipients || {}), ...(stageMeta || {}), ...(sentSignature ? { sentSignature } : {}), ...(sentWithApiKey ? { sentWithApiKey } : {}) } } : {}),
       },
@@ -6369,7 +6587,7 @@ class TicketService {
       if (!isPrivate && ticket.requester?.email) {
         email = await this._emailRequesterReply(ticket, entry, { cc, attachments: storedAttachments, signature, subject: subjectOverride });
       }
-      await mirrorService.enqueueThreadEntry(workspaceId, ticket.id, entry.id);
+      if (nativeEntryMirrorState === 'pending') await mirrorService.enqueueThreadEntry(workspaceId, ticket.id, entry.id);
     } else if (viaTicketPulse) {
       if (ticket.requester?.email) {
         email = await this._emailRequesterReply(ticket, entry, { cc, attachments: storedAttachments, signature, subject: null });
@@ -6562,11 +6780,24 @@ class TicketService {
     // Canonical `fs-conversation:<id>` OR legacy `fs-conv-<id>` (Phase DR1).
     const fsConversationId = parseFsConversationId(ext);
 
+    // FreshService switch: a note on an adopted ticket is edited here only (its
+    // FS conversation belongs to the old FS ticket); on imported history in an
+    // Off workspace the ticket is adopted first, then edited here only.
+    let fsEditWanted = Boolean(fsConversationId) && !isAdopted(ticket);
+    if (fsEditWanted && ticket.origin !== TICKET_ORIGIN.TICKETPULSE
+      && !(await this._fsBornWritable(ticket, workspaceId, 'reply_or_note'))) {
+      // A background writer leaves imported history as it is.
+      if (!(await this._adoptForWrite(ticket, workspaceId, actor))) return { entry, skipped: 'freshservice_off_imported' };
+      fsEditWanted = false;
+    } else if (fsEditWanted && ticket.origin === TICKET_ORIGIN.TICKETPULSE && await isFreshServiceOff(workspaceId)) {
+      fsEditWanted = false;
+    }
+
     // FS-born (and reconcile-imported) conversations update synchronously
     // BEFORE the local write — a rejected FS write leaves the note untouched,
     // matching how the create path treats FS as the gatekeeper. 404/405 is
     // tolerated inside the client (entry gone/immutable → local edit stands).
-    if (fsConversationId) {
+    if (fsEditWanted) {
       const client = await mirrorService.getInteractiveClient(workspaceId);
       if (!client) throw new ValidationError('FreshService is not configured for this workspace');
       const html = bodyHtml || textToReplyHtml(bodyText);
@@ -6756,6 +6987,8 @@ class TicketService {
     const entryHtml = noteBodyHtml
       ? `<p>Forwarded to ${recipients.map((r) => esc(r)).join(', ')}</p>${noteBodyHtml}`
       : null;
+    // TP-owned: 'pending' for the mirror, or 'none' with no FreshService copy (adopted / Off).
+    const forwardMirrorState = ticket.origin === TICKET_ORIGIN.TICKETPULSE ? await this._entryMirrorState(ticket, workspaceId) : null;
     const entry = await prisma.ticketThreadEntry.create({
       data: {
         ticketId: ticket.id,
@@ -6773,7 +7006,7 @@ class TicketService {
         bodyHtml: entryHtml,
         emailMessageId: sent?.messageId || null,
         occurredAt: now,
-        mirrorState: ticket.origin === TICKET_ORIGIN.TICKETPULSE ? 'pending' : null,
+        mirrorState: forwardMirrorState,
         rawPayload: { forwardTo: recipients, ...(forwardedAttachments.length ? { forwardedAttachments } : {}) },
       },
     });
@@ -6781,7 +7014,7 @@ class TicketService {
     // FreshService copy carries them too. A storage failure never un-sends the
     // forward: it is reported back so the composer can say which file is missing.
     const { stored, failed } = await this._storeEntryFiles(ticket, entry, uploads, actor, 'Forward');
-    if (ticket.origin === TICKET_ORIGIN.TICKETPULSE) {
+    if (forwardMirrorState === 'pending') {
       await mirrorService.enqueueThreadEntry(workspaceId, ticket.id, entry.id);
     }
     await this._audit(ticket.id, 'forwarded', actor, {

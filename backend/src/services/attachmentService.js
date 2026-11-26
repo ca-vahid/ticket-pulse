@@ -2,7 +2,8 @@ import crypto from 'node:crypto';
 import { BlobServiceClient } from '@azure/storage-blob';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
-import { ValidationError, NotFoundError } from '../utils/errors.js';
+import { ValidationError, NotFoundError, ConflictError } from '../utils/errors.js';
+import { fsGate } from './fsModeService.js';
 import { fsConversationEntryIdCandidates, parseFsConversationId } from '../utils/fsEntryId.js';
 import { markRecurring } from './recurringImageService.js';
 import { NAME_SELECT, withNameFields } from './attachmentNamingRules.js';
@@ -18,6 +19,10 @@ export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024; // 100 MB per file
 // and a full ticket now refuses the agent's whole message up front (draft kept) instead of
 // silently dropping the files, so 20 would have blocked any file on those tickets.
 export const MAX_ATTACHMENTS_PER_TICKET = 100;
+// A FreshService-only file asked for after the workspace was switched off (FreshService exit A1).
+// The Off preflight's "files not stored" count is cached this long per workspace.
+const UNSTORED_CACHE_MS = 10 * 60 * 1000;
+export const FS_OFF_FILE_MESSAGE = 'This file was never copied from FreshService, and FreshService is off for this workspace.';
 
 // Executables and scripts are refused outright — everything else is stored
 // as-is and always served with download disposition (never rendered inline).
@@ -273,9 +278,7 @@ class AttachmentService {
       select: { freshserviceTicketId: true, workspaceId: true },
     });
     if (!ticket?.freshserviceTicketId) throw new NotFoundError('Ticket has no FreshService copy');
-    const { default: mirrorService } = await import('./mirrorService.js');
-    const client = await mirrorService.getInteractiveClient(ticket.workspaceId);
-    if (!client) throw new ValidationError('FreshService is not configured for this workspace');
+    const client = await this._fsClientFor(ticket.workspaceId);
     const fsTicketId = Number(ticket.freshserviceTicketId);
     const detail = await client.getTicket(fsTicketId);
     const fsTicket = detail?.ticket || detail;
@@ -292,6 +295,165 @@ class AttachmentService {
   }
 
   /**
+   * The interactive FreshService client for a workspace, or a 409 when the
+   * workspace is switched off (FreshService exit A1): a file that was never
+   * copied into Ticket Pulse cannot be fetched any more. Shadow counts it.
+   */
+  async _fsClientFor(workspaceId) {
+    if (!(await fsGate(workspaceId, 'attachment'))) throw new ConflictError(FS_OFF_FILE_MESSAGE);
+    const { default: mirrorService } = await import('./mirrorService.js');
+    const client = await mirrorService.getInteractiveClient(workspaceId);
+    if (!client) throw new ValidationError('FreshService is not configured for this workspace');
+    return client;
+  }
+
+  /**
+   * Download and store every FreshService-only file of ONE ticket, while
+   * FreshService still answers (FreshService exit A3: adoption pre-stores the
+   * adopted tickets' files, which would otherwise die with FreshService).
+   * Best effort: one ticket read (plus its conversations when a file sits on
+   * one), then one download per file not yet in storage; a failure is counted,
+   * never thrown. Returns { total, stored, alreadyStored, failed }.
+   */
+  async storeFsAttachmentsForTicket(ticketId) {
+    const out = { total: 0, stored: 0, alreadyStored: 0, failed: 0 };
+    if (!this.isConfigured()) return { ...out, skipped: 'storage_not_configured' };
+    const rows = await prisma.ticketAttachment.findMany({
+      where: { ticketId: Number(ticketId), source: 'freshservice' },
+      orderBy: { id: 'asc' },
+    });
+    out.total = rows.length;
+    if (rows.length === 0) return out;
+
+    const missing = [];
+    for (const row of rows) {
+      let exists = false;
+      try {
+        exists = await this._container().getBlockBlobClient(row.blobName).exists();
+      } catch { /* treat as missing */ }
+      if (exists) out.alreadyStored += 1;
+      else missing.push(row);
+    }
+    if (missing.length === 0) return out;
+
+    let urls;
+    try {
+      urls = await this._fsAttachmentUrlsForTicket(Number(ticketId), missing.some((r) => r.threadEntryId));
+    } catch (err) {
+      logger.warn(`FS attachment pre-store for ticket ${ticketId} could not read FreshService: ${err.message}`);
+      out.failed = missing.length;
+      return { ...out, error: err.message };
+    }
+    const { default: axios } = await import('axios');
+    for (const row of missing) {
+      const fsAttId = Number((String(row.blobName).match(/\/att-(\d+)-/) || [])[1]);
+      const url = urls.get(fsAttId);
+      if (!url) { out.failed += 1; continue; }
+      try {
+        const response = await axios.get(url, { responseType: 'arraybuffer', timeout: 60_000, maxContentLength: MAX_ATTACHMENT_BYTES });
+        await this._storeFsBytes(row, Buffer.from(response.data));
+        out.stored += 1;
+      } catch (err) {
+        out.failed += 1;
+        logger.warn(`FS attachment pre-store failed for "${row.fileName}" (id ${row.id}): ${err.message}`);
+      }
+    }
+    if (out.stored > 0) this._forgetUnstoredCount(missing[0].workspaceId);
+    logger.info(`FS attachments pre-stored for ticket ${ticketId}: ${out.stored} stored, ${out.alreadyStored} already stored, ${out.failed} failed`);
+    return out;
+  }
+
+  /**
+   * How many FreshService-hosted files in a workspace have NO stored copy in
+   * Ticket Pulse (FreshService exit preflight: these die with FreshService).
+   * "Stored" is the test openDownload/bufferFor use: a blob exists under the
+   * row's blobName. One database query for the rows, then the stored blobs are
+   * LISTED per `fs/ws-<n>/` prefix (one paged listing, not a call per file).
+   * No FreshService call. Without blob storage nothing can be stored, so every
+   * row counts.
+   */
+  async countUnstoredFsAttachments(workspaceId, { fresh = false } = {}) {
+    const ws = Number(workspaceId);
+    // Cached per workspace for 10 minutes (the settings panel asks on every
+    // load; IT holds tens of thousands of FS files). `fresh: true` (the Off
+    // job's final check) always recounts. Concurrent askers share one count.
+    if (!this._unstoredCache) this._unstoredCache = new Map();
+    if (!this._unstoredInflight) this._unstoredInflight = new Map();
+    const hit = this._unstoredCache.get(ws);
+    if (!fresh && hit && Date.now() - hit.at < UNSTORED_CACHE_MS) return hit.value;
+    if (!fresh && this._unstoredInflight.has(ws)) return this._unstoredInflight.get(ws);
+    const run = this._countUnstoredFsAttachments(ws)
+      .then((value) => { this._unstoredCache.set(ws, { value, at: Date.now() }); return value; })
+      .finally(() => { if (this._unstoredInflight.get(ws) === run) this._unstoredInflight.delete(ws); });
+    this._unstoredInflight.set(ws, run);
+    return run;
+  }
+
+  /**
+   * The count itself. Rows are read a page at a time (blob names only, by id
+   * cursor); each `fs/ws-<n>/` folder is listed once, when its first row is
+   * met, into a set of the stored names. Memory: one page of rows plus the
+   * stored names of the folders this workspace's files use.
+   */
+  async _countUnstoredFsAttachments(ws) {
+    const PAGE = 5000;
+    const configured = this.isConfigured();
+    const container = configured ? this._container() : null;
+    const listed = new Set();
+    const stored = new Set();
+    let unstored = 0;
+    let cursor = 0;
+    for (;;) {
+      const rows = await prisma.ticketAttachment.findMany({
+        where: { workspaceId: ws, source: 'freshservice', id: { gt: cursor } },
+        select: { id: true, blobName: true },
+        orderBy: { id: 'asc' },
+        take: PAGE,
+      });
+      if (rows.length === 0) break;
+      cursor = rows[rows.length - 1].id;
+      for (const r of rows) {
+        if (!configured) { unstored += 1; continue; }
+        const m = String(r.blobName || '').match(/^(fs\/ws-[^/]+\/)/);
+        const prefix = m ? m[1] : 'fs/';
+        if (!listed.has(prefix)) {
+          listed.add(prefix);
+          for await (const item of container.listBlobsFlat({ prefix })) stored.add(item.name);
+        }
+        if (!stored.has(r.blobName)) unstored += 1;
+      }
+      if (rows.length < PAGE) break;
+    }
+    return unstored;
+  }
+
+  /** Forget a workspace's cached count (files were just stored). */
+  _forgetUnstoredCount(workspaceId) {
+    this._unstoredCache?.delete(Number(workspaceId));
+  }
+
+  /** fsAttachmentId -> fresh signed URL, for every file on the FS ticket (and its conversations). */
+  async _fsAttachmentUrlsForTicket(ticketId, withConversations) {
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { freshserviceTicketId: true, workspaceId: true },
+    });
+    if (!ticket?.freshserviceTicketId) throw new NotFoundError('Ticket has no FreshService copy');
+    const client = await this._fsClientFor(ticket.workspaceId);
+    const fsTicketId = Number(ticket.freshserviceTicketId);
+    const urls = new Map();
+    const detail = await client.getTicket(fsTicketId);
+    for (const a of ((detail?.ticket || detail)?.attachments || [])) if (a?.attachment_url) urls.set(Number(a.id), a.attachment_url);
+    if (withConversations) {
+      const conversations = await client.fetchTicketConversations(fsTicketId, { maxEntries: 500 });
+      for (const conv of (conversations || [])) {
+        for (const a of (conv?.attachments || [])) if (a?.attachment_url) urls.set(Number(a.id), a.attachment_url);
+      }
+    }
+    return urls;
+  }
+
+  /**
    * Download the FS file (signed URL needs no FS auth) and cache it in blob
    * storage so subsequent downloads never touch FS again.
    */
@@ -304,6 +466,12 @@ class AttachmentService {
       maxContentLength: MAX_ATTACHMENT_BYTES,
     });
     const buffer = Buffer.from(response.data);
+    await this._storeFsBytes(attachment, buffer);
+    return buffer;
+  }
+
+  /** Cache an FS file's bytes under its row's blob name (and fill a missing size). */
+  async _storeFsBytes(attachment, buffer) {
     const blockBlob = this._container().getBlockBlobClient(attachment.blobName);
     await blockBlob.uploadData(buffer, {
       blobHTTPHeaders: {
@@ -317,7 +485,6 @@ class AttachmentService {
       }).catch(() => {});
     }
     logger.info(`FS attachment cached: ${attachment.fileName} (${buffer.length} bytes) → ${attachment.blobName}`);
-    return buffer;
   }
 
   // ---- Scheduled-ticket staging (gap plan 2 P2) --------------------------
@@ -520,8 +687,50 @@ class AttachmentService {
     await this._container().getBlockBlobClient(attachment.blobName).deleteIfExists();
     await prisma.ticketAttachment.delete({ where: { id: attachment.id } });
     logger.info(`Attachment removed: ${attachment.fileName} (id ${attachment.id}) by ${actor?.email || 'unknown'}`);
+    // 25 Nov 2026: a removal leaves a History line ("Vahid Haeri removed an attachment
+    // · teams-picture-1.png") and refreshes open copies of the ticket. Both are best-effort:
+    // the file is already gone, so neither may fail the request.
+    const actorName = actor?.name || actor?.email || 'Someone';
+    try {
+      await prisma.ticketActivity.create({
+        data: {
+          ticketId,
+          activityType: 'attachment_removed',
+          performedBy: actorName,
+          performedAt: new Date(),
+          details: {
+            attachmentId: attachment.id,
+            fileName: attachment.displayName || attachment.fileName,
+            originalName: attachment.fileName,
+            sizeBytes: attachment.sizeBytes ?? null,
+            actorName,
+            actorEmail: actor?.email || null,
+            actorKind: 'human',
+            source: 'ticketpulse_native',
+          },
+        },
+      });
+    } catch (err) {
+      logger.warn(`Attachment ${attachment.id} removed, but its history row failed: ${err.message}`);
+    }
+    try {
+      const { sseManager } = await import('../routes/sse.routes.js');
+      sseManager.broadcast('ticket-change', { action: 'attachment_removed', workspaceId, ticketId, attachmentId: attachment.id }, workspaceId);
+    } catch { /* live refresh is a nicety */ }
     return { removed: true };
   }
 }
 
-export default new AttachmentService();
+const attachmentService = new AttachmentService();
+
+/** FreshService exit A3: pre-store one ticket's FreshService-only files (see the method). */
+export function storeFsAttachmentsForTicket(ticketId) {
+  return attachmentService.storeFsAttachmentsForTicket(ticketId);
+}
+
+/** FreshService exit preflight: FS-hosted files in the workspace with no stored copy. */
+export function countUnstoredFsAttachments(workspaceId, options = {}) {
+  return attachmentService.countUnstoredFsAttachments(workspaceId, options);
+}
+
+export default attachmentService;

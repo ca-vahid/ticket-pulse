@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  AlertTriangle, CheckCircle2, Clock3, Database, HelpCircle, RefreshCw,
+  AlertTriangle, CheckCircle2, CirclePause, Clock3, Database, HelpCircle, RefreshCw,
 } from 'lucide-react';
 import { syncAPI } from '../../services/api';
 
@@ -9,6 +9,9 @@ const STATUS_META = {
   late: { label: 'Late', Icon: Clock3, badge: 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200', dot: 'bg-amber-500' },
   stale: { label: 'Stale', Icon: AlertTriangle, badge: 'bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-200', dot: 'bg-red-500' },
   unknown: { label: 'No syncs yet', Icon: HelpCircle, badge: 'bg-secondary text-muted-foreground', dot: 'bg-muted-foreground/60' },
+  // FreshService switch (25 Nov 2026): an Off workspace has nothing to sync —
+  // calm and muted, never red or amber, never a stale alarm.
+  freshservice_off: { label: 'FreshService off', Icon: CirclePause, badge: 'text-muted-foreground', dot: 'bg-muted-foreground/40' },
 };
 
 // Manual refresh feedback: the request often returns in <100ms, which read as
@@ -149,11 +152,12 @@ export default function SyncHealthCard() {
             </thead>
             <tbody className="divide-y divide-border/60">
               {rows.map((row) => {
+                const fsOff = row.status === 'freshservice_off';
                 const rowMeta = STATUS_META[row.status] || STATUS_META.unknown;
                 return (
-                  <tr key={row.workspaceId} className="text-foreground/85">
+                  <tr key={row.workspaceId} className="text-foreground/85" data-status={row.status}>
                     <td className="px-3 py-2 font-medium text-foreground">{row.name}</td>
-                    <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">every {row.intervalMinutes}m</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{fsOff ? 'No FreshService sync' : `every ${row.intervalMinutes}m`}</td>
                     <td className="whitespace-nowrap px-3 py-2" title={fmtTime(row.lastSyncAt)}>
                       {row.lastSyncAt ? `${relativeAge(row.ageMs)} · ${fmtTime(row.lastSyncAt)}` : 'never'}
                     </td>
@@ -161,7 +165,14 @@ export default function SyncHealthCard() {
                       {row.dataFreshAt ? `Data fresh ${relativeAge(row.dataAgeMs)}` : '—'}
                     </td>
                     <td className="whitespace-nowrap px-3 py-2">
-                      {row.syncRunning ? (
+                      {fsOff ? (
+                        // FreshService switch: calm plain text with a dot and a pause icon — no badge, no alarm.
+                        <span className="inline-flex items-center gap-1.5 text-muted-foreground" data-testid="sync-health-fs-off">
+                          <span className={`h-1.5 w-1.5 rounded-full ${rowMeta.dot}`} aria-hidden="true" />
+                          <CirclePause className="h-3.5 w-3.5" aria-hidden="true" />
+                          {row.statusLabel || rowMeta.label}
+                        </span>
+                      ) : row.syncRunning ? (
                         // An in-flight run is liveness, not lateness — show it
                         // instead of a misleading Stale/Late chip.
                         <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-100 dark:bg-blue-500/20 px-2 py-0.5 font-semibold text-blue-700 dark:text-blue-200">

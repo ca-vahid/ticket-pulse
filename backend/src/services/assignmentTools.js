@@ -17,6 +17,7 @@ import { requesterTitle } from '../utils/requesterTitle.js';
 import { countAssignedToday } from './assignmentTodayCount.js';
 import { isSiteVisitLeave } from '../utils/leaveKinds.js';
 import { collapseLeaveRows } from './availability/siteVisit.js';
+import { fsGate, isFreshServiceOff } from './fsModeService.js';
 
 // Workload scans historically match legacy row variants too (lowercase labels
 // and raw FS status ints from very old syncs). Phase 8b: the canonical pair is
@@ -1391,7 +1392,11 @@ async function getRoutingBoundaryContext(workspaceId, input = {}) {
 
   let group = null;
   let groupLookup = 'not_applicable';
-  if (ticket.groupId) {
+  // FreshService switch: Off → no FreshService group read (advisory anyway).
+  const fsOn = ticket.groupId ? await fsGate(workspaceId, 'ai_tools') : true;
+  if (ticket.groupId && !fsOn) {
+    groupLookup = 'freshservice_off';
+  } else if (ticket.groupId) {
     try {
       const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
       if (fsConfig?.domain && fsConfig?.apiKey) {
@@ -2865,6 +2870,18 @@ async function searchDecisionNotes(workspaceId, input) {
   }
 }
 
+const FS_OFF_TOOL_NOTE = 'FreshService is off for this workspace';
+
+/** Is this FreshService id the tombstone of a ticket adopted into Ticket Pulse? */
+async function isAdoptedFsId(workspaceId, freshserviceTicketId) {
+  const n = Number(freshserviceTicketId);
+  if (!Number.isSafeInteger(n) || n <= 0) return false;
+  const row = await Promise.resolve()
+    .then(() => prisma.ticket.findFirst({ where: { workspaceId, freshserviceTicketId: BigInt(n) }, select: { mirrorState: true } }))
+    .catch(() => null);
+  return row?.mirrorState === 'adopted';
+}
+
 async function getFreshserviceActivities(freshserviceTicketId, workspaceId) {
   try {
     if (!freshserviceTicketId) {
@@ -2872,6 +2889,15 @@ async function getFreshserviceActivities(freshserviceTicketId, workspaceId) {
       // lives locally. Return an empty, well-formed result so the LLM moves on.
       return { ticketId: null, activityCount: 0, activities: [], note: 'Ticket was created in Ticket Pulse; no FreshService activity history exists.' };
     }
+    // FreshService switch: Off → FreshService is not asked; an adopted
+    // ticket's FS id is a tombstone (its history lives in Ticket Pulse now).
+    if (await isFreshServiceOff(workspaceId)) {
+      return { ticketId: Number(freshserviceTicketId) || null, activityCount: 0, activities: [], note: FS_OFF_TOOL_NOTE };
+    }
+    if (await isAdoptedFsId(workspaceId, freshserviceTicketId)) {
+      return { ticketId: Number(freshserviceTicketId) || null, activityCount: 0, activities: [], note: 'This ticket was adopted from FreshService; its history is in Ticket Pulse (use the ticket details), not FreshService.' };
+    }
+    await fsGate(workspaceId, 'ai_tools');
     const [fsConfig, timezone] = await Promise.all([
       settingsRepository.getFreshServiceConfigForWorkspace(workspaceId),
       getWorkspaceTimezone(workspaceId),

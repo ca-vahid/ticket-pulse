@@ -25,6 +25,7 @@ import { isCanonicalCategoryWorkspace } from '../utils/workspaceFeatureFlags.js'
 import providerGateway from './aiProviders/providerGateway.js';
 import { TOOL_SCHEMAS as ASSIGNMENT_TOOL_SCHEMAS } from './assignmentTools.js';
 import { requesterTitle } from '../utils/requesterTitle.js';
+import { fsGate } from './fsModeService.js';
 
 const ACTIVE_STATUSES = ['running', 'collecting', 'analyzing'];
 const STALE_RUNNING_MS = 30 * 60 * 1000;
@@ -1049,6 +1050,29 @@ class AssignmentDailyReviewService {
         failed: 0,
         warnings: [],
         perTicket: [],
+      };
+    }
+
+    // FreshService switch: Off → the review reads the cached threads only.
+    // (Adopted tickets are TP-origin, so the filter above already drops them.)
+    if (!(await fsGate(workspaceId, 'daily_review'))) {
+      emitProgress({
+        processed: 0,
+        total: 0,
+        hydratedActivities: 0,
+        hydratedConversations: 0,
+        failed: 0,
+        message: 'FreshService is off for this workspace: the review uses the threads already stored in Ticket Pulse.',
+      });
+      return {
+        hydratedActivities: 0,
+        hydratedConversations: 0,
+        activitiesFetched: 0,
+        conversationsFetched: 0,
+        failed: 0,
+        warnings: ['FreshService is off for this workspace, so the review used the threads already stored in Ticket Pulse.'],
+        perTicket: [],
+        skipped: 'freshservice_off',
       };
     }
 

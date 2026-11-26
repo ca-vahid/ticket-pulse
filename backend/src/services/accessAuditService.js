@@ -44,6 +44,10 @@ export const ACTIONS = Object.freeze({
   PERSONAL_KEY_ACCESS_REMOVED: 'personal_key_access_removed',
   // QA 11-24 #4: a super admin created a Ticket Pulse workspace.
   WORKSPACE_CREATED: 'workspace_created',
+  // FreshService switch (25 Nov 2026): a super admin moved a workspace between
+  // Connected / Shadow / Off, and the open FreshService tickets adopted at Off.
+  FRESHSERVICE_MODE_CHANGED: 'freshservice_mode_changed',
+  FRESHSERVICE_TICKETS_ADOPTED: 'freshservice_tickets_adopted',
 });
 
 // The changes that hand out a working secret, or switch one back on: these alert.

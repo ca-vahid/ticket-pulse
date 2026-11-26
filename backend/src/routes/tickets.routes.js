@@ -367,7 +367,14 @@ router.get('/meta', asyncHandler(async (req, res) => {
   const statuses = resolvedRetired && Array.isArray(meta?.statuses)
     ? meta.statuses.filter((s) => s.baseStatus !== 'Resolved')
     : meta?.statuses;
-  res.json({ success: true, data: { ...meta, ...(technicians ? { technicians } : {}), ...(statuses ? { statuses } : {}), resolvedRetired, actor: req.ticketActor, ...(replyGreeting ? { replyGreeting } : {}) } });
+  // FreshService switch (25 Nov 2026): the ticket pages hide every FreshService
+  // affordance when the workspace is Off or never connected. Cached lookup; a
+  // read error means "connected" (today's behaviour).
+  const freshserviceMode = await import('../services/fsModeService.js')
+    .then(({ getMode }) => getMode(req.workspaceId))
+    .catch(() => 'connected');
+  const freshserviceEnabled = freshserviceMode === 'connected' || freshserviceMode === 'shadow';
+  res.json({ success: true, data: { ...meta, ...(technicians ? { technicians } : {}), ...(statuses ? { statuses } : {}), resolvedRetired, freshserviceEnabled, freshserviceMode, actor: req.ticketActor, ...(replyGreeting ? { replyGreeting } : {}) } });
 }));
 
 // Stat cards: several tabs (and the page + its refresh) asked at the same
@@ -794,6 +801,57 @@ function requireTicketingStaff(req, _res, next) {
   if (actor.role === 'admin' || actor.workspaceRole === 'admin' || actor.technicianId) return next();
   return next(new AuthorizationError('Agent or admin access required', 'staff_required'));
 }
+
+/**
+ * POST /api/tickets/:id/adopt — "Adopt to edit" (FreshService switch, 25 Nov
+ * 2026): an agent or admin makes an imported FreshService ticket a Ticket
+ * Pulse ticket (TP-number, fully editable here). FreshService-born only; an
+ * already adopted ticket answers 200 with itself (adoption is idempotent).
+ */
+router.post('/:id/adopt', requireTicketingStaff, requireNativeTicketing, asyncHandler(async (req, res) => {
+  const id = parseTicketId(req);
+  // Only once FreshService is off (or was never connected): while it is on,
+  // the FreshService copy is live and adopting would fork the ticket.
+  const { isFreshServiceOff } = await import('../services/fsModeService.js');
+  if (!(await isFreshServiceOff(req.workspaceId))) {
+    return res.status(409).json({
+      success: false,
+      code: 'freshservice_on',
+      message: 'Adopt is only available once FreshService is off for this workspace.',
+    });
+  }
+  const ticket = await prisma.ticket.findFirst({
+    where: { id, workspaceId: req.workspaceId },
+    select: { id: true, origin: true, status: true, nativeNumber: true, mirrorState: true, freshserviceTicketId: true },
+  });
+  if (!ticket) throw new NotFoundError('Ticket not found');
+  if (ticket.status === 'Deleted') {
+    throw new ValidationError('This ticket is deleted; restore it before adopting it.');
+  }
+  const alreadyAdopted = ticket.mirrorState === 'adopted';
+  if (ticket.origin === 'ticketpulse' && !alreadyAdopted) {
+    throw new ValidationError('This ticket was created in Ticket Pulse; there is nothing to adopt.');
+  }
+  if (!alreadyAdopted && !ticket.freshserviceTicketId) {
+    throw new ValidationError('This ticket has no FreshService number to adopt from.');
+  }
+  const { default: fsAdoptionService } = await import('../services/fsAdoptionService.js');
+  const adopted = alreadyAdopted
+    ? ticket
+    : await fsAdoptionService.adoptTicket(id, req.workspaceId, { actorEmail: req.ticketActor.email, reason: 'agent' });
+  logger.info(`Ticket ${id} adopted from FreshService by ${req.ticketActor.email}`);
+  res.json({
+    success: true,
+    data: {
+      id: adopted?.id ?? id,
+      nativeNumber: adopted?.nativeNumber ?? null,
+      displayRef: adopted?.displayRef
+        || (adopted?.nativeNumber !== null && adopted?.nativeNumber !== undefined ? `TP-${adopted.nativeNumber}` : null),
+      mirrorState: 'adopted',
+      alreadyAdopted,
+    },
+  });
+}));
 
 router.get('/mailboxes/held', requireTicketingStaff, asyncHandler(async (req, res) => {
   const { default: mailboxHoldService } = await import('../services/mailboxHoldService.js');

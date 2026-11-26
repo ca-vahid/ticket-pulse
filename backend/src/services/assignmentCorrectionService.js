@@ -8,6 +8,7 @@ import {
 } from './freshServiceGroupGuard.js';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
+import { fsGate } from './fsModeService.js';
 
 const ASSIGNMENT_DECISIONS = new Set(['approved', 'modified', 'auto_assigned']);
 const ACTIONABLE_FRESHSERVICE_STATUSES = new Set([2, 3]);
@@ -208,7 +209,10 @@ class AssignmentCorrectionService {
     if (!targetTech) {
       return { success: false, status: 400, message: 'Target technician is not active in this workspace' };
     }
-    if (!targetTech.freshserviceId) {
+    // FreshService switch: Off, or an adopted ticket (its FS id is a
+    // tombstone) → the correction is applied in Ticket Pulse only.
+    const localOnlyReason = await this._localOnlyReason(run, workspaceId);
+    if (!localOnlyReason && !targetTech.freshserviceId) {
       return { success: false, status: 400, message: 'Target technician has no FreshService agent ID' };
     }
 
@@ -246,6 +250,21 @@ class AssignmentCorrectionService {
       },
     });
 
+    if (localOnlyReason) {
+      try {
+        const result = await this._applyCorrectionLocally({
+          run, correction, fromTech, targetTech, reason: normalized.reason, workspaceId, actorEmail, localOnlyReason,
+        });
+        return { success: true, status: 200, data: result };
+      } catch (error) {
+        await prisma.assignmentCorrection.update({
+          where: { id: correction.id },
+          data: { freshserviceSyncStatus: 'failed', freshserviceSyncError: error.message },
+        }).catch(() => {});
+        return { success: false, status: error.statusCode || 400, message: error.message };
+      }
+    }
+
     try {
       const result = await this._syncCorrectionToFreshService({ run, correction, fromTech, targetTech, reason: normalized.reason, workspaceId });
       return { success: true, status: 200, data: result };
@@ -267,6 +286,73 @@ class AssignmentCorrectionService {
       }));
       return { success: false, status: 502, message: error.message, freshserviceError };
     }
+  }
+
+  /**
+   * FreshService switch: why a correction must stay in Ticket Pulse, or null.
+   * 'adopted' (the ticket's FS id is a tombstone) or 'freshservice_off'.
+   */
+  async _localOnlyReason(run, workspaceId) {
+    const row = await Promise.resolve()
+      .then(() => prisma.ticket.findUnique({ where: { id: run.ticketId }, select: { mirrorState: true } }))
+      .catch(() => null);
+    if (row?.mirrorState === 'adopted') return 'adopted';
+    if (!(await fsGate(workspaceId, 'writeback'))) return 'freshservice_off';
+    return null;
+  }
+
+  /**
+   * The correction applied in Ticket Pulse only: imported history is adopted
+   * first, then the ticket is assigned through ticketService (episodes,
+   * history, notifications), and the correction is recorded with
+   * freshserviceSyncStatus 'skipped' and the reason.
+   */
+  async _applyCorrectionLocally({ run, correction, fromTech, targetTech, reason, workspaceId, actorEmail, localOnlyReason }) {
+    // An admin's correction (the route is admin-only): a person, never a background writer.
+    const actor = { email: actorEmail || null, name: actorEmail || 'Ticket Pulse admin', role: 'admin' };
+    const ticket = await prisma.ticket.findFirst({ where: { id: run.ticketId, workspaceId }, select: { id: true, origin: true } });
+    if (ticket?.origin === 'freshservice') {
+      const { default: fsAdoptionService } = await import('./fsAdoptionService.js');
+      const adopted = await fsAdoptionService.adoptForWrite(run.ticketId, workspaceId, actor);
+      if (!adopted) throw new Error('This imported ticket could not be adopted, so the correction was not applied');
+    }
+    const { default: ticketService } = await import('./ticketService.js');
+    await ticketService.assignTicket(run.ticketId, workspaceId, targetTech.id, actor, { allowAssignableOnly: true });
+
+    const now = new Date();
+    const updatedCorrection = await prisma.assignmentCorrection.update({
+      where: { id: correction.id },
+      data: {
+        freshserviceSyncStatus: 'skipped',
+        freshserviceSyncError: localOnlyReason,
+        freshservicePayload: {
+          ...(correction.freshservicePayload || {}),
+          localOnly: true,
+          skippedReason: localOnlyReason,
+          appliedAt: now.toISOString(),
+        },
+      },
+      include: {
+        fromTechnician: { select: { id: true, name: true, email: true } },
+        toTechnician: { select: { id: true, name: true, email: true } },
+      },
+    });
+
+    const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { defaultTimezone: true } });
+    const feedbackEntry = buildCorrectionFeedbackEntry({
+      timestamp: convertToTimezone(now, workspace?.defaultTimezone || 'America/Vancouver'),
+      ticket: run.ticket,
+      fromTech,
+      toTech: targetTech,
+      selectionSource: correction.selectionSource,
+      recommendationRank: correction.recommendationRank,
+      reason,
+    });
+    await assignmentRepository.appendFeedback(workspaceId, feedbackEntry).catch((error) => {
+      logger.warn('Failed to append assignment correction feedback', { correctionId: correction.id, error: error.message });
+    });
+    logger.info('Assignment correction applied in Ticket Pulse only', { correctionId: correction.id, ticketId: run.ticketId, reason: localOnlyReason });
+    return updatedCorrection;
   }
 
   async _syncCorrectionToFreshService({ run, correction, fromTech, targetTech, reason, workspaceId }) {
