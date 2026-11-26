@@ -42,6 +42,8 @@ const DAY_PARTS = [
 ];
 
 const STRIP_MAX = 14;
+/** Separator for the pick summary: a no-break space before the dot, so a wrap never starts a line with "·". */
+const SEP = ' · ';
 const OTHER_SITE = 'other';
 const SITE_LOCATION_MAX = 160;
 const VISIBLE_TYPES = 4;
@@ -427,7 +429,7 @@ export default function BookTimeForm({
 
   const tileInner = (t, on, hintId) => (
     <>
-      <TypeGlyph type={t} className="h-6 w-6" />
+      <TypeGlyph type={t} className="h-6 w-6 sm:max-xl:h-5 sm:max-xl:w-5" />
       <span className="min-w-0 flex-1 leading-tight">
         <span className={on ? 'font-medium' : ''}>{t.name}</span>
         {t.description && <span id={hintId} className="mt-0.5 block text-xs text-muted-foreground">{t.description}</span>}
@@ -435,7 +437,7 @@ export default function BookTimeForm({
       <ColorSwatch color={t.color} />
     </>
   );
-  const tileClass = (on) => `flex min-h-[2.75rem] min-w-0 cursor-pointer items-center gap-2.5 rounded-md border px-2.5 py-2 text-left text-sm ${on
+  const tileClass = (on) => `flex min-h-[2.75rem] min-w-0 cursor-pointer items-center gap-2.5 rounded-md border px-2.5 py-2 text-left text-sm sm:max-xl:gap-1.5 sm:max-xl:px-2 ${on
     ? 'border-primary bg-primary/5 text-foreground dark:bg-primary/15'
     : 'border-border text-foreground/85 hover:bg-muted'}`;
 
@@ -491,11 +493,12 @@ export default function BookTimeForm({
   const amountWords = !picked ? '' : isHours
     ? (form.startTime && form.endTime && form.endTime > form.startTime ? `${fmtMinute(timeToMinute(form.startTime))}–${fmtMinute(timeToMinute(form.endTime))}` : 'pick the hours')
     : single && halfWords ? halfWords
-      : [countWords, halfWords].filter(Boolean).join(' · ');
+      : [countWords, halfWords].filter(Boolean).join(SEP);
   const extendHint = picked && form.open && single && !isHours ? 'tap another day for a range' : null;
   const dates = picked ? rangeWords(form.startDate, isHours ? form.startDate : form.endDate, { today }) : '';
-  const summary = picked ? [dates, amountWords, extendHint].filter(Boolean).join(' · ') : '';
-  const spoken = picked ? [rangeWords(form.startDate, isHours ? form.startDate : form.endDate, { today, joiner: ' to ' }), amountWords.replace(' · ', ', '), extendHint, pastNeedsApprover ? PAST_SENTENCE : null].filter(Boolean).join(', ') : '';
+  // The dot stays with the words before it (no-break space), so a wrapped summary never starts a line with "·".
+  const summary = picked ? [dates, amountWords, extendHint].filter(Boolean).join(SEP) : '';
+  const spoken = picked ? [rangeWords(form.startDate, isHours ? form.startDate : form.endDate, { today, joiner: ' to ' }), amountWords.replace(SEP, ', '), extendHint, pastNeedsApprover ? PAST_SENTENCE : null].filter(Boolean).join(', ') : '';
 
   // ---- Footer
   const refused = fresh?.outcome === 'refused';
@@ -646,7 +649,7 @@ export default function BookTimeForm({
 
         {/* From sm up the month is a normal-sized calendar (20rem) with the day part, hours and the
             summary beside it, instead of a month stretched across the whole card (Vahid, 26 Nov). */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-5" data-testid="when-layout">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4 xl:gap-5" data-testid="when-layout">
           <div className="rounded-lg border border-border/70 p-2 sm:w-[20rem] sm:shrink-0 sm:p-3">
             <MonthPicker
               start={sel.start}
@@ -666,7 +669,7 @@ export default function BookTimeForm({
                 {DAY_PARTS.map((p) => {
                   const on = form.dayPart === p.value;
                   return (
-                    <label key={p.value} className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring ${on ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                    <label key={p.value} className={`cursor-pointer whitespace-nowrap rounded-md px-2 py-1.5 text-xs font-medium xl:px-3 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring ${on ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
                       <input type="radio" name={`dayPart-${uid}`} value={p.value} checked={on} onChange={() => set({ dayPart: p.value })} className="sr-only" />
                       {p.label}
                     </label>
@@ -688,7 +691,7 @@ export default function BookTimeForm({
 
             {picked && (
               <div className="space-y-0.5" aria-hidden="true">
-                <p className="text-sm font-medium text-foreground" data-testid="pick-summary">{summary}</p>
+                <p className="text-balance text-sm font-medium text-foreground" data-testid="pick-summary">{summary}</p>
                 {pastNeedsApprover && (
                   <p className="flex items-start gap-1.5 text-xs text-muted-foreground" data-testid="pick-past">
                     <Clock3 className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />{PAST_SENTENCE}
