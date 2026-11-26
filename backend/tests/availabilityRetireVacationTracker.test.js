@@ -65,7 +65,7 @@ const prismaMock = {
   avSettings: { findUnique: jest.fn(), create: jest.fn() },
   holiday: { findMany: jest.fn() },
   vacationTrackerConfig: { findMany: jest.fn(), findUnique: jest.fn(), count: jest.fn() },
-  $transaction: jest.fn(async (ops) => Promise.all(ops)),
+  $transaction: jest.fn(async (arg) => (typeof arg === 'function' ? arg(prismaMock) : Promise.all(arg))),
 };
 const store = new Map();
 const settingsMock = { get: jest.fn(async (k) => store.get(k) ?? null), set: jest.fn(async (k, v) => { store.set(k, String(v)); }) };
@@ -193,9 +193,12 @@ describe('the handover', () => {
     const out = await svc.retireVacationTracker(SUPER, { now: NOW });
 
     expect(out).toMatchObject({ retiredAt: NOW.toISOString(), retiredBy: SUPER.email, retiredByName: 'Sam Super', handedOver: 1 });
-    // Casey's six upcoming days (Thu–Tue, weekend included) + the day booked twice.
-    expect(out.directRowsReplaced).toBe(7);
+    // Casey's four upcoming working days (Thu, Fri, Mon, Tue) + the day booked twice.
+    expect(out.directRowsReplaced).toBe(5);
+    // Per person-day (review 26 Nov): the weekend inside her leave has no
+    // Vacation Pulse row, so its old rows stay (she is away, not available).
     expect(out.keptUnmatched).toEqual([
+      { technicianId: 11, technicianName: 'Casey Lee', workspaceId: 1, leaveType: 'PTO', category: 'OFF', dates: ['2099-12-05', '2099-12-06'] },
       { technicianId: 13, technicianName: 'Jo Park', workspaceId: 1, leaveType: 'PTO', category: 'OFF', dates: ['2099-12-10'] },
     ]);
 
@@ -204,7 +207,8 @@ describe('the handover', () => {
     expect(own).toEqual(['2099-12-03', '2099-12-04', '2099-12-07', '2099-12-08']);
     // Every row the old sync wrote before today is exactly as it was; none from today on but the kept one.
     expect(leaves.filter((r) => r.leaveDate < day('2099-12-03') && !r.vtLeaveId.startsWith('av:')).map(keyOf).sort()).toEqual(pastBefore);
-    expect(leaves.filter((r) => r.leaveDate >= day('2099-12-03') && !r.vtLeaveId.startsWith('av:') && !r.vtLeaveId.startsWith('graph:')).map((r) => r.vtLeaveId)).toEqual(['leave-b9']);
+    expect(leaves.filter((r) => r.leaveDate >= day('2099-12-03') && !r.vtLeaveId.startsWith('av:') && !r.vtLeaveId.startsWith('graph:')).map(keyOf).sort())
+      .toEqual(['leave-a1|2099-12-05|t11', 'leave-a1|2099-12-06|t11', 'leave-b9|2099-12-10|t13']);
     // The shared calendar's row is not Vacation Tracker's.
     expect(leaves.some((r) => r.vtLeaveId === 'graph:abc:13')).toBe(true);
     // The over booking was not touched; the moved one is marked.
@@ -213,7 +217,61 @@ describe('the handover', () => {
 
     // The switch is on, with the report.
     const saved = JSON.parse(store.get(VT_RETIRED_KEY));
-    expect(saved).toMatchObject({ retiredAt: NOW.toISOString(), retiredBy: SUPER.email, syncedWorkspaceIds: [1], report: { handedOver: 1, directRowsReplaced: 7 } });
+    expect(saved).toMatchObject({ retiredAt: NOW.toISOString(), retiredBy: SUPER.email, syncedWorkspaceIds: [1], report: { handedOver: 1, directRowsReplaced: 5 } });
+  });
+
+  test('a company holiday inside the leave keeps its old row; so does another kind of leave on a covered day', async () => {
+    // Mon 7 Dec is a holiday: the booking writes no row that day.
+    prismaMock.holiday.findMany.mockResolvedValue([{ date: day('2099-12-07'), name: 'Founders Day', isRecurring: false, isEnabled: true }]);
+    // Fri 4 Dec: a working-from-home day in Vacation Tracker beside the vacation one.
+    leaves.push(directRow('leave-w5', 11, '2099-12-04', { leaveTypeName: 'WFH', category: 'WFH' }));
+    const out = await svc.retireVacationTracker(SUPER, { now: NOW });
+    const own = leaves.filter((r) => r.vtLeaveId === 'av:501:w1').map((r) => r.leaveDate.toISOString().slice(0, 10)).sort();
+    expect(own).toEqual(['2099-12-03', '2099-12-04', '2099-12-08']);
+    const left = leaves.filter((r) => r.leaveDate >= day('2099-12-03') && !r.vtLeaveId.startsWith('av:') && !r.vtLeaveId.startsWith('graph:')).map(keyOf).sort();
+    expect(left).toEqual([
+      'leave-a1|2099-12-05|t11', 'leave-a1|2099-12-06|t11', 'leave-a1|2099-12-07|t11',
+      'leave-b9|2099-12-10|t13', 'leave-w5|2099-12-04|t11',
+    ]);
+    // Thu, Fri, Tue of the vacation + the day booked twice.
+    expect(out.directRowsReplaced).toBe(4);
+    expect(out.keptUnmatched).toEqual(expect.arrayContaining([
+      expect.objectContaining({ technicianId: 11, leaveType: 'WFH', dates: ['2099-12-04'] }),
+      expect.objectContaining({ technicianId: 11, leaveType: 'PTO', dates: ['2099-12-05', '2099-12-06', '2099-12-07'] }),
+    ]));
+  });
+
+  test('two clicks at once run one handover; both get its report', async () => {
+    const [a, b] = await Promise.all([
+      svc.retireVacationTracker(SUPER, { now: NOW }),
+      svc.retireVacationTracker(SUPER, { now: NOW }),
+    ]);
+    expect(b).toBe(a);
+    expect(prismaMock.avRequestEvent.create).toHaveBeenCalledTimes(1);
+    expect(settingsMock.set.mock.calls.filter(([k]) => k === VT_RETIRED_KEY)).toHaveLength(2); // switch on, then the report
+  });
+
+  test('projection fails closed: an unreadable switch rewrites nothing', async () => {
+    leaves.push(directRow('av:501:w1', 11, '2099-12-03', { leaveTypeName: 'Vacation' }));
+    const before = leaves.map(keyOf).sort();
+    settingsMock.get.mockImplementation(async (k) => { if (k === VT_RETIRED_KEY) throw new Error('db blip'); return store.get(k) ?? null; });
+    await expect(svc.project(requests[0])).rejects.toThrow(/could not read/);
+    expect(leaves.map(keyOf).sort()).toEqual(before);
+    settingsMock.get.mockImplementation(async (k) => store.get(k) ?? null);
+  });
+
+  test('projection is atomic: a failed write keeps the rows it had', async () => {
+    store.set(VT_RETIRED_KEY, JSON.stringify({ retiredAt: NOW.toISOString(), syncedWorkspaceIds: [1] }));
+    await svc.project(requests[0]);
+    const before = leaves.map(keyOf).sort();
+    const snapshot = leaves.map((r) => ({ ...r }));
+    prismaMock.$transaction.mockImplementationOnce(async (fn) => {
+      try { return await fn(prismaMock); } catch (err) { leaves = snapshot; throw err; } // a rollback
+    });
+    technicianLeave.create.mockRejectedValueOnce(new Error('connection lost'));
+    await expect(svc.project(requests[0])).rejects.toThrow('connection lost');
+    expect(leaves.map(keyOf).sort()).toEqual(before);
+    expect(prismaMock.$transaction).toHaveBeenCalled();
   });
 
   test('a second run is a no-op: nothing more moved or removed, the first retirement kept', async () => {
@@ -221,7 +279,7 @@ describe('the handover', () => {
     const after = leaves.map(keyOf).sort();
     const again = await svc.retireVacationTracker({ ...SUPER, name: 'Someone Else' }, { now: new Date('2099-12-03T22:00:00Z') });
     expect(again).toMatchObject({ retiredAt: NOW.toISOString(), retiredByName: 'Sam Super', handedOver: 0, directRowsReplaced: 0 });
-    expect(again.keptUnmatched.map((k) => k.technicianId)).toEqual([13]);
+    expect(again.keptUnmatched.map((k) => k.technicianId)).toEqual([11, 13]);
     expect(leaves.map(keyOf).sort()).toEqual(after);
   });
 
@@ -262,11 +320,19 @@ describe('once retired', () => {
     const row = vtRequest({ email: CASEY.email, startDate: day('2099-12-07'), endDate: day('2099-12-08') });
     prismaMock.avRequest.findUnique.mockImplementation(async ({ where }) => ({ ...row, id: where.id, events: [] }));
     prismaMock.avRequest.update.mockImplementation(async ({ data }) => ({ ...row, status: data.status }));
-    const out = await svc.cancelRequest(501, CASEY, 'plans changed');
-    expect(out.vacationTracker).toBeUndefined();
+    // "Today" is Thu 3 Dec 2099 in BC; only the clock is faked.
+    jest.useFakeTimers({ now: NOW, doNotFake: ['nextTick', 'setImmediate', 'clearImmediate', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'queueMicrotask', 'performance'] });
+    try {
+      const out = await svc.cancelRequest(501, CASEY, 'plans changed');
+      expect(out.vacationTracker).toBeUndefined();
+    } finally {
+      jest.useRealTimers();
+    }
     expect(wbMock.pushCancelled).not.toHaveBeenCalled();
-    // the old sync's rows of that leave go with it
-    expect(leaves.some((r) => r.vtLeaveId === 'leave-a1')).toBe(false);
+    // the old sync's rows of that leave go with it from today on; the days
+    // already taken stay as history (review 26 Nov)
+    expect(leaves.filter((r) => r.vtLeaveId === 'leave-a1').map((r) => r.leaveDate.toISOString().slice(0, 10)).sort())
+      .toEqual(['2099-11-30', '2099-12-01', '2099-12-02']);
   });
 
   test('My time: the booking says it came from Vacation Tracker, can be changed, and nothing is "still there"', async () => {

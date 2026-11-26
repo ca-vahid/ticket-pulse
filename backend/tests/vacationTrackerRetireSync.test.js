@@ -101,6 +101,15 @@ describe('retired: every legacy Vacation Tracker call stops', () => {
   });
 });
 
+test('retired while the run was writing: the clean-up does not run', async () => {
+  client.fetchLeaves.mockResolvedValue([{ id: 'leave-a1', userId: 'u1', leaveTypeId: 'lt-vac', startDate: '2099-12-01', endDate: '2099-12-01', status: 'APPROVED' }]);
+  vtRepo.bulkUpsertLeaves.mockImplementation(async () => { retire(); return []; });
+  const out = await service.syncLeaves(1, '2099-11-19', '2099-12-26');
+  expect(out).toMatchObject({ skipped: 'retired' });
+  expect(vtRepo.deleteStaleLeaves).not.toHaveBeenCalled();
+  expect(vtRepo.updateLastSyncAt).not.toHaveBeenCalled();
+});
+
 describe('not retired: an empty listing never cancels', () => {
   test('no leaves listed while leave-days are already there: the clean-up is skipped, with a warning', async () => {
     client.fetchLeaves.mockResolvedValue([]);

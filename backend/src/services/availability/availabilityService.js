@@ -899,7 +899,8 @@ class AvailabilityService {
     const leaveId = isVtExternalId(request.externalId) ? request.externalId.slice(3) : null;
     if (leaveId) {
       await Promise.resolve()
-        .then(() => prisma.technicianLeave.deleteMany({ where: { vtLeaveId: leaveId } }))
+        // Today on only: the past days of a leave already under way stay as history.
+        .then(() => prisma.technicianLeave.deleteMany({ where: { vtLeaveId: leaveId, leaveDate: { gte: toDay(pacificTodayKey()) } } }))
         .catch((err) => logger.warn(`Availability: could not clear Vacation Tracker rows for request ${request.id}: ${err.message}`));
     }
     // Retired (26 Nov 2026): a booking that came from there is a Vacation Pulse
@@ -1340,7 +1341,9 @@ class AvailabilityService {
     const person = await prisma.avPerson.findUnique({ where: { email: request.email } });
     const isHoliday = holidayMatcher(await this._holidays());
     const dates = workingDates({ startDate: request.startDate, endDate: request.endDate, workdays: person?.workdays, isHoliday });
-    const retirement = request.source === 'vacation_tracker' ? await getVacationTrackerRetirement() : null;
+    // Fails closed: if the switch cannot be read, nothing is rewritten (the
+    // caller logs it) rather than guessing which workspaces to write.
+    const retirement = request.source === 'vacation_tracker' ? await getVacationTrackerRetirement({ strict: true }) : null;
     const targets = await this._projectionTargets(request, { vtRetired: Boolean(retirement) });
     // A booking from a retired Vacation Tracker keeps its past: in a workspace
     // the old leave sync wrote, the days before retirement stay the rows it
@@ -1361,27 +1364,33 @@ class AvailabilityService {
     let written = 0;
     for (const t of targets) {
       const key = `av:${request.id}:w${t.workspaceId}`;
-      await prisma.technicianLeave.deleteMany({ where: { vtLeaveId: key } });
-      for (const date of dates) {
-        if (handedOverOn && syncedBefore.has(Number(t.workspaceId)) && dayKey(date) < handedOverOn) continue;
-        await prisma.technicianLeave.create({
-          data: {
-            workspaceId: t.workspaceId,
-            technicianId: t.id,
-            vtLeaveId: key,
-            leaveDate: toDay(date),
-            leaveTypeName: type.name,
-            category,
-            status: 'APPROVED',
-            isFullDay: !partial,
-            halfDayPart: half || (request.dayPart === 'hours' ? (((request.startMinute + request.endMinute) / 2) < 720 ? 'AM' : 'PM') : null),
-            startMinute: request.dayPart === 'hours' ? request.startMinute : (half === 'AM' ? 0 : half === 'PM' ? 720 : null),
-            endMinute: request.dayPart === 'hours' ? request.endMinute : (half === 'AM' ? 720 : half === 'PM' ? 1440 : null),
-            ...siteData,
-          },
-        });
-        written += 1;
-      }
+      // One transaction per workspace: a failure part-way never leaves the
+      // person with their old rows gone and the new ones half written.
+      written += await prisma.$transaction(async (tx) => {
+        await tx.technicianLeave.deleteMany({ where: { vtLeaveId: key } });
+        let n = 0;
+        for (const date of dates) {
+          if (handedOverOn && syncedBefore.has(Number(t.workspaceId)) && dayKey(date) < handedOverOn) continue;
+          await tx.technicianLeave.create({
+            data: {
+              workspaceId: t.workspaceId,
+              technicianId: t.id,
+              vtLeaveId: key,
+              leaveDate: toDay(date),
+              leaveTypeName: type.name,
+              category,
+              status: 'APPROVED',
+              isFullDay: !partial,
+              halfDayPart: half || (request.dayPart === 'hours' ? (((request.startMinute + request.endMinute) / 2) < 720 ? 'AM' : 'PM') : null),
+              startMinute: request.dayPart === 'hours' ? request.startMinute : (half === 'AM' ? 0 : half === 'PM' ? 720 : null),
+              endMinute: request.dayPart === 'hours' ? request.endMinute : (half === 'AM' ? 720 : half === 'PM' ? 1440 : null),
+              ...siteData,
+            },
+          });
+          n += 1;
+        }
+        return n;
+      }, { timeout: 20000 });
     }
     return { written };
   }
@@ -1935,8 +1944,21 @@ class AvailabilityService {
    * Returns { retiredAt, retiredBy, retiredByName, handedOver,
    * directRowsReplaced, keptUnmatched: [...] }.
    */
-  async retireVacationTracker(actor, { now = new Date() } = {}) {
+  async retireVacationTracker(actor, options = {}) {
     await this.assertSuperAdmin(actor);
+    // Single flight: a double-click, or two admins at once, wait for the run
+    // already going and get its report; the handover never runs twice at once.
+    if (this._retiring) return this._retiring;
+    const run = this._retireVacationTracker(actor, options);
+    this._retiring = run;
+    try {
+      return await run;
+    } finally {
+      if (this._retiring === run) this._retiring = null;
+    }
+  }
+
+  async _retireVacationTracker(actor, { now = new Date() } = {}) {
     const previous = await getVacationTrackerRetirement();
     // The workspaces the old leave sync was writing: their days before
     // retirement stay its rows (project() never writes them again).
@@ -1980,11 +2002,12 @@ class AvailabilityService {
    *     projected like any booking ('av:' rows, today onwards; its past days
    *     stay the rows the old sync wrote).
    *   - A leave-day the old sync wrote (not 'av:', not 'graph:') from today
-   *     on is removed when Vacation Pulse now covers it: it belongs to a
-   *     handed-over booking projected for that person, inside its dates; or
-   *     an 'av:' row of the same person, day, kind and part of the day.
-   *   - Every other upcoming leave-day the old sync wrote is kept and listed
-   *     (keptUnmatched), so an admin can check it.
+   *     on is removed only when an 'av:' row now stands for it: the same
+   *     person, the same day, the same kind and part of the day.
+   *   - Every other upcoming leave-day the old sync wrote (a weekend or
+   *     holiday inside a leave, a person not set up in Vacation Pulse, another
+   *     kind of leave) is kept and listed (keptUnmatched), so an admin can
+   *     check it.
    */
   async _handOverFromVacationTracker({ actorEmail, today }) {
     const from = toDay(today);
@@ -1996,7 +2019,6 @@ class AvailabilityService {
     });
     let handedOver = 0;
     const failed = [];
-    const byLeaveId = new Map(); // Vacation Tracker leave id -> its handed-over booking
     for (const r of requests || []) {
       try {
         await this.project(r);
@@ -2006,7 +2028,6 @@ class AvailabilityService {
           });
           handedOver += 1;
         }
-        if (isVtExternalId(r.externalId)) byLeaveId.set(r.externalId.slice(3), r);
       } catch (err) {
         failed.push(r.id);
         logger.warn(`Availability: Vacation Tracker handover could not move request ${r.id} (${err.message}); its leave-days are kept`);
@@ -2026,22 +2047,20 @@ class AvailabilityService {
         prisma.technicianLeave.findMany({ where: { leaveDate: { gte: from }, vtLeaveId: { startsWith: 'av:' } }, select: rowSelect, take: 50000 }),
         prisma.avLeaveType.findMany({ select: { id: true, name: true, availability: true, vtLeaveTypeNames: true } }),
       ]);
-      const appByDay = new Map();
-      const projectedFor = new Set(); // "<av key>|<technicianId>"
+      // Coverage is per person-day: a direct row goes only when an 'av:' row
+      // stands for that same technician on that same day with the same kind
+      // and part of the day. The old sync wrote every calendar day, the
+      // projection only working days, so weekends, holidays and other
+      // non-working days of a leave keep their direct rows (and are listed).
+      const appByDay = new Map(); // "<technicianId>|<day>" -> 'av:' rows
       for (const a of appRows || []) {
         const k = `${a.technicianId}|${dayKey(a.leaveDate)}`;
         if (!appByDay.has(k)) appByDay.set(k, []);
         appByDay.get(k).push(a);
-        projectedFor.add(`${a.vtLeaveId}|${a.technicianId}`);
       }
       const replace = [];
       for (const d of direct) {
-        const day = dayKey(d.leaveDate);
-        const req = byLeaveId.get(d.vtLeaveId);
-        let covered = Boolean(req) && req.status === 'approved'
-          && day >= dayKey(req.startDate) && day <= dayKey(req.endDate)
-          && projectedFor.has(`av:${req.id}:w${d.workspaceId}|${d.technicianId}`);
-        if (!covered) covered = (appByDay.get(`${d.technicianId}|${day}`) || []).some((a) => sameLeaveRow(d, a, avTypes || []));
+        const covered = (appByDay.get(`${d.technicianId}|${dayKey(d.leaveDate)}`) || []).some((a) => sameLeaveRow(d, a, avTypes || []));
         if (covered) replace.push(d.id);
         else kept.push(d);
       }

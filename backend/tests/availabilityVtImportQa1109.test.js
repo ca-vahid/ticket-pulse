@@ -24,6 +24,7 @@ const prismaMock = {
   avHoliday: { findMany: jest.fn() },
   vacationTrackerConfig: { findMany: jest.fn(), findUnique: jest.fn(), count: jest.fn() },
   technicianLeave: { deleteMany: jest.fn(), create: jest.fn() },
+  $transaction: jest.fn(async (fn) => fn(prismaMock)),
 };
 const settingsMock = { get: jest.fn(), set: jest.fn() };
 const wbMock = {
@@ -228,7 +229,8 @@ describe('#2 cancelling an imported leave', () => {
       events: { create: { kind: 'cancelled', actor: 'casey.lee@example.com', details: { reason: 'Plans changed', cancelledIn: 'ticket_pulse' } } },
     });
     expect(svc.unproject).toHaveBeenCalled();
-    expect(prismaMock.technicianLeave.deleteMany).toHaveBeenCalledWith({ where: { vtLeaveId: 'leave-77' } });
+    // Today on only: the days already taken stay as history (26 Nov 2026).
+    expect(prismaMock.technicianLeave.deleteMany).toHaveBeenCalledWith({ where: { vtLeaveId: 'leave-77', leaveDate: { gte: toDay(new Date().toLocaleDateString('en-CA', { timeZone: 'America/Vancouver' })) } } });
     expect(wbMock.pushCancelled).toHaveBeenCalledWith(301, 'Plans changed');
     expect(out.vacationTracker).toEqual({ updated: true, message: 'Cancelled in Ticket Pulse and in Vacation Tracker.' });
   });

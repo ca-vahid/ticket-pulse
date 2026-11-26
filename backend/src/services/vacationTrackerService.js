@@ -315,6 +315,11 @@ class VacationTrackerService {
       const existingRows = (leaves || []).length === 0
         ? await vtRepo.countDirectLeaves(workspaceId, startDt, endDt)
         : 0;
+      // Retired while the upsert ran: the clean-up never runs after retirement.
+      if (await isVacationTrackerRetired()) {
+        logRetiredOnce('the hourly leave sync');
+        return { ...RETIRED_SYNC, leavesProcessed: leaves.length, leaveDaysCreated: leaveRows.length };
+      }
       if (existingRows > 0) {
         logger.warn(`VT leave sync ws ${workspaceId}: Vacation Tracker listed no leaves for ${startDate}..${endDate}; keeping the ${existingRows} leave-day(s) already there (an empty listing never cancels)`);
       } else {
