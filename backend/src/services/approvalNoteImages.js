@@ -17,7 +17,10 @@ export const MAX_NOTE_IMAGES = 6;
 
 // The API's public origin: Teams fetches the pictures from there. The same settings as
 // graphSubscriptionService.notificationBaseUrl (not imported: it pulls in the Graph client).
-const PROD_API_ORIGIN = 'https://api.ticketpulse.bgcsaas.com';
+// The address is built fresh for each e-mail / card, so it follows the main address
+// (25 Nov 2026: api.ticketpulse.bgcsi.com); links already sent keep working because
+// api.ticketpulse.bgcsaas.com stays bound to the same App Service.
+const PROD_API_ORIGIN = 'https://api.ticketpulse.bgcsi.com';
 export function apiPublicOrigin(env = process.env) {
   const explicit = String(env.PUBLIC_API_URL || env.GRAPH_NOTIFICATION_BASE_URL || '').trim().replace(/\/+$/, '');
   if (explicit) return explicit;

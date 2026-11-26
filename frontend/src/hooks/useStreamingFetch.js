@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { getAuthToken, getWorkspaceId } from '../services/api';
+import { currentApiOrigin } from '../config/apiOrigin';
 
-const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:3000') + '/api';
+const API_BASE = `${currentApiOrigin()}/api`;
 
 /**
  * Low-level SSE stream reader.  Shared by both the hook and imperative callers.

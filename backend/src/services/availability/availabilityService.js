@@ -1394,7 +1394,7 @@ class AvailabilityService {
 
   async _baseUrl() {
     const { resolvePublicBaseUrl } = await import('../../utils/publicBaseUrl.js');
-    return resolvePublicBaseUrl({ fallback: 'https://ticketpulse.bgcsaas.com' });
+    return resolvePublicBaseUrl({ fallback: 'https://ticketpulse.bgcsi.com' });
   }
 
   async _notifyApprovers(request, leaveType, person, approvers, { was = null } = {}) {

@@ -91,7 +91,7 @@ class AvailabilityTeams {
       import('../teamsCards.js'),
       import('../../utils/publicBaseUrl.js'),
     ]);
-    return { teams, bot, textCard, base: await resolvePublicBaseUrl({ fallback: 'https://ticketpulse.bgcsaas.com' }) };
+    return { teams, bot, textCard, base: await resolvePublicBaseUrl({ fallback: 'https://ticketpulse.bgcsi.com' }) };
   }
 
   /** The person's agent row in the first workspace that has Teams on, or null. */

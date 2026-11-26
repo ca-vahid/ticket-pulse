@@ -16,7 +16,9 @@
  *
  * Pure apart from reading `env`; pass one in to test.
  */
-export const PRODUCTION_PUBLIC_URL = 'https://ticketpulse.bgcsaas.com';
+// 25 Nov 2026: the main address moved to ticketpulse.bgcsi.com. The old
+// ticketpulse.bgcsaas.com still works and forwards there (frontend index.html).
+export const PRODUCTION_PUBLIC_URL = 'https://ticketpulse.bgcsi.com';
 const LOCAL_FALLBACK = 'http://localhost:5173';
 const LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[?::1\]?|host\.docker\.internal)$/i;
 

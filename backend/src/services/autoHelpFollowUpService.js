@@ -512,7 +512,7 @@ class AutoHelpFollowUpService {
     const to = ticket.assignedTech?.email;
     if (!to) return { sent: false, reason: 'no_assignee' };
     const { resolvePublicBaseUrl } = await import('../utils/publicBaseUrl.js').catch(() => ({}));
-    const base = typeof resolvePublicBaseUrl === 'function' ? resolvePublicBaseUrl() : (process.env.PUBLIC_APP_URL || 'https://ticketpulse.bgcsaas.com');
+    const base = typeof resolvePublicBaseUrl === 'function' ? resolvePublicBaseUrl() : (process.env.PUBLIC_APP_URL || 'https://ticketpulse.bgcsi.com');
     const ref = ticketDisplayRef(ticket);
     const html = `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#0f172a">
 ${lines.map((l) => `<p style="margin:0 0 10px">${l}</p>`).join('\n')}

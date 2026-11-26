@@ -2,6 +2,18 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- Old address (25 Nov 2026): ticketpulse.bgcsi.com is the main address. The
+         old host forwards every link (e-mails, /it/TP-…, /ticket-status/<token>,
+         approval pages) to the same path there. Exactly that one host: never
+         localhost or the azurestaticapps preview host. Keep this first. -->
+    <script>
+      (function () {
+        if (location.hostname === 'ticketpulse.bgcsaas.com') {
+          window.__tpMovingHost = true; // main.jsx then does not start the app here
+          location.replace('https://ticketpulse.bgcsi.com' + location.pathname + location.search + location.hash);
+        }
+      })();
+    </script>
     <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/brand/favicon-16.png" />
     <link rel="icon" type="image/png" sizes="48x48" href="/brand/favicon-48.png" />

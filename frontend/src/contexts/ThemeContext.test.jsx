@@ -278,7 +278,8 @@ describe('index.html pre-paint script (no-flash smoke)', () => {
   });
 
   test('the script is inert for a light choice and stamps .dark for a stored dark choice', () => {
-    const body = htmlSrc.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
+    // The old-address forward (25 Nov 2026) is the first inline script; pick the theme one.
+    const body = [...htmlSrc.matchAll(/<script>\s*([\s\S]*?)<\/script>/g)].map((m) => m[1]).find((s) => s.includes('tp_theme'));
     const run = (stored, osDark) => {
       const root = { classList: { add: vi.fn() } };
       const meta = { setAttribute: vi.fn() };

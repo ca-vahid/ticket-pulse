@@ -8,30 +8,36 @@ import './index.css';
 import { installMotionPreference } from './utils/motionPreference';
 import { installPwa } from './utils/pwa';
 
-// Motion is decided by the app (On by default) before the first paint.
-installMotionPreference();
-// Installable app: service worker + the browser's install prompt.
-installPwa();
+function start() {
+  // Motion is decided by the app (On by default) before the first paint.
+  installMotionPreference();
+  // Installable app: service worker + the browser's install prompt.
+  installPwa();
 
-const msalInstance = new PublicClientApplication(msalConfig);
+  const msalInstance = new PublicClientApplication(msalConfig);
 
-msalInstance.initialize().then(() => {
-  const accounts = msalInstance.getAllAccounts();
-  if (accounts.length > 0) {
-    msalInstance.setActiveAccount(accounts[0]);
-  }
-
-  msalInstance.addEventCallback((event) => {
-    if (event.eventType === EventType.LOGIN_SUCCESS && event.payload.account) {
-      msalInstance.setActiveAccount(event.payload.account);
+  msalInstance.initialize().then(() => {
+    const accounts = msalInstance.getAllAccounts();
+    if (accounts.length > 0) {
+      msalInstance.setActiveAccount(accounts[0]);
     }
-  });
 
-  ReactDOM.createRoot(document.getElementById('root')).render(
-    <React.StrictMode>
-      <MsalProvider instance={msalInstance}>
-        <App />
-      </MsalProvider>
-    </React.StrictMode>,
-  );
-});
+    msalInstance.addEventCallback((event) => {
+      if (event.eventType === EventType.LOGIN_SUCCESS && event.payload.account) {
+        msalInstance.setActiveAccount(event.payload.account);
+      }
+    });
+
+    ReactDOM.createRoot(document.getElementById('root')).render(
+      <React.StrictMode>
+        <MsalProvider instance={msalInstance}>
+          <App />
+        </MsalProvider>
+      </React.StrictMode>,
+    );
+  });
+}
+
+// The old address is forwarding to ticketpulse.bgcsi.com (index.html): don't start
+// sign-in, the service worker or API calls on a page that is about to go away.
+if (!window.__tpMovingHost) start();

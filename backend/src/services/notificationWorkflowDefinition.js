@@ -2231,7 +2231,7 @@ export function notificationVariableCatalog(extraOutputFields = [], { customFiel
     variable('ticket.freshserviceTicketId', 'FreshService ticket number', 'Ticket', 'FreshService ticket number — blank for Ticket Pulse-born tickets (use Ticket number instead).', '225001'),
     variable('ticket.nativeNumber', 'Native ticket number', 'Ticket', 'Ticket Pulse native number (without the TP- prefix) — blank for FreshService-born tickets.', '1070'),
     variable('ticket.id', 'Internal ticket id', 'Ticket', 'Ticket Pulse internal database id (stable across both origins).', '4821'),
-    variable('ticket.url', 'Ticket link (agents)', 'Ticket', 'Link to the ticket page in Ticket Pulse — for agents, webhooks and Teams posts. Requester-facing mail uses the public status link instead.', 'https://ticketpulse.bgcsaas.com/tickets/4821'),
+    variable('ticket.url', 'Ticket link (agents)', 'Ticket', 'Link to the ticket page in Ticket Pulse — for agents, webhooks and Teams posts. Requester-facing mail uses the public status link instead.', 'https://ticketpulse.bgcsi.com/tickets/4821'),
     variable('ticket.origin', 'Ticket origin', 'Ticket', 'Where the ticket was born: ticketpulse or freshservice.', 'ticketpulse'),
     variable('ticket.createdVia', 'Created via', 'Ticket', 'How the ticket came to exist: app, email, api, freshservice_sync, held_reply (resolved from the mailbox hold queue), agent_cc (agent reply-all with the mailbox in Cc) or forward.', 'email'),
     variable('ticket.subject', 'Subject', 'Ticket', 'Ticket subject line.', 'VPN access problem'),

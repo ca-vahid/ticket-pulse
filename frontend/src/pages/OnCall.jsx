@@ -268,7 +268,10 @@ export default function OnCall() {
   };
 
   const download = (onlyMine) => {
-    const file = buildIcs({ weeks, people, onlyTechnicianId: onlyMine ? myId : null, now: new Date(now), host: window.location.hostname || 'ticketpulse' });
+    // Event ids keep the original host after the 25 Nov 2026 address change, so a
+    // calendar that imported the file before updates its events instead of doubling them.
+    const uidHost = window.location.hostname === 'ticketpulse.bgcsi.com' ? 'ticketpulse.bgcsaas.com' : window.location.hostname;
+    const file = buildIcs({ weeks, people, onlyTechnicianId: onlyMine ? myId : null, now: new Date(now), host: uidHost || 'ticketpulse' });
     if (!file.count) { setFileNote('There is nothing to put in a calendar yet.'); return; }
     const saved = saveFile(file.text, onlyMine ? 'my-on-call.ics' : 'on-call-schedule.ics');
     setFileNote(saved

@@ -32,7 +32,7 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TP = 'https://ticketpulse.bgcsaas.com/tickets'
+TP = 'https://ticketpulse.bgcsi.com/tickets'
 WS = 'ws=1'  # IT; links open in this workspace whatever the browser last used (v4.1.28)
 PRI = {4: ('Urgent', '#dc2626'), 3: ('High', '#d97706'), 2: ('Medium', '#64748b'), 1: ('Low', '#94a3b8')}
 OVERDUE_MIN, STALE_DAYS, URGENT_WINDOW_DAYS, SHOW_EACH = 3, 30, 7, 4
