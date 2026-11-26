@@ -1,6 +1,15 @@
-export const APP_VERSION = '4.4.19-preview';
+export const APP_VERSION = '4.4.20-preview';
 
 export const changelog = [
+  {
+    version: '4.4.20-preview',
+    date: 'November 25, 2026',
+    entries: [
+      { type: 'new', html: '<strong>FreshService switch, one workspace at a time</strong> &mdash; super admins can set each workspace to Connected, Shadow or Off under Settings &rarr; Workspaces. Shadow counts every FreshService call that Off would stop, so hidden dependencies show up first. Off stops all sync and copies for that workspace, makes its open FreshService tickets Ticket Pulse tickets (all history kept, the old number kept as a reference) and shows closed ones as imported history. Every workspace stays Connected until someone switches it.' },
+      { type: 'new', html: '<strong>Remove a file from the Attachments tab</strong> &mdash; the person who added a file, or an admin, can remove it from the Attachments tab after confirming; the ticket&rsquo;s history records who removed what.' },
+      { type: 'fixed', html: '<strong>Reminder subjects are never a vendor</strong> &mdash; attachments on a collection reminder (&ldquo;Reminder: 71 Days Outstanding Invoice &hellip;&rdquo;) are named after the company on the invoice, not the reminder&rsquo;s wording.' }
+    ],
+  },
   {
     version: '4.4.19-preview',
     date: 'November 25, 2026',
