@@ -230,7 +230,9 @@ class AvailabilityService {
     const out = new Map(list.map((e) => [e, new Set()]));
     if (!list.length) return out;
     const [techs, access] = await Promise.all([
-      prisma.technician.findMany({ where: { email: { in: list, mode: 'insensitive' } }, select: { email: true, workspaceId: true }, take: 10000 }),
+      // Active agent rows only: inactive, assignable-only agent rows (people from other
+      // teams kept in IT) must not make them count as that workspace's people.
+      prisma.technician.findMany({ where: { email: { in: list, mode: 'insensitive' }, isActive: true }, select: { email: true, workspaceId: true }, take: 10000 }),
       prisma.workspaceAccess.findMany({ where: { email: { in: list } }, select: { email: true, workspaceId: true }, take: 10000 }),
     ]);
     for (const r of [...(techs || []), ...(access || [])]) {
