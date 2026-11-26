@@ -1,5 +1,6 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
+import { apiPublicOrigin } from '../utils/apiPublicBase.js';
 
 /**
  * Pictures in an approval request (19 Oct 2026). A picture pasted into "Why
@@ -21,12 +22,8 @@ export const MAX_NOTE_IMAGES = 6;
 // api.ticketpulse.bgcsaas.com, while these picture links are built fresh for each
 // e-mail / card and so follow the main address (25 Nov 2026: api.ticketpulse.bgcsi.com).
 // Links already sent keep working: the old API host stays bound to the same App Service.
-const PROD_API_ORIGIN = 'https://api.ticketpulse.bgcsi.com';
-export function apiPublicOrigin(env = process.env) {
-  const explicit = String(env.PUBLIC_API_URL || env.GRAPH_NOTIFICATION_BASE_URL || '').trim().replace(/\/+$/, '');
-  if (explicit) return explicit;
-  return env.NODE_ENV === 'production' ? PROD_API_ORIGIN : '';
-}
+// 4.4.24: the function lives in utils/apiPublicBase.js (shared with the API key guide).
+export { apiPublicOrigin };
 
 const clean = (name) => String(name || '').replace(/&nbsp;|&#160;/gi, ' ').replace(/&amp;/gi, '&').trim().toLowerCase();
 const escapeHtml = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');

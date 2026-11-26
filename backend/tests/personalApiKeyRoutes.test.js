@@ -121,13 +121,27 @@ describe('owner routes', () => {
     expect(personalSvcMock.getOwnerOverview).toHaveBeenCalledWith(1, expect.objectContaining({ email: 'dana.fox@example.com' }));
     const guide = await as('dana', request(app).get('/api/me/api-keys/guide')).expect(200);
     expect(guide.body.data.filename).toBe('ticket-pulse-api-guide.md');
-    expect(personalSvcMock.ownerGuide).toHaveBeenCalledWith(1, expect.objectContaining({ email: 'dana.fox@example.com' }), { baseUrl: 'https://tickets.example.com' });
+    // supertest calls 127.0.0.1:<port>, a local API host outside production
+    expect(personalSvcMock.ownerGuide).toHaveBeenCalledWith(1, expect.objectContaining({ email: 'dana.fox@example.com' }), { baseUrl: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/) });
     const created = await as('dana', request(app).post('/api/me/api-keys')).send({ name: 'Script', abilities: ['reply'], expiresInDays: 90 }).expect(201);
     expect(created.body.data.secret).toBe('tpu_x');
     expect(personalSvcMock.createOwnKey).toHaveBeenCalledWith(1, expect.objectContaining({ email: 'dana.fox@example.com' }), { name: 'Script', abilities: ['reply'], expiresInDays: 90 }, expect.any(Object));
     await as('dana', request(app).post('/api/me/api-keys/5/rotate')).expect(200);
     expect(personalSvcMock.rotateOwnKey).toHaveBeenCalledWith(1, expect.anything(), '5', expect.any(Object));
     expect((await as('dana', request(app).delete('/api/me/api-keys/5')).expect(200)).body).toEqual({ success: true });
+  });
+
+  // 4.4.24: the guide named PUBLIC_APP_URL (mocked here as tickets.example.com),
+  // the web host, which answers /api/v1 with an HTML 404.
+  test('the guide is given the API host the request came in on, never the web host', async () => {
+    await as('dana', request(app).get('/api/me/api-keys/guide')).set('Host', 'api.ticketpulse.bgcsaas.com').expect(200);
+    expect(personalSvcMock.ownerGuide.mock.calls.at(-1)[2]).toEqual({ baseUrl: 'https://api.ticketpulse.bgcsaas.com' });
+    for (const headers of [{ Host: 'tickets.example.com' }, { Host: 'tickets.example.com', 'x-forwarded-host': 'evil.example.com' }]) {
+      await as('dana', request(app).get('/api/me/api-keys/guide')).set(headers).expect(200);
+      const { baseUrl } = personalSvcMock.ownerGuide.mock.calls.at(-1)[2];
+      expect(baseUrl).not.toBe('https://tickets.example.com');
+      expect(baseUrl).toBe('https://api.ticketpulse.bgcsi.com');
+    }
   });
 
   test('no session is 401', async () => {

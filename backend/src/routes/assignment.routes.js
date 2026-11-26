@@ -42,16 +42,18 @@ import { isCanonicalCategoryWorkspace, isFsTaxonomySyncWorkspace } from '../util
 import noiseCloseDigestService from '../services/noiseCloseDigestService.js';
 import prisma from '../services/prisma.js';
 import logger from '../utils/logger.js';
+import { resolveApiPublicBase } from '../utils/apiPublicBase.js';
 
 const router = express.Router();
 const ASSIGNMENT_STATS_TIMEZONE = 'America/Vancouver';
 const ESCALATION_CHANNELS = new Set(['email', 'sms', 'whatsapp', 'phone_call']);
 const PRIORITY_AUDIT_TRIGGERS = ['priority_assessment_after_hours', 'priority_assessment_only', 'priority_changed'];
 
+// The FreshService webhook URL an admin pastes into FS: the API host this
+// request came in on when it is a known one, else the configured API origin
+// (4.4.24; before, any x-forwarded-host was echoed back unchecked).
 function getRequestBaseUrl(req) {
-  const proto = (req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0].trim();
-  const host = (req.get('x-forwarded-host') || req.get('host') || '').split(',')[0].trim();
-  return host ? `${proto}://${host}` : '';
+  return resolveApiPublicBase(req);
 }
 
 async function getWebhookConfigExtras(req) {
