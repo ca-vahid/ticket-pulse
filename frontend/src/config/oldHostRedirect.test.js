@@ -9,13 +9,13 @@ const htmlSrc = readFileSync(join(here, '../../index.html'), 'utf8');
 const scripts = [...htmlSrc.matchAll(/<script>\s*([\s\S]*?)<\/script>/g)].map((m) => ({ body: m[1], at: m.index }));
 const forward = scripts.find((s) => s.body.includes('location.replace'));
 
-function run(href) {
+function run(href, { blocked = false } = {}) {
   const url = new URL(href);
   const replaced = [];
   const win = {};
   const location = {
     hostname: url.hostname, pathname: url.pathname, search: url.search, hash: url.hash,
-    replace: (to) => replaced.push(to),
+    replace: (to) => { if (blocked) throw new Error('navigation blocked'); replaced.push(to); },
   };
   new Function('location', 'window', forward.body)(location, win);
   return { to: replaced[0] || null, moving: win.__tpMovingHost === true };
@@ -39,6 +39,10 @@ describe('index.html old-address forward', () => {
     expect(run('https://ticketpulse.bgcsaas.com/it/TP-10000').to).toBe('https://ticketpulse.bgcsi.com/it/TP-10000');
     expect(run('https://ticketpulse.bgcsaas.com/ticket-status/abc123').to).toBe('https://ticketpulse.bgcsi.com/ticket-status/abc123');
     expect(run('https://ticketpulse.bgcsaas.com/approval/tok').to).toBe('https://ticketpulse.bgcsi.com/approval/tok');
+  });
+
+  test('a blocked navigation does not set the leaving flag, so the old app still starts', () => {
+    expect(run('https://ticketpulse.bgcsaas.com/tickets/1', { blocked: true })).toEqual({ to: null, moving: false });
   });
 
   test('leaves every other host alone', () => {

@@ -9,8 +9,11 @@
     <script>
       (function () {
         if (location.hostname === 'ticketpulse.bgcsaas.com') {
-          window.__tpMovingHost = true; // main.jsx then does not start the app here
-          location.replace('https://ticketpulse.bgcsi.com' + location.pathname + location.search + location.hash);
+          try {
+            location.replace('https://ticketpulse.bgcsi.com' + location.pathname + location.search + location.hash);
+            // Only once the move is under way: a blocked navigation lets the app start here.
+            window.__tpMovingHost = true; // main.jsx then does not start the app here
+          } catch (e) { /* stay on the old address */ }
         }
       })();
     </script>

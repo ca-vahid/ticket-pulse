@@ -102,7 +102,8 @@ describe('no service keeps its own localhost fallback', () => {
     const offenders = [];
     for (const entry of await readdir(dir, { recursive: true })) {
       if (!entry.endsWith('.js')) continue;
-      if ((await readFile(join(dir, entry), 'utf8')).includes("'https://ticketpulse.bgcsaas.com")) offenders.push(entry);
+      // A fallback (`fallback: '…'` or `|| '…'`); recognising old links (teamsNotificationService) is fine.
+      if (/(fallback:\s*|\|\|\s*)'https:\/\/ticketpulse\.bgcsaas\.com/.test(await readFile(join(dir, entry), 'utf8'))) offenders.push(entry);
     }
     expect(offenders).toEqual([]);
   });
