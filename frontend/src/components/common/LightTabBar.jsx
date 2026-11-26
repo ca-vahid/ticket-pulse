@@ -21,20 +21,48 @@ export function tabAccessibleName(tab) {
   return n > 0 ? `${tab.label}, ${n} ${tab.badgeLabel || 'new'}` : tab?.label;
 }
 
+/** The row's scroll-padding at the start (tp-swipe-row: 1rem), where a snapped tab starts. */
+function snapPadding(row) {
+  try {
+    const v = parseFloat(window.getComputedStyle(row).scrollPaddingLeft);
+    return Number.isFinite(v) ? v : 0;
+  } catch { return 0; }
+}
+
+/**
+ * The row's scrollLeft that brings `tab` into view, or null when the whole tab
+ * is already visible. The row snaps each tab's start (tp-swipe-row), and a
+ * scroll to anything but a snap point is snapped back, so this is the tab's
+ * START less the scroll-padding: a valid snap position.
+ */
+export function tabScrollLeft(row, tab, pad = snapPadding(row)) {
+  const r = row.getBoundingClientRect();
+  const t = tab.getBoundingClientRect();
+  if (t.left >= r.left && t.right <= r.right) return null;
+  const start = row.scrollLeft + (t.left - r.left) - (row.clientLeft || 0);
+  return Math.max(0, Math.round(start - pad));
+}
+
 export default function LightTabBar({ tabs, activeId, onSelect, ariaLabel, idPrefix = 'tab', children = null, className = '' }) {
   const refs = useRef({});
+  const rowRef = useRef(null);
   const mounted = useRef(false);
   const activeIndex = Math.max(0, tabs.findIndex((t) => t.id === activeId));
 
   // QA 11-25: on a phone the row scrolls sideways and the selected tab could sit
   // cut off at the edge. Bring it into view on open (at once) and on change
-  // (smoothly, unless the app's motion setting is off).
+  // (smoothly, unless the app's motion setting is off). Only the row's own
+  // scrollLeft moves, so the page never scrolls up or down.
   useEffect(() => {
     const el = refs.current[activeId];
-    if (!el || typeof el.scrollIntoView !== 'function') return;
+    const row = rowRef.current;
     const smooth = mounted.current && !motionReduced();
     mounted.current = true;
-    el.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: smooth ? 'smooth' : 'auto' });
+    if (!el || !row) return;
+    const left = tabScrollLeft(row, el);
+    if (left == null) return;
+    if (typeof row.scrollTo === 'function') row.scrollTo({ left, behavior: smooth ? 'smooth' : 'auto' });
+    else row.scrollLeft = left;
   }, [activeId, tabs.length]);
 
   const onKeyDown = (e) => {
@@ -52,6 +80,7 @@ export default function LightTabBar({ tabs, activeId, onSelect, ariaLabel, idPre
   return (
     <div className={`mb-5 flex flex-wrap items-end gap-x-3 gap-y-2 border-b border-border ${className}`} data-testid="light-tab-bar">
       <div
+        ref={rowRef}
         role="tablist"
         aria-label={ariaLabel}
         onKeyDown={onKeyDown}

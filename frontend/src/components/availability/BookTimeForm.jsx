@@ -222,14 +222,15 @@ export function Verdict({ preview, unit, editing = false }) {
  * to your approvers", then what is left after it, the rules' messages and
  * warnings underneath in small type.
  */
-export function RequestCheck({ preview, unit, typeName, editing = false }) {
+export function RequestCheck({ preview, unit, typeName, editing = false, hideReason = null }) {
   if (!preview) return null;
   const look = verdictLook(preview, editing);
   const messages = (preview.fired || []).filter((f) => f.message && f.outcome !== 'warn' && f.message !== preview.reason);
   const warnings = preview.warnings || [];
   const extra = [
     preview.remaining != null ? `${trimNum(preview.remaining)} left after this` : null,
-    preview.outcome === 'pending' && preview.reason ? preview.reason : null,
+    // `hideReason`: a sentence already shown above (the past-start one), said once only.
+    preview.outcome === 'pending' && preview.reason && preview.reason !== hideReason ? preview.reason : null,
   ].filter(Boolean).join(' · ');
   return (
     <div className="min-w-0 space-y-1" data-testid="availability-verdict">
@@ -364,10 +365,11 @@ export default function BookTimeForm({
   const siteOk = !siteRequired || siteAnswered(form);
   const body = useMemo(() => (type && picked ? buildRequestBody(form, type) : null), [form, type, picked]);
   const bodyKey = JSON.stringify(body);
-  // The dry run does not depend on the place, so typing a site does not re-ask it.
+  // The dry run does not depend on the place or the note, so typing either does
+  // not re-ask it (nor flip the footer back to "Checking…").
   const previewKey = useMemo(() => {
     if (!body) return 'null';
-    return JSON.stringify(Object.fromEntries(Object.entries(body).filter(([k]) => k !== 'siteOfficeId' && k !== 'siteLocation')));
+    return JSON.stringify(Object.fromEntries(Object.entries(body).filter(([k]) => !['siteOfficeId', 'siteLocation', 'note'].includes(k))));
   }, [body]);
   const originalKey = useMemo(() => {
     if (!original) return null;
@@ -556,7 +558,7 @@ export default function BookTimeForm({
   else if (fresh) {
     const look = verdictLook(fresh, Boolean(editing));
     statusWords = fresh.outcome === 'refused' ? look.text : `${verdictAmount(fresh, type?.unit)} · ${typeName} · ${look.text}`;
-    status = <RequestCheck preview={fresh} unit={type?.unit} typeName={typeName} editing={Boolean(editing)} />;
+    status = <RequestCheck preview={fresh} unit={type?.unit} typeName={typeName} editing={Boolean(editing)} hideReason={pastNeedsApprover ? PAST_SENTENCE : null} />;
   } else if (previewing) status = <span className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Checking…</span>;
   // One polite live region for the whole card: the pick, then what the check says (or the confirmation).
   const live = [spoken, statusWords].filter(Boolean).join('. ');
@@ -687,7 +689,8 @@ export default function BookTimeForm({
             )}
           </div>
         )}
-        <p className="sr-only" data-testid="pick-spoken">{spoken}</p>
+        {/* The spoken words of the pick, for the live region below; hidden so it is never read twice. */}
+        <p hidden data-testid="pick-spoken">{spoken}</p>
       </fieldset>
 
       {/* 3. Note */}

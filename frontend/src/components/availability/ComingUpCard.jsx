@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { ArrowRight, ChevronDown, Loader2, Pencil, X } from 'lucide-react';
 import {
   BTN_QUIET, CARD, REQUEST_STATUS, StatusDot, TypeGlyph, fmtAmount, fmtMinute, leaveLabel, sitePlace, todayKey,
@@ -36,8 +36,9 @@ function partWords(r) {
   return null;
 }
 
-/** "· text" that never leaves its "·" alone at the start of a wrapped line. */
-const Sep = ({ children, className = '' }) => <span className={`whitespace-nowrap ${className}`}>{' · '}{children}</span>;
+// Separators: the "·" is glued to the word BEFORE it with a no-break space, and
+// a plain space follows, so a wrapped line never starts with a dot.
+const DOT = ' ·';
 
 function sourceWords(r) {
   if (r.source === 'vacation_tracker') return 'from Vacation Tracker';
@@ -65,6 +66,7 @@ export function ComingUpRow({ r, type, today, offices = [], holidaySet = new Set
   const part = partWords(r);
   const away = !part && (!type?.availability || type.availability === 'OFF') && r.status !== 'denied' && r.status !== 'cancelled';
   const source = sourceWords(r);
+  const tail = [waitingOn.length > 0 ? waitingOn.join(' or ') : null, away && !readOnly ? `back ${backDay(r.endDate, holidaySet)}` : null].filter(Boolean);
   // Details, as the old list had them: the note, why it waits (or was decided so), the rules' words, the approver's note, the amount.
   const [open, setOpen] = useState(false);
   const reason = r.decision?.reason || null;
@@ -84,15 +86,14 @@ export function ComingUpRow({ r, type, today, offices = [], holidaySet = new Set
           <p className="text-sm font-semibold text-foreground">
             {dates}{nowWord && !readOnly && <span className="whitespace-nowrap font-normal text-muted-foreground"> ({nowWord})</span>}
           </p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
+          <p className="mt-0.5 text-xs text-muted-foreground" data-testid={`coming-up-${r.id}-what`}>
             <span className="text-foreground/85">{label}</span>
-            {part && <Sep>{part}</Sep>}
-            {source && <Sep>{source}</Sep>}
+            {[part, source].filter(Boolean).map((w) => <Fragment key={w}>{`${DOT} `}{w}</Fragment>)}
           </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            <StatusDot tone={status.tone} label={status.label} />
-            {waitingOn.length > 0 && <Sep>{waitingOn.join(' or ')}</Sep>}
-            {away && !readOnly && <Sep>back {backDay(r.endDate, holidaySet)}</Sep>}
+          <p className="mt-1 text-xs text-muted-foreground" data-testid={`coming-up-${r.id}-status`}>
+            {/* The status dot is an inline box: its trailing "·" rides in the same no-wrap span. */}
+            <span className="whitespace-nowrap"><StatusDot tone={status.tone} label={status.label} />{tail.length > 0 && DOT}</span>
+            {tail.map((w, i) => <Fragment key={w}>{' '}{w}{i < tail.length - 1 && DOT}</Fragment>)}
           </p>
           {stillInVt && <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-300" data-testid={`still-in-vt-${r.id}`}>Cancelled in Ticket Pulse. Cancel it in Vacation Tracker too.</p>}
           {isEditing && <p className="mt-0.5 text-xs font-medium text-primary">Changing…</p>}

@@ -1,6 +1,8 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { COLOR_DOT, COLOR_TEXT, MONTHS, addDaysKey, parseDay, todayKey } from './availabilityUi';
+import {
+  COLOR_DOT, COLOR_TEXT, HOLIDAY_BG, MONTHS, WEEKEND_BG, addDaysKey, parseDay, todayKey,
+} from './availabilityUi';
 import { isWeekend } from './calendarModel';
 import { WEEKDAY_LONG, dayLabel, monthCells } from './bookingModel';
 
@@ -27,6 +29,12 @@ const NAV_BTN = 'tp-focus-ring grid h-9 w-9 place-items-center rounded-md text-m
 
 const NO_BOOKINGS = new Map();
 const firstOfMonth = (key) => `${key.slice(0, 7)}-01`;
+
+/** "October 2026": the month `n` away from the one in view. */
+const monthName = (view, n) => {
+  const d = new Date(view.year, view.month + n, 1);
+  return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+};
 
 const monthOf = (key) => {
   const d = parseDay(key);
@@ -121,11 +129,12 @@ export default function MonthPicker({
   return (
     <div className="min-w-0" data-testid="month-picker">
       <div className="mb-1 flex items-center justify-between gap-2">
-        <button type="button" className={NAV_BTN} onClick={() => step(-1)} disabled={prevDisabled} aria-label="Previous month">
+        <button type="button" className={NAV_BTN} onClick={() => step(-1)} disabled={prevDisabled} aria-label={`Previous month, ${monthName(view, -1)}`}>
           <ChevronLeft className="h-4 w-4" aria-hidden="true" />
         </button>
-        <h3 id={headingId} className="text-sm font-semibold text-foreground">{MONTHS[view.month]} {view.year}</h3>
-        <button type="button" className={NAV_BTN} onClick={() => step(1)} aria-label="Next month">
+        {/* The month heading is announced when it changes (its own polite region; the pick summary has the card's other one). */}
+        <h3 id={headingId} className="text-sm font-semibold text-foreground" aria-live="polite" data-testid="month-picker-month">{MONTHS[view.month]} {view.year}</h3>
+        <button type="button" className={NAV_BTN} onClick={() => step(1)} aria-label={`Next month, ${monthName(view, 1)}`}>
           <ChevronRight className="h-4 w-4" aria-hidden="true" />
         </button>
       </div>
@@ -165,14 +174,22 @@ export default function MonthPicker({
                   ? `bg-primary/10 dark:bg-primary/20 ${key === lo ? 'rounded-l-md' : ''} ${key === hi ? 'rounded-r-md' : ''}`
                   : '';
                 const past = key < today;
+                // Three looks, each AA and each named in the day's label:
+                //   past days         plain muted numbers, no shading ("past");
+                //   weekends/holidays shaded as on the other calendars (WEEKEND_BG / HOLIDAY_BG),
+                //                     numbers a little softer than working days ("weekend" / "holiday");
+                //   working days      full-strength numbers.
+                // Inside a picked range the band shows instead of the shading.
+                const shade = offDay && !past && !inRange ? (holiday ? HOLIDAY_BG : WEEKEND_BG) : '';
                 const face = isEnd && inRange
                   ? 'bg-primary text-primary-foreground font-semibold'
                   : disabled
                     ? 'text-muted-foreground/45'
-                    : past || offDay
-                      // Past days stay pickable, only quieter; weekends and holidays are muted.
-                      ? `${past ? 'text-muted-foreground/70' : 'text-muted-foreground'} ${between ? '' : 'hover:bg-muted'}`
-                      : `text-foreground ${between ? '' : 'hover:bg-muted'}`;
+                    : past
+                      ? `text-muted-foreground ${between ? '' : 'hover:bg-muted'}`
+                      : offDay
+                        ? `text-foreground/70 ${shade} ${between ? '' : 'hover:bg-muted'}`
+                        : `text-foreground ${between ? '' : 'hover:bg-muted'}`;
                 return (
                   <td
                     key={key}
@@ -216,7 +233,9 @@ export default function MonthPicker({
         <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-muted-foreground/70" aria-hidden="true" />Booked</span>
         <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full border-[1.5px] border-muted-foreground/70" aria-hidden="true" />Waiting for approval</span>
         <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded-sm ring-1 ring-inset ring-primary" aria-hidden="true" />Today</span>
-        <span>Grey days: weekends, holidays and the past</span>
+        <span className="inline-flex items-center gap-1"><span className={`h-3 w-3 rounded-sm ${WEEKEND_BG}`} aria-hidden="true" />Weekend</span>
+        <span className="inline-flex items-center gap-1"><span className={`h-3 w-3 rounded-sm ${HOLIDAY_BG}`} aria-hidden="true" />Holiday</span>
+        <span>Grey numbers: past days</span>
       </p>
     </div>
   );

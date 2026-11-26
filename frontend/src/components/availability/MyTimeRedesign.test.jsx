@@ -91,14 +91,22 @@ describe('the month picker on its own (props in)', () => {
     expect(day(25)).toHaveAttribute('title', 'Working from home booked');
     expect(day(28)).toHaveAccessibleName('Saturday 28 November, weekend');
     expect(day(24)).toHaveAttribute('aria-disabled', 'true');
-    fireEvent.click(screen.getByRole('button', { name: 'Next month' }));
+    // The month buttons say where they go, and the heading is announced when the month changes.
+    expect(screen.getByRole('button', { name: 'Previous month, October 2026' })).toBeInTheDocument();
+    expect(screen.getByTestId('month-picker-month')).toHaveAttribute('aria-live', 'polite');
+    fireEvent.click(screen.getByRole('button', { name: 'Next month, December 2026' }));
+    expect(screen.getByTestId('month-picker-month')).toHaveTextContent('December 2026');
+    expect(screen.getByRole('button', { name: 'Next month, January 2027' })).toBeInTheDocument();
     expect(screen.getByRole('grid', { name: 'December 2026' })).toBeInTheDocument();
     expect(day(25, 'December')).toHaveAccessibleName('Friday 25 December, holiday: Christmas Day');
     expect(day(2, 'December')).toHaveAccessibleName(/Vacation waiting for approval/);
     // Waiting is a hollow ring, booked a filled dot; the legend says which is which.
     expect(day(2, 'December').querySelector('[data-dot]')).toHaveAttribute('data-dot', 'waiting');
     expect(day(2, 'December').querySelector('[data-dot]').className).toMatch(/border-current/);
-    expect(screen.getByTestId('month-picker-legend')).toHaveTextContent(/Booked.*Waiting for approval.*Today.*weekends, holidays and the past/);
+    expect(screen.getByTestId('month-picker-legend')).toHaveTextContent(/Booked.*Waiting for approval.*Today.*Weekend.*Holiday.*Grey numbers: past days/);
+    // Past days and weekends look different: weekends shaded, past days plain muted numbers.
+    expect(day(27, 'December').firstElementChild.className).toMatch(/bg-muted\/60/); // a Sunday
+    expect(day(25, 'December').firstElementChild.className).toMatch(/bg-rose-50/);
     expect(screen.getByRole('grid')).toHaveAttribute('aria-multiselectable', 'true');
   });
 
@@ -119,7 +127,7 @@ describe('the month picker on its own (props in)', () => {
     fireEvent.keyDown(document.activeElement, { key: ' ' });
     expect(onPick).toHaveBeenCalledTimes(1); // 3 Nov is before minKey here
     // Like the disabled Previous button, the keyboard stops at minKey's month.
-    expect(screen.getByRole('button', { name: 'Previous month' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^Previous month/ })).toBeDisabled();
     fireEvent.keyDown(document.activeElement, { key: 'PageUp' });
     expect(document.activeElement).toBe(day(3));
   });
@@ -256,14 +264,20 @@ describe('Book time away', () => {
     expect(screen.getByTestId('request-check-amount')).toHaveTextContent('4 working days · Vacation ·');
     // One polite live region for the card, saying the pick and the check.
     expect(screen.getByTestId('booking-live')).toHaveTextContent('Mon 30 Nov to Fri 4 Dec, 4 working days. 4 working days · Vacation · Goes to your approvers');
-    expect(document.querySelectorAll('[aria-live]')).toHaveLength(1);
+    // Two polite regions only: this one, and the calendar's month heading.
+    expect([...document.querySelectorAll('[aria-live]')].map((n) => n.dataset.testid).sort()).toEqual(['booking-live', 'month-picker-month']);
   });
 
   test('past days can be picked for any type; when the type is not "after the fact" an approver confirms it, and the summary says so', () => {
     render(<BookTimeForm me={ME} today={TODAY} requests={[]} />);
     expect(day(20)).not.toHaveAttribute('aria-disabled');
     expect(day(20)).toHaveAccessibleName('Friday 20 November, past');
-    expect(screen.getByRole('button', { name: 'Previous month' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /^Previous month/ })).toBeEnabled();
+    // Pickable, so AA contrast: muted, not faded; and not shaded like a weekend (a past Sunday neither).
+    expect(day(20).firstElementChild.className).toMatch(/(^|\s)text-muted-foreground(\s|$)/);
+    expect(day(22).firstElementChild.className).not.toMatch(/bg-muted\/60/);
+    expect(day(22)).toHaveAccessibleName('Sunday 22 November, past, weekend');
+    expect(day(29).firstElementChild.className).toMatch(/bg-muted\/60/);
     fireEvent.click(day(20));
     expect(screen.getAllByRole('gridcell', { selected: true }).map((c) => c.dataset.day)).toEqual(['2026-11-20']);
     expect(screen.getByTestId('pick-past')).toHaveTextContent('It starts in the past, so an approver has to confirm it.');
@@ -272,6 +286,40 @@ describe('Book time away', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Sick' }));
     expect(screen.queryByTestId('pick-past')).toBeNull();
     expect(screen.getAllByRole('gridcell', { selected: true }).map((c) => c.dataset.day)).toEqual(['2026-11-20']);
+  });
+
+  test('the past-start sentence shows once, even when the server\'s check gives it as the reason', async () => {
+    const PAST = 'It starts in the past, so an approver has to confirm it.';
+    api.preview.mockResolvedValue({ data: { outcome: 'pending', days: 1, dates: [], reason: PAST, remaining: 4 } });
+    render(<BookTimeForm me={ME} today={TODAY} requests={[]} />);
+    fireEvent.click(day(20));
+    await flushPreview();
+    await screen.findByTestId('request-check-amount');
+    // Seen once (the line under the summary); the live region says it once for screen readers.
+    const seen = screen.getAllByText(PAST, { exact: false }).filter((el) => !el.closest('.sr-only, [hidden]'));
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toHaveAttribute('data-testid', 'pick-past');
+    expect(screen.getByTestId('booking-live').textContent.split(PAST)).toHaveLength(2);
+    expect(screen.getByTestId('availability-verdict')).toHaveTextContent('4 left after this');
+    expect(screen.getByTestId('availability-verdict')).not.toHaveTextContent(PAST);
+  });
+
+  test('typing a note does not re-run the check: the footer, the label and Send stay as they are', async () => {
+    api.preview.mockResolvedValue({ data: { outcome: 'approved', days: 1, dates: [] } });
+    render(<BookTimeForm me={ME} today={TODAY} requests={[]} />);
+    fireEvent.click(day(26));
+    await flushPreview();
+    expect(await screen.findByText('Will be approved automatically')).toBeInTheDocument();
+    const calls = api.preview.mock.calls.length;
+    const live = screen.getByTestId('booking-live').textContent;
+    fireEvent.change(screen.getByLabelText(/3\. Note/), { target: { value: 'Back by noon' } });
+    expect(screen.queryByText('Checking…')).toBeNull();
+    expect(screen.getByText('Will be approved automatically')).toBeInTheDocument();
+    expect(send()).toBeEnabled();
+    expect(screen.getByTestId('booking-live').textContent).toBe(live);
+    await flushPreview();
+    expect(api.preview.mock.calls.length).toBe(calls);
+    expect(api.preview.mock.calls.at(-1)[0]).not.toHaveProperty('note');
   });
 
   test('changing a waiting request that has already started: opens on its range, and the end can be moved', async () => {
@@ -452,13 +500,20 @@ describe('Coming up', () => {
     expect(d2).toHaveTextContent('Approver: Fine by me');
   });
 
-  test('a "·" never starts a wrapped line: each separator stays with the words after it', () => {
-    render(<ComingUpCard requests={ROWS} typeById={typeById} offices={OFFICES} today={TODAY} onCancel={vi.fn()} />);
-    const back = within(screen.getByTestId('coming-up-6')).getByText(/· back Fri/);
-    expect(back).toHaveClass('whitespace-nowrap');
-    expect(back.textContent.trim()).toBe('· back Fri');
-    const source = within(screen.getByTestId('coming-up-1')).getByText(/· synced to Vacation Tracker/);
-    expect(source).toHaveClass('whitespace-nowrap');
+  test('a "·" never starts a wrapped line: each dot is glued to the word before it', () => {
+    const rows = [...ROWS, { id: 9, leaveTypeId: 1, status: 'pending', startDate: '2026-12-16', endDate: '2026-12-16', dayPart: 'full', source: 'app', waitingOn: [{ email: 'robin@example.com', name: 'Robin Vale' }] }];
+    render(<ComingUpCard requests={rows} typeById={typeById} offices={OFFICES} today={TODAY} onCancel={vi.fn()} />);
+    const text = (id) => screen.getByTestId(id).textContent;
+    // A no-break space before every dot, a plain space after: the line can only break after a dot.
+    expect(text('coming-up-1-what')).toBe('Working from home · synced to Vacation Tracker');
+    expect(text('coming-up-9-status')).toBe('Waiting for approval · Robin Vale · back Thu');
+    for (const id of ['coming-up-1-what', 'coming-up-6-what', 'coming-up-6-status', 'coming-up-9-status']) {
+      expect(text(id)).not.toMatch(/[ \n\t]·/);
+    }
+    // The status dot is an inline box, so its trailing dot sits inside the same no-wrap span.
+    const status = screen.getByTestId('coming-up-9-status').firstElementChild;
+    expect(status).toHaveClass('whitespace-nowrap');
+    expect(status.textContent).toBe('Waiting for approval ·');
   });
 
   test('a cancelled Vacation Tracker leave still there stays in view, saying what to do', () => {
