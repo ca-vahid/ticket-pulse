@@ -42,6 +42,10 @@ const pickRule = (r) => (r ? {
   groups: (r.groups || []).map((g) => ({ groupId: g.groupId, pct: g.pct })),
   rest: { evenly: r.rest?.evenly === true, techIds: [...(r.rest?.techIds || [])] },
 } : emptyRule());
+// Another admin saved in between (409): say so plainly; the page reloads to show their change.
+const saveFailure = (err, fallback) => (err?.response?.status === 409
+  ? 'Someone else changed the shares a moment ago. Reload to see their change.'
+  : err?.response?.data?.message || err?.message || fallback);
 const sameDraft = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const shareFields = (d) => JSON.stringify({ period: d.period, categoryIds: d.categoryIds, members: d.members, groups: d.groups, rest: d.rest });
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -226,12 +230,14 @@ function RemoveButton({ label, onClick, disabled }) {
 /** One row of the report: a person, or a group/rest subtotal (`subtotal`, with an optional `note`). */
 function ReportRow({ r, name, subtotal = false, note = null, indent = false, availability, days, testId }) {
   const pct = r.pct ?? 0;
+  // A group or rest member who went inactive keeps their row for the window (no share now).
+  const shownNote = note || (r.inactive ? 'no longer active' : null);
   return (
     <tr className={`border-b border-border/60 ${subtotal ? 'bg-muted/40' : ''}`} data-testid={testId}>
       <td className={`py-1 pr-3 ${indent ? 'pl-4' : ''} ${subtotal ? 'font-medium text-foreground' : 'text-foreground/85'}`}>
-        {name}{note ? <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">{note}</span> : null}
+        {name}{shownNote ? <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">{shownNote}</span> : null}
       </td>
-      <td className="py-1 pr-3 text-right tabular-nums text-foreground/85">{pct}%</td>
+      <td className="py-1 pr-3 text-right tabular-nums text-foreground/85">{r.inactive ? '—' : `${pct}%`}</td>
       <td className="py-1 pr-3 text-right tabular-nums text-muted-foreground">{r.got ?? 0}</td>
       <td className="py-1 pr-3">
         <span className="flex items-center gap-2">
@@ -352,7 +358,7 @@ export default function SharesTab({ workspaceTimezone = 'America/Vancouver' }) {
     if (!changed || problems.length) return;
     setSaving(true); setSaveError(null);
     try {
-      const res = await assignmentSharesAPI.saveSettings({ rule: { ...draft, id: isNew ? undefined : draft.id } });
+      const res = await assignmentSharesAPI.saveSettings({ rule: { ...draft, id: isNew ? undefined : draft.id }, expectedUpdatedAt: settings?.updatedAt ?? null });
       const next = res?.data?.settings;
       const id = res?.data?.ruleId || activeId;
       if (next) {
@@ -362,7 +368,7 @@ export default function SharesTab({ workspaceTimezone = 'America/Vancouver' }) {
       setSaved(true);
       if (id !== selected) setSelected(id); else load();
     } catch (err) {
-      setSaveError(err.response?.data?.message || err.message || 'Could not save');
+      setSaveError(saveFailure(err, 'Could not save'));
     }
     setSaving(false);
   };
@@ -371,7 +377,7 @@ export default function SharesTab({ workspaceTimezone = 'America/Vancouver' }) {
     if (!savedRule) { switchTo(rules[0]?.id || null); return; }
     setSaving(true); setSaveError(null);
     try {
-      const res = await assignmentSharesAPI.saveSettings({ removeRuleId: savedRule.id });
+      const res = await assignmentSharesAPI.saveSettings({ removeRuleId: savedRule.id, expectedUpdatedAt: settings?.updatedAt ?? null });
       const next = res?.data?.settings;
       if (next) setData((d) => ({ ...d, settings: next }));
       const first = next?.rules?.[0]?.id || null;
@@ -380,7 +386,7 @@ export default function SharesTab({ workspaceTimezone = 'America/Vancouver' }) {
       setSelected(first);
       if (first === selected) load();
     } catch (err) {
-      setSaveError(err.response?.data?.message || err.message || 'Could not delete');
+      setSaveError(saveFailure(err, 'Could not delete'));
     }
     setSaving(false);
   };
@@ -581,7 +587,10 @@ function RuleEditor({
 
   let totalText;
   let totalBad = false;
-  if (restOn(draft) && restCount) {
+  if (restOn(draft) && !restCount) {
+    totalBad = true;
+    totalText = `Total ${named}% — pick at least one person for the rest`;
+  } else if (restOn(draft)) {
     totalBad = named >= 100;
     totalText = totalBad ? `Named shares make ${named}% — nothing is left for the rest` : `Total 100% — the rest gets ${rest}%, ${eachPct(rest, restCount)}% each`;
   } else if (anyShares) {
