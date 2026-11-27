@@ -42,6 +42,16 @@ describe('queue view memory (sticky Tickets filters, 14 Oct 2026)', () => {
     expect(recallQueueView(1)).toBe('');
   });
 
+  test('QA 11-26 #7: the free-text search is not kept across visits (the filters are)', () => {
+    rememberQueueView(1, '?q=printer&status=Open&peek=5');
+    expect(recallQueueView(1)).toBe('?status=Open');
+    rememberQueueView(1, '?q=printer');
+    expect(recallQueueView(1)).toBe('');
+    // A view saved before the change still carries ?q=: it is dropped on the way back.
+    localStorage.setItem('tp_queue_view_ws2', JSON.stringify({ search: '?q=printer&group=7', at: Date.now() }));
+    expect(recallQueueView(2)).toBe('?group=7');
+  });
+
   test('a view older than a week is not restored', () => {
     rememberQueueView(1, '?status=Open');
     expect(recallQueueView(1, Date.now() + 8 * 24 * 60 * 60 * 1000)).toBe('');

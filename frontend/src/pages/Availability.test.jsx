@@ -105,12 +105,12 @@ const pickToday = async () => {
 };
 
 describe('My time', () => {
-  test('shows balances, the purpose notice and Coming up (no long list)', async () => {
+  test('shows the purpose notice and Coming up (no long list); the balances are on the Overview, not here', async () => {
     renderAt('/availability/my-time');
-    const balances = await screen.findByTestId('availability-balances');
-    expect(within(balances).getByText('9')).toBeInTheDocument();
-    expect(balances).toHaveTextContent('of 15 · 3 taken · 2 booked · 1 pending');
-    expect(screen.getByText('We record time away for scheduling only.')).toBeInTheDocument();
+    expect(await screen.findByText('We record time away for scheduling only.')).toBeInTheDocument();
+    // QA 11-26 #1: the "9 days left" strip is gone from My time.
+    expect(screen.queryByTestId('availability-balances')).toBeNull();
+    expect(screen.queryByText(/days? left/)).toBeNull();
     expect(await screen.findByTestId('coming-up-31')).toBeInTheDocument();
     // The 2020 request is past: folded away, not listed.
     expect(screen.queryByTestId('coming-up-30')).toBeNull();
@@ -259,7 +259,7 @@ describe('Vacation Pulse (was Availability)', () => {
 
   test.each(['/availability/my-time', '/vacation-pulse/my-time'])('%s renders the same page', async (path) => {
     renderBoth(path);
-    expect(await screen.findByTestId('availability-balances')).toBeInTheDocument();
+    expect(await screen.findByRole('form', { name: 'Book time away' })).toBeInTheDocument();
     expect(screen.getByRole('tablist', { name: 'Vacation Pulse sections' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'My time' })).toHaveAttribute('aria-selected', 'true');
   });

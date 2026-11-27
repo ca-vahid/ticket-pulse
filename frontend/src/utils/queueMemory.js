@@ -38,10 +38,25 @@ export function restoredQueueSearch(saved, currentSearch) {
   return out ? `?${out}` : '';
 }
 
+/**
+ * QA 11-26 #7: the free-text search (?q=) is a one-off, not part of the view
+ * kept across visits: a bare /tickets next day (new tab, the nav rail) brings
+ * back the filters but not an old search. The address keeps ?q= (F5 and shared
+ * links still show it), and this tab's Close/Back still returns to the search
+ * (utils/lastTicketList).
+ */
+const NOT_REMEMBERED = ['q'];
+const withoutSearch = (search) => {
+  const params = new URLSearchParams(search || '');
+  for (const key of NOT_REMEMBERED) params.delete(key);
+  const out = params.toString();
+  return out ? `?${out}` : '';
+};
+
 export function rememberQueueView(workspaceId, search) {
   if (!workspaceId) return;
   try {
-    localStorage.setItem(`${PREFIX}${workspaceId}`, JSON.stringify({ search: queueSearchToKeep(search), at: Date.now() }));
+    localStorage.setItem(`${PREFIX}${workspaceId}`, JSON.stringify({ search: withoutSearch(queueSearchToKeep(search)), at: Date.now() }));
   } catch { /* storage unavailable */ }
 }
 
@@ -82,7 +97,8 @@ export function recallQueueView(workspaceId, now = Date.now()) {
     const saved = JSON.parse(localStorage.getItem(`${PREFIX}${workspaceId}`) || 'null');
     if (!saved || typeof saved.search !== 'string' || !saved.search.startsWith('?')) return '';
     if (!Number.isFinite(saved.at) || now - saved.at > MAX_AGE_MS) return '';
-    return saved.search;
+    // A view saved before 26 Nov 2026 may still carry a search.
+    return withoutSearch(saved.search);
   } catch {
     return '';
   }

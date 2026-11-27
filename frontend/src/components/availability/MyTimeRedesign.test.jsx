@@ -25,7 +25,7 @@ const { default: BookTimeForm } = await import('./BookTimeForm');
 const { default: MonthPicker } = await import('./MonthPicker');
 const { default: ComingUpCard } = await import('./ComingUpCard');
 const { default: MyTimePanel } = await import('./MyTimePanel');
-const { mostUsedTypes, pickDay, rangeWords, countWorkingDays, upcomingRequests } = await import('./bookingModel');
+const { defaultTypes, mostUsedTypes, pickDay, rangeWords, countWorkingDays, upcomingRequests } = await import('./bookingModel');
 
 const TODAY = '2026-11-25'; // a Wednesday
 
@@ -78,6 +78,19 @@ describe('the pure helpers', () => {
     ];
     expect(mostUsedTypes(TYPES, reqs).map((t) => t.name)).toEqual(['Training', 'Sick', 'Vacation', 'Working from home']);
     expect(mostUsedTypes(TYPES, []).map((t) => t.name)).toEqual(['Vacation', 'Working from home', 'Sick', 'Site visit']);
+  });
+
+  test('QA 11-26 #1: the four tiles are Working from home, Appointment, Vacation, Sick, matched by key', () => {
+    expect(defaultTypes(TYPES).map((t) => t.name)).toEqual(['Working from home', 'Appointment', 'Vacation', 'Sick']);
+    // By key, not by name: renamed types keep their place.
+    const renamed = TYPES.map((t) => (t.key === 'wfh' ? { ...t, name: 'Remote day' } : t));
+    expect(defaultTypes(renamed)[0].name).toBe('Remote day');
+    // A type switched off in the workspace leaves its slot to the next type in the admins' order.
+    const noAppointment = TYPES.filter((t) => t.key !== 'appointment');
+    expect(defaultTypes(noAppointment).map((t) => t.name)).toEqual(['Working from home', 'Vacation', 'Sick', 'Site visit']);
+    const onlyTwo = TYPES.filter((t) => ['vacation', 'training'].includes(t.key));
+    expect(defaultTypes(onlyTwo).map((t) => t.name)).toEqual(['Vacation', 'Training']);
+    expect(defaultTypes([])).toEqual([]);
   });
 });
 
@@ -134,11 +147,13 @@ describe('the month picker on its own (props in)', () => {
 });
 
 describe('Book time away', () => {
-  test('1. What: the four most-used types, "More types" opens the rest in place, a pick takes the 4th tile', async () => {
+  test('1. What: the four set types, "More types" opens the rest in place, a pick takes the 4th tile', async () => {
     render(<BookTimeForm me={ME} today={TODAY} requests={[]} />);
     const tiles = screen.getByTestId('type-tiles');
     const names = () => within(tiles).getAllByRole('radio').map((r) => r.getAttribute('aria-label'));
-    expect(names()).toEqual(['Vacation', 'Working from home', 'Sick', 'Site visit']);
+    // QA 11-26 #1: Working from home, Appointment, Vacation, Sick, in that order.
+    expect(names()).toEqual(['Working from home', 'Appointment', 'Vacation', 'Sick']);
+    // With no history the first of the four in the admins' order starts picked (as before).
     expect(screen.getByRole('radio', { name: 'Vacation' })).toBeChecked();
     const more = screen.getByRole('button', { name: 'More types (3)' });
     expect(more).toHaveAttribute('aria-expanded', 'false');
@@ -146,7 +161,7 @@ describe('Book time away', () => {
     // The extra types are toggle buttons of their own (each a Tab stop), not radios of the four's group.
     const group = screen.getByRole('group', { name: 'More types' });
     const extra = within(group).getAllByRole('button');
-    expect(extra.map((b) => b.getAttribute('aria-label'))).toEqual(['Training', 'Bereavement', 'Appointment']);
+    expect(extra.map((b) => b.getAttribute('aria-label'))).toEqual(['Site visit', 'Training', 'Bereavement']);
     expect(within(group).queryAllByRole('radio')).toHaveLength(0);
     for (const b of extra) {
       expect(b).toHaveAttribute('aria-pressed', 'false');
@@ -157,12 +172,12 @@ describe('Book time away', () => {
     // More stays open, the four tiles stay put, and Training shows as pressed.
     expect(screen.getByRole('group', { name: 'More types' })).toBeInTheDocument();
     expect(within(group).getByRole('button', { name: 'Training' })).toHaveAttribute('aria-pressed', 'true');
-    expect(names()).toEqual(['Vacation', 'Working from home', 'Sick', 'Site visit']);
+    expect(names()).toEqual(['Working from home', 'Appointment', 'Vacation', 'Sick']);
     expect(screen.getByRole('radio', { name: 'Vacation' })).not.toBeChecked();
     // Once More closes, the picked type takes the fourth tile.
     fireEvent.click(screen.getByRole('button', { name: 'Fewer types' }));
     expect(screen.queryByRole('group', { name: 'More types' })).toBeNull();
-    expect(names()).toEqual(['Vacation', 'Working from home', 'Sick', 'Training']);
+    expect(names()).toEqual(['Working from home', 'Appointment', 'Vacation', 'Training']);
     expect(screen.getByRole('radio', { name: 'Training' })).toBeChecked();
     // Training has its own glyph, not the Vacation picture.
     expect(screen.getByRole('radio', { name: 'Training' }).closest('label').querySelector('[data-glyph]')).not.toBeNull();
@@ -176,11 +191,26 @@ describe('Book time away', () => {
     expect(screen.getByRole('radio', { name: 'Vacation' })).toBeChecked();
   });
 
-  test('the first tile follows the person\'s most-used type once their requests arrive', () => {
+  test('the picked tile follows the person\'s most-used of the four once their requests arrive', () => {
     const { rerender } = render(<BookTimeForm me={ME} today={TODAY} requests={[]} />);
-    rerender(<BookTimeForm me={ME} today={TODAY} requests={[{ id: 1, leaveTypeId: 2, status: 'approved', startDate: '2026-11-18', endDate: '2026-11-18' }]} />);
-    expect(within(screen.getByTestId('type-tiles')).getAllByRole('radio')[0]).toHaveAttribute('aria-label', 'Working from home');
-    expect(screen.getByRole('radio', { name: 'Working from home' })).toBeChecked();
+    rerender(<BookTimeForm me={ME} today={TODAY} requests={[{ id: 1, leaveTypeId: 3, status: 'approved', startDate: '2026-11-18', endDate: '2026-11-18' }]} />);
+    expect(within(screen.getByTestId('type-tiles')).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['Working from home', 'Appointment', 'Vacation', 'Sick']);
+    expect(screen.getByRole('radio', { name: 'Sick' })).toBeChecked();
+  });
+
+  test('a most-used type kept under More types never pushes one of the four out', () => {
+    const reqs = [5, 5, 5].map((leaveTypeId, i) => ({ id: i + 1, leaveTypeId, status: 'approved', startDate: '2026-11-18', endDate: '2026-11-18' }));
+    render(<BookTimeForm me={ME} today={TODAY} requests={reqs} />);
+    expect(within(screen.getByTestId('type-tiles')).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['Working from home', 'Appointment', 'Vacation', 'Sick']);
+    expect(screen.getByRole('radio', { name: 'Vacation' })).toBeChecked();
+    expect(screen.getByRole('button', { name: 'More types (3)' })).toBeInTheDocument();
+  });
+
+  test('the four skip a type switched off in the workspace', () => {
+    const me = { ...ME, leaveTypes: TYPES.map((t) => (t.key === 'appointment' ? { ...t, bookable: false } : t)) };
+    render(<BookTimeForm me={me} today={TODAY} requests={[]} />);
+    expect(within(screen.getByTestId('type-tiles')).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['Working from home', 'Vacation', 'Sick', 'Site visit']);
+    expect(screen.getByRole('button', { name: 'More types (2)' })).toBeInTheDocument();
   });
 
   test('Send is disabled until a day is picked; a range by clicking, highlighted end to end; the payload', async () => {
@@ -353,7 +383,8 @@ describe('Book time away', () => {
 
   test('a site visit needs an office before it is sent', async () => {
     render(<BookTimeForm me={ME} today={TODAY} requests={[]} />);
-    fireEvent.click(screen.getByRole('radio', { name: 'Site visit' }));
+    fireEvent.click(screen.getByRole('button', { name: /More types/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Site visit' }));
     expect(screen.getByLabelText(/^Which office\?/)).toBeRequired();
     fireEvent.click(day(26));
     await flushPreview();
@@ -386,8 +417,7 @@ describe('Book time away', () => {
 
   test('an hours type picks one day and asks for the times', async () => {
     render(<BookTimeForm me={ME} today={TODAY} requests={[]} />);
-    fireEvent.click(screen.getByRole('button', { name: /More types/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Appointment' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Appointment' }));
     expect(screen.getByRole('grid')).not.toHaveAttribute('aria-multiselectable');
     expect(screen.queryByRole('button', { name: 'Next week' })).toBeNull();
     fireEvent.click(day(26));
@@ -545,8 +575,21 @@ describe('My time, the page', () => {
       { id: 1, leaveTypeId: 2, status: 'approved', startDate: '2099-12-02', endDate: '2099-12-02', dayPart: 'full', source: 'app' },
       { id: 2, leaveTypeId: 1, status: 'cancelled', startDate: '2099-12-10', endDate: '2099-12-12', dayPart: 'full', source: 'app' },
     ] });
-    const { container } = render(<MyTimePanel me={ME} toast={vi.fn()} onChanged={vi.fn()} />);
+    const withBalance = { ...ME, balances: [{ leaveTypeId: 1, name: 'Vacation', year: 2026, entitled: 10, adjustments: 0, taken: 0, scheduled: 0, pending: 0, remaining: 10 }] };
+    const { container } = render(<MyTimePanel me={withBalance} toast={vi.fn()} onChanged={vi.fn()} />);
     expect(await screen.findByTestId('coming-up-1')).toBeInTheDocument();
+    // QA 11-26 #1: no balances strip ("10 days left") here; the Overview has it.
+    expect(screen.queryByTestId('availability-balances')).toBeNull();
+    expect(screen.queryByText(/days? left/)).toBeNull();
+    // The calendar spans the booking card: full width, no fixed narrow box beside other content.
+    const cal = screen.getByTestId('when-calendar');
+    expect(cal.className).toMatch(/(^|\s)w-full(\s|$)/);
+    expect(cal.className).not.toMatch(/w-\[20rem\]/);
+    expect(cal).toContainElement(screen.getByRole('grid'));
+    expect(screen.getByRole('grid').className).toMatch(/(^|\s)w-full(\s|$)/);
+    expect(screen.getByTestId('when-layout').className).not.toMatch(/sm:flex-row/);
+    // Rows stay modest from sm up (40 px), not the giant calendar of before.
+    expect(screen.getAllByRole('gridcell')[0].className).toMatch(/sm:h-10/);
     expect(screen.queryByTestId('coming-up-2')).toBeNull();
     expect(screen.queryByRole('region', { name: 'My requests' })).toBeNull();
     // One column until lg; the booking card comes first.

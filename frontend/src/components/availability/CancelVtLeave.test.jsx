@@ -21,7 +21,6 @@ const api = vi.hoisted(() => ({
 vi.mock('../../services/api', () => ({ availabilityAPI: api }));
 vi.mock('../../hooks/useAvailabilityApprovalCount', () => ({ notifyAvailabilityChanged: vi.fn() }));
 vi.mock('./BookTimeForm', () => ({ default: () => <div data-testid="book-form" /> }));
-vi.mock('./BalancesRow', () => ({ default: () => null }));
 
 const { default: MyRequestsList } = await import('./MyRequestsList');
 const { default: MyTimePanel } = await import('./MyTimePanel');

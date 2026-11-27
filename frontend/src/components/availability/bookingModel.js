@@ -120,6 +120,25 @@ export function mostUsedTypes(types = [], requests = [], n = 4) {
     .slice(0, n);
 }
 
+/**
+ * QA 11-26 #1: the four types shown first on "Book time away", in this order,
+ * matched by the leave type's stable `key` (never its display name).
+ */
+export const DEFAULT_TYPE_KEYS = ['wfh', 'appointment', 'vacation', 'sick'];
+
+/**
+ * The types shown as tiles: Working from home, Appointment, Vacation and Sick
+ * (DEFAULT_TYPE_KEYS) where the workspace offers them, in that order; a slot
+ * left by one that is switched off goes to the next type in the admins' order.
+ * `types` is the bookable list, already in the admins' sort order.
+ */
+export function defaultTypes(types = [], n = 4) {
+  const byKey = new Map((types || []).map((t) => [String(t.key || '').toLowerCase(), t]));
+  const pinned = DEFAULT_TYPE_KEYS.map((k) => byKey.get(k)).filter(Boolean);
+  const fill = (types || []).filter((t) => !pinned.includes(t));
+  return [...pinned, ...fill].slice(0, n);
+}
+
 /** Coming up: approved or waiting requests that are not over, soonest first. Never cancelled or denied. */
 export function upcomingRequests(requests = [], today) {
   return (requests || [])
