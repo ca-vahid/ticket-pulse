@@ -166,3 +166,38 @@ describe('searchRequesters — suppressed rows leave the pickers', () => {
     expect(where.suppressedAt).toBeNull();
   });
 });
+
+describe('searchRequesters — Settings → Contacts (QA 11-26 item 2)', () => {
+  const row = (id, name) => ({ id, name, email: `${name.toLowerCase().replace(/ /g, '.')}@example.com`, jobTitle: null, entraJobTitle: null });
+
+  test('without a workspace, or with no matching contacts, results are unchanged', async () => {
+    const eight = Array.from({ length: 8 }, (_, i) => row(i + 1, `Avery ${String.fromCharCode(65 + i)}`));
+    prismaMock.requester.findMany.mockResolvedValue(eight.map((r) => ({ ...r })));
+    prismaMock.workspaceContact = { findMany: jest.fn().mockResolvedValue([]) };
+    const plain = await ticketService.searchRequesters('avery');
+    expect(prismaMock.workspaceContact.findMany).not.toHaveBeenCalled();
+    const scoped = await ticketService.searchRequesters('avery', { workspaceId: 1 });
+    expect(scoped.requesters.map((r) => r.id)).toEqual(plain.requesters.map((r) => r.id));
+    expect(scoped.requesters.some((r) => r.isContact)).toBe(false);
+  });
+
+  test('a contact already in the list is marked; a crowded-out one replaces the last non-contact', async () => {
+    const eight = Array.from({ length: 8 }, (_, i) => row(i + 1, `Avery ${String.fromCharCode(65 + i)}`));
+    prismaMock.requester.findMany.mockResolvedValue(eight.map((r) => ({ ...r })));
+    prismaMock.workspaceContact = {
+      findMany: jest.fn().mockResolvedValue([{ requester: row(2, 'Avery B') }, { requester: row(50, 'Avery Zed') }]),
+    };
+    const out = await ticketService.searchRequesters('avery', { workspaceId: 3 });
+    expect(prismaMock.workspaceContact.findMany.mock.calls[0][0].where).toMatchObject({ workspaceId: 3, requester: { suppressedAt: null } });
+    expect(out.requesters).toHaveLength(8);
+    expect(out.requesters.map((r) => r.id)).toEqual([1, 2, 3, 4, 5, 6, 7, 50]);
+    expect(out.requesters.filter((r) => r.isContact).map((r) => r.id)).toEqual([2, 50]);
+  });
+
+  test('a failed contacts read never fails the search', async () => {
+    prismaMock.requester.findMany.mockResolvedValue([row(1, 'Avery Stone')]);
+    prismaMock.workspaceContact = { findMany: jest.fn().mockRejectedValue(new Error('relation does not exist')) };
+    const out = await ticketService.searchRequesters('avery', { workspaceId: 1 });
+    expect(out.requesters.map((r) => r.id)).toEqual([1]);
+  });
+});

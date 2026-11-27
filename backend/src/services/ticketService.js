@@ -4119,28 +4119,60 @@ class TicketService {
    * Entra directory people not yet in the requester table. Entra being
    * unconfigured/unreachable degrades to requester-only results.
    */
-  async searchRequesters(q) {
+  async searchRequesters(q, { workspaceId = null } = {}) {
     const query = String(q || '').trim();
     if (query.length < 2) return { requesters: [], directory: [] };
 
-    const requesters = await prisma.requester.findMany({
+    const matches = [
+      { name: { contains: query, mode: 'insensitive' } },
+      { email: { contains: query, mode: 'insensitive' } },
+    ];
+    const select = {
+      id: true, name: true, email: true, department: true, entraDepartment: true,
+      entraOfficeLocation: true, entraCity: true, jobTitle: true, entraJobTitle: true,
+    };
+    let requesters = await prisma.requester.findMany({
       where: {
         isActive: true,
         // QA 09-09: phantom/QA-artifact rows are hidden here rather than via
         // isActive, which the FreshService sync overwrites every cycle.
         suppressedAt: null,
-        OR: [
-          { name: { contains: query, mode: 'insensitive' } },
-          { email: { contains: query, mode: 'insensitive' } },
-        ],
+        OR: matches,
       },
-      select: {
-        id: true, name: true, email: true, department: true, entraDepartment: true,
-        entraOfficeLocation: true, entraCity: true, jobTitle: true, entraJobTitle: true,
-      },
+      select,
       orderBy: { name: 'asc' },
       take: 8,
     });
+
+    // Contacts (QA 11-26 item 2): the current workspace's Settings → Contacts
+    // people are always findable here and marked isContact. The list above is
+    // left exactly as it was; a matching contact it missed (crowded out of the
+    // first 8, or isActive=false from the FreshService sync) takes the place of
+    // the last non-contact rows, so the Cc picker's 8-row cut keeps it too.
+    // A failed read never fails the search.
+    const ws = Number(workspaceId);
+    if (Number.isInteger(ws) && ws > 0) {
+      const contactRows = await Promise.resolve()
+        .then(() => prisma.workspaceContact.findMany({
+          where: { workspaceId: ws, requester: { suppressedAt: null, OR: matches } },
+          select: { requester: { select } },
+          orderBy: { requester: { name: 'asc' } },
+          take: 8,
+        }))
+        .catch((err) => { logger.warn(`Contacts lookup for requester search failed (results unchanged): ${err.message}`); return []; });
+      const contacts = (contactRows || []).map((row) => row.requester).filter(Boolean);
+      if (contacts.length) {
+        const contactIds = new Set(contacts.map((c) => c.id));
+        const shown = new Set(requesters.map((r) => r.id));
+        const missing = contacts.filter((c) => !shown.has(c.id));
+        const list = requesters.map((r) => (contactIds.has(r.id) ? { ...r, isContact: true } : r));
+        let overflow = Math.max(0, list.length + missing.length - 8);
+        for (let i = list.length - 1; i >= 0 && overflow > 0; i -= 1) {
+          if (!list[i].isContact) { list.splice(i, 1); overflow -= 1; }
+        }
+        requesters = [...list, ...missing.map((c) => ({ ...c, isContact: true }))].slice(0, 8);
+      }
+    }
     // Entra's title wins over the hand-typed FreshService one (requesterTitle).
     for (const r of requesters) { r.jobTitle = requesterTitle(r); delete r.entraJobTitle; }
 

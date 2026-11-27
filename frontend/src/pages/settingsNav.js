@@ -2,6 +2,7 @@ import {
   Bell,
   Radar,
   BarChart3,
+  BookUser,
   Bot,
   Brain,
   Camera,
@@ -54,6 +55,8 @@ export const ALL_SETTINGS_NAV_ITEMS = [
   // Reviewers manage approval categories from Approvals → Categories (v3.7.02);
   // this Settings mount is the admin's second door to the same panel.
   { id: 'approval-categories', label: 'Approval Categories', Icon: Stamp, minRole: 'admin', group: 'Tickets & AI' },
+  // QA 11-26 item 2: this workspace's people outside the directory.
+  { id: 'contacts', label: 'Contacts', Icon: BookUser, minRole: 'admin', group: 'Tickets & AI', keywords: ['requesters', 'recipients', 'external people', 'vendors', 'customers'] },
   // QA 11-05 #2: Macros left Ticket Ops for their own tab. `keywords` feed the
   // section filter ("scenario" is what FreshService calls them).
   { id: 'macros', label: 'Macros', Icon: Zap, minRole: 'admin', group: 'Tickets & AI', keywords: ['scenario automations', 'quick actions', 'canned replies', 'one click'] },
