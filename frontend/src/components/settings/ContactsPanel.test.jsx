@@ -139,6 +139,37 @@ describe('ContactsPanel', () => {
     await waitFor(() => expect(settingsAPI.updateContact).toHaveBeenCalledWith(901, { note: 'Night shift' }));
   });
 
+  test('a person other workspaces also know: details read-only with the server\'s reason, note only sent', async () => {
+    const shared = 'This person is also known outside this workspace’s contacts, so their name, phone and job title are not changed from here.';
+    settingsAPI.getContacts.mockResolvedValue({ data: { contacts: [{ ...CONTACTS[0], detailsLocked: shared }], total: 1, sandbox: false } });
+    render(<ContactsPanel />);
+    await screen.findByText('Avery Stone');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Avery Stone' }));
+    const form = screen.getByRole('form', { name: 'Edit Avery Stone' });
+    expect(within(form).getByLabelText(/^Name/)).toBeDisabled();
+    expect(within(form).getByLabelText(/^Phone/)).toBeDisabled();
+    expect(within(form).getByLabelText(/^Job title/)).toBeDisabled();
+    expect(within(form).getByTestId('contact-lock-reason')).toHaveTextContent(/also known outside this workspace.*You can change the note/);
+    fireEvent.change(within(form).getByLabelText(/^Note/), { target: { value: 'Courier' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(settingsAPI.updateContact).toHaveBeenCalledWith(900, { note: 'Courier' }));
+  });
+
+  test('a late answer to an older request never overwrites the newer one', async () => {
+    let answerFirst;
+    settingsAPI.getContacts
+      .mockImplementationOnce(() => new Promise((resolve) => { answerFirst = resolve; }))
+      .mockImplementation(async () => ({ data: { contacts: [CONTACTS[1]], total: 1, sandbox: false } }));
+    render(<ContactsPanel />);
+    fireEvent.change(screen.getByLabelText('Search contacts'), { target: { value: 'jordan' } });
+    expect(await screen.findByText('Jordan Pike')).toBeInTheDocument();
+    expect(settingsAPI.getContacts).toHaveBeenLastCalledWith('jordan');
+    answerFirst({ data: { contacts: [CONTACTS[0]], total: 2, sandbox: false } });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByText('Avery Stone')).not.toBeInTheDocument();
+    expect(screen.getByText('Jordan Pike')).toBeInTheDocument();
+  });
+
   test('a sandbox workspace is read-only', async () => {
     settingsAPI.getContacts.mockResolvedValue({ data: { contacts: CONTACTS, total: 2, sandbox: true } });
     render(<ContactsPanel />);

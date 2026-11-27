@@ -36,6 +36,14 @@ export function validateContactForm(form, { isEdit = false } = {}) {
   return errors;
 }
 
+const FRESHSERVICE_LOCK = 'FreshService keeps this person’s name, phone and job title.';
+
+/** The server's reason (detailsLocked); an older server only says managedByFreshService. */
+function lockReasonFor(contact) {
+  if (contact?.detailsLocked) return contact.detailsLocked;
+  return contact?.managedByFreshService ? FRESHSERVICE_LOCK : null;
+}
+
 const initialsOf = (name) => String(name || '?').split(/\s+/).filter(Boolean).map((p) => p[0]).join('').slice(0, 2).toUpperCase();
 
 function formatDay(value) {
@@ -44,7 +52,11 @@ function formatDay(value) {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-function ContactForm({ initial, isEdit, lockedDetails, saving, serverError, onCancel, onSubmit }) {
+// `lockReason`: why this workspace may not change the person's name / phone /
+// job title (FreshService owns them, or other workspaces see the same person —
+// requesters are shared). Null = editable.
+function ContactForm({ initial, isEdit, lockReason = null, saving, serverError, onCancel, onSubmit }) {
+  const lockedDetails = Boolean(lockReason);
   const [form, setForm] = useState(initial);
   const [errors, setErrors] = useState({});
   const baseId = useId();
@@ -124,7 +136,7 @@ function ContactForm({ initial, isEdit, lockedDetails, saving, serverError, onCa
       </div>
       {field('note', 'Note', { placeholder: 'e.g. Account manager at our printer vendor', inputRef: isEdit ? firstRef : undefined })}
       {lockedDetails && (
-        <p className="text-xs text-muted-foreground">FreshService keeps this person&rsquo;s name, phone and job title. You can change the note.</p>
+        <p className="text-xs text-muted-foreground" data-testid="contact-lock-reason">{lockReason} You can change the note.</p>
       )}
       {serverError && (
         <p role="alert" className="flex items-start gap-1.5 text-sm text-red-700 dark:text-red-200">
@@ -167,18 +179,24 @@ export default function ContactsPanel() {
     return () => clearTimeout(t);
   }, [searchQ]);
 
+  // Only the newest request may write the list: a slow answer for an older
+  // search (or the previous workspace) arriving late is dropped.
+  const requestSeq = useRef(0);
   const load = useCallback(async () => {
+    const seq = ++requestSeq.current;
     setLoading(true); setError(null);
     try {
       const res = await settingsAPI.getContacts(query);
+      if (seq !== requestSeq.current) return;
       setContacts(res.data?.contacts || []);
       setTotal(res.data?.total ?? 0);
       setSandbox(Boolean(res.data?.sandbox));
     } catch (err) {
+      if (seq !== requestSeq.current) return;
       setError(err.response?.data?.message || err.message || 'Could not load contacts');
       setContacts([]);
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
   }, [query]);
 
@@ -296,7 +314,7 @@ export default function ContactsPanel() {
               note: formState.contact.note || '',
             }
             : EMPTY_FORM}
-          lockedDetails={formState.mode === 'edit' && formState.contact.managedByFreshService}
+          lockReason={formState.mode === 'edit' ? lockReasonFor(formState.contact) : null}
           saving={saving}
           serverError={formError}
           onCancel={closeForm}
