@@ -196,7 +196,8 @@ model Workspace {
   analyticsReports                  AnalyticsReport[]
   userEmailSignatures               UserEmailSignature[]
   userPreferences                   UserPreference[]
-  emailIdentity                     WorkspaceEmailIdentity?
+  workspaceContacts                 WorkspaceContact[]
+  emailIdentity                    WorkspaceEmailIdentity?
   queueCardConfig                   QueueCardConfig?
   ticketFormConfig                  TicketFormConfig?
   ticketIntakeRuns                  TicketIntakeRun[]
@@ -1439,13 +1440,38 @@ model Requester {
   // An automation's mailbox: never send it requester-facing email.
   unattended             Boolean   @default(false)
 
-  tickets Ticket[]
+  tickets           Ticket[]
+  workspaceContacts WorkspaceContact[]
 
   @@index([freshserviceId])
   @@index([email])
   @@index([entraOfficeLocation])
   @@index([entraCountry])
   @@map("requesters")
+}
+
+// Contacts (QA 11-26 item 2): Settings -> Contacts, one workspace's list of
+// people outside the directory to pick as requesters or recipients. A link to
+// the GLOBAL requester row (found by e-mail, or created by Contacts); removing
+// a contact deletes this link only, never the requester (tickets point at it).
+model WorkspaceContact {
+  id           Int       @id @default(autoincrement())
+  workspaceId  Int       @map("workspace_id")
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  requesterId  Int       @map("requester_id")
+  requester    Requester @relation(fields: [requesterId], references: [id], onDelete: Cascade)
+  note         String?   @db.VarChar(255)
+  addedByEmail String?   @map("added_by_email") @db.VarChar(255)
+  // This link's Contacts form minted the requester row. Passed on to another
+  // link when this one is removed; when the last link goes and the person has
+  // no tickets, the requester is hidden from pickers ('contact_removed').
+  createdRequester Boolean @default(false) @map("created_requester")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  @@unique([workspaceId, requesterId])
+  @@index([workspaceId])
+  @@index([requesterId])
+  @@map("workspace_contacts")
 }
 
 model Ticket {

@@ -3,6 +3,11 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import CcChips from './CcChips';
+import { ticketsAPI } from '../../services/api';
+
+vi.mock('../../services/api', () => ({
+  ticketsAPI: { requesterSearch: vi.fn(async () => ({ data: { requesters: [], directory: [] } })) },
+}));
 
 afterEach(cleanup);
 
@@ -65,6 +70,23 @@ describe('CcChips', () => {
     fireEvent.change(input, { target: { value: 'a@x.io' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  test('a workspace contact in the suggestions is marked "Contact" (QA 11-26 item 2)', async () => {
+    ticketsAPI.requesterSearch.mockResolvedValueOnce({
+      data: {
+        requesters: [
+          { id: 1, name: 'Avery Stone', email: 'avery.stone@example.com', isContact: true },
+          { id: 2, name: 'Avery Lane', email: 'avery.lane@example.com' },
+        ],
+        directory: [],
+      },
+    });
+    render(<CcChips value={[]} onChange={() => {}} />);
+    fireEvent.change(screen.getByLabelText('Cc recipients'), { target: { value: 'avery' } });
+    const contactRow = await screen.findByRole('option', { name: /Avery Stone/ });
+    expect(contactRow).toHaveTextContent('Contact');
+    expect(screen.getByRole('option', { name: /Avery Lane/ })).not.toHaveTextContent('Contact');
   });
 
   test('an in-progress invalid address shows the inline hint', () => {

@@ -20,6 +20,7 @@ import MembersPanel from '../components/settings/MembersPanel';
 import SignaturesPanel from '../components/settings/SignaturesPanel';
 import GroupsPanel from '../components/settings/GroupsPanel';
 import ApprovalCategoriesPanel from '../components/settings/ApprovalCategoriesPanel';
+import ContactsPanel from '../components/settings/ContactsPanel';
 import TicketOpsPanel from '../components/settings/TicketOpsPanel';
 import MacrosPanel from '../components/settings/MacrosPanel';
 import ApiKeysPanel from '../components/settings/ApiKeysPanel';
@@ -1292,6 +1293,13 @@ export default function Settings() {
                 {activeSectionId === 'signatures' && (
                   <div className="p-6">
                     <SignaturesPanel />
+                  </div>
+                )}
+
+                {/* Contacts (QA 11-26 item 2): people outside the directory, per workspace */}
+                {activeSectionId === 'contacts' && (
+                  <div className="p-6">
+                    <ContactsPanel />
                   </div>
                 )}
 

@@ -551,6 +551,11 @@ export const settingsAPI = {
   getSignatures: () => api.get('/settings/signatures'),
   updateSignature: (email, data) => api.put(`/settings/signatures/${encodeURIComponent(email)}`, data),
   massApplySignatures: (data) => api.post('/settings/signatures/mass-apply', data),
+  // Settings → Contacts (QA 11-26 item 2): this workspace's people outside the directory.
+  getContacts: (q = '') => api.get('/settings/contacts', { params: q ? { q } : {} }),
+  addContact: (data) => api.post('/settings/contacts', data),
+  updateContact: (id, data) => api.patch(`/settings/contacts/${id}`, data),
+  removeContact: (id) => api.delete(`/settings/contacts/${id}`),
   setTechnicianActive: (id, isActive) => api.put(`/settings/technicians/${id}/active`, { isActive }),
   // QA 09-25 item 6: can own tickets, not counted in team numbers.
   setTechnicianAssignableOnly: (id, assignableOnly) => api.put(`/settings/technicians/${id}/assignable-only`, { assignableOnly }),

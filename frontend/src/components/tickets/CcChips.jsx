@@ -83,6 +83,7 @@ export default function CcChips({
             name: p.name,
             email,
             hint: [p.jobTitle, p.department || p.entraOfficeLocation || p.entraCity].filter(Boolean).join(' · '),
+            isContact: p.isContact === true, // QA 11-26 item 2: Settings → Contacts
           });
         }
         setResults(merged.slice(0, 8));
@@ -209,7 +210,10 @@ export default function CcChips({
             >
               <span className="h-6 w-6 rounded-full bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border border-blue-100 dark:border-blue-500/20 inline-flex items-center justify-center text-[9px] font-semibold flex-shrink-0">{initials(p.name)}</span>
               <span className="min-w-0">
-                <span className="block text-sm text-foreground truncate">{p.name || p.email}</span>
+                <span className="block text-sm text-foreground truncate">
+                  {p.name || p.email}
+                  {p.isContact && <span className="ml-1.5 text-[10px] font-semibold uppercase text-muted-foreground">Contact</span>}
+                </span>
                 <span className="block text-xs text-muted-foreground/75 truncate flex items-center gap-1">
                   <Building2 className="w-3 h-3 flex-shrink-0" aria-hidden="true" />{p.email}{p.hint ? ` · ${p.hint}` : ''}
                 </span>

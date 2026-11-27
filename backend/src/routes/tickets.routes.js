@@ -570,8 +570,9 @@ router.put('/preferences/:key', asyncHandler(async (req, res) => {
 }));
 
 // Requester typeahead for the create flow: known requesters + Entra directory.
+// The workspace's Settings → Contacts people are always findable (isContact).
 router.get('/requester-search', asyncHandler(async (req, res) => {
-  const results = await ticketService.searchRequesters(String(req.query.q || ''));
+  const results = await ticketService.searchRequesters(String(req.query.q || ''), { workspaceId: req.workspaceId });
   res.json({ success: true, data: results });
 }));
 
