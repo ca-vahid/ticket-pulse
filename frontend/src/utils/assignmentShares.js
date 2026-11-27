@@ -10,8 +10,8 @@ export const sharesTotal = (members) => list(members).reduce((sum, m) => sum + (
 /** The percent named outright: people plus groups. */
 export const explicitPct = (rule) => sharesTotal(rule?.members) + sharesTotal(rule?.groups);
 export const restOn = (rule) => rule?.rest?.evenly === true;
-/** What "the rest, split evenly" takes: 100 − the named percent (0 when off). */
-export const restPct = (rule) => (restOn(rule) ? Math.max(0, 100 - explicitPct(rule)) : 0);
+/** What "the rest, split evenly" takes: 100 − the named percent (0 when off or nobody is picked, as the server counts it). */
+export const restPct = (rule) => (restOn(rule) && list(rule?.rest?.techIds).length ? Math.max(0, 100 - explicitPct(rule)) : 0);
 export const hasShares = (rule) => list(rule?.members).length > 0 || list(rule?.groups).length > 0 || (restOn(rule) && list(rule?.rest?.techIds).length > 0);
 const round1 = (n) => Math.round(n * 10) / 10;
 export const eachPct = (pct, n) => (n > 0 ? round1(pct / n) : 0);

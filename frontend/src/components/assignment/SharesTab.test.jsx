@@ -116,6 +116,7 @@ describe('SharesTab', () => {
     fireEvent.click(save);
     await waitFor(() => expect(saveSpy).toHaveBeenCalledWith({
       rule: expect.objectContaining({ id: 'r1', mode: 'shadow', period: 'week', categoryIds: [10, 11], members }),
+      expectedUpdatedAt: '2026-10-16T16:00:00Z',
     }));
   });
 
@@ -134,7 +135,7 @@ describe('SharesTab', () => {
     fireEvent.click(sub);
     saveSpy.mockResolvedValue({ success: true, data: { settings: SETTINGS, ruleId: 'r1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(saveSpy).toHaveBeenCalledWith({ rule: expect.objectContaining({ categoryIds: [11, 12, 101] }) }));
+    await waitFor(() => expect(saveSpy).toHaveBeenCalledWith({ rule: expect.objectContaining({ categoryIds: [11, 12, 101] }), expectedUpdatedAt: '2026-10-16T16:00:00Z' }));
   });
 
   test('add a person, split evenly, and the draft preview is asked for', async () => {
@@ -297,6 +298,7 @@ describe('SharesTab', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(saveSpy).toHaveBeenCalledWith({
       rule: expect.objectContaining({ id: undefined, mode: 'shadow', categoryIds: [12], groups: [{ groupId: 70, pct: 100 }], members: [] }),
+      expectedUpdatedAt: '2026-10-16T16:00:00Z',
     }));
   });
 
@@ -320,6 +322,36 @@ describe('SharesTab', () => {
     expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
   });
 
+  test('the rest switched on with nobody picked counts as 0% and says to pick someone', async () => {
+    mount();
+    await screen.findByTestId('shares-tab');
+    fireEvent.change(shareInput('Alex Doe'), { target: { value: '20' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Split the rest evenly among…' }));
+    expect(screen.getByTestId('shares-rest-row')).toHaveTextContent('The rest, split evenly0%');
+    expect(screen.getByTestId('shares-total')).toHaveTextContent('Total 70% — pick at least one person for the rest');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+  test('someone else saved in between: the save says so plainly', async () => {
+    mount();
+    await screen.findByTestId('shares-tab');
+    fireEvent.change(shareInput('Alex Doe'), { target: { value: '40' } });
+    fireEvent.change(shareInput('Kit Moss'), { target: { value: '20' } });
+    saveSpy.mockRejectedValue({ response: { status: 409, data: { message: 'conflict' } } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText('Someone else changed the shares a moment ago. Reload to see their change.')).toBeInTheDocument();
+  });
+
+  test('a group member who went inactive keeps a marked row in the report', async () => {
+    const rows = [...R2_DATA.rows.slice(0, 1), { techId: 7, name: 'Blake Ruiz', pct: 0, slotKey: 'g70', inactive: true, got: 1, gotPct: 17, rulePicked: 0, ruleMatched: 0 }];
+    getSpy.mockResolvedValue({ success: true, data: { ...R2_DATA, rows, sections: [{ ...R2_DATA.sections[0], rows }] } });
+    mount();
+    await screen.findByTestId('shares-tab');
+    const table = screen.getByRole('columnheader', { name: 'Share' }).closest('table');
+    const blake = within(table).getAllByRole('row').find((row) => row.cells[0].textContent.startsWith('Blake Ruiz'));
+    expect([blake.cells[0].textContent, blake.cells[1].textContent]).toEqual(['Blake Ruizno longer active', '—']);
+  });
+
   test('delete a rule asks first, in the page', async () => {
     mount();
     await screen.findByTestId('shares-tab');
@@ -327,7 +359,7 @@ describe('SharesTab', () => {
     expect(screen.getByTestId('shares-delete-confirm')).toHaveTextContent('Delete “Project Setup, Proposal Setup”? Tickets in its categories go back to the AI’s pick.');
     saveSpy.mockResolvedValue({ success: true, data: { settings: { ...SETTINGS, rules: [] } } });
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
-    await waitFor(() => expect(saveSpy).toHaveBeenCalledWith({ removeRuleId: 'r1' }));
+    await waitFor(() => expect(saveSpy).toHaveBeenCalledWith({ removeRuleId: 'r1', expectedUpdatedAt: '2026-10-16T16:00:00Z' }));
   });
 
   test('switching rules with changes not saved asks first', async () => {

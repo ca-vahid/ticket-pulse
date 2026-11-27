@@ -1,7 +1,7 @@
 import express from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireAdmin, requireReviewer } from '../middleware/auth.js';
-import { ValidationError } from '../utils/errors.js';
+import { ConflictError, ValidationError } from '../utils/errors.js';
 import { MODES, PERIODS, RULE_FIELDS, SETTING_FIELDS } from '../services/assignmentShares/rules.js';
 
 /**
@@ -78,7 +78,12 @@ router.put('/settings', requireAdmin, asyncHandler(async (req, res) => {
   }
   const user = sessionUser(req) || {};
   const shares = await service();
-  const out = await shares.saveSettings(req.workspaceId, patch, { by: user.name || user.email || null });
+  // The settings' updatedAt the page loaded (null = never saved); an older page sends none.
+  const expected = Object.prototype.hasOwnProperty.call(body, 'expectedUpdatedAt')
+    ? (typeof body.expectedUpdatedAt === 'string' ? body.expectedUpdatedAt : null)
+    : undefined;
+  const out = await shares.saveSettings(req.workspaceId, patch, { by: user.name || user.email || null, expectedUpdatedAt: expected });
+  if (out.conflict) throw new ConflictError(`${out.errors[0]}.`);
   if (out.errors.length) throw new ValidationError(out.errors.join('. '));
   res.json({ success: true, data: { settings: out.settings, changes: out.changes, ruleId: out.ruleId } });
 }));

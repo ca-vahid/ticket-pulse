@@ -132,8 +132,9 @@ describe('a group and the evenly split rest', () => {
     expect(people.find((p) => p.techId === AV)).toMatchObject({ pct: 16.7, group: 'Juniors', slotKey: 'g70' });
     expect(people.find((p) => p.techId === A)).toMatchObject({ pct: 12.5, rest: true, slotKey: 'rest' });
     const credit = R.creditSplit(slots);
-    expect([...credit.values()].reduce((a, b) => a + b, 0)).toBe(R.UNIT);
-    expect([credit.get(AV), credit.get(BL), credit.get(CA)]).toEqual([1667, 1667, 1666]);
+    // Inside a group everyone gets the same whole units; the 2 left over are dropped (review fix), never handed to the lowest id.
+    expect([...credit.values()].reduce((a, b) => a + b, 0)).toBe(R.UNIT - 2);
+    expect([credit.get(AV), credit.get(BL), credit.get(CA)]).toEqual([1666, 1666, 1666]);
     expect([A, S, J, K].map((id) => credit.get(id))).toEqual([1250, 1250, 1250, 1250]);
   });
 
@@ -167,6 +168,18 @@ describe('a group and the evenly split rest', () => {
   test('an inactive group member is left out of the split', () => {
     const { slots } = R.expandRule(QA_RULE, { groups: groupsMap(), activeIds: new Set([A, S, J, K, AV, BL]) });
     expect(slots[0].techIds).toEqual([AV, BL]);
+  });
+
+  test('members of one slot tie exactly, so whoever was assigned least recently goes first (review fix)', () => {
+    // The rest over three people at the start of a week; Jo (3) was assigned least recently.
+    const rule = R.normalizeRule({ categoryIds: [20], rest: { evenly: true, techIds: [A, S, J] } });
+    const { slots, people } = R.expandRule(rule);
+    const lastAssignedAt = new Map([[A, Date.UTC(2026, 10, 20)], [S, Date.UTC(2026, 10, 19)], [J, Date.UTC(2026, 10, 2)]]);
+    const { techId, scores } = R.pickNext({ members: people, slots, ledger: new Map(), lastAssignedAt });
+    expect(new Set(scores.map((s) => s.score)).size).toBe(1);
+    expect(techId).toBe(J);
+    // And a run of tickets rotates through them in least-recent order, never piling on the lowest id.
+    expect(R.previewSequence({ members: people, slots, ledger: new Map(), lastAssignedAt, count: 6 })).toEqual([J, S, A, J, S, A]);
   });
 
   test('the pick sentence says whose share it is', () => {
@@ -377,6 +390,15 @@ describe('preview and report per rule (QA 11-26 #4)', () => {
     expect(out.sections[1]).toMatchObject({ kind: 'rest', pct: 50, got: 3 });
   });
 
+  test('a junior who went inactive keeps a row in the report window; their tickets count for the group', async () => {
+    prismaMock.technician.findMany.mockResolvedValue(PEOPLE.map((p) => (p.id === BL ? { ...p, isActive: false } : p)));
+    prismaMock.ticket.findMany.mockResolvedValue([AV, BL, BL, S].map((holder, i) => ({ id: 100 + i, assignedTechId: holder, assignedBy: null, assignedTech: null })));
+    const out = await shares.results(WS, { days: 14, ruleId: 'r2', now: NOW });
+    expect(out.totals).toMatchObject({ toMembers: 4, outside: 0 });
+    expect(out.sections[0]).toMatchObject({ name: 'Juniors', got: 3 });
+    expect(out.sections[0].rows.map((r) => [r.name, r.pct, r.got, r.inactive === true])).toEqual([['Avery Stone', 50, 1, false], ['Blake Ruiz', 0, 2, true]]);
+  });
+
   test('no rule id: the first rule, as before', async () => {
     const out = await shares.results(WS, { days: 14, now: NOW });
     expect(out.ruleId).toBe('r1');
@@ -422,6 +444,57 @@ describe('saving rules', () => {
     // A new rule never reuses a removed rule's id.
     const added = await shares.saveSettings(WS, { rule: { mode: 'off', period: 'week', categoryIds: [20], members: [] } }, { now: NOW });
     expect(added.ruleId).toBe('r3');
+  });
+
+  test('the production case: saving r1 onto the stored v1 object keeps its history, mode and enabledSince', async () => {
+    const v1History = [{ at: '2026-11-16T18:00:00.000Z', by: 'Avery Stone', changes: [{ field: 'mode', from: 'shadow', to: 'live' }] }];
+    store.set(settingsKey(WS), JSON.stringify({
+      v: 1, mode: 'live', period: 'week', categoryIds: [10], members: MEMBERS,
+      enabledSince: '2026-11-02T17:00:00.000Z', updatedAt: '2026-11-16T18:00:00.000Z', updatedBy: 'Avery Stone', history: v1History,
+    }));
+    const members = [{ techId: A, pct: 40 }, { techId: S, pct: 30 }, { techId: J, pct: 20 }, { techId: K, pct: 10 }];
+    const out = await shares.saveSettings(WS, { rule: { id: 'r1', members } }, { by: 'Blake Ruiz', now: NOW, expectedUpdatedAt: '2026-11-16T18:00:00.000Z' });
+    expect(out.errors).toEqual([]);
+    const stored = JSON.parse(store.get(settingsKey(WS)));
+    expect(stored.rules).toHaveLength(1);
+    expect(stored.rules[0]).toMatchObject({ id: 'r1', mode: 'live', period: 'week', categoryIds: [10], members, enabledSince: '2026-11-02T17:00:00.000Z', updatedBy: 'Blake Ruiz' });
+    expect(stored.history).toHaveLength(2);
+    expect(stored.history[0]).toMatchObject({ ruleId: 'r1', by: 'Blake Ruiz', changes: [{ field: 'members' }] });
+    expect(stored.history[1]).toEqual(v1History[0]);
+  });
+
+  test('two admins adding rules at once: both rules are kept (saves run one at a time)', async () => {
+    const body = (cat) => ({ rule: { mode: 'off', period: 'week', categoryIds: [cat], members: [{ techId: K, pct: 100 }] } });
+    prismaMock.competencyCategory.findMany.mockResolvedValue([
+      { id: 10, name: 'Project Setup', parentId: null }, { id: 20, name: 'Vendor Invoices', parentId: null },
+      { id: 30, name: 'Payroll', parentId: null }, { id: 31, name: 'Expenses', parentId: null },
+    ]);
+    const [one, two] = await Promise.all([shares.saveSettings(WS, body(30)), shares.saveSettings(WS, body(31))]);
+    expect([one.errors, two.errors]).toEqual([[], []]);
+    expect([one.ruleId, two.ruleId]).toEqual(['r3', 'r4']);
+    expect(JSON.parse(store.get(settingsKey(WS))).rules.map((r) => r.id)).toEqual(['r1', 'r2', 'r3', 'r4']);
+  });
+
+  test('a save made from a page that is out of date is refused (409), nothing is written; an older page that sends nothing is accepted', async () => {
+    store.set(settingsKey(WS), JSON.stringify({ ...V2, updatedAt: '2026-11-25T18:00:00.000Z' }));
+    const stale = await shares.saveSettings(WS, { rule: { id: 'r2', mode: 'live' } }, { now: NOW, expectedUpdatedAt: '2026-11-24T10:00:00.000Z' });
+    expect(stale).toMatchObject({ conflict: true, errors: ['Someone else changed the shares a moment ago. Reload to see their change'] });
+    expect(settingsRepositoryMock.set).not.toHaveBeenCalled();
+    const neverSaved = await shares.saveSettings(WS, { rule: { id: 'r2', mode: 'live' } }, { now: NOW, expectedUpdatedAt: null });
+    expect(neverSaved.conflict).toBe(true);
+    const fresh = await shares.saveSettings(WS, { rule: { id: 'r2', mode: 'live' } }, { now: NOW, expectedUpdatedAt: '2026-11-25T18:00:00.000Z' });
+    expect(fresh.errors).toEqual([]);
+    const old = await shares.saveSettings(WS, { rule: { id: 'r2', mode: 'shadow' } }, { now: NOW });
+    expect(old.errors).toEqual([]);
+  });
+
+  test('history keeps the last 30 lines per rule, so editing one rule never pushes out another’s', () => {
+    const legacy = { at: '2026-11-01T00:00:00.000Z', by: 'Avery Stone', changes: [{ field: 'mode' }] };
+    const busy = Array.from({ length: 40 }, (_, i) => ({ at: `2026-11-20T00:${String(i).padStart(2, '0')}:00.000Z`, ruleId: 'r2', changes: [{ field: 'members' }] }));
+    const kept = R.trimHistory([...busy, legacy]);
+    expect(kept.filter((h) => h.ruleId === 'r2')).toHaveLength(30);
+    expect(kept[kept.length - 1]).toEqual(legacy);
+    expect(R.normalizeSettings({ ...V2, history: [...busy, legacy] }).history).toHaveLength(31);
   });
 
   test('the editor gets the active internal groups with members among the workspace’s people', async () => {

@@ -43,6 +43,7 @@ import {
  */
 
 export const settingsKey = (workspaceId) => `assignment_shares_ws${Number(workspaceId)}`;
+export const SAVE_CONFLICT = 'Someone else changed the shares a moment ago. Reload to see their change';
 
 /** Integration sandboxes: never. */
 const SANDBOX_WORKSPACES = [6, 7, 8, 9];
@@ -139,13 +140,26 @@ class AssignmentSharesService {
    * A save: `{ rule }` adds or changes one rule (no id = new), `{ removeRuleId }`
    * removes one, and the v1 body `{ mode, period, categoryIds, members }`
    * changes the first rule.
-   * @returns {{ settings, changes, errors, ruleId }} — errors non-empty = nothing was saved.
+   *
+   * Saves run one at a time per workspace (the same lock as decisions), and
+   * `expectedUpdatedAt` (the settings' updatedAt the editor loaded; null =
+   * never saved) must still be the stored one: otherwise another admin saved
+   * in between and nothing is written (`conflict: true`). Omitted (an older
+   * page) = not checked, as before.
+   * @returns {{ settings, changes, errors, ruleId, conflict? }} — errors non-empty = nothing was saved.
    */
-  async saveSettings(workspaceId, patch = {}, { by = null, now = new Date() } = {}) {
+  async saveSettings(workspaceId, patch = {}, { by = null, now = new Date(), expectedUpdatedAt } = {}) {
     const ws = Number(workspaceId);
     if (SANDBOX_WORKSPACES.includes(ws)) return { settings: await this.getSettings(ws, { fresh: true }), changes: [], errors: ['Ticket shares are not available in an integration sandbox'], ruleId: null };
+    return this._withLock(ws, () => this._save(ws, patch, { by, now, expectedUpdatedAt }));
+  }
+
+  async _save(ws, patch, { by, now, expectedUpdatedAt }) {
     const current = await this.getSettings(ws, { fresh: true });
     if (current.unreadable) return { settings: current, changes: [], errors: ['The current settings could not be read; nothing was saved'], ruleId: null };
+    if (expectedUpdatedAt !== undefined && (expectedUpdatedAt || null) !== (current.updatedAt || null)) {
+      return { settings: current, changes: [], errors: [SAVE_CONFLICT], ruleId: null, conflict: true };
+    }
     const { people, categories, groups } = await this.options(ws);
     const validTechIds = new Set(people.map((p) => p.id));
     const validCategoryIds = new Set(categories.flatMap((c) => [c.id, ...c.subcategories.map((s) => s.id)]));
@@ -241,7 +255,22 @@ class AssignmentSharesService {
     const names = new Map((techs || []).map((t) => [t.id, t.name]));
     const active = new Set((techs || []).filter((t) => t.isActive || t.assignableOnly).map((t) => t.id));
     const expanded = expandRule(rule, { groups, activeIds: active, names });
-    return { expanded, techs: techs || [], names, active, groupsFailed: failed };
+    // Group and rest members of this workspace who went inactive: out of the
+    // split, but the report still shows them (their tickets in the window).
+    const placed = new Set(expanded.people.map((p) => p.techId));
+    const known = new Set((techs || []).map((t) => t.id));
+    const dropped = [];
+    const drop = (id, slotKey, group = null) => {
+      if (!known.has(id) || active.has(id) || placed.has(id)) return;
+      placed.add(id);
+      dropped.push({ techId: id, pct: 0, slotKey, ...(group ? { group } : {}), inactive: true });
+    };
+    for (const g of rule.groups || []) {
+      const info = groups.get(g.groupId);
+      for (const id of info?.techIds || []) drop(Number(id), `g${g.groupId}`, info.name);
+    }
+    if (rule.rest?.evenly) for (const id of rule.rest.techIds || []) drop(Number(id), 'rest');
+    return { expanded, dropped, techs: techs || [], names, active, groupsFailed: failed };
   }
 
   /**
@@ -530,9 +559,11 @@ class AssignmentSharesService {
     const rule = this._rule(settings, ruleId);
     const empty = { workspaceId: ws, timeZone, days: period, settings, ruleId: rule?.id || null, rows: [], sections: [], warnings: [], totals: null, events: [] };
     if (!rule || !hasShares(rule) || !rule.categoryIds?.length) return empty;
-    const { expanded, groupsFailed } = await this._expand(ws, rule);
+    const { expanded, dropped, groupsFailed } = await this._expand(ws, rule);
     const warnings = groupsFailed ? ['The groups could not be read just now, so they are left out of this report.'] : expanded.warnings;
-    const members = expanded.people;
+    // Review of QA 11-26: a member who went inactive keeps a row (marked), so
+    // their tickets in the window still count for the group, not as "outside".
+    const members = [...expanded.people, ...dropped];
     const cats = rule.categoryIds;
     if (!members.length) return { ...empty, warnings };
 

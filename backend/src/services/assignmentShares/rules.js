@@ -47,7 +47,9 @@ import { isAwayLeave } from '../../utils/leaveKinds.js';
 export const SETTINGS_VERSION = 2;
 export const RECORD_VERSION = 1;
 export const UNIT = 10000;
+/** History lines kept per rule (a line before rules counts as r1's), and overall. */
 export const HISTORY_LIMIT = 30;
+export const HISTORY_TOTAL_LIMIT = 200;
 export const MAX_MEMBERS = 30;
 export const MAX_GROUPS = 10;
 export const MAX_REST = 30;
@@ -114,6 +116,25 @@ function cleanCategoryIds(list) {
   return [...new Set(asList(list).map(Number).filter(positiveInt))].slice(0, MAX_CATEGORIES);
 }
 
+/**
+ * The last HISTORY_LIMIT lines of EACH rule (newest first), at most
+ * HISTORY_TOTAL_LIMIT in all: editing one rule never pushes another rule's
+ * lines out (a v1 workspace's earlier lines stay with r1).
+ */
+export function trimHistory(list) {
+  const kept = [];
+  const perRule = new Map();
+  for (const h of asList(list)) {
+    if (!h || typeof h !== 'object') continue;
+    const key = typeof h.ruleId === 'string' ? h.ruleId : LEGACY_RULE_ID;
+    const n = (perRule.get(key) || 0) + 1;
+    perRule.set(key, n);
+    if (n <= HISTORY_LIMIT) kept.push(h);
+    if (kept.length >= HISTORY_TOTAL_LIMIT) break;
+  }
+  return kept;
+}
+
 const cleanName = (v) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, MAX_NAME) : '');
 const ruleNumber = (id) => (typeof id === 'string' && RULE_ID.test(id) ? Number(id.slice(1)) : 0);
 
@@ -178,7 +199,7 @@ export function normalizeSettings(raw) {
     fromV1,
     updatedAt: str(stored.updatedAt),
     updatedBy: str(stored.updatedBy),
-    history: Array.isArray(stored.history) ? stored.history.slice(0, HISTORY_LIMIT) : [],
+    history: trimHistory(stored.history),
   };
 }
 
@@ -347,7 +368,7 @@ export function applyPatch(current, patch = {}, {
         rules: rules.filter((r) => r.id !== target.id),
         updatedAt: at,
         updatedBy: by || null,
-        history: [{ at, by: by || null, ruleId: target.id, rule: label(target), changes }, ...(current.history || [])].slice(0, HISTORY_LIMIT),
+        history: trimHistory([{ at, by: by || null, ruleId: target.id, rule: label(target), changes }, ...(current.history || [])]),
         persisted: true,
       },
       changes,
@@ -403,7 +424,7 @@ export function applyPatch(current, patch = {}, {
     updatedAt: at,
     updatedBy: by || null,
     history: changes.length
-      ? [{ at, by: by || null, ruleId: id, rule: label(rule), changes }, ...(current?.history || [])].slice(0, HISTORY_LIMIT)
+      ? trimHistory([{ at, by: by || null, ruleId: id, rule: label(rule), changes }, ...(current?.history || [])])
       : (current?.history || []),
     persisted: true,
   };
@@ -430,7 +451,7 @@ export function toStored(settings) {
     })),
     updatedAt: settings?.updatedAt || null,
     updatedBy: settings?.updatedBy || null,
-    history: (settings?.history || []).slice(0, HISTORY_LIMIT),
+    history: trimHistory(settings?.history),
   };
 }
 
@@ -688,11 +709,19 @@ export function expandRule(rule, { groups = new Map(), activeIds = null, names =
 // ---- the ledger --------------------------------------------------------------
 
 /**
- * One ticket's credit: whole units that add up to exactly one ticket. First
- * split across the slots with someone in, by percent (the rounding remainder
- * to the largest share, then people before groups, then the lower id), then a
- * slot's part evenly across its people who are in (the few left-over units to
- * the lower ids). Deterministic.
+ * One ticket's credit, in whole units. First split across the slots with
+ * someone in, by percent (the rounding remainder to the largest share, then
+ * people before groups, then the lower id), then a slot's part evenly across
+ * its people who are in. Deterministic.
+ *
+ * Inside a group or the rest, every member gets exactly the same whole number
+ * of units and the few left over (fewer than the members) are dropped, not
+ * handed to the lowest id: otherwise the lowest id would always be a unit
+ * ahead, exact ties would never happen, and "least recently assigned" could
+ * never decide between members (review of QA 11-26). The cost is under
+ * n/10,000 of a ticket per ticket. A one-person slot (every rule stored before
+ * QA 11-26) has no remainder, so its arithmetic is exactly what it was: the
+ * units add up to one ticket.
  * @param {Array} slots  expandRule().slots (or slotsFromMembers)
  * @param {(techId:number) => boolean} isIn  who is in for this ticket
  * @returns {Map<number, number>} techId → units
@@ -717,15 +746,8 @@ export function creditSplit(slots, isIn = () => true) {
   const first = [...live].sort(slotOrder)[0];
   units.set(first.key, units.get(first.key) + (UNIT - given));
   for (const s of live) {
-    const total = units.get(s.key);
-    const ids = [...s.ids].sort((a, b) => a - b);
-    const base = Math.floor(total / ids.length);
-    let extra = total - base * ids.length;
-    for (const id of ids) {
-      const add = base + (extra > 0 ? 1 : 0);
-      if (extra > 0) extra -= 1;
-      out.set(id, (out.get(id) || 0) + add);
-    }
+    const each = Math.floor(units.get(s.key) / s.ids.length);
+    for (const id of s.ids) out.set(id, (out.get(id) || 0) + each);
   }
   return out;
 }
@@ -989,6 +1011,7 @@ export function summarizeReport({ members = [], tickets = [], runs = [], names =
       pct: m.pct,
       ...(m.slotKey ? { slotKey: m.slotKey } : {}),
       ...(m.group ? { group: m.group } : {}),
+      ...(m.inactive ? { inactive: true } : {}),
       got: got.get(m.techId),
       gotPct: toMembers ? Math.round((got.get(m.techId) / toMembers) * 100) : null,
       rulePicked: picked.get(m.techId).picked,
