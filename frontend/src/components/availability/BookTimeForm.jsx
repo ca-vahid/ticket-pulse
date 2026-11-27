@@ -7,7 +7,7 @@ import {
 } from './availabilityUi';
 import MonthPicker from './MonthPicker';
 import {
-  PAST_SENTENCE, bookedByDay, countWorkingDays, defaultTypes, mostUsedTypes, nextWeekRange, pickDay, rangeWords, requestWords, tomorrowKey,
+  LIVE_STATUSES, PAST_SENTENCE, bookedByDay, countWorkingDays, defaultTypes, mostUsedTypes, nextWeekRange, pickDay, rangeWords, requestWords, tomorrowKey,
 } from './bookingModel';
 
 /**
@@ -333,17 +333,22 @@ export default function BookTimeForm({
     .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)), [me.leaveTypes, editingTypeId]);
   const typeById = useMemo(() => new Map((me.leaveTypes || []).map((t) => [t.id, t])), [me.leaveTypes]);
   const holidaySet = useMemo(() => new Set(Object.keys(holidays || {})), [holidays]);
-  // The four tiles are fixed (QA 11-26 #1); the type that starts picked is the
-  // person's most-used of those four (ties in the admins' order), so a favourite
-  // kept under More types never pushes one of the four out.
+  // The four tiles are fixed (QA 11-26 #1). The type that starts picked is the
+  // person's most-used one when it is one of the four; with no history, the first
+  // of the four in the admins' order (as before). When their most-used type is
+  // kept under More types, nothing starts picked, so a quick tap-and-send never
+  // books a type they did not mean (Send waits for "Pick what you're booking").
   const tiles = useMemo(() => defaultTypes(types, VISIBLE_TYPES), [types]);
-  const favourite = useMemo(
-    () => mostUsedTypes(types, requests, types.length).find((t) => tiles.includes(t)) || tiles[0] || null,
-    [types, requests, tiles],
-  );
+  const favourite = useMemo(() => {
+    const ranked = mostUsedTypes(types, requests, types.length);
+    const ids = new Set(types.map((t) => t.id));
+    const hasHistory = (requests || []).some((r) => LIVE_STATUSES.includes(r.status) && ids.has(r.leaveTypeId));
+    if (!hasHistory) return ranked.find((t) => tiles.includes(t)) || tiles[0] || null;
+    return tiles.includes(ranked[0]) ? ranked[0] : null;
+  }, [types, requests, tiles]);
   const original = useMemo(() => (editing ? formFromRequest(editing) : null), [editing]);
   const preset = presetTypeId && types.some((t) => t.id === presetTypeId) ? presetTypeId : null;
-  const [form, setForm] = useState(() => original || emptyForm(preset || favourite?.id || types[0]?.id));
+  const [form, setForm] = useState(() => original || emptyForm(preset || favourite?.id));
   // Until the person picks a type, the picked tile follows their most-used one (their requests load after the form).
   const typeTouched = useRef(Boolean(original || preset));
   const [moreOpen, setMoreOpen] = useState(false);
@@ -361,8 +366,9 @@ export default function BookTimeForm({
   const formRef = useRef(null);
 
   useEffect(() => {
-    if (typeTouched.current || !favourite) return;
-    setForm((f) => (f.leaveTypeId === String(favourite.id) ? f : { ...f, leaveTypeId: String(favourite.id) }));
+    if (typeTouched.current) return;
+    const id = favourite ? String(favourite.id) : '';
+    setForm((f) => (f.leaveTypeId === id ? f : { ...f, leaveTypeId: id }));
   }, [favourite]);
 
   const type = types.find((t) => String(t.id) === form.leaveTypeId) || null;
@@ -572,6 +578,7 @@ export default function BookTimeForm({
   let status;
   let statusWords = '';
   if (editing && unchanged) { statusWords = 'Change the type, dates, place or note to save.'; status = <span className="text-sm text-muted-foreground">{statusWords}</span>; }
+  else if (!type) { statusWords = "Pick what you're booking"; status = <span className="text-sm text-muted-foreground" data-testid="booking-pick-type">{statusWords}</span>; }
   else if (!picked) {
     statusWords = sent ? sent.text : '';
     status = sent
@@ -667,8 +674,8 @@ export default function BookTimeForm({
         </div>
 
         {/* QA 11-26 #1: the month runs across the card (seven equal columns), with modest
-            rows so it never grows into the "extremely large" calendar of before (Vahid,
-            26 Nov); the day part, hours and the summary sit under it. */}
+            rows, kept smaller than the earlier oversized calendar; the day part, hours
+            and the summary sit under it. */}
         <div className="space-y-3" data-testid="when-layout">
           <div className="w-full rounded-lg border border-border/70 p-2 sm:px-3 sm:py-2.5" data-testid="when-calendar">
             <MonthPicker

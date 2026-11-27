@@ -202,8 +202,34 @@ describe('Book time away', () => {
     const reqs = [5, 5, 5].map((leaveTypeId, i) => ({ id: i + 1, leaveTypeId, status: 'approved', startDate: '2026-11-18', endDate: '2026-11-18' }));
     render(<BookTimeForm me={ME} today={TODAY} requests={reqs} />);
     expect(within(screen.getByTestId('type-tiles')).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['Working from home', 'Appointment', 'Vacation', 'Sick']);
-    expect(screen.getByRole('radio', { name: 'Vacation' })).toBeChecked();
     expect(screen.getByRole('button', { name: 'More types (3)' })).toBeInTheDocument();
+  });
+
+  test('only Site visit history: nothing ticked, Send disabled until the person picks what they are booking', async () => {
+    const reqs = [4, 4].map((leaveTypeId, i) => ({ id: i + 1, leaveTypeId, status: 'approved', startDate: '2026-11-18', endDate: '2026-11-18' }));
+    render(<BookTimeForm me={ME} today={TODAY} requests={reqs} />);
+    for (const r of within(screen.getByTestId('type-tiles')).getAllByRole('radio')) expect(r).not.toBeChecked();
+    expect(screen.getByTestId('booking-pick-type')).toHaveTextContent("Pick what you're booking");
+    // A day alone does not make it sendable, and nothing is checked with the server.
+    fireEvent.click(day(26));
+    expect(send()).toBeDisabled();
+    expect(screen.getByTestId('booking-pick-type')).toBeInTheDocument();
+    await flushPreview();
+    expect(api.preview).not.toHaveBeenCalled();
+    // Picking the type (here from More types) makes it sendable.
+    fireEvent.click(screen.getByRole('button', { name: /More types/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Site visit' }));
+    expect(screen.queryByTestId('booking-pick-type')).toBeNull();
+    fireEvent.change(screen.getByLabelText(/^Which office\?/), { target: { value: '1' } });
+    await flushPreview();
+    await waitFor(() => expect(send()).toBeEnabled());
+  });
+
+  test('history mostly among the four keeps the most-used one ticked, even with some More types use', () => {
+    const reqs = [3, 3, 4].map((leaveTypeId, i) => ({ id: i + 1, leaveTypeId, status: 'approved', startDate: '2026-11-18', endDate: '2026-11-18' }));
+    render(<BookTimeForm me={ME} today={TODAY} requests={reqs} />);
+    expect(screen.getByRole('radio', { name: 'Sick' })).toBeChecked();
+    expect(screen.queryByTestId('booking-pick-type')).toBeNull();
   });
 
   test('the four skip a type switched off in the workspace', () => {
@@ -588,8 +614,16 @@ describe('My time, the page', () => {
     expect(cal).toContainElement(screen.getByRole('grid'));
     expect(screen.getByRole('grid').className).toMatch(/(^|\s)w-full(\s|$)/);
     expect(screen.getByTestId('when-layout').className).not.toMatch(/sm:flex-row/);
-    // Rows stay modest from sm up (40 px), not the giant calendar of before.
-    expect(screen.getAllByRole('gridcell')[0].className).toMatch(/sm:h-10/);
+    // Seven equal columns across the card.
+    expect(screen.getByRole('grid').className).toMatch(/table-fixed/);
+    expect(within(screen.getByRole('grid')).getAllByRole('columnheader')).toHaveLength(7);
+    // A real day (the 15th, never a filler cell): rows stay modest from sm up (40 px),
+    // not the oversized calendar of before, and its face widens with the column.
+    const fifteenth = screen.getByRole('gridcell', { name: /^\w+ 15 / });
+    expect(fifteenth).toHaveAttribute('data-day');
+    expect(fifteenth.className).toMatch(/(^|\s)sm:h-10(\s|$)/);
+    expect(fifteenth.className).toMatch(/(^|\s)h-11(\s|$)/);
+    expect(fifteenth.firstElementChild.className).toMatch(/(^|\s)sm:max-w-\[4\.5rem\](\s|$)/);
     expect(screen.queryByTestId('coming-up-2')).toBeNull();
     expect(screen.queryByRole('region', { name: 'My requests' })).toBeNull();
     // One column until lg; the booking card comes first.
@@ -605,7 +639,6 @@ describe('My time, the page', () => {
     // The footer with Send stays reachable: sticky above the tab bar and the safe area.
     expect(screen.getByTestId('booking-footer').className).toMatch(/sticky/);
     expect(screen.getByTestId('booking-footer').className).toMatch(/safe-area-inset-bottom/);
-    // Calendar tap targets are at least 40 px tall.
-    expect(screen.getAllByRole('gridcell')[0].className).toMatch(/h-11/);
+    // Calendar tap targets are at least 40 px tall (checked on the 15th above: h-11 on a phone, sm:h-10 up).
   });
 });
