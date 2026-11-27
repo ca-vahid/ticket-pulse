@@ -254,7 +254,7 @@ export default function ContactsPanel() {
           <BookUser className="h-5 w-5 text-blue-600 dark:text-blue-300" aria-hidden="true" />
         </div>
         <div>
-          <h3 className="text-lg font-semibold text-foreground">Contacts</h3>
+          <h3 className="text-lg font-semibold text-foreground">Workspace contacts</h3>
           <p className="max-w-2xl text-sm text-muted-foreground">
             People outside the directory you want to pick as requesters or recipients in this workspace.
           </p>
