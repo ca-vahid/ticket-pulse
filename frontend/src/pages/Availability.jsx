@@ -26,7 +26,7 @@ import RequestHistoryPanel from '../components/availability/RequestHistoryPanel'
  *   /availability/overview   who is out this week, my balance, holidays, coverage (default)
  *   /availability/calendar   wallchart: people by day, grouped by office / approval group
  *   /availability/month      the month with named bars
- *   /availability/my-time    balances, book time away (live verdict), coming up
+ *   /availability/my-time    book time away (live verdict), coming up (balances are on the overview)
  *   /availability/approvals  pending requests I may decide (approvers / admins)
  *   /availability/history    anyone's requests, past and present (admins, QA 10-21 #1)
  *   /availability/settings   types, groups, rules, offices, people, balances, import

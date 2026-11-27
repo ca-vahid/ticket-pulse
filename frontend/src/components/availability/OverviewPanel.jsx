@@ -120,7 +120,8 @@ function MyBalances({ me }) {
               <span className={`block text-lg font-semibold tabular-nums ${over ? AWAY_TEXT : 'text-foreground'}`}>
                 {trimNum(Math.abs(remaining))} {over ? 'over' : 'left'}
               </span>
-              <span className="block text-xs text-muted-foreground">{name} · {trimNum(b.taken)} of {trimNum(entitled)} taken{extra ? ` · ${extra}` : ''}</span>
+              {/* The leave year (QA 11-26 #1: My time's strip, which said it, is gone), so "N left" is never ambiguous near a year end. */}
+              <span className="block text-xs text-muted-foreground">{name}{b.year ? ` · ${b.year}` : ''} · {trimNum(b.taken)} of {trimNum(entitled)} taken{extra ? ` · ${extra}` : ''}</span>
             </span>
           </li>
         );

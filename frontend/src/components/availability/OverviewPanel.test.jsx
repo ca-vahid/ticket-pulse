@@ -150,7 +150,8 @@ describe('the page', () => {
     show();
     const balances = await screen.findByTestId('my-balances');
     expect(balances).toHaveTextContent('16 over');
-    expect(balances).toHaveTextContent('Vacation · 26 of 10 taken');
+    // The leave year is named (QA 11-26 #1), so "left" is never ambiguous near a year end.
+    expect(balances).toHaveTextContent('Vacation · 2026 · 26 of 10 taken');
     expect(balances).not.toHaveTextContent('-16');
     await waitFor(() => expect(screen.getByTestId('my-next')).toHaveTextContent('Nothing booked for you, Kim.'));
   });

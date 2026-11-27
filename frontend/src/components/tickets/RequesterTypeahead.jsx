@@ -248,7 +248,11 @@ const RequesterTypeahead = forwardRef(function RequesterTypeahead({
                 >
                   <span className="h-7 w-7 rounded-full bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border border-blue-100 dark:border-blue-500/20 inline-flex items-center justify-center text-[10px] font-semibold flex-shrink-0">{initials(p.name)}</span>
                   <span className="min-w-0">
-                    <span className="block text-sm text-foreground truncate">{p.name}</span>
+                    <span className="block text-sm text-foreground truncate">
+                      {p.name}
+                      {/* QA 11-26 item 2: one of this workspace's Settings → Contacts. */}
+                      {p.isContact && <span className="ml-1.5 text-[10px] font-semibold uppercase text-muted-foreground">Contact</span>}
+                    </span>
                     <span className="block text-xs text-muted-foreground/75 truncate">{p.email}{p.jobTitle ? ` · ${p.jobTitle}` : ''}</span>
                   </span>
                 </button>

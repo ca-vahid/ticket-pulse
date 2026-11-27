@@ -82,6 +82,7 @@ jest.unstable_mockModule('../src/middleware/auth.js', () => ({
   requireGlobalAdmin: requireAdminMock,
   requireWorkspaceAccess: requireWorkspaceAccessMock,
   requireWorkspaceMemberOrAgent: requireWorkspaceMemberOrAgentMock,
+  sessionUser: (req) => req.session?.user ?? req.user ?? null,
 }));
 jest.unstable_mockModule('../src/middleware/workspace.js', () => ({
   requireWorkspace: (req, _res, next) => { req.workspaceId = 1; next(); },

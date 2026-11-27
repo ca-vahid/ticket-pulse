@@ -28,6 +28,8 @@ describe('filterSettingsNavItems', () => {
     expect(ids(items)).toContain('macros');
     expect(items.find((i) => i.id === 'macros').keywords).toContain('scenario automations');
     expect(ids(items)).toContain('approval-categories');
+    // QA 11-26 item 2: Contacts is a workspace-admin tab.
+    expect(items.find((i) => i.id === 'contacts')).toMatchObject({ label: 'Workspace contacts', minRole: 'admin' });
     expect(ids(items)).toContain('dashboard');
     expect(ids(items)).not.toContain('freshservice');
     expect(ids(items)).not.toContain('admins');

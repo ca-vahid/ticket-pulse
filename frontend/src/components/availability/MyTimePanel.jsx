@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { availabilityAPI } from '../../services/api';
 import { notifyAvailabilityChanged } from '../../hooks/useAvailabilityApprovalCount';
-import BalancesRow from './BalancesRow';
 import BookTimeForm from './BookTimeForm';
 import ComingUpCard from './ComingUpCard';
 import { CARD, ErrorNote, todayKey } from './availabilityUi';
@@ -10,8 +9,11 @@ import { CARD, ErrorNote, todayKey } from './availabilityUi';
 export const BOOK_NEW_EVENT = 'tp:availability-book-new';
 
 /**
- * My time (redesigned for QA 11-25 #1): the balances as a strip on top, then
- * "Book time away" (about two thirds) beside "Coming up" (a third). On a phone
+ * My time (redesigned for QA 11-25 #1): "Book time away" (about two thirds)
+ * beside "Coming up" (a third). The balances strip that sat on top went in QA
+ * 11-26 #1: the Overview shows the same balances (left or over, taken of the
+ * allowance, booked and waiting), and the booking's check says what is left
+ * after it. On a phone
  * it is one column, the booking first. The long list of every request is gone:
  * Coming up shows the approved and waiting ones that are not over, and past
  * or cancelled requests are in History (admins) or folded under Coming up.
@@ -82,7 +84,6 @@ export default function MyTimePanel({ me, onChanged, toast, bookType = null, onO
 
   return (
     <div className="min-w-0" data-testid="my-time">
-      <BalancesRow balances={me.balances} leaveTypes={me.leaveTypes} />
       <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] lg:items-start" data-testid="my-time-columns">
         <div className={`min-w-0 ${CARD} ${editing ? 'ring-2 ring-primary/40' : ''}`}>
           <BookTimeForm

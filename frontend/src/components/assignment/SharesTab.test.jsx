@@ -14,23 +14,34 @@ vi.mock('../../services/api', () => ({
 
 const PEOPLE = [
   { id: 1, name: 'Alex Doe' }, { id: 2, name: 'Sam Lee' }, { id: 3, name: 'Jo Park' }, { id: 4, name: 'Kit Moss' }, { id: 5, name: 'Ria Chen' },
+  { id: 6, name: 'Avery Stone' }, { id: 7, name: 'Blake Ruiz' },
 ];
 const CATEGORIES = [
   { id: 10, name: 'Project Setup', subcategories: [{ id: 101, name: 'Quebec' }] },
   { id: 11, name: 'Proposal Setup', subcategories: [] },
   { id: 12, name: 'Research & Development', subcategories: [] },
+  { id: 20, name: 'Vendor Invoices', subcategories: [] },
 ];
-const SETTINGS = {
-  mode: 'shadow', period: 'week', categoryIds: [10, 11],
+const GROUPS = [{ id: 70, name: 'Juniors', memberIds: [6, 7] }, { id: 71, name: 'Night shift', memberIds: [] }];
+// QA 11-26: settings are a list of rules. The first is what a v1 object reads as.
+const RULE = {
+  id: 'r1', name: '', mode: 'shadow', period: 'week', categoryIds: [10, 11],
   members: [{ techId: 1, pct: 50 }, { techId: 2, pct: 20 }, { techId: 3, pct: 20 }, { techId: 4, pct: 10 }],
+  groups: [], rest: { evenly: false, techIds: [] },
+  updatedAt: '2026-10-16T16:00:00Z', updatedBy: 'Alex Doe',
+};
+const SETTINGS = {
+  v: 2, seq: 1, rules: [RULE],
   updatedAt: '2026-10-16T16:00:00Z', updatedBy: 'Alex Doe',
   history: [{ at: '2026-10-16T16:00:00Z', by: 'Alex Doe', changes: [{ field: 'mode', from: 'off', to: 'shadow' }] }],
 };
 const DATA = {
   settings: SETTINGS,
+  ruleId: 'r1',
   canManage: true,
   people: PEOPLE,
   categories: CATEGORIES,
+  groups: GROUPS,
   days: 14,
   preview: {
     ready: true,
@@ -68,7 +79,7 @@ describe('SharesTab', () => {
   test('shows the setup, the preview and the Shadow report', async () => {
     mount();
     expect(await screen.findByTestId('shares-tab')).toBeInTheDocument();
-    expect(getSpy).toHaveBeenCalledWith(14);
+    expect(getSpy).toHaveBeenCalledWith(14, undefined);
     expect(screen.getByText(/Shadow: recording who the rule would pick/)).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'Shadow' })).toBeChecked();
     expect(screen.getByRole('radio', { name: 'Week' })).toBeChecked();
@@ -100,12 +111,13 @@ describe('SharesTab', () => {
     fireEvent.change(shareInput('Kit Moss'), { target: { value: '20' } });
     expect(screen.getByTestId('shares-total')).toHaveTextContent('Total 100%');
     expect(save).toBeEnabled();
-    saveSpy.mockResolvedValue({ success: true, data: { settings: { ...SETTINGS, members: [{ techId: 1, pct: 40 }, { techId: 2, pct: 20 }, { techId: 3, pct: 20 }, { techId: 4, pct: 20 }] } } });
+    const members = [{ techId: 1, pct: 40 }, { techId: 2, pct: 20 }, { techId: 3, pct: 20 }, { techId: 4, pct: 20 }];
+    saveSpy.mockResolvedValue({ success: true, data: { settings: { ...SETTINGS, rules: [{ ...RULE, members }] }, ruleId: 'r1' } });
     fireEvent.click(save);
-    await waitFor(() => expect(saveSpy).toHaveBeenCalledWith(expect.objectContaining({
-      mode: 'shadow', period: 'week', categoryIds: [10, 11],
-      members: [{ techId: 1, pct: 40 }, { techId: 2, pct: 20 }, { techId: 3, pct: 20 }, { techId: 4, pct: 20 }],
-    })));
+    await waitFor(() => expect(saveSpy).toHaveBeenCalledWith({
+      rule: expect.objectContaining({ id: 'r1', mode: 'shadow', period: 'week', categoryIds: [10, 11], members }),
+      expectedUpdatedAt: '2026-10-16T16:00:00Z',
+    }));
   });
 
   test('the categories pick-list: a top category covers its subcategories', async () => {
@@ -121,9 +133,9 @@ describe('SharesTab', () => {
     expect(sub).not.toBeChecked();
     expect(sub).toBeEnabled();
     fireEvent.click(sub);
-    saveSpy.mockResolvedValue({ success: true, data: { settings: SETTINGS } });
+    saveSpy.mockResolvedValue({ success: true, data: { settings: SETTINGS, ruleId: 'r1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(saveSpy).toHaveBeenCalledWith(expect.objectContaining({ categoryIds: [11, 12, 101] })));
+    await waitFor(() => expect(saveSpy).toHaveBeenCalledWith({ rule: expect.objectContaining({ categoryIds: [11, 12, 101] }), expectedUpdatedAt: '2026-10-16T16:00:00Z' }));
   });
 
   test('add a person, split evenly, and the draft preview is asked for', async () => {
@@ -188,6 +200,178 @@ describe('SharesTab', () => {
     await screen.findByTestId('shares-tab');
     expect(screen.queryByRole('columnheader', { name: 'Away' })).toBeNull();
     expect(screen.queryByTestId('shares-away-note')).toBeNull();
+  });
+
+  // ---- QA 11-26: rules per category, internal groups, the rest split evenly ----
+  const R2 = {
+    id: 'r2', name: 'Vendor Invoices', mode: 'live', period: 'week', categoryIds: [20],
+    members: [], groups: [{ groupId: 70, pct: 50 }], rest: { evenly: true, techIds: [4, 5] },
+    updatedAt: '2026-11-20T16:00:00Z', updatedBy: 'Alex Doe',
+  };
+  const TWO = { ...SETTINGS, seq: 2, rules: [RULE, R2] };
+  const R2_DATA = {
+    ...DATA,
+    settings: TWO,
+    ruleId: 'r2',
+    preview: { ...DATA.preview, picks: [{ name: 'Avery Stone' }], sections: [] },
+    rows: [
+      { techId: 6, name: 'Avery Stone', pct: 25, slotKey: 'g70', got: 2, gotPct: 33, rulePicked: 2, ruleMatched: 2 },
+      { techId: 7, name: 'Blake Ruiz', pct: 25, slotKey: 'g70', got: 1, gotPct: 17, rulePicked: 1, ruleMatched: 1 },
+      { techId: 4, name: 'Kit Moss', pct: 25, slotKey: 'rest', got: 2, gotPct: 33, rulePicked: 1, ruleMatched: 1 },
+      { techId: 5, name: 'Ria Chen', pct: 25, slotKey: 'rest', got: 1, gotPct: 17, rulePicked: 1, ruleMatched: 0 },
+    ],
+    totals: { tickets: 6, toMembers: 6, outside: 0, unassigned: 0, runs: 6, compared: 5, agreed: 4, aiCompared: 5, aiAgreed: 3, noPick: 0 },
+    events: [],
+  };
+  R2_DATA.sections = [
+    { kind: 'group', id: 70, name: 'Juniors', pct: 50, got: 3, gotPct: 50, rulePicked: 3, ruleMatched: 3, rows: R2_DATA.rows.slice(0, 2) },
+    { kind: 'rest', name: 'The rest, split evenly', pct: 50, got: 3, gotPct: 50, rulePicked: 2, ruleMatched: 1, rows: R2_DATA.rows.slice(2) },
+  ];
+  const twoRules = () => getSpy.mockImplementation(async (days, ruleId) => ({ success: true, data: ruleId === 'r2' ? R2_DATA : { ...DATA, settings: TWO } }));
+
+  test('the rules list: one plain row per rule with its summary and mode', async () => {
+    twoRules();
+    mount();
+    await screen.findByTestId('shares-tab');
+    const list = screen.getByRole('list', { name: 'Rules' });
+    const rows = within(list).getAllByRole('button');
+    expect(rows.map((r) => r.textContent)).toEqual([
+      'Project Setup, Proposal Setup4 people 100%Shadow',
+      'Vendor InvoicesJuniors 50% · rest split evenly across 2 peopleLive',
+    ]);
+    expect(rows[0]).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByText(/2 rules: 1 Live, 1 in Shadow\./)).toBeInTheDocument();
+  });
+
+  test('picking a rule loads its report; a group row lists its members; other rules’ categories are greyed out', async () => {
+    twoRules();
+    mount();
+    await screen.findByTestId('shares-tab');
+    fireEvent.click(screen.getByRole('button', { name: /^Vendor Invoices/ }));
+    await waitFor(() => expect(getSpy).toHaveBeenLastCalledWith(14, 'r2'));
+    const group = await screen.findByTestId('shares-group-row-70');
+    expect(group).toHaveTextContent('Juniors');
+    expect(group).toHaveTextContent('Avery Stone, Blake Ruiz — about 25% each');
+    expect(screen.getByLabelText('Share for Juniors, percent')).toHaveValue(50);
+    expect(screen.getByTestId('shares-rest-row')).toHaveTextContent('The rest, split evenly50%');
+    expect(screen.getByTestId('shares-total')).toHaveTextContent('Total 100% — the rest gets 50%, 25% each');
+    const cats = screen.getByRole('list', { name: 'Categories it applies to' });
+    expect(within(cats).getByRole('checkbox', { name: /^Project Setup(?! ›)/ })).toBeDisabled();
+    expect(within(cats).getAllByText('in “Project Setup, Proposal Setup”')).toHaveLength(2);
+    // The report: the Juniors subtotal, each junior underneath, then the rest.
+    const table = screen.getByRole('columnheader', { name: 'Share' }).closest('table');
+    const names = within(table).getAllByRole('row').slice(1).map((row) => row.cells[0].textContent);
+    expect(names).toEqual(['Juniorsgroup', 'Avery Stone', 'Blake Ruiz', 'The rest, split evenly', 'Kit Moss', 'Ria Chen']);
+    const subtotal = screen.getByTestId('shares-group-70');
+    expect([subtotal.cells[1].textContent, subtotal.cells[2].textContent]).toEqual(['50%', '3']);
+  });
+
+  test('the running total must leave something for the rest', async () => {
+    twoRules();
+    mount();
+    await screen.findByTestId('shares-tab');
+    fireEvent.click(screen.getByRole('button', { name: /^Vendor Invoices/ }));
+    const input = await screen.findByLabelText('Share for Juniors, percent');
+    fireEvent.change(input, { target: { value: '100' } });
+    expect(screen.getByTestId('shares-total')).toHaveTextContent('Named shares make 100% — nothing is left for the rest');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(screen.getByText(/nothing is left to split evenly/)).toBeInTheDocument();
+  });
+
+  test('add a rule: a group with its members, a category, Shadow, saved as a new rule', async () => {
+    mount();
+    await screen.findByTestId('shares-tab');
+    fireEvent.click(screen.getByRole('button', { name: 'Add a rule' }));
+    await waitFor(() => expect(getSpy).toHaveBeenLastCalledWith(14, 'new'));
+    expect(screen.getByText('not saved yet')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Add group'), { target: { value: '70' } });
+    expect(screen.getByTestId('shares-group-row-70')).toHaveTextContent('Avery Stone, Blake Ruiz — about 50% each');
+    expect(screen.getByTestId('shares-total')).toHaveTextContent('Total 100%');
+    // The juniors are placed: they are no longer offered as people.
+    expect(within(screen.getByLabelText('Add person')).queryByRole('option', { name: 'Avery Stone' })).toBeNull();
+    // Categories the first rule holds cannot be ticked.
+    const cats = screen.getByRole('list', { name: 'Categories it applies to' });
+    expect(within(cats).getByRole('checkbox', { name: /^Proposal Setup/ })).toBeDisabled();
+    fireEvent.click(within(cats).getByRole('checkbox', { name: /Research & Development/ }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Shadow' }));
+    saveSpy.mockResolvedValue({ success: true, data: { settings: { ...SETTINGS, rules: [RULE, { ...R2, id: 'r2' }] }, ruleId: 'r2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(saveSpy).toHaveBeenCalledWith({
+      rule: expect.objectContaining({ id: undefined, mode: 'shadow', categoryIds: [12], groups: [{ groupId: 70, pct: 100 }], members: [] }),
+      expectedUpdatedAt: '2026-10-16T16:00:00Z',
+    }));
+  });
+
+  test('a group with nobody in it says so', async () => {
+    mount();
+    await screen.findByTestId('shares-tab');
+    fireEvent.click(screen.getByRole('button', { name: 'Add a rule' }));
+    fireEvent.change(await screen.findByLabelText('Add group'), { target: { value: '71' } });
+    expect(screen.getByTestId('shares-group-row-71')).toHaveTextContent('Nobody in this group yet. Its share goes to the others until someone joins.');
+  });
+
+  test('split the rest evenly among people: the rest takes what the named shares leave', async () => {
+    mount();
+    await screen.findByTestId('shares-tab');
+    fireEvent.change(shareInput('Alex Doe'), { target: { value: '20' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Split the rest evenly among…' }));
+    expect(screen.getByText('Pick the people who split the rest.')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Add person to the rest'), { target: { value: '5' } });
+    fireEvent.change(screen.getByLabelText('Add person to the rest'), { target: { value: '6' } });
+    expect(screen.getByTestId('shares-total')).toHaveTextContent('Total 100% — the rest gets 30%, 15% each');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+  });
+
+  test('the rest switched on with nobody picked counts as 0% and says to pick someone', async () => {
+    mount();
+    await screen.findByTestId('shares-tab');
+    fireEvent.change(shareInput('Alex Doe'), { target: { value: '20' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Split the rest evenly among…' }));
+    expect(screen.getByTestId('shares-rest-row')).toHaveTextContent('The rest, split evenly0%');
+    expect(screen.getByTestId('shares-total')).toHaveTextContent('Total 70% — pick at least one person for the rest');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+  test('someone else saved in between: the save says so plainly', async () => {
+    mount();
+    await screen.findByTestId('shares-tab');
+    fireEvent.change(shareInput('Alex Doe'), { target: { value: '40' } });
+    fireEvent.change(shareInput('Kit Moss'), { target: { value: '20' } });
+    saveSpy.mockRejectedValue({ response: { status: 409, data: { message: 'conflict' } } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText('Someone else changed the shares a moment ago. Reload to see their change.')).toBeInTheDocument();
+  });
+
+  test('a group member who went inactive keeps a marked row in the report', async () => {
+    const rows = [...R2_DATA.rows.slice(0, 1), { techId: 7, name: 'Blake Ruiz', pct: 0, slotKey: 'g70', inactive: true, got: 1, gotPct: 17, rulePicked: 0, ruleMatched: 0 }];
+    getSpy.mockResolvedValue({ success: true, data: { ...R2_DATA, rows, sections: [{ ...R2_DATA.sections[0], rows }] } });
+    mount();
+    await screen.findByTestId('shares-tab');
+    const table = screen.getByRole('columnheader', { name: 'Share' }).closest('table');
+    const blake = within(table).getAllByRole('row').find((row) => row.cells[0].textContent.startsWith('Blake Ruiz'));
+    expect([blake.cells[0].textContent, blake.cells[1].textContent]).toEqual(['Blake Ruizno longer active', '—']);
+  });
+
+  test('delete a rule asks first, in the page', async () => {
+    mount();
+    await screen.findByTestId('shares-tab');
+    fireEvent.click(screen.getByRole('button', { name: 'Delete rule' }));
+    expect(screen.getByTestId('shares-delete-confirm')).toHaveTextContent('Delete “Project Setup, Proposal Setup”? Tickets in its categories go back to the AI’s pick.');
+    saveSpy.mockResolvedValue({ success: true, data: { settings: { ...SETTINGS, rules: [] } } });
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(saveSpy).toHaveBeenCalledWith({ removeRuleId: 'r1', expectedUpdatedAt: '2026-10-16T16:00:00Z' }));
+  });
+
+  test('switching rules with changes not saved asks first', async () => {
+    twoRules();
+    mount();
+    await screen.findByTestId('shares-tab');
+    fireEvent.change(shareInput('Alex Doe'), { target: { value: '40' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Vendor Invoices/ }));
+    expect(screen.getByText(/has changes that are not saved/)).toBeInTheDocument();
+    expect(shareInput('Alex Doe')).toHaveValue(40);
+    fireEvent.click(screen.getByRole('button', { name: 'Discard them' }));
+    expect(await screen.findByLabelText('Share for Juniors, percent')).toHaveValue(50);
   });
 
   test('a reviewer who is not an admin sees it read-only', async () => {

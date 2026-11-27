@@ -1985,7 +1985,9 @@ export function ActiveFilterBar({ meta }) {
 
   const chips = [];
   const q = get('q');
-  if (q) chips.push({ label: `“${q}”`, onRemove: () => patch({ q: null }) });
+  // QA 11-26 #7: the search term is its own chip (drawn apart below) so it is
+  // easy to find and clear: a search often outlives the moment (F5 keeps ?q=).
+  if (q) chips.push({ search: true, label: `Search: ${q}`, onRemove: () => patch({ q: null }) });
   const segment = get('segment');
   if (segment && segment !== 'all') chips.push({ label: SEGMENT_LABELS[segment] || segment, onRemove: () => patch({ segment: null }) });
   const statusRaw = searchParams.get('status');
@@ -2088,7 +2090,29 @@ export function ActiveFilterBar({ meta }) {
           <ListFilter className="w-3.5 h-3.5" aria-hidden="true" />
           Filtered view
         </span>
-        {chips.map((chip, i) => (
+        {chips.map((chip, i) => (chip.search ? (
+          // The search term: a search icon, the words "Search:", an amber tint
+          // and a labelled Clear button, so it never reads as one more filter.
+          <span
+            key="search"
+            className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 py-0.5 pl-2 pr-0.5 text-xs text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-100"
+            data-testid="search-chip"
+          >
+            <Search className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span className="min-w-0 truncate" title={q}>
+              <span className="font-medium">Search:</span> <span className="font-semibold">{q}</span>
+            </span>
+            <button
+              type="button"
+              onClick={chip.onRemove}
+              aria-label="Clear search"
+              className="tp-focus-ring inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 font-semibold text-amber-800 hover:bg-amber-100 dark:text-amber-200 dark:hover:bg-amber-500/25"
+            >
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
+              Clear
+            </button>
+          </span>
+        ) : (
           <span
             key={`${chip.label}-${i}`}
             className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-card border border-border text-xs text-foreground/85 shadow-subtle"
@@ -2102,7 +2126,7 @@ export function ActiveFilterBar({ meta }) {
               <X className="w-3 h-3" aria-hidden="true" />
             </button>
           </span>
-        ))}
+        )))}
         <button
           onClick={resetAll}
           className="tp-focus-ring ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-bold hover:bg-red-700 shadow-subtle"

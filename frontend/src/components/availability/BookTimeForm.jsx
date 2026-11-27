@@ -7,7 +7,7 @@ import {
 } from './availabilityUi';
 import MonthPicker from './MonthPicker';
 import {
-  PAST_SENTENCE, bookedByDay, countWorkingDays, mostUsedTypes, nextWeekRange, pickDay, rangeWords, requestWords, tomorrowKey,
+  LIVE_STATUSES, PAST_SENTENCE, bookedByDay, countWorkingDays, defaultTypes, mostUsedTypes, nextWeekRange, pickDay, rangeWords, requestWords, tomorrowKey,
 } from './bookingModel';
 
 /**
@@ -16,11 +16,15 @@ import {
  * to cancel and book again).
  *
  * Redesigned for QA 11-25 #1 (the QA mockup, refined) as three numbered steps:
- *   1. What   the person's four most-used types as quiet tiles (pictogram and
- *             colour as on the Overview); "More types (N)" opens the rest in
- *             place as their own toggle buttons (the picked one takes the 4th
- *             tile once More is closed). A site visit asks "Which office?".
- *   2. When   an inline month calendar: tap a day, tap a second day for a
+ *   1. What   four quiet tiles (pictogram and colour as on the Overview):
+ *             Working from home, Appointment, Vacation, Sick (QA 11-26 #1, by
+ *             type key; a type switched off leaves its slot to the next one).
+ *             The person's most-used of the four starts picked. "More types
+ *             (N)" opens the rest in place as their own toggle buttons (the
+ *             picked one takes the 4th tile once More is closed). A site visit
+ *             asks "Which office?".
+ *   2. When   an inline month calendar across the card (QA 11-26 #1, rows kept
+ *             modest): tap a day, tap a second day for a
  *             range, tap again to start over. Today / Tomorrow / Next week.
  *             Past days can be picked for any type (an approver confirms
  *             them, as the server says). Full day / Morning / Afternoon where
@@ -299,6 +303,8 @@ export function DayStrip({ startDate, endDate, counted, color, dayPart }) {
 }
 
 const STEP = 'text-xs font-semibold text-foreground';
+// Today / Tomorrow / Next week: small outlined buttons (not pills).
+const QUICK_BTN = 'tp-focus-ring inline-flex items-center rounded-md border border-border px-2.5 py-1 text-xs font-medium text-primary hover:bg-muted';
 // Stable defaults, so the memos below do not recompute on every render.
 const NO_REQUESTS = [];
 const NO_HOLIDAYS = {};
@@ -327,11 +333,23 @@ export default function BookTimeForm({
     .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)), [me.leaveTypes, editingTypeId]);
   const typeById = useMemo(() => new Map((me.leaveTypes || []).map((t) => [t.id, t])), [me.leaveTypes]);
   const holidaySet = useMemo(() => new Set(Object.keys(holidays || {})), [holidays]);
-  const ranked = useMemo(() => mostUsedTypes(types, requests, VISIBLE_TYPES), [types, requests]);
+  // The four tiles are fixed (QA 11-26 #1). The type that starts picked is the
+  // person's most-used one when it is one of the four; with no history, the first
+  // of the four in the admins' order (as before). When their most-used type is
+  // kept under More types, nothing starts picked, so a quick tap-and-send never
+  // books a type they did not mean (Send waits for "Pick what you're booking").
+  const tiles = useMemo(() => defaultTypes(types, VISIBLE_TYPES), [types]);
+  const favourite = useMemo(() => {
+    const ranked = mostUsedTypes(types, requests, types.length);
+    const ids = new Set(types.map((t) => t.id));
+    const hasHistory = (requests || []).some((r) => LIVE_STATUSES.includes(r.status) && ids.has(r.leaveTypeId));
+    if (!hasHistory) return ranked.find((t) => tiles.includes(t)) || tiles[0] || null;
+    return tiles.includes(ranked[0]) ? ranked[0] : null;
+  }, [types, requests, tiles]);
   const original = useMemo(() => (editing ? formFromRequest(editing) : null), [editing]);
   const preset = presetTypeId && types.some((t) => t.id === presetTypeId) ? presetTypeId : null;
-  const [form, setForm] = useState(() => original || emptyForm(preset || ranked[0]?.id || types[0]?.id));
-  // Until the person picks a type, the first tile follows their most-used type (their requests load after the form).
+  const [form, setForm] = useState(() => original || emptyForm(preset || favourite?.id));
+  // Until the person picks a type, the picked tile follows their most-used one (their requests load after the form).
   const typeTouched = useRef(Boolean(original || preset));
   const [moreOpen, setMoreOpen] = useState(false);
   // While More is open the four tiles keep their places (ids); a pick there moves in when it closes.
@@ -348,9 +366,10 @@ export default function BookTimeForm({
   const formRef = useRef(null);
 
   useEffect(() => {
-    if (typeTouched.current || !ranked[0]) return;
-    setForm((f) => (f.leaveTypeId === String(ranked[0].id) ? f : { ...f, leaveTypeId: String(ranked[0].id) }));
-  }, [ranked]);
+    if (typeTouched.current) return;
+    const id = favourite ? String(favourite.id) : '';
+    setForm((f) => (f.leaveTypeId === id ? f : { ...f, leaveTypeId: id }));
+  }, [favourite]);
 
   const type = types.find((t) => String(t.id) === form.leaveTypeId) || null;
   const isHours = type?.unit === 'hour';
@@ -415,7 +434,7 @@ export default function BookTimeForm({
 
   // ---- 1. What
   const byId = new Map(types.map((t) => [t.id, t]));
-  const openVisible = !type || ranked.some((t) => t.id === type.id) ? ranked : [...ranked.slice(0, VISIBLE_TYPES - 1), type];
+  const openVisible = !type || tiles.some((t) => t.id === type.id) ? tiles : [...tiles.slice(0, VISIBLE_TYPES - 1), type];
   const visible = frozenTiles ? frozenTiles.map((id) => byId.get(id)).filter(Boolean) : openVisible;
   const rest = types.filter((t) => !visible.some((v) => v.id === t.id));
   const toggleMore = () => {
@@ -559,6 +578,7 @@ export default function BookTimeForm({
   let status;
   let statusWords = '';
   if (editing && unchanged) { statusWords = 'Change the type, dates, place or note to save.'; status = <span className="text-sm text-muted-foreground">{statusWords}</span>; }
+  else if (!type) { statusWords = "Pick what you're booking"; status = <span className="text-sm text-muted-foreground" data-testid="booking-pick-type">{statusWords}</span>; }
   else if (!picked) {
     statusWords = sent ? sent.text : '';
     status = sent
@@ -640,22 +660,24 @@ export default function BookTimeForm({
 
       {/* 2. When */}
       <fieldset className="min-w-0 space-y-3" aria-labelledby={ids.when}>
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        {/* The shortcuts sit at the right of the step's line (QA 11-26 #1 mockup). */}
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
           <p className="text-xs text-muted-foreground">
             <span id={ids.when} className={STEP}>{onSite ? 3 : 2}. When</span>
             <span> — {isHours ? 'tap a day' : 'tap a day, or tap two days for a range'}</span>
           </p>
-          <span className="-mr-2 flex flex-wrap items-center">
+          <span className="flex flex-wrap items-center gap-1.5">
             {quick.map((q) => (
-              <button key={q.label} type="button" className={`${BTN_LINK} px-1.5 py-0.5 text-xs`} onClick={q.run}>{q.label}</button>
+              <button key={q.label} type="button" className={QUICK_BTN} onClick={q.run}>{q.label}</button>
             ))}
           </span>
         </div>
 
-        {/* From sm up the month is a normal-sized calendar (20rem) with the day part, hours and the
-            summary beside it, instead of a month stretched across the whole card (Vahid, 26 Nov). */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4 xl:gap-5" data-testid="when-layout">
-          <div className="rounded-lg border border-border/70 p-2 sm:w-[20rem] sm:shrink-0 sm:p-3">
+        {/* QA 11-26 #1: the month runs across the card (seven equal columns), with modest
+            rows, kept smaller than the earlier oversized calendar; the day part, hours
+            and the summary sit under it. */}
+        <div className="space-y-3" data-testid="when-layout">
+          <div className="w-full rounded-lg border border-border/70 p-2 sm:px-3 sm:py-2.5" data-testid="when-calendar">
             <MonthPicker
               start={sel.start}
               end={isHours ? sel.start : sel.end}
@@ -668,7 +690,7 @@ export default function BookTimeForm({
             />
           </div>
 
-          <div className="min-w-0 flex-1 space-y-3 sm:pt-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 empty:hidden">
             {showDayPart && (
               <div role="radiogroup" aria-label="Part of the day" className="inline-flex rounded-md border border-input p-0.5">
                 {DAY_PARTS.map((p) => {
@@ -684,7 +706,7 @@ export default function BookTimeForm({
             )}
 
             {isHours && picked && (
-              <div className="grid max-w-xs grid-cols-2 gap-2">
+              <div className="grid w-full max-w-xs grid-cols-2 gap-2">
                 <Field label="From">
                   <input type="time" className={INPUT} value={form.startTime} onChange={(e) => set({ startTime: e.target.value })} aria-label="Start time" />
                 </Field>
@@ -695,7 +717,7 @@ export default function BookTimeForm({
             )}
 
             {picked && (
-              <div className="space-y-0.5" aria-hidden="true">
+              <div className="min-w-0 flex-1 basis-60 space-y-0.5" aria-hidden="true">
                 <p className="text-balance text-sm font-medium text-foreground" data-testid="pick-summary">{summary}</p>
                 {pastNeedsApprover && (
                   <p className="flex items-start gap-1.5 text-xs text-muted-foreground" data-testid="pick-past">

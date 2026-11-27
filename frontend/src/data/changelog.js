@@ -1,6 +1,16 @@
-export const APP_VERSION = '4.4.28-preview';
+export const APP_VERSION = '4.4.29-preview';
 
 export const changelog = [
+  {
+    version: '4.4.29-preview',
+    date: 'November 26, 2026',
+    entries: [
+      { type: 'new', html: '<strong>Workspace contacts</strong> &mdash; Settings &rarr; Workspace contacts lets a workspace&rsquo;s admins add people who aren&rsquo;t in the directory (name and e-mail), so they can be picked as requesters or recipients in that workspace. Removing one takes them off the list; their tickets stay as they are.' },
+      { type: 'new', html: '<strong>Shares by category, with groups</strong> &mdash; Shares now hold one rule per set of categories, each with its own Off / Shadow / Live switch. A rule can give an internal group a share (for example Juniors take 50% of Vendor Invoices) and split the rest evenly among the others. The preview and &ldquo;How the split worked out&rdquo; show the group&rsquo;s total with each member underneath. Existing shares keep working exactly as before.' },
+      { type: 'improved', html: '<strong>My time is roomier</strong> &mdash; the calendar now spans the booking card, the four tiles are Working from home, Appointment, Vacation and Sick (the rest are under More types), and the &ldquo;days left&rdquo; boxes are gone from My time (balances stay on the Overview, now with their year).' },
+      { type: 'improved', html: '<strong>Clearing a search is easier</strong> &mdash; on the tickets list the search term shows first, in amber, with its own Clear button, and an old search no longer comes back by itself when you return to the list later.' },
+    ],
+  },
   {
     version: '4.4.28-preview',
     date: 'November 26, 2026',
