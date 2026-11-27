@@ -90,8 +90,62 @@ function hiddenNote(requester) {
 
 const hasFsId = (requester) => requester?.freshserviceId !== null && requester?.freshserviceId !== undefined;
 
+export const LOCK_REASONS = {
+  freshservice: 'FreshService keeps this person\'s name, phone and job title.',
+  shared: 'This person is also known outside this workspace\'s contacts, so their name, phone and job title are not changed from here.',
+  unchecked: 'Their name, phone and job title could not be checked just now, so they are not changed from here.',
+};
+
+/**
+ * May THIS workspace change the person's name / phone / job title? Requesters
+ * are global, so only when nobody else can see the row: it is not a
+ * FreshService person, this workspace's Contacts made it (createdRequester),
+ * no other workspace lists it, and it has no tickets outside this workspace.
+ * `others` = { links, ticketsElsewhere } counts, or null when they could not
+ * be read (fails closed). Returns null (editable) or a LOCK_REASONS sentence.
+ */
+function lockReason(link, r, others) {
+  if (hasFsId(r)) return LOCK_REASONS.freshservice;
+  if (link?.createdRequester !== true) return LOCK_REASONS.shared;
+  if (!others) return LOCK_REASONS.unchecked;
+  if (others.links > 0 || others.ticketsElsewhere > 0) return LOCK_REASONS.shared;
+  return null;
+}
+
+/** Other-workspace links and tickets for ONE requester. */
+async function othersFor(ws, requesterId, { excludeLinkId = null, db = prisma } = {}) {
+  const [links, ticketsElsewhere] = await Promise.all([
+    db.workspaceContact.count({ where: { requesterId, ...(excludeLinkId ? { id: { not: excludeLinkId } } : {}) } }),
+    db.ticket.count({ where: { requesterId, workspaceId: { not: ws } } }),
+  ]);
+  return { links, ticketsElsewhere };
+}
+
+/**
+ * The same counts for a page of links, in two grouped reads. A failed read
+ * never fails the list: those rows come back locked ("could not be checked").
+ */
+async function othersForLinks(ws, links) {
+  const ids = [...new Set(links.filter((l) => l.createdRequester === true && !hasFsId(l.requester)).map((l) => l.requesterId))];
+  const map = new Map();
+  if (!ids.length) return map;
+  try {
+    const [linkGroups, ticketGroups] = await Promise.all([
+      prisma.workspaceContact.groupBy({ by: ['requesterId'], where: { requesterId: { in: ids } }, _count: { _all: true } }),
+      prisma.ticket.groupBy({ by: ['requesterId'], where: { requesterId: { in: ids }, workspaceId: { not: ws } }, _count: { _all: true } }),
+    ]);
+    const linkCount = new Map(linkGroups.map((g) => [g.requesterId, g._count?._all ?? 0]));
+    const ticketCount = new Map(ticketGroups.map((g) => [g.requesterId, g._count?._all ?? 0]));
+    // linkCount includes this workspace's own link.
+    for (const id of ids) map.set(id, { links: Math.max(0, (linkCount.get(id) || 1) - 1), ticketsElsewhere: ticketCount.get(id) || 0 });
+  } catch (err) {
+    logger.warn(`Contacts: could not check who else knows ${ids.length} contact(s) in workspace ${ws}: ${err.message}`);
+  }
+  return map;
+}
+
 /** API shape. Never exposes the BigInt FreshService id. */
-export function toContactDto(link) {
+export function toContactDto(link, { detailsLocked = null } = {}) {
   const r = link.requester || {};
   return {
     id: link.id,
@@ -106,6 +160,8 @@ export function toContactDto(link) {
     // FreshService owns name/phone/job title once the person exists there
     // (the requester sync rewrites them every cycle); only the note is ours.
     managedByFreshService: hasFsId(r),
+    // null = this workspace may edit name/phone/job title; else the reason why not.
+    detailsLocked,
     hiddenFromPickers: hiddenNote(r),
   };
 }
@@ -146,7 +202,11 @@ class WorkspaceContactService {
       }),
       prisma.workspaceContact.count({ where: { workspaceId: ws } }),
     ]);
-    return { contacts: rows.map(toContactDto), total, sandbox: SANDBOX_WORKSPACES.includes(ws) };
+    const others = await othersForLinks(ws, rows);
+    const contacts = rows.map((link) => toContactDto(link, {
+      detailsLocked: lockReason(link, link.requester, others.get(link.requesterId) || null),
+    }));
+    return { contacts, total, sandbox: SANDBOX_WORKSPACES.includes(ws) };
   }
 
   /**
@@ -166,6 +226,10 @@ class WorkspaceContactService {
     let outcome;
     try {
       outcome = await prisma.$transaction(async (tx) => {
+        // Two workspaces adding the same new address at once would both miss
+        // the lookup and mint two requesters: serialise on the e-mail.
+        // (Mail intake and the FreshService sync do not take this lock.)
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`workspace_contact:${email}`}::text))`;
         const known = await tx.requester.findFirst({
           where: { email: { equals: email, mode: 'insensitive' } },
           orderBy: { id: 'asc' },
@@ -178,10 +242,12 @@ class WorkspaceContactService {
           let requester = known;
           // Only Contacts sets 'contact_removed', so this row is one Contacts made.
           const ours = Boolean(known.suppressedAt) && known.suppressedReason === CONTACT_REMOVED;
+          const others = await othersFor(ws, known.id, { db: tx });
           if (ours) {
-            // Adding it back undoes the hiding and, while FreshService does not
-            // own the row yet, takes the details just typed.
-            const refresh = !hasFsId(known)
+            // Adding it back undoes the hiding. It takes the details just typed
+            // only while nobody else sees the row (no FreshService id, no other
+            // workspace's link, no tickets elsewhere) — requesters are global.
+            const refresh = lockReason({ createdRequester: true }, known, others) === null
               ? { name, ...(phone ? { phone } : {}), ...(jobTitle ? { jobTitle } : {}) }
               : {};
             requester = await tx.requester.update({
@@ -193,7 +259,7 @@ class WorkspaceContactService {
           const link = await tx.workspaceContact.create({
             data: { workspaceId: ws, requesterId: known.id, note, addedByEmail, createdRequester: ours },
           });
-          return { link: { ...link, requester }, existing: true };
+          return { link: { ...link, requester }, existing: true, detailsLocked: lockReason(link, requester, others) };
         }
 
         const requester = await tx.requester.create({
@@ -205,14 +271,14 @@ class WorkspaceContactService {
         const link = await tx.workspaceContact.create({
           data: { workspaceId: ws, requesterId: requester.id, note, addedByEmail, createdRequester: true },
         });
-        return { link: { ...link, requester }, existing: false };
+        return { link: { ...link, requester }, existing: false, detailsLocked: null };
       });
     } catch (err) {
       if (isUniqueViolation(err)) throw new ConflictError('That person is already a contact in this workspace');
       throw err;
     }
 
-    const contact = toContactDto(outcome.link);
+    const contact = toContactDto(outcome.link, { detailsLocked: outcome.detailsLocked });
     logger.info(`Contacts: added contact ${outcome.link.id} (requester ${contact.requesterId}, ${outcome.existing ? 'known person' : 'new person'}) in workspace ${ws}`);
     let message;
     if (!outcome.existing) message = `${contact.name} added to this workspace's contacts.`;
@@ -244,8 +310,17 @@ class WorkspaceContactService {
     if (name !== undefined && name !== r.name) personPatch.name = name;
     if (phone !== undefined && phone !== (r.phone || null)) personPatch.phone = phone;
     if (jobTitle !== undefined && jobTitle !== (r.jobTitle || null)) personPatch.jobTitle = jobTitle;
-    if (Object.keys(personPatch).length && hasFsId(r)) {
-      throw new ValidationError('FreshService keeps this person\'s name, phone and job title, so only the note can be changed here.');
+
+    // Requesters are global: details change only when nobody outside this
+    // workspace's Contacts can see this row (see lockReason). Otherwise the
+    // note is the only thing this workspace may change.
+    const needsOthers = !hasFsId(r) && link.createdRequester === true;
+    const others = needsOthers
+      ? await Promise.resolve().then(() => othersFor(ws, r.id, { excludeLinkId: link.id })).catch(() => null)
+      : null;
+    const detailsLocked = lockReason(link, r, others);
+    if (Object.keys(personPatch).length && detailsLocked) {
+      throw new ValidationError(`${detailsLocked} Only the note can be changed here.`);
     }
 
     const note = cleanText(fields.note, 'note', { label: 'Note' });
@@ -261,7 +336,7 @@ class WorkspaceContactService {
     if (changed.length) {
       logger.info(`Contacts: updated contact ${link.id} (${changed.join(', ')}) in workspace ${ws}`);
     }
-    return { contact: toContactDto({ ...saved, requester }), changed };
+    return { contact: toContactDto({ ...link, ...saved, requester }, { detailsLocked }), changed };
   }
 
   /**
