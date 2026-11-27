@@ -2426,7 +2426,8 @@ export const assignmentTimezoneFitAPI = {
 
 // Ticket shares (QA 10-16 item 4, proof of concept): Assignment Review → Shares.
 export const assignmentSharesAPI = {
-  get: (days = 14) => api.get('/assignment-shares', { params: { days } }),
+  // QA 11-26: per rule. ruleId omitted = the first rule; 'new' = a rule not saved yet.
+  get: (days = 14, ruleId) => api.get('/assignment-shares', { params: ruleId ? { days, ruleId } : { days } }),
   preview: (draft) => api.post('/assignment-shares/preview', draft),
   saveSettings: (settings) => api.put('/assignment-shares/settings', settings),
 };

@@ -136,9 +136,9 @@ describe('periods (workspace time zone, week starts Monday)', () => {
 });
 
 describe('settings', () => {
-  test('nothing stored: off, weekly, nobody, no categories', () => {
-    expect(normalizeSettings(null)).toMatchObject({ mode: 'off', period: 'week', members: [], categoryIds: [] });
-    expect(normalizeSettings('not json')).toMatchObject({ mode: 'off' });
+  test('nothing stored: no rules (QA 11-26: settings are v2, a list of rules)', () => {
+    expect(normalizeSettings(null)).toMatchObject({ v: 2, rules: [], persisted: false, history: [] });
+    expect(normalizeSettings('not json')).toMatchObject({ rules: [] });
   });
 
   test('cannot save unless the shares total 100', () => {
@@ -167,10 +167,11 @@ describe('settings', () => {
     const now = new Date('2026-10-16T18:00:00Z');
     const { next, changes, errors } = applyPatch(normalizeSettings(null), { mode: 'shadow', categoryIds: [10], members: MEMBERS }, { by: 'Alex Doe', now });
     expect(errors).toEqual([]);
-    expect(changes.map((c) => c.field)).toEqual(['mode', 'categoryIds', 'members']);
-    expect(next).toMatchObject({ mode: 'shadow', enabledSince: now.toISOString(), updatedBy: 'Alex Doe' });
+    // The v1 body still works: it makes (or changes) the first rule.
+    expect(changes.map((c) => c.field)).toEqual(['rule', 'mode', 'categoryIds', 'members']);
+    expect(next.rules[0]).toMatchObject({ id: 'r1', mode: 'shadow', enabledSince: now.toISOString(), updatedBy: 'Alex Doe' });
     expect(next.history).toHaveLength(1);
-    expect(toStored(next)).toMatchObject({ v: 1, mode: 'shadow', categoryIds: [10] });
+    expect(toStored(next)).toMatchObject({ v: 2, rules: [{ id: 'r1', mode: 'shadow', categoryIds: [10] }] });
   });
 });
 

@@ -5,18 +5,27 @@ import logger from '../../utils/logger.js';
 import { ticketDisplayRef } from '../../utils/ticketOrigin.js';
 import assigneeAway from '../assigneeAwayService.js';
 import {
-  applyPatch, buildLedger, categoryMatches, decide, normalizeSettings, periodOf, previewSequence,
-  promoteSuggestion, recordFor, summarizeReport, toStored, validateDraft, onLeaveAt, workingAt,
-  AWAY_AHEAD_DAYS, awayWindows, summarizeAway,
+  applyPatch, buildLedger, decide, expandRule, hasShares, normalizeRule, normalizeSettings, periodOf, previewSequence,
+  promoteSuggestion, recordFor, ruleFor, ruleReady, sectionsFor, summarizeReport, toStored, validateRule, onLeaveAt, workingAt,
+  AWAY_AHEAD_DAYS, LEGACY_RULE_ID, awayWindows, summarizeAway,
 } from './rules.js';
 
 /**
  * Ticket shares — the part that reads and remembers (QA 10-16 item 4, proof
- * of concept). The rules themselves are in rules.js (pure).
+ * of concept; rules per category with internal groups QA 11-26 #3–6). The
+ * rules themselves are in rules.js (pure).
  *
- * - Settings live in app_settings under `assignment_shares_ws<id>` (no table).
+ * - Settings live in app_settings under `assignment_shares_ws<id>` (no table):
+ *   v2 `{ v: 2, seq, rules: [...], history }`. A v1 object (one set of
+ *   categories and people) is read as one rule, 'r1', and decides exactly as
+ *   before; it is rewritten as v2 on the next save.
+ * - A ticket uses the switched-on rule whose categories cover it (categories
+ *   never overlap), with that rule's mode and period.
+ * - A group's share is split across its CURRENT members (re-read on every
+ *   decision): active internal groups (origin 'local') of the workspace, and
+ *   members who can take tickets (active or assignable-only).
  * - Counts are read live from `tickets` on every decision: created this
- *   period, in the chosen categories, held by someone on the list, not noise,
+ *   period, in the rule's categories, held by someone on the rule, not noise,
  *   not deleted, not a duplicate or merged away. No credits table: a person's
  *   "earned" share is worked out again from those tickets and the leave rows.
  *   What that loses: shares and the list are the CURRENT ones for the whole
@@ -86,7 +95,11 @@ class AssignmentSharesService {
     return value;
   }
 
-  /** The workspace's people (active or assignable) and categories (active), for the editor and the checks. */
+  /**
+   * The workspace's people (active or assignable), categories (active) and
+   * internal groups (active, origin 'local', with members who are among those
+   * people), for the editor and the checks.
+   */
   async options(workspaceId) {
     const ws = Number(workspaceId);
     const people = await soft(() => prisma.technician.findMany({
@@ -107,24 +120,49 @@ class AssignmentSharesService {
       name: t.name,
       subcategories: (cats || []).filter((c) => c.parentId === t.id).map((c) => ({ id: c.id, name: c.name })),
     }));
-    return { people: (people || []).map((p) => ({ id: p.id, name: p.name })), categories };
+    const personIds = new Set((people || []).map((p) => p.id));
+    const groupRows = await soft(() => prisma.group.findMany({
+      where: { workspaceId: ws, origin: 'local', isActive: true },
+      select: { id: true, name: true, members: { select: { technicianId: true }, take: 300 } },
+      orderBy: { name: 'asc' },
+      take: 200,
+    }), []);
+    const groups = (groupRows || []).map((g) => ({
+      id: g.id,
+      name: g.name,
+      memberIds: [...new Set((g.members || []).map((m) => m.technicianId))].filter((id) => personIds.has(id)),
+    }));
+    return { people: (people || []).map((p) => ({ id: p.id, name: p.name })), categories, groups };
   }
 
-  /** @returns {{ settings, changes, errors }} — errors non-empty = nothing was saved. */
+  /**
+   * A save: `{ rule }` adds or changes one rule (no id = new), `{ removeRuleId }`
+   * removes one, and the v1 body `{ mode, period, categoryIds, members }`
+   * changes the first rule.
+   * @returns {{ settings, changes, errors, ruleId }} — errors non-empty = nothing was saved.
+   */
   async saveSettings(workspaceId, patch = {}, { by = null, now = new Date() } = {}) {
     const ws = Number(workspaceId);
-    if (SANDBOX_WORKSPACES.includes(ws)) return { settings: await this.getSettings(ws, { fresh: true }), changes: [], errors: ['Ticket shares are not available in an integration sandbox'] };
+    if (SANDBOX_WORKSPACES.includes(ws)) return { settings: await this.getSettings(ws, { fresh: true }), changes: [], errors: ['Ticket shares are not available in an integration sandbox'], ruleId: null };
     const current = await this.getSettings(ws, { fresh: true });
-    if (current.unreadable) return { settings: current, changes: [], errors: ['The current settings could not be read; nothing was saved'] };
-    const { people, categories } = await this.options(ws);
+    if (current.unreadable) return { settings: current, changes: [], errors: ['The current settings could not be read; nothing was saved'], ruleId: null };
+    const { people, categories, groups } = await this.options(ws);
     const validTechIds = new Set(people.map((p) => p.id));
     const validCategoryIds = new Set(categories.flatMap((c) => [c.id, ...c.subcategories.map((s) => s.id)]));
-    const { next, changes, errors } = applyPatch(current, patch, { by, now, validTechIds, validCategoryIds });
-    if (errors.length) return { settings: current, changes: [], errors };
+    const parentOf = new Map(categories.flatMap((c) => c.subcategories.map((s) => [s.id, c.id])));
+    const categoryNames = new Map(categories.flatMap((c) => [[c.id, c.name], ...c.subcategories.map((s) => [s.id, s.name])]));
+    const groupInfo = new Map(groups.map((g) => [g.id, { name: g.name, techIds: g.memberIds }]));
+    const names = new Map(people.map((p) => [p.id, p.name]));
+    const { next, changes, errors, ruleId } = applyPatch(current, patch, {
+      by, now, validTechIds, validCategoryIds, groups: groupInfo, names, parentOf, categoryNames,
+    });
+    if (errors.length) return { settings: current, changes: [], errors, ruleId: null };
     await settingsRepository.set(settingsKey(ws), JSON.stringify(toStored(next)));
     this._settingsCache.delete(ws);
-    logger.info('Ticket shares settings saved', { workspaceId: ws, by, mode: next.mode, changes: changes.map((c) => c.field) });
-    return { settings: await this.getSettings(ws, { fresh: true }), changes, errors: [] };
+    logger.info('Ticket shares settings saved', {
+      workspaceId: ws, by, ruleId, modes: next.rules.map((r) => `${r.id}:${r.mode}`), changes: changes.map((c) => c.field),
+    });
+    return { settings: await this.getSettings(ws, { fresh: true }), changes, errors: [], ruleId };
   }
 
   // ---- the lock and the in-process ledger -----------------------------------
@@ -161,27 +199,70 @@ class AssignmentSharesService {
   }
 
   /**
-   * Everything one decision (or the preview) needs, read once.
-   * @param {object} p
-   * @param {object} p.settings      normalised settings (or a draft for the preview)
-   * @param {boolean} p.reserve      count Live picks still waiting for a reviewer + this process's ledger
-   * @param {number|null} p.excludeTicketId  the ticket being decided
-   * @param {number[]} p.handedBack  people who handed this ticket back: out for it
+   * A rule's groups with their CURRENT members: active internal groups of the
+   * workspace. `failed` = the read failed (the caller must not act on it).
+   * @returns {{ map: Map<number, {name, techIds:number[]}>, failed:boolean }}
    */
-  async _state(ws, { settings, now = new Date(), reserve = false, excludeTicketId = null, handedBack = [] } = {}) {
-    const timeZone = await this._timeZone(ws);
-    const period = periodOf(now, settings.period, timeZone);
-    const members = settings.members || [];
-    const memberIds = members.map((m) => m.techId);
-    const cats = settings.categoryIds || [];
+  async _groupInfo(ws, groupIds = []) {
+    const ids = [...new Set(groupIds.map(Number).filter(positive))];
+    if (!ids.length) return { map: new Map(), failed: false };
+    let failed = false;
+    const rows = await Promise.resolve().then(() => prisma.group.findMany({
+      where: { id: { in: ids }, workspaceId: ws, origin: 'local', isActive: true },
+      select: { id: true, name: true, members: { select: { technicianId: true }, take: 300 } },
+      take: 50,
+    })).catch((err) => {
+      failed = true;
+      logger.debug?.(`Ticket shares groups unreadable: ${err.message}`);
+      return [];
+    });
+    const map = new Map((rows || []).map((g) => [g.id, { name: g.name, techIds: (g.members || []).map((m) => m.technicianId) }]));
+    return { map, failed };
+  }
 
-    const techs = memberIds.length ? await soft(() => prisma.technician.findMany({
-      where: { id: { in: memberIds }, workspaceId: ws },
+  /**
+   * A rule → who takes its tickets now (rules.expandRule) with the people's
+   * rows. Group and rest members who cannot take tickets (inactive, another
+   * workspace) are left out of the split; a person named on their own stays
+   * and is "not active" for the pick, as always.
+   */
+  async _expand(ws, rule) {
+    const { map: groups, failed } = await this._groupInfo(ws, (rule.groups || []).map((g) => g.groupId));
+    const ids = [...new Set([
+      ...(rule.members || []).map((m) => m.techId),
+      ...[...groups.values()].flatMap((g) => g.techIds),
+      ...(rule.rest?.evenly ? rule.rest.techIds || [] : []),
+    ].map(Number).filter(positive))];
+    const techs = ids.length ? await soft(() => prisma.technician.findMany({
+      where: { id: { in: ids }, workspaceId: ws },
       select: { id: true, name: true, isActive: true, assignableOnly: true, timezone: true, workStartTime: true, workEndTime: true },
-      take: 100,
+      take: 300,
     }), []) : [];
     const names = new Map((techs || []).map((t) => [t.id, t.name]));
     const active = new Set((techs || []).filter((t) => t.isActive || t.assignableOnly).map((t) => t.id));
+    const expanded = expandRule(rule, { groups, activeIds: active, names });
+    return { expanded, techs: techs || [], names, active, groupsFailed: failed };
+  }
+
+  /**
+   * Everything one decision (or the preview) needs, read once.
+   * @param {object} p
+   * @param {object} p.rule          the normalised rule (or a draft for the preview)
+   * @param {boolean} p.reserve      count Live picks still waiting for a reviewer + this process's ledger
+   * @param {number|null} p.excludeTicketId  the ticket being decided
+   * @param {number[]} p.handedBack  people who handed this ticket back: out for it
+   * @returns {null | object} null = the rule's groups could not be read: do not act.
+   */
+  async _state(ws, { rule, now = new Date(), reserve = false, excludeTicketId = null, handedBack = [] } = {}) {
+    const timeZone = await this._timeZone(ws);
+    const period = periodOf(now, rule.period, timeZone);
+    const { expanded, techs, names, active, groupsFailed } = await this._expand(ws, rule);
+    if (groupsFailed) return null;
+    const members = expanded.people;
+    const memberIds = members.map((m) => m.techId);
+    const cats = rule.categoryIds || [];
+    const ruleId = rule.id || null;
+    const sameRule = (id) => (id || LEGACY_RULE_ID) === (ruleId || LEGACY_RULE_ID);
 
     const rows = memberIds.length && cats.length ? await soft(() => prisma.ticket.findMany({
       where: {
@@ -211,7 +292,8 @@ class AssignmentSharesService {
       const counted = new Set(tickets.map((t) => t.ticketId));
       const since = new Date(new Date(now).getTime() - RESERVE_MS);
       const pending = await soft(() => prisma.$queryRaw(Prisma.sql`
-        SELECT r.ticket_id AS "ticketId", t.created_at AS "createdAt", r.recommendation -> 'share' -> 'pick' ->> 'techId' AS "techId"
+        SELECT r.ticket_id AS "ticketId", t.created_at AS "createdAt", r.recommendation -> 'share' -> 'pick' ->> 'techId' AS "techId",
+          r.recommendation -> 'share' ->> 'ruleId' AS "ruleId"
         FROM assignment_pipeline_runs r
         JOIN tickets t ON t.id = r.ticket_id
         WHERE r.workspace_id = ${ws} AND r.created_at >= ${since} AND r.decision = 'pending_review'
@@ -223,12 +305,13 @@ class AssignmentSharesService {
       for (const p of pending || []) {
         const ticketId = Number(p.ticketId);
         const techId = Number(p.techId);
-        if (counted.has(ticketId) || ticketId === Number(excludeTicketId) || !memberIds.includes(techId)) continue;
+        // A pick recorded before rules (no ruleId) belongs to the first rule, 'r1'.
+        if (!sameRule(p.ruleId) || counted.has(ticketId) || ticketId === Number(excludeTicketId) || !memberIds.includes(techId)) continue;
         counted.add(ticketId);
         tickets.push({ ticketId, holderId: techId, at: p.createdAt, reserved: true });
       }
       for (const entry of this._ledger.get(ws) || []) {
-        if (counted.has(entry.ticketId) || entry.ticketId === Number(excludeTicketId) || !memberIds.includes(entry.techId)) continue;
+        if (!sameRule(entry.ruleId) || counted.has(entry.ticketId) || entry.ticketId === Number(excludeTicketId) || !memberIds.includes(entry.techId)) continue;
         if (new Date(entry.createdAt).getTime() < period.start.getTime()) continue;
         counted.add(entry.ticketId);
         tickets.push({ ticketId: entry.ticketId, holderId: entry.techId, at: entry.createdAt, reserved: true });
@@ -280,8 +363,8 @@ class AssignmentSharesService {
       if (!workingAt(techById.get(m.techId), now, timeZone)) notWorking.set(m.techId, 'outside working hours');
     }
 
-    const ledger = buildLedger({ members, tickets: tickets.map((t) => ({ holderId: t.holderId, at: t.at })), leavesByTech, timeZone });
-    return { timeZone, period, names, out, notWorking, ledger, lastAssignedAt, counted: tickets.length };
+    const ledger = buildLedger({ members, slots: expanded.slots, tickets: tickets.map((t) => ({ holderId: t.holderId, at: t.at })), leavesByTech, timeZone });
+    return { timeZone, period, names, out, notWorking, ledger, lastAssignedAt, counted: tickets.length, expanded };
   }
 
   // ---- the pipeline step -----------------------------------------------------
@@ -303,7 +386,7 @@ class AssignmentSharesService {
       if (!positive(Number(ticketId)) || SANDBOX_WORKSPACES.includes(ws)) return null;
       if (!['auto_assigned', 'pending_review'].includes(decision)) return null;
       const settings = await this.getSettings(ws);
-      if (settings.mode === 'off' || !settings.members.length || !settings.categoryIds.length) return null;
+      if (!settings.rules.some(ruleReady)) return null;
 
       const saved = await soft(() => prisma.ticket.findUnique({
         where: { id: Number(ticketId) },
@@ -311,10 +394,12 @@ class AssignmentSharesService {
       }), null);
       const categoryId = Number(recommendation?.internalCategoryId) || saved?.internalCategoryId || null;
       const subcategoryId = Number(recommendation?.internalSubcategoryId) || saved?.internalSubcategoryId || null;
-      if (!categoryMatches(settings.categoryIds, { categoryId, subcategoryId })) return null;
+      // The rule switched on for this ticket's category (QA 11-26 #6), with its own mode.
+      const rule = ruleFor(settings, { categoryId, subcategoryId });
+      if (!rule) return null;
 
       // A pipeline in dry-run mode never acts: Live behaves as Shadow there.
-      const live = settings.mode === 'live' && !dryRun;
+      const live = rule.mode === 'live' && !dryRun;
       const mode = live ? 'live' : 'shadow';
 
       return await this._withLock(ws, async () => {
@@ -322,9 +407,16 @@ class AssignmentSharesService {
           where: { ticketId: Number(ticketId), endMethod: 'rejected' }, select: { technicianId: true }, take: 50,
         }), []);
         const state = await this._state(ws, {
-          settings, now, reserve: live, excludeTicketId: Number(ticketId), handedBack: (handed || []).map((h) => Number(h.technicianId)),
+          rule, now, reserve: live, excludeTicketId: Number(ticketId), handedBack: (handed || []).map((h) => Number(h.technicianId)),
         });
-        const result = decide({ settings, ledger: state.ledger, out: state.out, notWorking: state.notWorking, lastAssignedAt: state.lastAssignedAt, names: state.names, aiPick });
+        if (!state) {
+          logger.warn('Ticket shares: the rule’s groups could not be read, the AI’s pick stands', { workspaceId: ws, ticketId, runId, ruleId: rule.id });
+          return null;
+        }
+        const result = decide({
+          rule, members: state.expanded.people, slots: state.expanded.slots,
+          ledger: state.ledger, out: state.out, notWorking: state.notWorking, lastAssignedAt: state.lastAssignedAt, names: state.names, aiPick,
+        });
         const applied = live && Boolean(result.techId);
         const techName = result.techId ? state.names.get(result.techId) || null : null;
         const aiName = aiPick?.techName || null;
@@ -336,10 +428,10 @@ class AssignmentSharesService {
         else if (decision === 'auto_assigned') sentence = `Assigned by the share rule to ${who}${aiName && !result.agreesWithAi ? ` The AI’s first choice was ${aiName}.` : ''}`;
         else sentence = `Suggested first by the share rule: ${who}${aiName && !result.agreesWithAi ? ` The AI’s own first choice, ${aiName}, is second.` : ''}`;
 
-        const record = recordFor({ ...result, sentence }, { settings, mode, applied, period: state.period, aiPick, now });
+        const record = recordFor({ ...result, sentence }, { rule, mode, applied, period: state.period, aiPick, now });
         if (applied) {
-          this._note(ws, { ticketId: Number(ticketId), techId: result.techId, createdAt: saved?.createdAt || now, runId });
-          logger.info('Ticket shares picked the person', { workspaceId: ws, ticketId, runId, decision, techId: result.techId, aiTechId: aiPick?.techId || null });
+          this._note(ws, { ticketId: Number(ticketId), techId: result.techId, createdAt: saved?.createdAt || now, runId, ruleId: rule.id });
+          logger.info('Ticket shares picked the person', { workspaceId: ws, ticketId, runId, ruleId: rule.id, decision, techId: result.techId, aiTechId: aiPick?.techId || null });
         }
         const out = { mode, applied, techId: result.techId, techName, sentence, record, step: null };
         if (applied && decision === 'pending_review') {
@@ -354,6 +446,7 @@ class AssignmentSharesService {
               kind: 'share_rule',
               mode,
               applied,
+              ruleId: rule.id,
               fromTechId: aiPick?.techId || null,
               fromTechName: aiName,
               toTechId: result.techId || null,
@@ -372,42 +465,76 @@ class AssignmentSharesService {
 
   // ---- the preview -------------------------------------------------------------
 
+  /** A saved rule by id; no id = the first rule (the only one before QA 11-26). */
+  _rule(settings, ruleId = null) {
+    const rules = settings?.rules || [];
+    return ruleId ? rules.find((r) => r.id === ruleId) || null : rules[0] || null;
+  }
+
   /**
-   * "The next 10 tickets would go to …" for saved settings or a draft (period,
-   * categories and people). Uses this period's real counts and today's leave.
+   * "The next 10 tickets would go to …" for a saved rule or a draft of one
+   * (period, categories, people, groups, the rest). Uses this period's real
+   * counts and today's leave. A group shows as one subtotal with its members
+   * underneath (`sections`).
    */
-  async preview(workspaceId, draft = null, { now = new Date(), count = 10 } = {}) {
+  async preview(workspaceId, draft = null, { ruleId = null, now = new Date(), count = 10 } = {}) {
     const ws = Number(workspaceId);
+    const notReady = { picks: [], out: [], counts: [], sections: [], warnings: [], period: null, ready: false, ruleId };
     const saved = await this.getSettings(ws);
-    const settings = draft ? { ...saved, ...draft } : saved;
-    if (draft && validateDraft({ ...settings, mode: 'off' }).length) return { picks: [], out: [], counts: [], period: null, ready: false };
-    if (!settings.members?.length || !settings.categoryIds?.length) return { picks: [], out: [], counts: [], period: null, ready: false };
-    const state = await this._state(ws, { settings, now, reserve: settings.mode === 'live' });
-    const picks = previewSequence({ members: settings.members, ledger: state.ledger, out: state.out, notWorking: state.notWorking, lastAssignedAt: state.lastAssignedAt, count, now });
+    const base = this._rule(saved, ruleId);
+    if (!draft && !base) return notReady;
+    const rule = draft ? normalizeRule({ ...(base || {}), ...draft, id: base?.id || null }, base?.id || null) : base;
+    if (draft && validateRule({ ...rule, mode: 'off' }).length) return notReady;
+    if (!hasShares(rule) || !rule.categoryIds?.length) return notReady;
+    const state = await this._state(ws, { rule, now, reserve: rule.mode === 'live' });
+    if (!state) return notReady;
+    const { expanded } = state;
+    const picks = previewSequence({
+      members: expanded.people, slots: expanded.slots, ledger: state.ledger, out: state.out, notWorking: state.notWorking, lastAssignedAt: state.lastAssignedAt, count, now,
+    });
     const name = (id) => state.names.get(id) || `Technician ${id}`;
-    const result = decide({ settings, ledger: state.ledger, out: state.out, notWorking: state.notWorking, lastAssignedAt: state.lastAssignedAt, names: state.names });
+    const result = decide({
+      rule, members: expanded.people, slots: expanded.slots, ledger: state.ledger, out: state.out, notWorking: state.notWorking, lastAssignedAt: state.lastAssignedAt, names: state.names,
+    });
+    const person = new Map(expanded.people.map((p) => [p.techId, p]));
+    const groupOf = (id) => (person.get(id)?.group ? { group: person.get(id).group } : {});
+    const counts = result.people.map((p) => ({
+      techId: p.techId, name: p.name, pct: p.pct, count: p.count, target: p.target, slotKey: person.get(p.techId)?.slotKey, ...groupOf(p.techId),
+    }));
     return {
       ready: true,
-      period: { kind: settings.period, key: state.period.key, start: state.period.start.toISOString() },
-      picks: picks.map((id) => ({ techId: id, name: name(id) })),
+      ruleId: rule.id || null,
+      period: { kind: rule.period, key: state.period.key, start: state.period.start.toISOString() },
+      picks: picks.map((id) => ({ techId: id, name: name(id), ...groupOf(id) })),
       out: [...state.out, ...state.notWorking].map(([techId, why]) => ({ techId, name: name(techId), why })),
-      counts: result.people.map((p) => ({ techId: p.techId, name: p.name, pct: p.pct, count: p.count, target: p.target })),
+      counts,
+      sections: sectionsFor(expanded, counts, { sum: ['count', 'target'] }),
+      warnings: expanded.warnings,
       counted: state.counted,
     };
   }
 
   // ---- the Shadow report -------------------------------------------------------
 
-  async results(workspaceId, { days = 14, now = new Date() } = {}) {
+  /**
+   * "How the split worked out" for one rule (no id = the first): its tickets
+   * in the window, per person and per group (`sections`), how often the
+   * rule's pick matched, recent picks and days away.
+   */
+  async results(workspaceId, { days = 14, ruleId = null, now = new Date() } = {}) {
     const ws = Number(workspaceId);
     const period = [7, 14, 30].includes(Number(days)) ? Number(days) : 14;
     const settings = await this.getSettings(ws, { fresh: true });
     const timeZone = await this._timeZone(ws);
     const since = new Date(new Date(now).getTime() - period * DAY_MS);
-    const members = settings.members || [];
-    const cats = settings.categoryIds || [];
-    const empty = { workspaceId: ws, timeZone, days: period, settings, rows: [], totals: null, events: [] };
-    if (!members.length || !cats.length) return empty;
+    const rule = this._rule(settings, ruleId);
+    const empty = { workspaceId: ws, timeZone, days: period, settings, ruleId: rule?.id || null, rows: [], sections: [], warnings: [], totals: null, events: [] };
+    if (!rule || !hasShares(rule) || !rule.categoryIds?.length) return empty;
+    const { expanded, groupsFailed } = await this._expand(ws, rule);
+    const warnings = groupsFailed ? ['The groups could not be read just now, so they are left out of this report.'] : expanded.warnings;
+    const members = expanded.people;
+    const cats = rule.categoryIds;
+    if (!members.length) return { ...empty, warnings };
 
     const tickets = await soft(() => prisma.ticket.findMany({
       where: {
@@ -473,11 +600,15 @@ class AssignmentSharesService {
     // QA 11-06 #4: days away in the window and coming up, so an admin can see
     // why someone's part sits below their share and adjust before a long leave.
     const away = await this._away(ws, summary.rows, { pastDays: period, now });
+    const rows = away ? away.rows : summary.rows;
 
     return {
       ...empty,
       ...summary,
-      rows: away ? away.rows : summary.rows,
+      rows,
+      // QA 11-26 #4: each group as a subtotal (its share against what it got) with its members underneath.
+      sections: sectionsFor(expanded, rows, { sum: ['got', 'rulePicked', 'ruleMatched'], toMembers: summary.totals.toMembers }),
+      warnings,
       availability: away ? away.availability : null,
       totals: summary.totals ? { ...summary.totals, selfPicked } : summary.totals,
       events,

@@ -209,8 +209,8 @@ describe('settings and preview', () => {
     const out = await shares.saveSettings(WS, { mode: 'shadow', categoryIds: [10, 101], members: MEMBERS }, { by: 'Alex Doe', now: NOW });
     expect(out.errors).toEqual([]);
     expect(settingsRepositoryMock.set).toHaveBeenCalledWith('assignment_shares_ws5', expect.any(String));
-    expect(JSON.parse(store.get('assignment_shares_ws5'))).toMatchObject({ v: 1, mode: 'shadow', period: 'week', categoryIds: [10, 101] });
-    expect(out.settings).toMatchObject({ mode: 'shadow', updatedBy: 'Alex Doe' });
+    expect(JSON.parse(store.get('assignment_shares_ws5'))).toMatchObject({ v: 2, rules: [{ id: 'r1', mode: 'shadow', period: 'week', categoryIds: [10, 101] }] });
+    expect(out.settings.rules[0]).toMatchObject({ mode: 'shadow', updatedBy: 'Alex Doe' });
   });
 
   test('the editor gets top categories with their subcategories', async () => {
